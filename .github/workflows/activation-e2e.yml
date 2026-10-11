@@ -35,7 +35,7 @@ name: Activation E2E (Maestro)
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - "apps/mobile/app/**"
       - "apps/mobile/src/**"
@@ -45,7 +45,7 @@ on:
       - "apps/mobile/scripts/**"
       - ".github/workflows/activation-e2e.yml"
   pull_request:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - "apps/mobile/app/**"
       - "apps/mobile/src/**"

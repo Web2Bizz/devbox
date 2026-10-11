@@ -1,4 +1,4 @@
-# iOS build gate for pull requests and main.
+# iOS build gate for pull requests and pushes to main/dev.
 #
 # Requires NO Apple/EAS secrets: it validates the Expo config, exports the iOS JS
 # bundle, generates the native project, installs CocoaPods, and compiles an
@@ -18,9 +18,9 @@ name: iOS CI
 # holds after the move into the monorepo, so the no-paths decision is kept as-is.
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
   push:
-    branches: [main]
+    branches: [main, dev]
 
 # Monorepo: the Expo project and the generated ios/ project live in apps/mobile.
 defaults:
@@ -63,7 +63,7 @@ jobs:
     name: Unsigned iOS Simulator build
     needs: test
     # Same rule as build.yml: an open PR gets checks only, the simulator
-    # build runs after the merge (push to main).
+    # build runs after the merge (push to main or dev).
     if: github.event_name != 'pull_request'
     # macos-15 ships Xcode 16.x, which React Native 0.81 / Expo SDK 54 require.
     runs-on: macos-15

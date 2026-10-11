@@ -22,7 +22,7 @@ images/
   opencode/   # separate compose stack for the opencode image (Dokploy)
 docs/         # env validation, auth, npm registry, migration notes
 DESIGN.md     # repo-wide design-system referat (frontend + mobile)
-.github/workflows/  # 13 workflows (ci, docker, security-scan, build/ios-ci/publish-*,
+.github/workflows/  # 12 workflows (ci, docker, build/ios-ci/publish-*,
                     # cua-smoke, activation-e2e, product-intelligence, triage-reviews,
                     # bump-version) — most with paths filters
 docker-compose.yml
@@ -216,8 +216,8 @@ npx expo start                   # see apps/mobile/AGENTS.md for gates
 
 ## CI / Docker
 
-Workflows live in the root `.github/workflows/` — 13 of them: `ci`, `docker`,
-`security-scan`, `build`, `ios-ci`, `publish-app-store`, `publish-play-store`,
+Workflows live in the root `.github/workflows/` — 12 of them: `ci`, `docker`,
+`build`, `ios-ci`, `publish-app-store`, `publish-play-store`,
 `publish-fdroid`, `cua-smoke`, `activation-e2e`, `product-intelligence`,
 `triage-reviews`, `bump-version`. Most are gated by `paths:` filters, so the
 mobile workflows only run on `apps/mobile/**` changes and the web/docker stack
@@ -227,7 +227,7 @@ only on its own paths.
   then `bun install` / `bun run lint` / `bun run build` / `bun run test`.
 - Mobile has its own workflows (`build.yml` → Android APK, `ios-ci.yml`,
   `publish-*.yml`) and `activation-e2e.yml` / `cua-smoke.yml` for smoke tests.
-- `security-scan.yml` runs dependency/secret scanning.
+
 - Images build `FROM oven/bun:1.4.2` (3 stages each); backend runs
   `bun dist/main.js`, frontend runs `bun apps/frontend/server.js` (Next standalone,
   `output: 'standalone'` preserved). Healthchecks probe via `bun -e fetch(…)`.

@@ -1,6 +1,6 @@
 name: CUA Smoke Test
 
-# Monorepo: manual dispatch plus main/tag pushes that touch the mobile app only.
+# Monorepo: manual dispatch plus main/dev/tag pushes that touch the mobile app only.
 # GitHub does not evaluate path filters for tag pushes, so `tags: ["v*"]` still
 # fires the release-grade run.
 on:
@@ -39,7 +39,7 @@ on:
         required: false
         default: ""
   push:
-    branches: [main]
+    branches: [main, dev]
     tags: ["v*"]
     paths:
       - "apps/mobile/scripts/android-cua-smoke.py"

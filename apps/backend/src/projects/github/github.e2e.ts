@@ -45,11 +45,11 @@ for (const key of [
 const FIXTURE_REPOS = [
   {
     id: 1296269,
-    name: "devbox-backend",
-    full_name: "acme/devbox-backend",
+    name: "my-app",
+    full_name: "acme/my-app",
     private: false,
     default_branch: "main",
-    html_url: "https://github.com/acme/devbox-backend",
+    html_url: "https://github.com/acme/my-app",
     owner: { login: "acme" },
   },
   {
@@ -350,11 +350,11 @@ async function main(): Promise<void> {
         assert.deepEqual(body[0], {
           id: 1296269,
           owner: "acme",
-          name: "devbox-backend",
-          fullName: "acme/devbox-backend",
+          name: "my-app",
+          fullName: "acme/my-app",
           private: false,
           defaultBranch: "main",
-          url: "https://github.com/acme/devbox-backend",
+          url: "https://github.com/acme/my-app",
         });
         assert.equal(body[1]?.private, true);
         assert.equal(body[1]?.defaultBranch, "trunk");

@@ -44,10 +44,10 @@ export class GithubRepoDto {
   @ApiProperty({ example: 'acme' })
   owner!: string;
 
-  @ApiProperty({ example: 'devbox-backend' })
+  @ApiProperty({ example: 'my-app' })
   name!: string;
 
-  @ApiProperty({ example: 'acme/devbox-backend' })
+  @ApiProperty({ example: 'acme/my-app' })
   fullName!: string;
 
   @ApiProperty({ example: false })
@@ -56,7 +56,7 @@ export class GithubRepoDto {
   @ApiProperty({ example: 'main' })
   defaultBranch!: string;
 
-  @ApiProperty({ example: 'https://github.com/acme/devbox-backend' })
+  @ApiProperty({ example: 'https://github.com/acme/my-app' })
   url!: string;
 }
 

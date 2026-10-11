@@ -42,7 +42,7 @@ export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
 export type GithubLinkInput = z.infer<typeof githubLinkSchema>;
 
 export class CreateProjectDto {
-  @ApiProperty({ example: 'devbox-backend' })
+  @ApiProperty({ example: 'my-app' })
   name!: string;
 
   @ApiProperty({ required: false, example: 'Devbox backend service' })
@@ -51,13 +51,13 @@ export class CreateProjectDto {
   @ApiProperty({ required: false, example: 'acme' })
   githubOwner?: string;
 
-  @ApiProperty({ required: false, example: 'devbox-backend' })
+  @ApiProperty({ required: false, example: 'my-app' })
   githubRepo?: string;
 
   @ApiProperty({ required: false, example: 'main' })
   githubBranch?: string;
 
-  @ApiProperty({ required: false, example: 'https://github.com/acme/devbox-backend' })
+  @ApiProperty({ required: false, example: 'https://github.com/acme/my-app' })
   githubUrl?: string;
 
   @ApiProperty({ required: false, example: 'user-1' })
@@ -138,7 +138,7 @@ export class GithubLinkDto {
   @ApiProperty({ example: 'acme' })
   owner!: string;
 
-  @ApiProperty({ example: 'devbox-backend' })
+  @ApiProperty({ example: 'my-app' })
   repo!: string;
 
   @ApiProperty({ required: false, example: 'main' })

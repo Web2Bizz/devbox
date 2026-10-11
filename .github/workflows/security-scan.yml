@@ -5,16 +5,32 @@ name: Security scan
 # was cheap to fix; what was missing was a gate that would have caught it
 # before the push. This is that gate.
 
-# NOTE: deliberately NO paths filter. gitleaks scans the FULL commit history
-# (fetch-depth: 0) of whatever the checkout contains, and in the monorepo that
-# checkout now also covers apps/backend and apps/frontend — a paths filter would
-# suppress runs on exactly the commits (backend/frontend) this gate exists to
-# catch. Secrecy is repo-wide, not app-scoped.
+# gitleaks scans the FULL commit history (fetch-depth: 0), so the filter must be
+# repo-wide rather than per-app: a secret could have landed in any app, and
+# filtering per app would let an unrelated-app PR skip the very commits the gate
+# exists to catch. The paths below cover every tree that can hold a secret
+# (all apps, contracts, images, docs) plus this workflow itself and the env
+# template. Not a required status check (main is unprotected), so a filtered-out
+# PR cannot get stuck waiting on a check that never runs.
 on:
   push:
     branches: [main]
+    paths:
+      - "apps/**"
+      - "contracts/**"
+      - "images/**"
+      - "docs/**"
+      - ".github/workflows/security-scan.yml"
+      - ".env.example"
   pull_request:
     branches: [main]
+    paths:
+      - "apps/**"
+      - "contracts/**"
+      - "images/**"
+      - "docs/**"
+      - ".github/workflows/security-scan.yml"
+      - ".env.example"
 
 permissions:
   contents: read

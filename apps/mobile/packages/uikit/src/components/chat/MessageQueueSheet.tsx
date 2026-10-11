@@ -218,7 +218,7 @@ const r = StyleSheet.create({
     paddingVertical: 10,
     marginBottom: 8,
   },
-  rowDark: { backgroundColor: colors.surfaceDark2, borderColor: "#3a3a3a" },
+  rowDark: { backgroundColor: colors.surfaceDark2, borderColor: colors.borderDark2 },
   textWrap: { flex: 1, flexDirection: "row", alignItems: "flex-start", gap: 8 },
   index: { fontSize: 13, fontWeight: "700", color: "#999999", minWidth: 18, paddingTop: 1 },
   text: { flex: 1, fontSize: 14, color: "#0a0a0a", lineHeight: 20 },
@@ -235,7 +235,7 @@ const r = StyleSheet.create({
     paddingVertical: 6,
     minHeight: 40,
   },
-  editorDark: { color: "#ffffff", borderColor: "#3a3a3a", backgroundColor: "#0a0a0a" },
+  editorDark: { color: "#ffffff", borderColor: colors.borderDark2, backgroundColor: "#0a0a0a" },
   actions: { flexDirection: "row", alignItems: "center", gap: 4 },
   iconBtn: { padding: 6 },
 })

@@ -152,8 +152,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 4,
   },
-  // NOTE: #3a3a3a has no theme token (borderDark is #1a1a1a) — kept as-is.
-  boxDark: { backgroundColor: colors.surfaceDark2, borderColor: "#3a3a3a" },
+  boxDark: { backgroundColor: colors.surfaceDark2, borderColor: colors.borderDark2 },
   header: {
     flexDirection: "row",
     alignItems: "center",

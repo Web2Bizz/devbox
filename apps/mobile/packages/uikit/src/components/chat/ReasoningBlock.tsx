@@ -2,6 +2,7 @@ import { useState } from "react"
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { useTranslation } from "react-i18next"
+import { colors } from "../../theme"
 
 interface Props {
   text: string
@@ -46,5 +47,5 @@ const s = StyleSheet.create({
   label: { fontSize: 12, fontWeight: "600", color: "#92400e", flex: 1 },
   labelDark: { color: "#f59e0b" },
   text: { fontSize: 13, lineHeight: 20, color: "#78350f", marginTop: 8 },
-  textDark: { color: "#d4a574" },
+  textDark: { color: colors.warningSoftText },
 })

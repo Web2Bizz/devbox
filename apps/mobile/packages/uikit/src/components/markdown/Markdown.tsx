@@ -79,7 +79,7 @@ const lightTheme = {
   blockquote: {
     backgroundColor: "transparent",
     borderLeftWidth: 3,
-    borderLeftColor: "#d1d5db",
+    borderLeftColor: colors.blockquoteBorderLight,
     paddingLeft: 12,
     paddingVertical: 2,
     marginVertical: 4,
@@ -120,7 +120,7 @@ const darkTheme = {
   link: { color: colors.accentPale },
   blockquote: {
     ...lightTheme.blockquote,
-    borderLeftColor: "#4a4a5a",
+    borderLeftColor: colors.blockquoteBorderDark,
   },
   code: {
     ...lightTheme.code,

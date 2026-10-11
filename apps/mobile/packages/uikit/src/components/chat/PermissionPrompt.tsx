@@ -1,6 +1,7 @@
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { useTranslation } from "react-i18next"
+import { colors } from "../../theme"
 
 interface Props {
   permission: { id: string; permission: string; patterns: string[] }
@@ -48,7 +49,7 @@ const s = StyleSheet.create({
   title: { fontSize: 15, fontWeight: "600", color: "#92400e" },
   textWhite: { color: "#ffffff" },
   type: { fontSize: 13, color: "#78350f", marginBottom: 12 },
-  typeDark: { color: "#d4a574" },
+  typeDark: { color: colors.warningSoftText },
   actions: { flexDirection: "row", gap: 8 },
   btn: { flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: "center" },
   deny: { backgroundColor: "#fef2f2" },

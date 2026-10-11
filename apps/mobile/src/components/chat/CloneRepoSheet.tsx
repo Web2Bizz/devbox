@@ -9,6 +9,7 @@ import BottomSheet, {
 } from "@gorhom/bottom-sheet"
 import { useTranslation } from "react-i18next"
 import { shouldCapSheetContent, sheetContentCap, SheetHandle } from "@web2bizz/ui-native"
+import { colors } from "@web2bizz/ui-native"
 import { filterMockRepos, type MockRepo } from "../../lib/github-mock"
 import { useClonedProjects } from "../../stores/cloned-projects"
 import { useConnections } from "../../stores/connections"
@@ -112,7 +113,7 @@ export function CloneRepoSheet({ sheetRef, isDark, targetDir }: Props) {
           {cloning ? (
             <ActivityIndicator size="small" color={isDark ? "#ffffff" : "#0a0a0a"} testID="cloning-indicator" />
           ) : (
-            <Ionicons name="download-outline" size={20} color={isDark ? "#8b5cf6" : "#6d28d9"} />
+            <Ionicons name="download-outline" size={20} color={isDark ? colors.accent : colors.accentStrong} />
           )}
         </TouchableOpacity>
       )

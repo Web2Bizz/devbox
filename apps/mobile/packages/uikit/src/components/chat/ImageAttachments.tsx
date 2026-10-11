@@ -1,5 +1,6 @@
 import { View, Text, Image, TouchableOpacity, StyleSheet, ScrollView } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
+import { colors } from "../../theme"
 
 export interface Attachment {
   uri: string
@@ -55,7 +56,7 @@ const s = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 8,
-    backgroundColor: "#f0f0f0",
+    backgroundColor: colors.surfaceLight3,
   },
   remove: {
     position: "absolute",

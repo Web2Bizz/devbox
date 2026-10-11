@@ -1090,7 +1090,7 @@ const styles = StyleSheet.create({
     borderBottomColor: "#e5e5e5",
   },
   groupHeaderDark: {
-    backgroundColor: "#151515",
+    backgroundColor: colors.surfaceDark4,
     borderBottomColor: "#1a1a1a",
   },
   groupHeaderText: {

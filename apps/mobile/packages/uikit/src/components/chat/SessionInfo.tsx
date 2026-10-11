@@ -143,7 +143,7 @@ export function SessionInfo({
             <TokenPill
               label={t("chat.sessionInfo.pills.cacheWrite")}
               value={stats.cacheWrite}
-              color="#ec4899"
+              color={colors.accentPale}
               isDark={isDark}
             />
           )}
@@ -205,7 +205,7 @@ export function SessionInfo({
 function MetaItem({ icon, label, value, isDark }: { icon: string; label: string; value: string; isDark: boolean }) {
   return (
     <View style={s.metaItem}>
-      <Ionicons name={icon as any} size={12} color={isDark ? "#555555" : "#999999"} />
+      <Ionicons name={icon as any} size={12} color={isDark ? colors.textDisabled : colors.textTertiaryLight} />
       <Text style={[s.metaLabel, isDark && s.dimDark]}>{label}</Text>
       <Text style={[s.metaValue, isDark && s.metaValueDark]}>{value}</Text>
     </View>
@@ -228,12 +228,12 @@ const s = StyleSheet.create({
     paddingVertical: 8,
     borderBottomWidth: 1,
     borderBottomColor: "#e5e5e5",
-    backgroundColor: "#fafafa",
+    backgroundColor: colors.surfaceLight4,
     gap: 8,
   },
   containerDark: {
     borderBottomColor: "#1a1a1a",
-    backgroundColor: "#111111",
+    backgroundColor: colors.surfaceDeep,
   },
   row: {
     flexDirection: "row",
@@ -326,7 +326,7 @@ const s = StyleSheet.create({
     color: "#666666",
   },
   metaValueDark: {
-    color: "#aaaaaa",
+    color: colors.textSecondaryAltDark,
   },
   actions: {
     flexDirection: "row",

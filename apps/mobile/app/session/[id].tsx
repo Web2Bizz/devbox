@@ -37,6 +37,7 @@ import {
   SessionInfo,
   type SlashCommand,
   type Attachment,
+  colors,
 } from "@web2bizz/ui-native"
 import { useSessions } from "../../src/stores/sessions"
 import type { QueuedDraft } from "../../src/stores/sessions"
@@ -1063,7 +1064,7 @@ export default function SessionScreen() {
                       <Ionicons
                         name={item.icon as keyof typeof Ionicons.glyphMap}
                         size={16}
-                        color={isDark ? "#bbbbbb" : "#444444"}
+                        color={isDark ? colors.textPlaceholder : colors.neutral.gray600}
                       />
                       <Text style={[s.suggestionText, isDark && s.suggestionTextDark]}>{t(item.labelKey)}</Text>
                     </TouchableOpacity>
@@ -1167,7 +1168,7 @@ export default function SessionScreen() {
               accessibilityRole="button"
               accessibilityLabel={t("session.queue.button", { count: queuedForSession.length })}
             >
-              <Ionicons name="time-outline" size={15} color={isDark ? "#bbbbbb" : "#444444"} />
+              <Ionicons name="time-outline" size={15} color={isDark ? colors.textPlaceholder : colors.neutral.gray600} />
               <Text style={[s.queueBtnText, isDark && s.queueBtnTextDark]}>
                 {t("session.queue.button", { count: queuedForSession.length })}
               </Text>
@@ -1196,7 +1197,7 @@ export default function SessionScreen() {
                   <Ionicons
                     name={item.icon as keyof typeof Ionicons.glyphMap}
                     size={13}
-                    color={isDark ? "#bbbbbb" : "#444444"}
+                    color={isDark ? colors.textPlaceholder : colors.neutral.gray600}
                   />
                   <Text style={[s.followUpText, isDark && s.followUpTextDark]}>{t(item.labelKey)}</Text>
                 </TouchableOpacity>
@@ -1428,7 +1429,7 @@ const s = StyleSheet.create({
   },
   suggestionChipDark: { borderColor: "#2a2a2a", backgroundColor: "#1a1a1a" },
   suggestionText: { fontSize: 14, fontWeight: "500", color: "#444444" },
-  suggestionTextDark: { color: "#bbbbbb" },
+  suggestionTextDark: { color: colors.textPlaceholder },
   // Follow-up strip above the composer: fixed 45px block, horizontal scroll.
   // Chips mirror suggestionChip (border + background) in a compact form to
   // fit the 45px height.
@@ -1463,7 +1464,7 @@ const s = StyleSheet.create({
   },
   followUpChipDark: { borderColor: "#2a2a2a", backgroundColor: "#1a1a1a" },
   followUpText: { fontSize: 12, fontWeight: "500", color: "#444444" },
-  followUpTextDark: { color: "#bbbbbb" },
+  followUpTextDark: { color: colors.textPlaceholder },
   // Outbox button row above the composer: compact, same chip language.
   queueBar: {
     flexDirection: "row",
@@ -1484,8 +1485,8 @@ const s = StyleSheet.create({
   },
   queueBtnDark: { borderColor: "#2a2a2a", backgroundColor: "#1a1a1a" },
   queueBtnText: { fontSize: 13, fontWeight: "600", color: "#444444" },
-  queueBtnTextDark: { color: "#bbbbbb" },
-  emptyHint: { fontSize: 13, color: "#bbbbbb", marginTop: 12 },
+  queueBtnTextDark: { color: colors.textPlaceholder },
+  emptyHint: { fontSize: 13, color: colors.textPlaceholder, marginTop: 12 },
   metaDark: { color: "#666666" },
   textWhite: { color: "#ffffff" },
 
@@ -1621,7 +1622,7 @@ const s = StyleSheet.create({
 
   // Pending revert (edit message) banner
   bannerRevert: {
-    backgroundColor: "#7A1E43",
+    backgroundColor: colors.accentBannerBg,
     flexDirection: "row",
     justifyContent: "space-between",
   },

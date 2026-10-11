@@ -90,7 +90,7 @@ const styles = StyleSheet.create({
     color: colors.accentStrong,
   },
   titleDark: {
-    color: "#FFE4D9",
+    color: colors.accentBannerText,
   },
   body: {
     fontSize: 12,

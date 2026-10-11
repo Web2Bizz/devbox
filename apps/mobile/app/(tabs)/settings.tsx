@@ -30,7 +30,7 @@ import {
 } from "../../src/lib/notifications"
 import type { Category } from "../../src/lib/notifications"
 import { CURRENT_VERSION } from "../../src/lib/update-check"
-import { layout } from "@web2bizz/ui-native"
+import { colors, layout } from "@web2bizz/ui-native"
 import type { LocalePreference } from "../../src/lib/i18n/locale-resolve"
 
 function SettingRow({
@@ -230,7 +230,7 @@ export default function SettingsScreen() {
           value={settings.requireBiometric}
           onValueChange={(value) => updateSettings({ requireBiometric: value })}
           disabled={!hasBiometrics}
-          trackColor={{ false: "#767577", true: "#22c55e" }}
+          trackColor={{ false: colors.switchTrackOff, true: colors.success }}
         />
       }
     />,
@@ -245,7 +245,7 @@ export default function SettingsScreen() {
           value={settings.requireBiometricForMessages}
           onValueChange={(value) => updateSettings({ requireBiometricForMessages: value })}
           disabled={!hasBiometrics || !settings.requireBiometric}
-          trackColor={{ false: "#767577", true: "#22c55e" }}
+          trackColor={{ false: colors.switchTrackOff, true: colors.success }}
         />
       }
     />,
@@ -279,7 +279,7 @@ export default function SettingsScreen() {
             <Switch
               value={notifications[category]}
               onValueChange={(value) => handleToggle(category, value)}
-              trackColor={{ false: "#767577", true: "#22c55e" }}
+              trackColor={{ false: colors.switchTrackOff, true: colors.success }}
             />
           }
         />
@@ -350,7 +350,7 @@ export default function SettingsScreen() {
             <Switch
               value={lanDiscovery}
               onValueChange={(value) => setLanDiscovery(value)}
-              trackColor={{ false: "#767577", true: "#22c55e" }}
+              trackColor={{ false: colors.switchTrackOff, true: colors.success }}
             />
           }
         />

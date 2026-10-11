@@ -1,6 +1,7 @@
 import { View, Text, TouchableOpacity, StyleSheet, Linking } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import type { RepoLink, GitProvider } from "../lib/git-remotes"
+import { colors } from "@web2bizz/ui-native"
 
 // Ionicons brand glyph per git host; self-hosted/unknown fall back to a
 // generic branch icon (Ionicons has no gitea/self-hosted glyphs).
@@ -29,7 +30,7 @@ export function RepoLinkRow({ repo, isDark }: { repo: RepoLink; isDark: boolean 
       accessibilityRole="link"
       accessibilityLabel={repo.webUrl}
     >
-      <Ionicons name={providerIconName(repo.provider)} size={18} color={isDark ? "#bbbbbb" : "#444444"} />
+      <Ionicons name={providerIconName(repo.provider)} size={18} color={isDark ? colors.textPlaceholder : colors.neutral.gray600} />
       <View style={styles.content}>
         <Text style={[styles.slug, isDark && styles.textDark]} numberOfLines={1}>
           {repo.slug}

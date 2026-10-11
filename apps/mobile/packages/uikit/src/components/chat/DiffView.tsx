@@ -1,6 +1,7 @@
 import { View, Text, StyleSheet, Platform, ScrollView } from "react-native"
 import { WIDE_CONTENT_SCROLL_CONFIG } from "../../utils/scroll-config"
 import { computeDiff } from "./diff-compute"
+import { colors } from "../../theme"
 
 const mono = Platform.OS === "ios" ? "Menlo" : "monospace"
 
@@ -54,7 +55,7 @@ const s = StyleSheet.create({
   container: {
     borderRadius: 6,
     overflow: "hidden",
-    backgroundColor: "#f8f8f8",
+    backgroundColor: colors.surfaceLight2,
     marginTop: 6,
   },
   containerDark: { backgroundColor: "#1a1a1a" },

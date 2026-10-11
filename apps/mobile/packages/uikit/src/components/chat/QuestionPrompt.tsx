@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from 
 import { Ionicons } from "@expo/vector-icons"
 import { useTranslation } from "react-i18next"
 import { QUESTION_BODY_SCROLL_PROPS } from "../../utils/session-layout"
+import { colors } from "../../theme"
 
 interface QuestionOption {
   label: string
@@ -190,7 +191,7 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#e5e5e5",
   },
-  optionDark: { backgroundColor: "#2a2a2a", borderColor: "#3a3a3a" },
+  optionDark: { backgroundColor: "#2a2a2a", borderColor: colors.borderDark2 },
   optionSelected: { borderColor: "#0a0a0a", backgroundColor: "#e5e5e5" },
   optionSelectedDark: { borderColor: "#ffffff", backgroundColor: "#2a2a2a" },
   optionLabel: { fontSize: 14, fontWeight: "600", color: "#0a0a0a" },
@@ -210,7 +211,7 @@ const s = StyleSheet.create({
     borderColor: "#e5e5e5",
     color: "#0a0a0a",
   },
-  customInputDark: { backgroundColor: "#2a2a2a", borderColor: "#3a3a3a", color: "#ffffff" },
+  customInputDark: { backgroundColor: "#2a2a2a", borderColor: colors.borderDark2, color: "#ffffff" },
   customSubmit: { justifyContent: "center", alignItems: "center", padding: 8 },
 
   footer: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 12 },

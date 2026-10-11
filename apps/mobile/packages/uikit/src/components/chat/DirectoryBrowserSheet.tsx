@@ -293,7 +293,7 @@ export function DirectoryBrowserSheet({
             <Ionicons
               name="arrow-up-circle-outline"
               size={22}
-              color={canGoUp ? (isDark ? colors.accentPale : colors.accentStrong) : isDark ? "#3a3a3a" : "#dddddd"}
+              color={canGoUp ? (isDark ? colors.accentPale : colors.accentStrong) : isDark ? colors.borderDark2 : colors.borderLight2}
             />
           </TouchableOpacity>
           <Text style={[s.path, isDark && s.dimDark]} numberOfLines={1} ellipsizeMode="head">
@@ -412,12 +412,12 @@ export function DirectoryBrowserSheet({
             <Ionicons
               name="folder-outline"
               size={20}
-              color={item.ignored ? (isDark ? "#555555" : "#bbbbbb") : isDark ? "#888888" : "#666666"}
+              color={item.ignored ? (isDark ? colors.textDisabled : colors.textPlaceholder) : isDark ? colors.textSecondaryDark : colors.textSecondaryLight}
             />
             <Text style={[s.rowLabel, isDark && s.white, item.ignored && s.rowLabelDim]} numberOfLines={1}>
               {item.name}
             </Text>
-            <Ionicons name="chevron-forward" size={16} color={isDark ? "#555555" : "#cccccc"} />
+            <Ionicons name="chevron-forward" size={16} color={isDark ? colors.textDisabled : colors.neutral.gray200} />
           </TouchableOpacity>
         )}
         contentContainerStyle={s.list}

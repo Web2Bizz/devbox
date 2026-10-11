@@ -2,6 +2,7 @@ import { useState } from "react"
 import { View, Text, TouchableOpacity, StyleSheet, useColorScheme, Platform, ScrollView } from "react-native"
 import * as Clipboard from "expo-clipboard"
 import { WIDE_CONTENT_SCROLL_CONFIG } from "../../utils/scroll-config"
+import { colors } from "../../theme"
 
 interface Props {
   code: string
@@ -53,7 +54,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: "#e8e8e8",
+    backgroundColor: colors.codeHeaderBgLight,
   },
   headerDark: {
     backgroundColor: "#2a2a2a",

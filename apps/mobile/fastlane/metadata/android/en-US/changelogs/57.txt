@@ -1,2 +1,4 @@
-v0.6.1
-(Changelog pending — fill in before release.)
+v0.6.0
+Version line rolled back from 0.6.1 to 0.6.0: the 0.6.1 bump was cut from the
+0.6.0 prerelease line before it shipped anywhere, so only the semver moves back.
+versionCode stays at 57 so existing installs keep upgrading in place.

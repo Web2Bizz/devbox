@@ -1,2 +1,4 @@
-v1.0.2
-(Changelog pending — fill in before release.)
+v0.6.0
+Puts the prerelease line back at 0.6.0 after the automatic major bump that
+the monorepo merge into main triggered. Only the semver moves — versionCode
+stays monotonic so existing installs keep upgrading in place.

@@ -1,18 +1,31 @@
-# AGENTS.md — DevBox Backend (monorepo)
+# AGENTS.md — DevBox (monorepo)
 
 Монорепо: `apps/backend` (NestJS API), `apps/frontend` (Next.js 16.3
-Turbopack + `@web2bizz/ui` 0.25.9), `contracts/openapi.yaml`.
+Turbopack + `@web2bizz/ui` 0.26.0), `apps/mobile` (Expo 57 / RN 0.86 +
+`@web2bizz/ui-native`), `contracts/openapi.yaml`, `images/opencode`
+(отдельный compose-стек под Dokploy).
+
+`apps/mobile` — самостоятельный npm-проект (свой `package-lock.json`,
+`--legacy-peer-deps`), намеренно **вне bun workspaces**: ставится и запускается
+из своей директории, без `bun --filter`.
 
 ## Frontend — дизайн-система
 
+- Общие правила для всех UI-приложений — реферат
+  [`DESIGN.md`](DESIGN.md) (корень). При расхождении с прикладным
+  `DESIGN.md` побеждает **прикладной**: `apps/frontend/DESIGN.md` (веб-шелл)
+  и `apps/mobile/DESIGN.md` (mobile) ближе к коду и кит-версии.
 - Договорённости по layout/токенам/радиусам/бренду:
   [`apps/frontend/DESIGN.md`](apps/frontend/DESIGN.md) — читать перед
   правками шелла (`dashboard-shell`, `layout/Sidebar`, `layout/Content`,
   `app/globals.css`).
+- Mobile: [`apps/mobile/AGENTS.md`](apps/mobile/AGENTS.md) — структура и
+  гейты mobile-приложения.
 - Порядок стилей: `@web2bizz/ui/styles.css` → `globals.css`
   (source order, не менять). Hex — только `:root` / `.dark`.
 - Проверки после правок фронта: `bun --filter frontend lint`
   (`tsc --noEmit`) + `bun --filter frontend build` (`next build --turbopack`).
+  После правок mobile — гейты из `apps/mobile/AGENTS.md` (npm, не bun).
 
 ## Фолбэки запрещены по умолчанию
 

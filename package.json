@@ -1,8 +1,8 @@
 {
-  "name": "devbox-backend",
+  "name": "devbox",
   "version": "0.1.0",
   "private": true,
-  "description": "Devbox Backend — monorepo MVP (apps/backend + apps/frontend + postgres)",
+  "description": "DevBox — monorepo (apps/backend NestJS API + apps/frontend Next.js + apps/mobile Expo + postgres)",
   "packageManager": "bun@1.4.2",
   "workspaces": [
     "apps/backend",

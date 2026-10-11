@@ -1,11 +1,14 @@
-# Devbox Backend — monorepo MVP
+# DevBox — monorepo
 
-Bun workspaces monorepo: NestJS 12 (backend) + Next.js 16.3 + Turbopack (frontend) + Postgres.
+Bun workspaces monorepo: NestJS 12 (backend) + Next.js 16.3 + Turbopack
+(frontend) + Expo 57 / React Native 0.86 (mobile, `@web2bizz/ui-native`) +
+Postgres. Shared contract in `contracts/`, deployment images in
+`images/opencode/`.
 
 > Runtime: **Bun 1.4.2** (pinned in `.bun-version` — the single source of truth,
 > mirrored in `packageManager`, `engines`, `oven/bun` Docker tags and CI).
-> `bun.lock` is the lockfile. **Node 22 fallback** stays supported until CI is
-> green on Bun (see "Node fallback" below).
+> `bun.lock` is the lockfile. **Node 22 fallback** is still supported, but note
+> that CI is **not** green on Bun yet — see "CI status" below.
 
 ## Structure
 
@@ -13,17 +16,64 @@ Bun workspaces monorepo: NestJS 12 (backend) + Next.js 16.3 + Turbopack (fronten
 apps/
   backend/    # NestJS 12 + TypeScript 6 + Zod 4 + Drizzle API (GET /health)
   frontend/   # Next.js 16.3 App Router + React 19 + TypeScript + @web2bizz/ui (output: standalone, bundler: Turbopack)
+  mobile/     # Expo 57 / RN 0.86 + @web2bizz/ui-native (standalone npm project, NOT a bun workspace)
+contracts/    # openapi.yaml (API contract) + opencode-upstream.json
+images/
+  opencode/   # separate compose stack for the opencode image (Dokploy)
+docs/         # env validation, auth, npm registry, migration notes
+DESIGN.md     # repo-wide design-system referat (frontend + mobile)
+.github/workflows/  # 13 workflows (ci, docker, security-scan, build/ios-ci/publish-*,
+                    # cua-smoke, activation-e2e, product-intelligence, triage-reviews,
+                    # bump-version) — most with paths filters
 docker-compose.yml
 .bun-version / bunfig.toml / bun.lock
-.github/workflows/  # ci.yml, docker.yml
 ```
+
+## Design system
+
+- [`DESIGN.md`](DESIGN.md) — repo-wide referat: общие правила для всех
+  UI-приложений монорепо. При расхождении с прикладным `DESIGN.md` побеждает
+  прикладной (он ближе к коду и кит-версии).
+- [`apps/frontend/DESIGN.md`](apps/frontend/DESIGN.md) — веб-шелл: порядок
+  стилей, токены, радиусы, бренд.
+- [`apps/mobile/DESIGN.md`](apps/mobile/DESIGN.md) + `apps/mobile/AGENTS.md` —
+  mobile-приложение и его гейты.
+
+## Mobile (apps/mobile)
+
+Expo 57 / React Native 0.86 клиент на `@web2bizz/ui-native`
+(`file:packages/uikit` — локальный uikit-пакет внутри mobile). Это
+**отдельный npm-проект**: свой `package-lock.json`, ставится с
+`--legacy-peer-deps`, и намеренно **НЕ входит в bun workspaces** (иначе
+`bun.lock` начал бы резолвить его peer-зависимости по своим правилам и ломал
+expo-специфичное разрешение). Запуск — только из своей директории:
+
+```bash
+cd apps/mobile && npm install --legacy-peer-deps && npx expo start
+```
+
+Mobile-воркфлоу в CI (`.github/workflows/ios-ci.yml`, `build.yml`,
+`publish-app-store.yml`, `publish-play-store.yml`, `publish-fdroid.yml`)
+запускаются по paths-фильтрам `apps/mobile/**`.
+
+## images/opencode
+
+Отдельный compose-стек для образа `opencode` (`Dockerfile` + `entrypoint.sh` +
+`reload-secrets.sh` + `docker-compose.yml` внутри `images/opencode/`). Он
+**намеренно не входит в корневой `docker-compose.yml`**: поднимается в
+Dokploy, целится во внешнюю сеть `dokploy-network` (`external: true`),
+поднимает контейнер `opencode-dev` на порту `expose 4096` с томами
+(`projects`, `ssh-keys`, `gh-config`, `pnpm-store`, `opencode-data`, …) и
+лимитами CPU/RAM. Требует `OPENCODE_SERVER_PASSWORD` (fail-fast, если не
+задан).
 
 ## Frontend UI kit (@web2bizz/ui)
 
 Private Verdaccio package (`https://npm.registry.web2bizz.team`, scope
 `@web2bizz`), pinned exact in `apps/frontend/package.json` (currently
-`0.25.8` — bump with `bun add @web2bizz/ui@<ver>` inside `apps/frontend`,
-never by hand-editing the version).
+`0.26.0` — bump with `bun add @web2bizz/ui@<ver>` inside `apps/frontend`,
+never by hand-editing the version). Mobile uses the sibling package
+`@web2bizz/ui-native` (vendored as `apps/mobile/packages/uikit`).
 
 - Peer deps: `react>=19`, `react-dom>=19` — frontend runs React 19, do not
   downgrade to 18.
@@ -155,17 +205,53 @@ Volumes: `pgdata` (данные PG — бэкап командой выше) · 
 | `bun run test`       | `bun test --pass-with-no-tests` per workspace |
 | `docker compose up --build` | full stack (pg + backend + frontend) |
 
+`apps/mobile` is **not** in `workspaces` and has no `bun --filter` script — it
+is a separate npm project run from its own directory:
+
+```bash
+cd apps/mobile
+npm install --legacy-peer-deps   # its own package-lock.json
+npx expo start                   # see apps/mobile/AGENTS.md for gates
+```
+
 ## CI / Docker
+
+Workflows live in the root `.github/workflows/` — 13 of them: `ci`, `docker`,
+`security-scan`, `build`, `ios-ci`, `publish-app-store`, `publish-play-store`,
+`publish-fdroid`, `cua-smoke`, `activation-e2e`, `product-intelligence`,
+`triage-reviews`, `bump-version`. Most are gated by `paths:` filters, so the
+mobile workflows only run on `apps/mobile/**` changes and the web/docker stack
+only on its own paths.
 
 - CI (`ci.yml`) uses `oven-sh/setup-bun@v2` with `bun-version-file: .bun-version`,
   then `bun install` / `bun run lint` / `bun run build` / `bun run test`.
+- Mobile has its own workflows (`build.yml` → Android APK, `ios-ci.yml`,
+  `publish-*.yml`) and `activation-e2e.yml` / `cua-smoke.yml` for smoke tests.
+- `security-scan.yml` runs dependency/secret scanning.
 - Images build `FROM oven/bun:1.4.2` (3 stages each); backend runs
   `bun dist/main.js`, frontend runs `bun apps/frontend/server.js` (Next standalone,
   `output: 'standalone'` preserved). Healthchecks probe via `bun -e fetch(…)`.
+- `images/opencode/` is a separate Dokploy stack — see its section above.
+
+### CI status — NOT green (honest)
+
+As of the last runs on `main`, most workflows fail. The dominant cause is
+**missing repository secrets in the new repo**, not code: `ci` and `docker`
+fail at `bun install` with
+
+```
+GET https://npm.registry.web2bizz.team/@web2bizz/ui/-/ui-0.26.0.tgz - 401
+```
+
+i.e. `secrets.NPM_TOKEN` is empty in the new repository. Fix = populate
+`NPM_TOKEN` (and any other store/publish secrets) in repo settings. Until that
+happens, do not read a red CI as a code regression.
 
 ## Node fallback
 
-Until Bun CI is green, Node 22 still works:
+Node 22 works today **because CI is not green on Bun** (see "CI status"); the
+previous wording was "until CI is green on Bun". If CI turns green, revisit
+this section.
 
 ```bash
 npm install                  # legacy lockfile removed; regenerates package-lock.json (gitignored)

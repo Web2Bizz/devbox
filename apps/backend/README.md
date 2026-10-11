@@ -108,7 +108,7 @@ npm run lint --workspace=apps/backend  # tsc --noEmit
 ```bash
 docker logs <backend> 2>&1 | grep '\[correlationId\]'
 # или
-journalctl -u devbox-backend | grep 'email_taken'
+bun run dev:logs 2>&1 | grep 'email_taken'   # pm2-процесс `devbox-backend`, не systemd
 bun run build && bun dist/auth/auth.e2e.js  # 18/18, включая correlationId-сквозняк
 curl -v -X POST http://localhost:3000/api/v1/auth/register \
   -H 'content-type: application/json' -H 'x-correlation-id: debug-001' \

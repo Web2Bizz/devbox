@@ -52,7 +52,7 @@ expo-специфичное разрешение). Запуск — только
 cd apps/mobile && npm install --legacy-peer-deps && npx expo start
 ```
 
-Mobile-воркфлоу в CI (`.github/workflows/ios-ci.yml`, `build.yml`,
+Mobile-воркфлоу в CI (`.github/workflows/mobile.yml`,
 `publish-app-store.yml`, `publish-play-store.yml`, `publish-fdroid.yml`)
 запускаются по paths-фильтрам `apps/mobile/**`.
 
@@ -225,8 +225,9 @@ only on its own paths.
 
 - CI (`ci.yml`) uses `oven-sh/setup-bun@v2` with `bun-version-file: .bun-version`,
   then `bun install` / `bun run lint` / `bun run build` / `bun run test`.
-- Mobile has its own workflows (`build.yml` → Android APK, `ios-ci.yml`,
-  `publish-*.yml`) and `activation-e2e.yml` / `cua-smoke.yml` for smoke tests.
+- Mobile has its own workflows (`mobile.yml` → tests + conditional Android/iOS
+  native builds + Release/Prerelease, `publish-*.yml`) and `activation-e2e.yml`
+  / `cua-smoke.yml` for smoke tests.
 
 - Images build `FROM oven/bun:1.4.2` (3 stages each); backend runs
   `bun dist/main.js`, frontend runs `bun apps/frontend/server.js` (Next standalone,

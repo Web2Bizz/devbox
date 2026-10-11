@@ -17,7 +17,7 @@ npx expo start --clear           # start with cache clear
 npx expo run:android / run:ios   # dev build (needed for native modules)
 ```
 
-No `lint`/`format` scripts despite `CONTRIBUTING.md` mentioning `npm run lint` — there is no ESLint/Prettier config; `typecheck` + `test` are the CI gates (`.github/workflows/build.yml`, `ios-ci.yml`).
+No `lint`/`format` scripts despite `CONTRIBUTING.md` mentioning `npm run lint` — there is no ESLint/Prettier config; `typecheck` + `test` are the CI gates (`.github/workflows/mobile.yml`).
 
 ## Version bump (single source: `package.json`)
 

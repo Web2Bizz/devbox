@@ -1,96 +1,151 @@
-name: docker
+name: Docker
 
+# Сборка и публикация Docker образов в self-hosted registry.
+# Только публикация — без redeploy (отдельный процесс).
+# Нейминг — через ./.github/actions/resolve-names: ORG/REPO/SERVICE
+# Сервисы ищутся в apps/* и services/* (монорепозиторий).
+# NOTE(images/opencode): images/* НЕ входит в discovery (только apps/*,
+# services/*) — образ opencode собирается/деплоится отдельно через
+# images/opencode/docker-compose.yml, матрица его никогда не подхватит.
+# NOTE(bun): адаптация шаблона @web2bizz/scaffold под bun-монорепо —
+# setup-bun + `bun install` (NPM_TOKEN через env, см. .npmrc/bunfig.toml),
+# `bunx nx` вместо `pnpm exec`; sdk-job шаблона удалён (пакета @web2bizz/id
+# в этом репо нет, workspaces = backend+frontend).
+# NOTE(nx-docker-target): у проектов нет nx-таргета `docker` (таргеты
+# выводятся из scripts в apps/*/package.json — backend/frontend его не
+# определяют), поэтому финальный шаг шаблона `nx run <project>:docker`
+# заменён прямым docker/build-push-action с Dockerfile
+# apps/<project>/Dockerfile и тегами из resolve-names.
 on:
   push:
-    branches: [main, dev]
-    paths:
-      - "apps/backend/**"
-      - "apps/frontend/**"
-      - "docker-compose.yml"
-      - "bun.lock"
-      - "bunfig.toml"
-      - ".npmrc"
-      - ".bun-version"
-      - ".github/workflows/docker.yml"
-  pull_request:
-    paths:
-      - "apps/backend/**"
-      - "apps/frontend/**"
-      - "bun.lock"
-      - "bunfig.toml"
-      - ".npmrc"
-      - ".bun-version"
-
-env:
-  REGISTRY: ghcr.io
+    branches:
+      - dev
+  workflow_dispatch:
 
 jobs:
-  backend:
+  affected:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
+    outputs:
+      matrix: ${{ steps.projects.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
 
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - name: Discover services
+        id: discover
+        uses: ./.github/actions/resolve-names
+        with:
+          registry: docker.registry.web2bizz.team
+          discover-services: "true"
 
-      - uses: docker/login-action@v3
-        if: github.event_name == 'push'
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: ".bun-version"
+
+      - name: Install dependencies
+        run: bun install
+        env:
+          # Private scope @web2bizz → https://npm.registry.web2bizz.team.
+          # .npmrc/bunfig.toml содержат плейсхолдер ${NPM_TOKEN}/$NPM_TOKEN —
+          # токен только через env, никогда дописыванием в .npmrc.
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Set SHAs for affected
+        uses: nrwl/nx-set-shas@v5
+
+      - name: Compute affected docker projects
+        id: projects
+        run: |
+          DISCOVERED='${{ steps.discover.outputs.services }}'
+          echo "Discovered services (apps/*, services/*): $DISCOVERED"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # ручной запуск — все сервисы из discover
+            echo "matrix=$DISCOVERED" >> "$GITHUB_OUTPUT"
+          else
+            # affected через Nx, пересечение affected ∩ discovered;
+            # пустой affected ([]) — валиден, matrix-job скипается;
+            # fallback к discovered только если Nx упал (fail-safe)
+            NX_JSON=$(bunx nx show projects --affected --base="$NX_BASE" --head="$NX_HEAD" --json 2>/dev/null) || NX_JSON=""
+            if [ -z "$NX_JSON" ]; then
+              # Nx не отработал — fail-safe: собираем всё обнаруженное
+              echo "matrix=$DISCOVERED" >> "$GITHUB_OUTPUT"
+            else
+              AFFECTED=$(echo "$NX_JSON" | python3 -c "
+          import json,sys
+          discovered=json.loads('${{ steps.discover.outputs.services }}')
+          affected=json.load(sys.stdin)
+          filtered=[p for p in affected if p in discovered]
+          print(json.dumps(filtered))
+          ")
+              echo "matrix=$AFFECTED" >> "$GITHUB_OUTPUT"  # [] — валидно, matrix-job скипается
+            fi
+          fi
+          echo "docker projects: $(grep '^matrix=' "$GITHUB_OUTPUT" | tail -1)"
+
+  docker:
+    needs: [affected]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(needs.affected.outputs.matrix) }}
+    env:
+      REGISTRY: docker.registry.web2bizz.team
+      PUSH: true
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: ".bun-version"
+
+      - name: Install dependencies
+        run: bun install
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Resolve registry names
+        id: names
+        uses: ./.github/actions/resolve-names
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          service: ${{ matrix.project }}
 
-      - uses: docker/metadata-action@v5
-        id: meta
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}-backend
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: apps/backend/Dockerfile
-          platforms: linux/amd64
-          push: ${{ github.event_name == 'push' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          # Private registry auth via BuildKit secret (masked, never --build-arg).
-          secrets: |
-            NPM_TOKEN=${{ secrets.NPM_TOKEN }}
-
-  frontend:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-
-      - uses: docker/login-action@v3
-        if: github.event_name == 'push'
+      - name: Log in to Docker Registry
+        uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: app
+          password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
 
-      - uses: docker/metadata-action@v5
+      - name: Docker metadata
         id: meta
+        uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}-frontend
+          images: ${{ steps.names.outputs.service_image_path }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=
 
-      - uses: docker/build-push-action@v6
+      - name: Build and push ${{ matrix.project }} image
+        uses: docker/build-push-action@v6
         with:
           context: .
-          file: apps/frontend/Dockerfile
-          platforms: linux/amd64
-          push: ${{ github.event_name == 'push' }}
+          file: apps/${{ matrix.project }}/Dockerfile
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

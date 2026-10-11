@@ -1,0 +1,14 @@
+node_modules
+dist
+build
+out
+.git
+.github
+.env
+.env.local
+*.log
+npm-debug.log*
+.DS_Store
+**/.graphify
+**/tmp/opencode
+**/.opencode/.cache

@@ -1,0 +1,70 @@
+# graphify — индексы вне репо (/tmp/opencode), на случай in-repo кеша — игнор
+.graphify/
+.tmp/
+tmp/opencode/
+.opencode/.cache/
+.opencode/.graphify/
+
+# --- перенесено из web/.gitignore (монорепо-тулчейн) ---
+
+# Deps
+node_modules/
+
+# Lockfiles — bun.lock is the single source of truth (see .bun-version).
+# npm/pnpm/yarn locks are not used; keep them out of the tree.
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# Build output
+dist/
+.next/
+out/
+build/
+
+# Env (never commit secrets)
+.env
+.env.local
+.env.*.local
+.env.dev
+.env.prod
+
+# npm auth — project .npmrc / bunfig.toml use ${NPM_TOKEN} placeholder (safe to commit).
+# Never commit real tokens: local overrides below are ignored.
+.npmrc.local
+.npmrc.auth
+*.tgz
+
+# GitHub App private key (file-based, never commit the PEM)
+keys/
+keys/*.pem
+*.pem
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Docker / misc
+.docker/
+
+# Devbox workspace
+workspace/**
+!workspace/.gitkeep
+
+# TS build info (incremental)
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+apps/backend/repos/**
+
+# Agent telemetry (internal tooling state, not repo content)
+apps/mobile/.supervisor/
+apps/mobile/.autopilot/
+apps/mobile/.playwright-mcp/

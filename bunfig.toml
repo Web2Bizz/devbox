@@ -1,0 +1,12 @@
+# Bun workspace config.
+# Version pin lives in ONE place only: .bun-version (mirror it in
+# packageManager + engines + oven/bun Docker tags + CI when bumping).
+[install]
+# Keep npm-workspaces-style linking so apps/* resolve each other.
+linkWorkspacePackages = true
+
+# Private scope → selfhosted Verdaccio. Token via $NPM_TOKEN env only
+# (local shell / .env / CI secrets / docker --secret) — never hardcoded.
+# Public packages fall back to registry.npmjs.org. Bun also reads .npmrc.
+[install.scopes]
+"@web2bizz" = { url = "https://npm.registry.web2bizz.team/", token = "$NPM_TOKEN" }

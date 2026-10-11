@@ -1,0 +1,82 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-devbox}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-devbox}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - back
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-devbox} -d ${POSTGRES_DB:-devbox}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  backend:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      APP_BACKEND_PORT: ${APP_BACKEND_PORT:-${PORT:-3100}}
+      APP_BACKEND_HOST: ${APP_BACKEND_HOST:-0.0.0.0}
+      APP_BACKEND_PROTOCOL: ${APP_BACKEND_PROTOCOL:-http}
+      APP_BACKEND_SOCKET: ${APP_BACKEND_SOCKET:-http://localhost:${APP_BACKEND_PORT:-${PORT:-3100}}}
+      # In-network DATABASE_URL always targets the `postgres` service host.
+      # Prod POSTGRES_HOST (pg.db.*) is for host→remote access, never the compose network.
+      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-devbox}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-devbox}}
+      OPENCODE_URL: ${OPENCODE_URL:-${OPENCODE_SERVER_URL:-http://host.docker.internal:4096}}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:${NEXT_PUBLIC_PORT:-3001},http://localhost:8080}
+      REQUEST_TIMEOUT_MS: ${REQUEST_TIMEOUT_MS:-10000}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "${APP_BACKEND_PORT:-${PORT:-3100}}:3100"
+    networks:
+      - front
+      - back
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # oven/bun images carry the bun runtime (no wget/curl guaranteed),
+      # so probe via bun. Port follows the app's listen port.
+      test: ["CMD-SHELL", "bun -e 'const p=process.env.APP_BACKEND_PORT||process.env.PORT||3100;const r=await fetch(`http://localhost:${p}/health`);if(!r.ok)process.exit(1)'"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-${APP_BACKEND_SOCKET:-http://localhost:3100}}
+    restart: unless-stopped
+    ports:
+      - "8080:3000"
+    networks:
+      - front
+    depends_on:
+      - backend
+    healthcheck:
+      # oven/bun runner has no wget — probe the Next standalone via bun fetch.
+      test: ["CMD-SHELL", "bun -e 'const r=await fetch(\"http://localhost:3000/\");if(!r.ok)process.exit(1)'"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+volumes:
+  pgdata:
+
+networks:
+  front:
+  back:

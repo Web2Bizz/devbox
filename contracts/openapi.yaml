@@ -1,0 +1,3006 @@
+openapi: 3.0.3
+info:
+  title: Devbox opencode proxy API
+  version: 0.1.0
+  description: >-
+    Thin proxy layer between frontend clients and the live opencode server.
+    Backend (node:http) forwards /api/v1/* to OPENCODE_SERVER_URL with
+    REQUEST_TIMEOUT_MS timeout; unreachable upstream answers 503
+    EXTERNAL_UNAVAILABLE («сервис временно недоступен, повторите позже»)
+    with a Retry-After header — no mock fallbacks, a 200 always means live
+    upstream data.
+    Error envelope is always { code, message, correlationId }.
+    New sdk mirror (VERSION_NEUTRAL, no version segment):
+    /api/opencode/session, /api/opencode/session/status,
+    /api/opencode/session/{id} (GET/DELETE/PATCH),
+    /api/opencode/session/{id}/message (GET with limit/before + POST),
+    /api/opencode/session/{id}/message/{messageID},
+    /api/opencode/session/{id}/prompt_async (204),
+    /api/opencode/session/{id}/command, /api/opencode/session/{id}/shell,
+    /api/opencode/session/{id}/fork, /api/opencode/session/{id}/abort,
+    /api/opencode/config/providers, /api/opencode/global/event (SSE),
+    /api/opencode/global/health, /api/opencode/event (SSE) — same paths as
+    the upstream opencode OpenAPI so the frontend uses the SAME
+    @opencode-ai/sdk against
+    <NEXT_PUBLIC_API_URL>/api/opencode. Unreachable upstream answers 503
+    EXTERNAL_UNAVAILABLE with Retry-After (no mock 200s).
+
+    Versioning policy:
+    - canonical: /api/v1/* (frontend clients must use these paths);
+    - removed: unversioned /api/* aliases were deleted → 404 { code: 'not_found', … };
+    - reserved: /api/v2/* binds nothing yet → 404 { code: 'not_found', … };
+    - /health is an unversioned liveness probe (no /api/v1/health alias).
+    Swagger: /swagger + /swagger/v1 serve the v1 document
+    (/swagger.json, /openapi.yaml); /swagger/v2 is an empty reserved stub.
+servers:
+  - url: http://localhost:3000
+    description: backend local
+  - url: http://localhost:8080
+    description: frontend via compose (proxied browser → frontend)
+paths:
+  /health:
+    get:
+      summary: Liveness + postgres/opencode/registry reachability
+      operationId: getHealth
+      responses:
+        '200':
+          description: ok (even if db/opencode/registry down — flags carry the state)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+  /api/v1/registry/catalog:
+    get:
+      summary: List registry repositories (proxy → Docker Registry /v2/_catalog, 503 when unreachable)
+      operationId: listRegistryCatalogV1
+      responses:
+        '200':
+          description: live catalog
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistryCatalog'
+        '503':
+          description: registry unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/registry/npm/status:
+    get:
+      summary: npm registry status (probe → Verdaccio /-/ping, 503 when unreachable or auth refused)
+      operationId: getNpmRegistryStatusV1
+      responses:
+        '200':
+          description: live npm status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NpmRegistryStatus'
+        '503':
+          description: npm registry unreachable or auth refused (code EXTERNAL_UNAVAILABLE, neutral message, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/session:
+    get:
+      summary: Active session (proxy → opencode server, 503 when unreachable)
+      operationId: getSessionV1
+      parameters:
+        - name: Api-Version
+          in: header
+          required: false
+          description: Effective URI API version (always "1" for this endpoint).
+          schema:
+            type: string
+            example: '1'
+      responses:
+        '200':
+          description: live session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '503':
+          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/messages:
+    get:
+      summary: Session messages (proxy → opencode server, 503 when unreachable)
+      operationId: listMessagesV1
+      parameters:
+        - name: Api-Version
+          in: header
+          required: false
+          description: Effective URI API version (always "1" for this endpoint).
+          schema:
+            type: string
+            example: '1'
+        - name: sessionId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: live messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessagesResponse'
+        '503':
+          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/projects:
+    get:
+      summary: List projects
+      operationId: listProjectsV1
+      responses:
+        '200':
+          description: projects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Project'
+    post:
+      summary: Create project
+      operationId: createProjectV1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProject'
+      responses:
+        '201':
+          description: created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '400':
+          description: bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/projects/{id}:
+    get:
+      summary: Get project by id
+      operationId: getProjectV1
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+    patch:
+      summary: Update project
+      operationId: updateProjectV1
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProject'
+      responses:
+        '200':
+          description: updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+    delete:
+      summary: Delete project (cascades chats/sessions)
+      operationId: deleteProjectV1
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: deleted
+  /api/v1/projects/{id}/chats:
+    get:
+      summary: List project chats
+      operationId: listProjectChatsV1
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: chats
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProjectChat'
+    post:
+      summary: Create project chat
+      operationId: createProjectChatV1
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateChat'
+      responses:
+        '201':
+          description: created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectChat'
+  /api/v1/projects/{id}/sessions:
+    get:
+      summary: List project sessions
+      operationId: listProjectSessionsV1
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: sessions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProjectSession'
+    post:
+      summary: Create project session (binds projectId + optional chatId)
+      operationId: createProjectSessionV1
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSession'
+      responses:
+        '201':
+          description: created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectSession'
+  /api/v1/projects/{id}/github-link:
+    get:
+      summary: GitHub link status
+      operationId: githubLinkStatusV1
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GithubLinkStatus'
+    post:
+      summary: Link GitHub repository (format validation only, no tokens stored)
+      operationId: linkGithubV1
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GithubLink'
+      responses:
+        '200':
+          description: linked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+    delete:
+      summary: Unlink GitHub repository
+      operationId: unlinkGithubV1
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: unlinked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+  /api/v1/projects/github/install-url:
+    get:
+      summary: Get the GitHub App install URL for the current user (multi-tenant)
+      operationId: getGithubInstallUrlV1
+      responses:
+        '200':
+          description: App install entrypoint (https://github.com/apps/<slug>/installations/new)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GithubInstallUrl'
+        '503':
+          description: GitHub App slug is not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/projects/github/callback:
+    get:
+      summary: Bind a fresh GitHub App installation to the current user
+      operationId: githubInstallCallbackV1
+      parameters:
+        - name: installation_id
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: setup_action
+          in: query
+          required: false
+          schema:
+            type: string
+            default: install
+        - name: userId
+          in: query
+          required: false
+          description: MVP mock user key (x-user-id header wins over this param)
+          schema:
+            type: string
+        - name: x-user-id
+          in: header
+          required: false
+          description: MVP mock user key (wins over ?userId)
+          schema:
+            type: string
+      responses:
+        '200':
+          description: installation bound to user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GithubCallbackResult'
+        '400':
+          description: bad query (installation_id / setup_action)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/projects/github/webhook:
+    post:
+      summary: GitHub App webhook (installation lifecycle, X-Hub-Signature-256 verified)
+      operationId: githubWebhookV1
+      parameters:
+        - name: X-Hub-Signature-256
+          in: header
+          required: true
+          description: sha256=<hex hmac-sha256(rawBody, GITHUB_WEBHOOK_SECRET)>
+          schema:
+            type: string
+        - name: X-GitHub-Event
+          in: header
+          required: false
+          description: GitHub event name (only `installation` mutates state)
+          schema:
+            type: string
+      responses:
+        '200':
+          description: event acked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GithubWebhookAck'
+        '401':
+          description: invalid webhook signature
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: webhook secret is not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/projects/github/repos:
+    get:
+      summary: List GitHub App installation repositories for the current user (per-install token, never stored)
+      operationId: listGithubReposV1
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: per_page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 30
+        - name: userId
+          in: query
+          required: false
+          description: MVP mock user key (x-user-id header wins over this param)
+          schema:
+            type: string
+        - name: x-user-id
+          in: header
+          required: false
+          description: MVP mock user key (wins over ?userId)
+          schema:
+            type: string
+      responses:
+        '200':
+          description: installation repositories (normalized)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GithubRepo'
+        '400':
+          description: bad query (page/per_page out of range)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: GitHub App is not configured / auth failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: No installation for this user (code GITHUB_NOT_INSTALLED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '429':
+          description: GitHub rate limit (code EXTERNAL_RATE_LIMITED, retry later)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: GitHub upstream unavailable (code EXTERNAL_UNAVAILABLE / EXTERNAL_UPSTREAM_5XX)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '504':
+          description: GitHub upstream timeout (code EXTERNAL_TIMEOUT)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/auth/register:
+    post:
+      summary: Register a local account (email+password)
+      operationId: registerV1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthRegister'
+      responses:
+        '201':
+          description: registered (user + access/refresh pair)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSession'
+        '400':
+          description: bad request (validation)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: email already registered (code email_taken)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/auth/login:
+    post:
+      summary: Log in with email+password
+      operationId: loginV1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthLogin'
+      responses:
+        '200':
+          description: logged in (user + access/refresh pair)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSession'
+        '400':
+          description: bad request (validation)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: invalid credentials (generic code invalid_credentials, no enumeration)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/auth/refresh:
+    post:
+      summary: Rotate the refresh token (single-use jti, reuse revokes)
+      operationId: refreshV1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthRefresh'
+      responses:
+        '200':
+          description: rotated pair
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokens'
+        '401':
+          description: invalid or reused refresh token (code invalid_credentials)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/auth/logout:
+    post:
+      summary: Log out (revoke the refresh token, idempotent)
+      operationId: logoutV1
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthRefresh'
+      responses:
+        '200':
+          description: logged out
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+  /api/v1/auth/me:
+    get:
+      summary: Current user profile (Bearer access token)
+      operationId: getMeV1
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthUser'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    patch:
+      summary: Update current user profile (firstName/lastName)
+      operationId: updateMeV1
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthUpdateMe'
+      responses:
+        '200':
+          description: updated profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthUser'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/users/{id}:
+    get:
+      summary: Get own user profile (403 for anyone else — no enumeration)
+      operationId: getUserV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: own profile (private — X-Robots-Tag noindex)
+          headers:
+            X-Robots-Tag:
+              description: noindex (private response, never indexed)
+              schema:
+                type: string
+                example: noindex
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthUser'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: not your profile (fires before any DB lookup)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: own profile missing (deleted after token issue)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/organizations:
+    post:
+      summary: Create organization (caller becomes maintainer)
+      operationId: createOrganizationV1
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrganization'
+      responses:
+        '201':
+          description: created (private — X-Robots-Tag noindex)
+          headers:
+            X-Robots-Tag:
+              description: noindex (private response, never indexed)
+              schema:
+                type: string
+                example: noindex
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+        '400':
+          description: bad request (validation)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: owner user not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: storage unconfigured (REPOS_ROOT empty)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    get:
+      summary: List organizations of the caller (membership-scoped, never global)
+      operationId: listOrganizationsV1
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: caller orgs (private — X-Robots-Tag noindex)
+          headers:
+            X-Robots-Tag:
+              description: noindex (private response, never indexed)
+              schema:
+                type: string
+                example: noindex
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Organization'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/organizations/invites/accept:
+    post:
+      summary: Accept a single-use invite token (caller joins the org)
+      operationId: acceptOrganizationInviteV1
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AcceptInvite'
+      responses:
+        '200':
+          description: membership granted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationMember'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: invite not found or already used (also unknown org/user)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: already a member, or org already has a maintainer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '410':
+          description: invite expired (ORG_INVITE_TTL_SEC window passed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/organizations/{id}:
+    get:
+      summary: Get organization by id (members only — strangers get 404)
+      operationId: getOrganizationV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: organization (private — X-Robots-Tag noindex)
+          headers:
+            X-Robots-Tag:
+              description: noindex (private response, never indexed)
+              schema:
+                type: string
+                example: noindex
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: not found (or not a member — existence is not leaked)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    patch:
+      summary: Update organization settings (maintainer only)
+      operationId: updateOrganizationV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateOrganization'
+      responses:
+        '200':
+          description: updated
+          headers:
+            X-Robots-Tag:
+              description: noindex (private response, never indexed)
+              schema:
+                type: string
+                example: noindex
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: member without the maintainer role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: not found (or not a member — existence is not leaked)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    delete:
+      summary: Delete organization (maintainer only, projects survive — links cascade)
+      operationId: deleteOrganizationV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: deleted
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: member without the maintainer role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: not found (or not a member — existence is not leaked)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/organizations/{id}/members:
+    get:
+      summary: List organization members (members only)
+      operationId: listOrganizationMembersV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: members (private — X-Robots-Tag noindex)
+          headers:
+            X-Robots-Tag:
+              description: noindex (private response, never indexed)
+              schema:
+                type: string
+                example: noindex
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OrganizationMember'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: not found (or not a member — existence is not leaked)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    post:
+      summary: Add organization member (maintainer only, at most one maintainer)
+      operationId: addOrganizationMemberV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddMember'
+      responses:
+        '201':
+          description: member added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationMember'
+        '400':
+          description: bad request (validation)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: member without the maintainer role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: not found (org, requester membership, or target user)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: already a member, or org already has a maintainer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/organizations/{id}/members/{userId}:
+    patch:
+      summary: Change member role (maintainer only, never demote the last maintainer)
+      operationId: changeOrganizationMemberRoleV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMemberRole'
+      responses:
+        '200':
+          description: role changed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationMember'
+        '400':
+          description: cannot demote the last maintainer (also validation)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: member without the maintainer role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: not found (org, requester membership, or target member)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: org already has a maintainer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    delete:
+      summary: Remove organization member (maintainer only, never the last maintainer)
+      operationId: removeOrganizationMemberV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: member removed
+        '400':
+          description: cannot remove the last maintainer (also validation)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: member without the maintainer role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: not found (org, requester membership, or target member)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/organizations/{id}/invites:
+    post:
+      summary: Mint a single-use invite token (maintainer only, TTL ORG_INVITE_TTL_SEC)
+      operationId: createOrganizationInviteV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateInvite'
+      responses:
+        '201':
+          description: invite minted (token is returned ONCE, never logged)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationInvite'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: member without the maintainer role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: not found (or not a member — existence is not leaked)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: org already has a maintainer (maintainer-role invite)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/organizations/{id}/projects/{projectId}:
+    post:
+      summary: Attach a project to the organization (maintainer only, metadata-only — no disk move)
+      description: >-
+        Project homes resolve per scope (ProjectScope user|org):
+        users/<uuid>/projects/<id>/content vs
+        orgs/<uuid>/projects/<id>/content. Linking writes only the
+        projects_and_organizations join row — disk homes are NOT moved (see
+        docs/manual-migration-orgs-layout.md). Sessions/chats/files of a
+        linked project admit any member of a linked org; user-space projects
+        admit only the owner.
+      operationId: linkOrganizationProjectV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: linked
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: member without the maintainer role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: not found (org, requester membership, or project)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: project is already linked to this organization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    delete:
+      summary: Detach a project from the organization (maintainer only, project survives)
+      operationId: unlinkOrganizationProjectV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: unlinked
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: member without the maintainer role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: not found (org, requester membership, or link row)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/projects/{id}/files:
+    get:
+      summary: Readonly project file listing (path + depth, jailed, depth 0-5)
+      operationId: listProjectFilesV1
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: path
+          in: query
+          required: false
+          schema:
+            type: string
+            default: .
+        - name: depth
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 5
+            default: 1
+      responses:
+        '200':
+          description: tree
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileNode'
+        '403':
+          description: traversal forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/repos:
+    get:
+      summary: List valid git repos across all user-spaces (readonly registry, corrupted skipped)
+      operationId: listReposV1
+      description: >-
+        Readonly index over REPOS_ROOT/<user-space>/workspace/<repo> (user drops
+        repos there by hand; the backend never clones or writes). Only
+        directories with a valid .git are returned (git rev-parse + fsck, 5s
+        timeout, no shell); no-git/corrupted entries are skipped with a warn
+        log and never fail the whole listing. Supports limit (1-100, default
+        50), offset (default 0), q (case-insensitive name substring).
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 100
+      responses:
+        '200':
+          description: valid repos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Repo'
+        '400':
+          description: bad query (limit/offset/q out of range)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/repos/{userSpace}:
+    get:
+      summary: List valid git repos for one user-space (readonly registry, corrupted skipped)
+      operationId: listReposBySpaceV1
+      parameters:
+        - name: userSpace
+          in: path
+          required: true
+          description: user-space segment matching /^[a-zA-Z0-9_-]+$/
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 100
+      responses:
+        '200':
+          description: valid repos in this user-space
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Repo'
+        '400':
+          description: invalid userSpace or bad query
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/chat:
+    post:
+      summary: Send chat message (proxy → opencode server, 503 when unreachable)
+      operationId: sendChatV1
+      parameters:
+        - name: Api-Version
+          in: header
+          required: false
+          description: Effective URI API version (always "1" for this endpoint).
+          schema:
+            type: string
+            example: '1'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendChatRequest'
+      responses:
+        '200':
+          description: live assistant reply
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendChatResponse'
+        '400':
+          description: bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/opencode/session:
+    get:
+      summary: List sessions (sdk → opencode server, 503 when unreachable)
+      operationId: opencodeListSessions
+      tags: [opencode]
+      parameters:
+        - name: directory
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: live sessions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Session'
+        '503':
+          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    post:
+      summary: Create session (sdk → opencode server, 503 when unreachable)
+      operationId: opencodeCreateSession
+      tags: [opencode]
+      parameters:
+        - name: directory
+          in: query
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                parentID:
+                  type: string
+      responses:
+        '200':
+          description: live session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '503':
+          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/opencode/session/status:
+    get:
+      summary: Get session status (sdk → opencode server, 503 when unreachable)
+      operationId: opencodeSessionStatus
+      tags: [opencode]
+      parameters:
+        - name: directory
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: live session status map
+          content:
+            application/json:
+              schema:
+                type: object
+                description: upstream session.status payload (live only)
+        '503':
+          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/opencode/session/{id}:
+    get:
+      summary: Get session (sdk → opencode server, 503 when unreachable)
+      operationId: opencodeGetSession
+      tags: [opencode]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: directory
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: live session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '503':
+          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    delete:
+      summary: Delete session (sdk → opencode server, 503 when unreachable)
+      operationId: opencodeDeleteSession
+      tags: [opencode]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: directory
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: deleted flag (live upstream only)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted]
+                properties:
+                  deleted:
+                    type: boolean
+                    example: true
+        '503':
+          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    patch:
+      summary: Update session (sdk → opencode server, 503 when unreachable)
+      operationId: opencodeUpdateSession
+      tags: [opencode]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: directory
+          in: query
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpencodeSessionUpdate'
+      responses:
+        '200':
+          description: live session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '503':
+          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/opencode/session/{id}/message:
+    get:
+      summary: List session messages (sdk → opencode server, 503 when unreachable)
+      operationId: opencodeListMessages
+      tags: [opencode]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: directory
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Max messages to return (non-negative integer; upstream default when omitted).
+          schema:
+            type: integer
+            minimum: 0
+        - name: before
+          in: query
+          required: false
+          description: Cursor message id — return messages before it (upstream pagination).
+          schema:
+            type: string
+      responses:
+        '200':
+          description: live messages
+          headers:
+            x-next-cursor:
+              description: Opaque upstream pagination cursor (present only when upstream sends it).
+              schema:
+                type: string
+            Link:
+              description: RFC 8288 pagination links (present only when upstream sends them).
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessagesResponse'
+        '503':
+          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    post:
+      summary: Send session message (sdk → opencode server, 503 when unreachable)
+      operationId: opencodePrompt
+      tags: [opencode]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: directory
+          in: query
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpencodePrompt'
+      responses:
+        '200':
+          description: live assistant reply
+          content:
+            application/json:
+              schema:
+                type: object
+                description: upstream session.prompt payload (live only)
+        '400':
+          description: bad request (parts must be a non-empty array; command/shell required fields missing)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/opencode/session/{id}/message/{messageID}:
+    get:
+      summary: Get session message (sdk → opencode server, 503 when unreachable)
+      operationId: opencodeGetMessage
+      tags: [opencode]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: messageID
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: directory
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: live message
+          content:
+            application/json:
+              schema:
+                type: object
+                description: upstream session.message payload (live only)
+        '503':
+          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/opencode/session/{id}/prompt_async:
+    post:
+      summary: Send async session message, return immediately (sdk → opencode server, 503 when unreachable)
+      operationId: opencodePromptAsync
+      tags: [opencode]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: directory
+          in: query
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpencodePrompt'
+      responses:
+        '204':
+          description: prompt accepted (live upstream only)
+        '400':
+          description: bad request (parts must be a non-empty array)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/opencode/session/{id}/command:
+    post:
+      summary: Send command to session (sdk → opencode server, 503 when unreachable)
+      operationId: opencodeRunCommand
+      tags: [opencode]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: directory
+          in: query
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpencodeCommand'
+      responses:
+        '200':
+          description: live assistant reply
+          content:
+            application/json:
+              schema:
+                type: object
+                description: upstream session.command payload (live only)
+        '400':
+          description: bad request (command + arguments are required)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/opencode/session/{id}/shell:
+    post:
+      summary: Run shell command in session (sdk → opencode server, 503 when unreachable)
+      operationId: opencodeRunShell
+      tags: [opencode]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: directory
+          in: query
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpencodeShell'
+      responses:
+        '200':
+          description: live created message
+          content:
+            application/json:
+              schema:
+                type: object
+                description: upstream session.shell payload (live only)
+        '400':
+          description: bad request (agent + command are required)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/opencode/session/{id}/fork:
+    post:
+      summary: Fork session (sdk → opencode server, 503 when unreachable)
+      operationId: opencodeForkSession
+      tags: [opencode]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: directory
+          in: query
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpencodeFork'
+      responses:
+        '200':
+          description: live forked session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '503':
+          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/opencode/session/{id}/abort:
+    post:
+      summary: Abort session (sdk → opencode server, 503 when unreachable)
+      operationId: opencodeAbortSession
+      tags: [opencode]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: directory
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: abort result (live upstream only)
+          content:
+            application/json:
+              schema:
+                type: object
+                description: upstream session.abort payload (live only)
+        '503':
+          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/opencode/config/providers:
+    get:
+      summary: List providers (sdk → opencode server, 503 when unreachable)
+      operationId: opencodeListProviders
+      tags: [opencode]
+      parameters:
+        - name: directory
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: live providers
+          content:
+            application/json:
+              schema:
+                type: object
+                description: upstream config.providers payload (live only)
+        '503':
+          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/opencode/global/event:
+    get:
+      summary: Subscribe to opencode events (SSE re-stream, 503 when unreachable)
+      operationId: opencodeStreamEvents
+      tags: [opencode]
+      responses:
+        '200':
+          description: text/event-stream of upstream GlobalEvent frames (live only)
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                example: 'data: {"type":"session.created"}\n\n'
+        '503':
+          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/opencode/global/health:
+    get:
+      summary: Opencode server health (passthrough, 503 when unreachable)
+      operationId: opencodeGlobalHealth
+      tags: [opencode]
+      responses:
+        '200':
+          description: live upstream health ({healthy, version})
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpencodeHealth'
+        '503':
+          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/opencode/event:
+    get:
+      summary: Subscribe to legacy opencode events (SSE re-stream, 503 when unreachable)
+      operationId: opencodeStreamLegacyEvents
+      tags: [opencode]
+      parameters:
+        - name: directory
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: text/event-stream of upstream Event frames (live only)
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                example: 'data: {"type":"session.created"}\n\n'
+        '503':
+          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Short-lived HS256 access token from POST /api/v1/auth/login (or register).
+  schemas:
+    Health:
+      type: object
+      required: [status, db, opencode, registry, npmRegistry]
+      properties:
+        status:
+          type: string
+          example: ok
+        db:
+          type: string
+          enum: [up, down, skipped]
+        opencode:
+          type: string
+          enum: [up, down]
+          description: opencode server reachability (up = any HTTP response, down = timeout/network)
+        registry:
+          type: string
+          enum: [up, down, skipped]
+          description: docker registry reachability (up = any HTTP response, down = timeout/network, skipped = DOCKER_REGISTRY_URL unset)
+        npmRegistry:
+          type: string
+          enum: [up, down, skipped]
+          description: npm registry (Verdaccio) reachability (up = 2xx with valid credentials, down = timeout/network/auth-failure 401-403, skipped = NPM_REGISTRY_URL unset)
+    RegistryCatalog:
+      type: object
+      required: [repositories]
+      description: GET /api/v1/registry/catalog payload (live Docker Registry /v2/_catalog only)
+      properties:
+        repositories:
+          type: array
+          items:
+            type: string
+          example: ['library/nginx', 'team/app']
+    NpmRegistryStatus:
+      type: object
+      required: [status, url, scope]
+      description: GET /api/v1/registry/npm/status payload (live Verdaccio /-/ping with valid credentials only; 401-403 answer 503 neutral; secrets never in payload)
+      properties:
+        status:
+          type: string
+          enum: [up]
+          example: up
+        url:
+          type: string
+          example: https://npm.registry.web2bizz.team
+        scope:
+          type: string
+          example: '@web2bizz'
+    Session:
+      type: object
+      required: [id, title, createdAt]
+      properties:
+        id:
+          type: string
+          example: ses_abc123
+        title:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        model:
+          type: string
+    ChatMessage:
+      type: object
+      required: [id, sessionId, role, content, createdAt]
+      properties:
+        id:
+          type: string
+        sessionId:
+          type: string
+        role:
+          type: string
+          enum: [user, assistant, system]
+        content:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    SendChatRequest:
+      type: object
+      required: [message]
+      properties:
+        sessionId:
+          type: string
+        message:
+          type: string
+    SendChatResponse:
+      type: object
+      required: [sessionId, message]
+      properties:
+        sessionId:
+          type: string
+        message:
+          $ref: '#/components/schemas/ChatMessage'
+    MessagesResponse:
+      type: object
+      required: [sessionId, messages]
+      properties:
+        sessionId:
+          type: string
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+    OpencodePrompt:
+      type: object
+      required: [parts]
+      description: >-
+        POST /api/opencode/session/{id}/message body (upstream session.prompt
+        passthrough, see contracts/opencode-upstream.json). Optional
+        messageID/model/agent/noReply/system/tools/variant/format + required
+        non-empty parts (text/file/agent/subtask). Text-only callers keep
+        working: { parts: [{ type: 'text', text: 'hi' }] }.
+      properties:
+        messageID:
+          type: string
+        model:
+          type: object
+          required: [providerID, modelID]
+          properties:
+            providerID:
+              type: string
+            modelID:
+              type: string
+        agent:
+          type: string
+        noReply:
+          type: boolean
+        system:
+          type: string
+        tools:
+          type: object
+          additionalProperties:
+            type: boolean
+        variant:
+          type: string
+        format:
+          description: upstream OutputFormat passthrough (live only)
+        parts:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [type]
+            properties:
+              type:
+                type: string
+                enum: [text, file, agent, subtask]
+              text:
+                type: string
+                minLength: 1
+              mime:
+                type: string
+              url:
+                type: string
+              filename:
+                type: string
+              name:
+                type: string
+              prompt:
+                type: string
+              description:
+                type: string
+              agent:
+                type: string
+    OpencodeCommand:
+      type: object
+      required: [command, arguments]
+      description: POST /api/opencode/session/{id}/command body (upstream session.command passthrough).
+      properties:
+        messageID:
+          type: string
+        agent:
+          type: string
+        model:
+          type: string
+        arguments:
+          type: string
+          minLength: 1
+        command:
+          type: string
+          minLength: 1
+        variant:
+          type: string
+    OpencodeShell:
+      type: object
+      required: [agent, command]
+      description: POST /api/opencode/session/{id}/shell body (upstream session.shell passthrough).
+      properties:
+        messageID:
+          type: string
+        agent:
+          type: string
+          minLength: 1
+        model:
+          type: object
+          required: [providerID, modelID]
+          properties:
+            providerID:
+              type: string
+            modelID:
+              type: string
+        command:
+          type: string
+          minLength: 1
+    OpencodeFork:
+      type: object
+      description: POST /api/opencode/session/{id}/fork body (upstream session.fork passthrough).
+      properties:
+        messageID:
+          type: string
+    OpencodeSessionUpdate:
+      type: object
+      description: PATCH /api/opencode/session/{id} body (upstream session.update passthrough).
+      properties:
+        title:
+          type: string
+    OpencodeHealth:
+      type: object
+      required: [healthy, version]
+      description: GET /api/opencode/global/health payload (upstream global.health passthrough).
+      properties:
+        healthy:
+          type: boolean
+          example: true
+        version:
+          type: string
+          example: 1.18.33
+    ApiError:
+      type: object
+      required: [code, message, correlationId]
+      description: >-
+        Frozen envelope — only new `code` VALUES are added, never new fields.
+        Legacy lowercase codes (bad_request, unauthorized, forbidden,
+        not_found, payload_too_large, request_failed, internal_error) plus
+        typed upstream codes: EXTERNAL_TIMEOUT (504, per-attempt
+        REQUEST_TIMEOUT_MS budget exceeded), EXTERNAL_UNAVAILABLE (503,
+        network/unknown upstream failure), EXTERNAL_RATE_LIMITED (429),
+        EXTERNAL_UPSTREAM_5XX (502 or the upstream 5xx), GITHUB_AUTH
+        (401/403 from the GitHub App surface), auth codes:
+        invalid_credentials (401, generic — no user enumeration),
+        email_taken (409), provider_not_configured (501 stub seam).
+        Retry policy: idempotent GET upstreams retry 429/5xx/timeout
+        (EXTERNAL_RETRY_MAX_ATTEMPTS=3, BASE_DELAY_MS=200, MAX_DELAY_MS=2000);
+        POST/PUT/PATCH/DELETE run once unless explicitly opted in.
+      properties:
+        code:
+          type: string
+          example: bad_request
+        message:
+          type: string
+        correlationId:
+          type: string
+    AuthUser:
+      type: object
+      required: [id, firstName, lastName, email, provider, createdAt]
+      description: Public account shape (never carries passwordHash).
+      properties:
+        id:
+          type: string
+          format: uuid
+        firstName:
+          type: string
+          example: Ada
+        lastName:
+          type: string
+          example: Lovelace
+        email:
+          type: string
+          example: ada@devbox.local
+        provider:
+          type: string
+          enum: [local, sso-oauth, github-app]
+          example: local
+        createdAt:
+          type: string
+          format: date-time
+    AuthTokens:
+      type: object
+      required: [accessToken, refreshToken, tokenType, expiresIn]
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        tokenType:
+          type: string
+          example: bearer
+        expiresIn:
+          type: integer
+          example: 900
+    AuthSession:
+      allOf:
+        - $ref: '#/components/schemas/AuthTokens'
+        - type: object
+          required: [user]
+          properties:
+            user:
+              $ref: '#/components/schemas/AuthUser'
+    AuthRegister:
+      type: object
+      required: [firstName, lastName, email, password]
+      properties:
+        firstName:
+          type: string
+          example: Ada
+        lastName:
+          type: string
+          example: Lovelace
+        email:
+          type: string
+          example: ada@devbox.local
+        password:
+          type: string
+          minLength: 8
+    AuthLogin:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          example: ada@devbox.local
+        password:
+          type: string
+          minLength: 8
+    AuthRefresh:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+    AuthUpdateMe:
+      type: object
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+    Project:
+      type: object
+      required: [id, name, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        githubOwner:
+          type: string
+          nullable: true
+        githubRepo:
+          type: string
+          nullable: true
+        githubBranch:
+          type: string
+          nullable: true
+        githubUrl:
+          type: string
+          nullable: true
+        ownerId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        corrupted:
+          type: boolean
+          description: "Computed flag (no DB column): true when the project row exists but the on-disk git repo is missing or invalid"
+        corruptedReason:
+          type: string
+          nullable: true
+          description: "Machine reason when corrupted (missing-dir, no-git, rev-parse-failed, fsck-failed, timeout, storage-unconfigured, …). storage-unconfigured = REPOS_ROOT empty (required for project writes; fallback chain is readonly-registry only)"
+    CreateProject:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        githubOwner:
+          type: string
+        githubRepo:
+          type: string
+        githubBranch:
+          type: string
+        githubUrl:
+          type: string
+        ownerId:
+          type: string
+    ProjectChat:
+      type: object
+      required: [id, projectId, title, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    CreateChat:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+    ProjectSession:
+      type: object
+      required: [id, projectId, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        chatId:
+          type: string
+          format: uuid
+          nullable: true
+        status:
+          type: string
+          enum: [open, closed]
+        metadata:
+          type: object
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    CreateSession:
+      type: object
+      properties:
+        chatId:
+          type: string
+          format: uuid
+          nullable: true
+        status:
+          type: string
+          enum: [open, closed]
+        metadata:
+          type: object
+          nullable: true
+    GithubLink:
+      type: object
+      required: [owner, repo]
+      properties:
+        owner:
+          type: string
+        repo:
+          type: string
+        branch:
+          type: string
+    GithubLinkStatus:
+      type: object
+      required: [linked]
+      properties:
+        linked:
+          type: boolean
+        owner:
+          type: string
+          nullable: true
+        repo:
+          type: string
+          nullable: true
+        branch:
+          type: string
+          nullable: true
+        url:
+          type: string
+          nullable: true
+    GithubRepo:
+      type: object
+      required: [id, owner, name, fullName, private, defaultBranch, url]
+      properties:
+        id:
+          type: integer
+          example: 1296269
+        owner:
+          type: string
+          example: acme
+        name:
+          type: string
+          example: devbox-backend
+        fullName:
+          type: string
+          example: acme/devbox-backend
+        private:
+          type: boolean
+        defaultBranch:
+          type: string
+          example: main
+        url:
+          type: string
+          example: https://github.com/acme/devbox-backend
+    GithubInstallUrl:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          example: https://github.com/apps/devbox/installations/new
+    GithubCallbackResult:
+      type: object
+      required: [ok, installationId]
+      properties:
+        ok:
+          type: boolean
+          example: true
+        installationId:
+          type: integer
+          example: 789012
+    GithubWebhookAck:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          example: true
+    FileNode:
+      type: object
+      required: [path, type]
+      properties:
+        path:
+          type: string
+        type:
+          type: string
+          enum: [file, dir]
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/FileNode'
+    Repo:
+      type: object
+      required: [userSpace, name, path, updatedAt]
+      description: >-
+        Valid git repo from the readonly registry
+        (REPOS_ROOT/<user-space>/workspace/<repo>; path is relative to
+        REPOS_ROOT, updatedAt is the repo directory mtime).
+      properties:
+        userSpace:
+          type: string
+          example: alice
+        name:
+          type: string
+          example: demo
+        path:
+          type: string
+          example: alice/workspace/demo
+        updatedAt:
+          type: string
+          format: date-time
+    ProjectScope:
+      type: string
+      enum: [user, org]
+      description: >-
+        Project home scope on disk (REPOS_ROOT): user →
+        users/<uuid>/projects/<id>/content, org →
+        orgs/<uuid>/projects/<id>/content (no `workspace` segment). Linking a
+        project to an org is metadata-only (no disk move — see
+        docs/manual-migration-orgs-layout.md); access follows the scope rule:
+        linked projects admit any member of a linked org, user-space projects
+        admit only the owner.
+      example: user
+    Organization:
+      type: object
+      required: [id, name, isPrivate, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: acme
+        description:
+          type: string
+          nullable: true
+        ownerId:
+          type: string
+          format: uuid
+          nullable: true
+          description: creator (SET NULL — the org outlives its creator)
+        isPrivate:
+          type: boolean
+          default: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    CreateOrganization:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          example: acme
+        description:
+          type: string
+        isPrivate:
+          type: boolean
+          default: true
+    UpdateOrganization:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        isPrivate:
+          type: boolean
+    OrgRole:
+      type: string
+      enum: [maintainer, user]
+      description: exactly one maintainer per org (partial unique index), unlimited users
+      example: user
+    OrganizationMember:
+      type: object
+      required: [orgId, userId, role, createdAt]
+      properties:
+        orgId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        role:
+          $ref: '#/components/schemas/OrgRole'
+        createdAt:
+          type: string
+          format: date-time
+    AddMember:
+      type: object
+      required: [userId]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        role:
+          $ref: '#/components/schemas/OrgRole'
+          default: user
+    UpdateMemberRole:
+      type: object
+      required: [role]
+      properties:
+        role:
+          $ref: '#/components/schemas/OrgRole'
+    OrganizationInvite:
+      type: object
+      required: [token, orgId, role, expiresAt]
+      description: single-use bearer token (returned ONCE, never logged; TTL ORG_INVITE_TTL_SEC, default 24h)
+      properties:
+        token:
+          type: string
+        orgId:
+          type: string
+          format: uuid
+        role:
+          $ref: '#/components/schemas/OrgRole'
+        expiresAt:
+          type: string
+          format: date-time
+    CreateInvite:
+      type: object
+      properties:
+        role:
+          $ref: '#/components/schemas/OrgRole'
+          default: user
+    AcceptInvite:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+# Proxy mapping (backend node:http → opencode server):
+#   GET  /api/v1/session       → GET  {OPENCODE_SERVER_URL}/session
+#   GET  /api/v1/messages?s=…  → GET  {OPENCODE_SERVER_URL}/messages?sessionId=…
+#   POST /api/v1/chat          → POST {OPENCODE_SERVER_URL}/chat
+# Sdk mirror (backend NestJS OpencodeController → opencode server via
+# @opencode-ai/sdk 1.18.33 pinned, VERSION_NEUTRAL under /api — no version
+# segment; upstream snapshot: contracts/opencode-upstream.json, GET /doc):
+#   GET    /api/opencode/session                 → sdk session.list()
+#   POST   /api/opencode/session                 → sdk session.create()
+#   GET    /api/opencode/session/status          → sdk session.status()
+#   GET    /api/opencode/session/{id}            → sdk session.get()
+#   DELETE /api/opencode/session/{id}            → sdk session.delete()
+#   PATCH  /api/opencode/session/{id}            → sdk session.update()
+#   POST   /api/opencode/session/{id}/fork       → sdk session.fork()
+#   GET    /api/opencode/session/{id}/message    → sdk session.messages() (+limit/before, x-next-cursor/Link passthrough)
+#   POST   /api/opencode/session/{id}/message    → sdk session.prompt() (full body)
+#   GET    /api/opencode/session/{id}/message/{messageID} → sdk session.message()
+#   POST   /api/opencode/session/{id}/prompt_async → sdk session.promptAsync() (204)
+#   POST   /api/opencode/session/{id}/command    → sdk session.command()
+#   POST   /api/opencode/session/{id}/shell      → sdk session.shell()
+#   POST   /api/opencode/session/{id}/abort      → sdk session.abort()
+#   GET    /api/opencode/config/providers        → sdk config.providers()
+#   GET    /api/opencode/global/event (SSE)      → sdk global.event() re-stream
+#   GET    /api/opencode/global/health           → raw GET {upstream}/global/health (no sdk binding)
+#   GET    /api/opencode/event (SSE)             → sdk event.subscribe() re-stream
+# Removed: unversioned /api/session, /api/messages, /api/chat → 404 not_found.
+# Reserved: /api/v2/* → 404 { code: 'not_found', … } (no v2 bindings yet).
+# Timeout: REQUEST_TIMEOUT_MS (default 10000) per attempt via AbortController/fetch signal.
+# Retry: idempotent GET upstreams retry 429/5xx/timeout with exponential
+#   backoff (EXTERNAL_RETRY_MAX_ATTEMPTS=3, BASE_DELAY_MS=200, MAX_DELAY_MS=2000,
+#   equal jitter); POST /api/v1/chat runs once (non-idempotent guard) unless
+#   the caller opts into allowNonIdempotentRetry.
+# Errors: upstream non-2xx / timeout / network → 503 EXTERNAL_UNAVAILABLE
+#         («сервис временно недоступен, повторите позже») with Retry-After;
+#         invalid body/route → 4xx ApiError envelope with x-correlation-id;
+#         typed upstream failures (GitHub surface) → EXTERNAL_* envelope.

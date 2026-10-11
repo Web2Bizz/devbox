@@ -1,0 +1,50 @@
+{
+  "name": "backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Devbox backend API (NestJS 12 + TypeScript 6 + Zod 4 + Drizzle)",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "bun --bun nest start -b swc --watch",
+    "build": "nest build -b swc",
+    "start": "bun dist/main.js",
+    "lint": "tsc --noEmit -p tsconfig.json",
+    "test": "bun test --pass-with-no-tests dist",
+    "test:e2e": "bun run build && bun dist/api/versioning.e2e.js && bun dist/opencode/opencode.e2e.js && bun dist/projects/projects.e2e.js && bun dist/projects/github/github.e2e.js && bun dist/common/external/external-client.e2e.js && bun dist/common/external/external-error.spec.js && bun dist/common/external/retry.spec.js && bun dist/env.spec.js && bun dist/auth/auth.e2e.js && bun dist/repos/repos.service.spec.js && bun dist/repos/repos.e2e.js && bun dist/docker-registry/docker-registry.service.spec.js && bun dist/docker-registry/docker-registry.e2e.js && bun dist/npm-registry/npm-registry.service.spec.js && bun dist/npm-registry/npm-registry.e2e.js && bun dist/organizations/organizations.service.spec.js && bun dist/organizations/organizations.e2e.js",
+    "test:e2e:auth": "bun run build && bun dist/auth/auth.e2e.js",
+    "test:e2e:projects": "bun run build && bun dist/projects/projects.e2e.js",
+    "test:e2e:github": "bun run build && bun dist/projects/github/github.e2e.js",
+    "test:e2e:repos": "bun run build && bun dist/repos/repos.service.spec.js && bun dist/repos/repos.e2e.js"
+  },
+  "dependencies": {
+    "@nestjs/common": "^12.1.0",
+    "@nestjs/config": "^12.0.1",
+    "@nestjs/core": "^12.1.0",
+    "@nestjs/platform-express": "^12.1.0",
+    "@nestjs/swagger": "^12.0.2",
+    "@octokit/auth-app": "^8.3.1",
+    "@opencode-ai/sdk": "1.18.33",
+    "dotenv": "^16.4.5",
+    "dotenv-expand": "^11.0.6",
+    "drizzle-orm": "^0.45.3",
+    "octokit": "^5.0.5",
+    "pg": "^8.12.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^12.0.7",
+    "@swc/cli": "^0.8.1",
+    "@swc/core": "^1.16.2",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.7.4",
+    "@types/pg": "^8.11.0",
+    "drizzle-kit": "^0.31.11",
+    "typescript": "^6.0.3"
+  },
+  "engines": {
+    "node": ">=22",
+    "bun": ">=1.4.2"
+  }
+}

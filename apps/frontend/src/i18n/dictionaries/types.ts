@@ -1,0 +1,325 @@
+/**
+ * Shared i18n dictionary type (EN/RU share the exact shape).
+ * Cookie-only approach: flat URLs (/login, /projects, …) stay untouched,
+ * no `[locale]` segment, no middleware rewrite. Default locale `en`.
+ */
+export interface Dictionary {
+  metadata: {
+    title: string;
+    description: string;
+  };
+  nav: {
+    projects: string;
+    organizations: string;
+    users: string;
+    secrets: string;
+    profile: string;
+    aiProviders: string;
+    chat: string;
+    registries: string;
+    databases: string;
+    brokers: string;
+    s3: string;
+    dataPersist: string;
+    volumes: string;
+    console: string;
+    sections: string;
+  };
+  common: {
+    loading: string;
+    loadingPage: string;
+    refresh: string;
+    retry: string;
+    tryAgain: string;
+    cancel: string;
+    reveal: string;
+    hide: string;
+    copy: string;
+    copied: string;
+    delete: string;
+    confirmDelete: string;
+  };
+  auth: {
+    welcomeBack: string;
+    subtitle: string;
+    email: string;
+    password: string;
+    firstName: string;
+    lastName: string;
+    signIn: string;
+    signingIn: string;
+    signUp: string;
+    signingUp: string;
+    createAccount: string;
+    haveAccount: string;
+    noAccount: string;
+    registerFailed: string;
+    loginFailed: string;
+    signedInMock: string;
+    redirecting: string;
+    mockHint: string;
+  };
+  validation: {
+    invalidEmail: string;
+    passwordMin: string;
+    nameRequired: string;
+    invalidCredentials: string;
+    emailTaken: string;
+    tooLong: string;
+    invalidEmailDetailed: string;
+  };
+  errors: {
+    somethingWentWrong: string;
+    pageFailed: string;
+    unexpected: string;
+    updateFailed: string;
+    sessionExpired: string;
+    diagnosticId: string;
+  };
+  projects: {
+    titleA: string;
+    titleB: string;
+    subtitle: string;
+    emptyTitle: string;
+    emptyDesc: string;
+    updatedPrefix: string;
+    detailSubtitle: string;
+    notFoundTitle: string;
+    notFoundDesc: string;
+    back: string;
+    brokenBadge: string;
+    brokenTitle: string;
+    brokenDesc: string;
+    brokenReasonLabel: string;
+    tabs: {
+      overview: string;
+      secrets: string;
+      ai: string;
+      sessions: string;
+      running: string;
+    };
+    overviewTitle: string;
+    overviewDesc: string;
+    secretsTitle: string;
+    secretsDesc: string;
+    aiTitle: string;
+    aiDesc: string;
+    createTrigger: string;
+    create: {
+      title: string;
+      description: string;
+      nameLabel: string;
+      namePlaceholder: string;
+      hint: string;
+      submit: string;
+      creating: string;
+      validation: {
+        required: string;
+        tooShort: string;
+        tooLong: string;
+        invalidChars: string;
+      };
+    };
+  };
+  secrets: {
+    titleA: string;
+    titleB: string;
+    subtitle: string;
+    searchLabel: string;
+    searchPlaceholder: string;
+    emptyTitle: string;
+    emptyDesc: string;
+    noMatchesTitle: string;
+    noMatchesDesc: (query: string) => string;
+    revealedTitle: string;
+    revealedDesc: string;
+    deleteTitle: (name: string) => string;
+    deleteDesc: string;
+    notFound: (id: string) => string;
+  };
+  profile: {
+    titleA: string;
+    titleB: string;
+    subtitle: string;
+    savedTitle: string;
+    savedDesc: string;
+    nameLabel: string;
+    emailLabel: string;
+    namePlaceholder: string;
+    saveChanges: string;
+    saving: string;
+    reset: string;
+    sincePrefix: string;
+  };
+  aiProviders: {
+    titleA: string;
+    titleB: string;
+    subtitle: string;
+    doneTitle: string;
+    emptyTitle: string;
+    emptyDesc: string;
+    connectedNotice: (name: string) => string;
+    models: string;
+    enableLabel: (name: string) => string;
+    enabled: string;
+    disabled: string;
+    configure: string;
+  };
+  registries: {
+    titleA: string;
+    titleB: string;
+    subtitle: string;
+    searchLabel: string;
+    searchPlaceholder: string;
+    dockerImages: string;
+    emptyTitle: string;
+    emptyDesc: string;
+    noMatchesTitle: string;
+    noMatchesDesc: (query: string) => string;
+    repositories: string;
+    catalogEmpty: string;
+  };
+  npm: {
+    titleA: string;
+    titleB: string;
+    subtitle: string;
+    searchLabel: string;
+    searchPlaceholder: string;
+    packages: string;
+    emptyTitle: string;
+    emptyDesc: string;
+    noMatchesTitle: string;
+    noMatchesDesc: (query: string) => string;
+    scopeLabel: string;
+  };
+  registry: {
+    titleA: string;
+    titleB: string;
+    subtitle: string;
+    dockerTitle: string;
+    dockerDesc: string;
+    npmTitle: string;
+    npmDesc: string;
+  };
+  opencode: {
+    streamTitle: string;
+    streamSubtitle: string;
+    connecting: string;
+    live: string;
+    reconnecting: string;
+    error: string;
+    eventsEmpty: string;
+    reconnect: string;
+    sessionsTitle: string;
+    sessionsDesc: string;
+    runningTitle: string;
+    runningDesc: string;
+    create: string;
+    open: string;
+    abort: string;
+    stop: string;
+    emptyAll: string;
+    emptyRunning: string;
+  };
+  chat: {
+    title: string;
+    subtitle: string;
+    placeholder: string;
+    send: string;
+    stop: string;
+    emptyTitle: string;
+    emptyDesc: string;
+    retry: string;
+    streaming: string;
+    you: string;
+    assistant: string;
+    sessionTitle: string;
+    sessionSubtitle: string;
+  };
+  language: {
+    label: string;
+    en: string;
+    ru: string;
+    switchToEn: string;
+    switchToRu: string;
+  };
+  userMenu: {
+    profile: string;
+    signOut: string;
+    login: string;
+    noEmail: string;
+  };
+  orgs: {
+    titleA: string;
+    titleB: string;
+    subtitle: string;
+    emptyTitle: string;
+    emptyDesc: string;
+    createTrigger: string;
+    back: string;
+    detailSubtitle: string;
+    notFoundTitle: string;
+    notFoundDesc: string;
+    overviewTitle: string;
+    overviewDesc: string;
+    membersTitle: string;
+    membersDesc: string;
+    changeRole: string;
+    removeMember: string;
+    roles: {
+      maintainer: string;
+      user: string;
+    };
+    inviteTitle: string;
+    inviteDesc: string;
+    mintInvite: string;
+    minting: string;
+    copyLink: string;
+    inviteAccepted: string;
+    inviteAcceptedDesc: string;
+    inviteExpired: string;
+    inviteExpiredDesc: string;
+    inviteReplay: string;
+    inviteReplayDesc: string;
+    forbidden: string;
+    forbiddenDesc: string;
+    projectsTitle: string;
+    projectsDesc: string;
+    linkProject: string;
+    unlinkProject: string;
+    linkPlaceholder: string;
+    lastMaintainer: string;
+    alreadyLinked: string;
+    create: {
+      title: string;
+      description: string;
+      nameLabel: string;
+      namePlaceholder: string;
+      hint: string;
+      submit: string;
+      creating: string;
+      validation: {
+        required: string;
+        tooShort: string;
+        tooLong: string;
+      };
+    };
+    errors: {
+      forbidden: string;
+      notFound: string;
+      conflict: string;
+      gone: string;
+      badRequest: string;
+    };
+  };
+  users: {
+    titleA: string;
+    titleB: string;
+    subtitle: string;
+    forbiddenTitle: string;
+    forbiddenDesc: string;
+    notFoundTitle: string;
+    notFoundDesc: string;
+    back: string;
+  };
+}

@@ -1,0 +1,491 @@
+/* App-level styles. Design tokens, fonts and base reset come from
+ * `@web2bizz/ui/styles.css` (imported in app/layout.tsx before this file).
+ * Only semantic tokens / CSS vars here — no hardcoded hex colors
+ * (see @web2bizz/ui docs/agents/anti-patterns.md).
+ *
+ * DevBox brand tokens below are the ONLY place where logo-palette hex
+ * values may appear. Everything else references these vars semantically. */
+
+/* ---- DevBox logo palette (light = default) ----
+ * Logo: linear-gradient(135deg, #FF2A7A 0%, #FF5E62 50%, #FF9966 100%),
+ * glow: feDropShadow 0 8px 12px #FF2A7A @ 25%.
+ * This file loads AFTER `@web2bizz/ui/styles.css`, so these `:root`/`.dark`
+ * rules win over the library defaults by source order (same specificity).
+ * `--primary` / `--ring` / `--sidebar-primary` in the library are defined as
+ * `var(--accent)` aliases, so re-pointing `--accent` re-themes
+ * `border-primary`, `Card variant=brand` accents, focus rings, etc. */
+:root {
+  --brand-1: #ff2a7a;
+  --brand-2: #ff5e62;
+  --brand-3: #ff9966;
+
+  --accent: var(--brand-1);
+  --accent-secondary: var(--brand-2);
+  --on-accent: #ffffff;
+
+  --gradient-brand: linear-gradient(
+    135deg,
+    var(--brand-1) 0%,
+    var(--brand-2) 50%,
+    var(--brand-3) 100%
+  );
+  --gradient-brand-primary: var(--gradient-brand);
+  --gradient-accent-soft-start: rgb(255 42 122 / 0.14);
+  --gradient-accent-soft-end: rgb(255 153 102 / 0.2);
+
+  --shadow-glow-line-color-accent: rgb(255 42 122 / 0.3);
+  --shadow-glow-blur-color-accent: rgb(255 42 122 / 0.2);
+  --glow-accent-16: rgb(255 42 122 / 0.16);
+
+  --shadow-brand-glow: 0 8px 12px rgb(255 42 122 / 0.25);
+  --filter-logo-glow: drop-shadow(0 8px 12px rgb(255 42 122 / 0.25));
+}
+
+.dark {
+  --brand-1: #ff2a7a;
+  --brand-2: #ff5e62;
+  --brand-3: #ff9966;
+
+  --accent: var(--brand-1);
+  --accent-secondary: var(--brand-2);
+  --on-accent: #ffffff;
+
+  --gradient-brand: linear-gradient(
+    135deg,
+    var(--brand-1) 0%,
+    var(--brand-2) 50%,
+    var(--brand-3) 100%
+  );
+  --gradient-brand-primary: var(--gradient-brand);
+  --gradient-accent-soft-start: rgb(255 42 122 / 0.22);
+  --gradient-accent-soft-end: rgb(255 153 102 / 0.28);
+
+  --shadow-glow-line-color-accent: rgb(255 42 122 / 0.45);
+  --shadow-glow-blur-color-accent: rgb(255 42 122 / 0.3);
+  --glow-accent-16: rgb(255 42 122 / 0.24);
+
+  --shadow-brand-glow: 0 8px 24px rgb(255 42 122 / 0.45);
+  --filter-logo-glow: drop-shadow(0 8px 16px rgb(255 42 122 / 0.45));
+}
+
+/* ---- Brand utilities (semantic refs only, no hex) ---- */
+
+/* Gradient text for outline icons / wordmarks */
+.text-gradient-brand {
+  background: var(--gradient-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Gradient surface (swatches, badges, hero bands) */
+.bg-gradient-brand {
+  background: var(--gradient-brand);
+}
+
+/* Logo glow per spec (feDropShadow equivalent for the PNG logo) */
+.logo-glow {
+  filter: var(--filter-logo-glow);
+}
+
+/* Brand glow shadow for cards / buttons */
+.shadow-brand-glow {
+  box-shadow: var(--shadow-brand-glow);
+}
+
+.page {
+  min-height: 100dvh;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.page-inner {
+  margin: 0;
+  max-width: none;
+  width: 100%;
+  padding: 1.5rem 1rem;
+  box-sizing: border-box;
+}
+
+/* ---- App shell (visible Sidebar / Header / Content) ----
+ * <div.app-shell-container.mx-auto.w-full.max-w-none.px-2> centers the
+ * whole shell full-width (no max-width limit, 8px side gutters;
+ * kit 0.25.9 `components` entry exposes no Container export — only
+ * ChartContainer in full/widgets — see DESIGN.md).
+ * Inside: <div.app-shell> grid —
+ * row 1 → kit Header (shape=rounded) with its NATIVE bar
+ * (`sm:rounded-xl sm:border` on <header> itself): only grid-area +
+ * consumer sticky pinning below (kit 0.25.9 removed the sticky wrapper,
+ * positioning is app-owned), no flattening, no radius:0.
+ * row 2 → <aside.app-sidebar> 300px + <main.app-content> 1fr, separated
+ * by 1rem gutters so the rounded corners stay visible.
+ * Only .app-content scrolls (own scrollbar); the page itself never scrolls
+ * while the shell is mounted. Desktop sidebar is a plain grid cell
+ * (no sticky, no 100dvh). Mobile (<768px): single column, sidebar hidden,
+ * opened via header menu trigger as fixed drawer + overlay.
+ * Radius rule (DESIGN.md): Sidebar + Content use
+ * border-radius: var(--radius-lg) — equal to the Header bar radius
+ * (rounded-xl → --radius-xl = --radius). Only var() refs here.
+ * All colors via semantic vars only (no hex outside :root/.dark tokens). */
+body:has(.app-shell) {
+  overflow: hidden;
+}
+
+.app-shell-container {
+  width: 100%;
+  max-width: none;
+  margin-inline: auto;
+  box-sizing: border-box;
+  height: 100dvh;
+  overflow: hidden;
+  padding-inline: 0.5rem;
+  padding-bottom: 1rem;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: 300px minmax(0, 1fr);
+  grid-template-areas:
+    'header header'
+    'sidebar content';
+  gap: 1rem;
+  height: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding-inline: 0;
+  overflow: hidden;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* Kit Header renders its own positioning per version:
+ * - kit ≤0.25.8 (variant=sticky): `div.sticky.container.mx-auto` wrapper
+ *   around <header> — keep it NATIVE, only pin the wrapper to the grid row.
+ * - kit 0.25.9+ (shape=rounded): pure <header> bar, no wrapper —
+ *   grid-area + sticky pinning are app-owned here (consumer layout owns
+ *   fixed/sticky per kit docs). Both selectors below, no flattening. */
+.app-shell > div:has(> .app-header),
+.app-shell > .app-header {
+  grid-area: header;
+  min-width: 0;
+}
+
+/* Consumer sticky pin for the wrapper-less 0.25.9 bar
+ * (tokens from kit layout.css; only var() refs, no hex). */
+.app-shell > .app-header {
+  position: sticky;
+  top: var(--header-sticky-top);
+  z-index: 30;
+}
+
+.app-sidebar {
+  grid-area: sidebar;
+  width: 300px;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1.5rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--sidebar, var(--card));
+  overflow-y: auto;
+}
+
+.app-sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  width: 100%;
+}
+
+.app-sidebar-nav .app-sidebar-link {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  justify-content: flex-start;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-md, 0.5rem);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+  color: var(--muted-foreground);
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+
+.app-sidebar-nav button.app-sidebar-link {
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.app-sidebar-nav .app-sidebar-link:hover {
+  color: var(--foreground);
+  background: var(--sidebar-accent, var(--muted));
+}
+
+.app-sidebar-nav .app-sidebar-link[aria-current='page'] {
+  color: var(--foreground);
+  background: var(--sidebar-accent, var(--muted));
+  border-color: var(--sidebar-border, var(--border));
+}
+
+.app-sidebar-nav .app-sidebar-link:focus-visible {
+  outline: 2px solid var(--sidebar-ring, var(--ring));
+  outline-offset: 2px;
+}
+
+.app-sidebar-group {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.app-sidebar-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.app-sidebar-chevron {
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+  transition: transform 150ms ease;
+}
+
+.app-sidebar-link[aria-expanded='true'] .app-sidebar-chevron {
+  transform: rotate(0deg);
+}
+
+.app-sidebar-link[aria-expanded='false'] .app-sidebar-chevron {
+  transform: rotate(-90deg);
+}
+
+.app-sidebar-sublist {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  width: 100%;
+  margin: 0;
+  padding: 0 0 0 1rem;
+  list-style: none;
+}
+
+.app-sidebar-sublist[hidden] {
+  display: none;
+}
+
+/* .app-header keeps the kit bar NATIVE (shape=rounded → sm:rounded-xl
+ * sm:border, bg-card/80 backdrop-blur from headerVariants): no
+ * radius/border/background overrides here by design — see DESIGN.md.
+ * Only the trailing-controls row below is app-owned. */
+
+.app-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  max-width: 56rem;
+  margin-inline: auto;
+  padding: 0.75rem 1.5rem;
+}
+
+.app-header-leading {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.app-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.app-content {
+  grid-area: content;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: clip;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--background);
+}
+
+@media (max-width: 767px) {
+  .app-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'header'
+      'content';
+  }
+}
+
+.app-menu-trigger {
+  display: inline-flex;
+}
+
+@media (min-width: 768px) {
+  .app-menu-trigger {
+    display: none;
+  }
+}
+
+.app-sidebar-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgb(0 0 0 / 0.5);
+}
+
+.app-sidebar-drawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 17rem;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1.5rem 1rem;
+  background: var(--background);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+@media (min-width: 768px) {
+  .app-sidebar-drawer,
+  .app-sidebar-overlay {
+    display: none;
+  }
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.brand-row {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+}
+
+.brand-showcase {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  margin-top: 1rem;
+}
+
+.brand-swatch {
+  border-radius: var(--radius-md, 0.625rem);
+  min-height: 4.5rem;
+  border: 1px solid var(--border);
+}
+
+.brand-swatch-label {
+  font-size: 0.8rem;
+  color: var(--muted-foreground);
+  margin-top: 0.375rem;
+}
+
+.status-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
+  align-items: stretch;
+  margin-bottom: 1.5rem;
+}
+
+/* Nested radius: level 1 inside Content/Sidebar (DESIGN.md §3) */
+.app-content :is([data-slot='card'], .status-grid > *),
+.app-sidebar :is([data-slot='card']) {
+  border-radius: var(--radius-md);
+}
+
+.mono {
+  font-family: var(--font-family-mono, ui-monospace, monospace);
+  font-size: 0.85em;
+  word-break: break-all;
+}
+
+/* ---- Auth shell (guest, (auth) group) ----
+ * Mirrors the dashboard Header bar (kit Header shape=rounded, NATIVE
+ * radius/border — no overrides, see DESIGN.md §3) + borderless centered
+ * content: no sidebar, no Card frames in the shell (the login Card is the
+ * page's own form). Structure (app/(auth)/layout.tsx):
+ * <div.auth-shell> → skip-link + <AuthHeader/> + <main#main-content>
+ *   → <div.auth-shell-inner>{children}</div>.
+ * - .auth-shell: full-width column, 8px side gutters (px-2 like the
+ *   dashboard container), 1rem row gap + bottom padding so the bar's
+ *   rounding stays visible; background/foreground via semantic vars only
+ *   (light/dark come from kit tokens, no hex here).
+ * - .auth-shell > .app-header: consumer sticky pin (kit 0.25.9+ owns no
+ *   positioning — same pin as .app-shell > .app-header in the dashboard).
+ * - main: flex column, the only vertical-centering zone.
+ * - .auth-shell-inner: centered form column (max 28rem + auto margins),
+ *   min-height minus the header so short forms still center vertically;
+ *   no border/radius/background — borderless by design. */
+.auth-shell {
+  width: 100%;
+  max-width: none;
+  margin-inline: auto;
+  box-sizing: border-box;
+  min-height: 100dvh;
+  padding-inline: 0.5rem;
+  padding-bottom: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.auth-shell > .app-header {
+  position: sticky;
+  top: var(--header-sticky-top);
+  z-index: 30;
+}
+
+.auth-shell > main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.auth-shell-inner {
+  width: 100%;
+  max-width: 28rem;
+  margin-inline: auto;
+  box-sizing: border-box;
+  padding: 1.5rem 1rem;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: calc(100dvh - var(--header-height) - 2rem);
+}

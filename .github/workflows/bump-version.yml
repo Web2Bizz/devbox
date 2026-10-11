@@ -1,0 +1,80 @@
+name: Bump Version
+
+# Automatic version bump, same trigger shape as web2bizz/ui:
+# every push to dev/main gets exactly one version commit on top.
+# Mode by branch:
+#   dev  → carry-on-9 patch bump (0.4.15 → 0.5.0 …), like web2bizz/ui
+#   main → major bump with minor/patch reset (0.4.15 → 1.0.0); versionCode
+#          keeps incrementing and is NEVER reset (stores key upgrades off it)
+# The bump commit message carries [skip bump] so this workflow never loops.
+# No npm install needed — the scripts below use node builtins only.
+
+on:
+  push:
+    branches: [dev, main]
+    paths:
+      - "apps/mobile/**"
+      - ".github/workflows/bump-version.yml"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Bump mode (auto = by branch, major = force major+reset)"
+        required: false
+        default: "auto"
+        type: choice
+        options:
+          - auto
+          - major
+
+# Monorepo: the bump scripts, package.json/app.json/android/changelogs/fastlane
+# paths and the `git add` pathspecs are all apps/mobile-relative. Executing the
+# steps there keeps the exact same file set staged. NOTE: `git push` has no
+# branch/repository override, so it still pushes the current ref of the
+# MONOREPO root repository — see the migration report for that decision.
+defaults:
+  run:
+    working-directory: apps/mobile
+
+concurrency:
+  group: bump-version
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    if: "github.event_name == 'workflow_dispatch' || (!contains(github.event.head_commit.message, '[skip bump]') && !contains(github.event.head_commit.message, 'chore: bump version'))"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Bump version + release metadata
+        run: |
+          if [ "${{ inputs.mode }}" = "major" ] || { [ "${{ github.event_name }}" != "workflow_dispatch" ] && [ "${{ github.ref_name }}" = "main" ]; }; then
+            MODE=--major
+          else
+            MODE=
+          fi
+          node scripts/bump-version.mjs $MODE
+          node scripts/bump-release-meta.mjs
+          npm run check:versions
+
+      - name: Commit and push
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          git add package.json app.json android/app/build.gradle distribution/changelogs fastlane/metadata
+          git commit -m "chore: bump version to ${VERSION} [skip bump]" || echo "nothing to commit"
+          git push

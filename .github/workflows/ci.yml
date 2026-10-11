@@ -1,0 +1,62 @@
+name: ci
+
+# Monorepo (backend + frontend bun workspace). apps/mobile is intentionally NOT
+# covered here: it is a standalone npm/Expo project with its own package-lock.json
+# and its own workflows (build.yml, ios-ci.yml, activation-e2e.yml).
+on:
+  push:
+    paths:
+      - "apps/backend/**"
+      - "apps/frontend/**"
+      - "package.json"
+      - "bun.lock"
+      - "bunfig.toml"
+      - ".npmrc"
+      - ".bun-version"
+      - "tsconfig.base.json"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    paths:
+      - "apps/backend/**"
+      - "apps/frontend/**"
+      - "package.json"
+      - "bun.lock"
+      - "bunfig.toml"
+      - ".npmrc"
+      - ".bun-version"
+      - "tsconfig.base.json"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          # Single source of truth for the pin is .bun-version
+          # (mirrored in packageManager/engines/oven-bun Docker tags).
+          bun-version-file: ".bun-version"
+
+      - name: Install
+        run: bun install
+        env:
+          # Private scope @web2bizz → https://npm.registry.web2bizz.team.
+          # GitHub masks secrets.* in logs automatically; empty → public-only install.
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Lint (tsc --noEmit)
+        run: bun run lint
+
+      - name: No console.* in backend src (use AppLogger)
+        run: |
+          if grep -rn "console\." apps/backend/src; then
+            echo "::error::console.* found in apps/backend/src — use AppLogger (src/common/app-logger.service.ts) instead"
+            exit 1
+          fi
+
+      - name: Build
+        run: bun run build
+
+      - name: Test
+        run: bun run test

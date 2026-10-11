@@ -2,7 +2,7 @@ name: ci
 
 # Monorepo (backend + frontend bun workspace). apps/mobile is intentionally NOT
 # covered here: it is a standalone npm/Expo project with its own package-lock.json
-# and its own workflows (build.yml, ios-ci.yml, activation-e2e.yml).
+# and its own workflows (mobile.yml, activation-e2e.yml).
 on:
   push:
     paths:

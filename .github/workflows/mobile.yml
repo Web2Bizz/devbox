@@ -1,0 +1,274 @@
+name: Mobile CI
+
+# Single conditional pipeline for apps/mobile: Linux checks always, Android
+# native build on every non-PR push, iOS native build only where it is actually
+# meaningful (main + release tags), then the GitHub Release / Prerelease jobs.
+#
+# Merged from the former build.yml ("Build Android APK") and ios-ci.yml
+# ("iOS CI"). Both used to run their own copy of the typecheck/test job, so a
+# single mobile-touching PR burned two full runners for the same checks.
+#
+# Monorepo: this workflow only ever builds apps/mobile. Path filters keep it from
+# firing on backend/frontend-only changes. Note: GitHub does not evaluate path
+# filters for tag pushes, so `tags: ["v*"]` (the release path) still fires.
+#
+# PATH FILTER vs REQUIRED CHECKS — read before enabling branch protection:
+#   main is currently NOT protected (`GET /branches/main/protection` → 404), so
+#   path filters are safe today: "Typecheck and unit tests" always reports on a
+#   mobile PR. The old ios-ci.yml deliberately ran UNFILTERED on PRs because a
+#   path-filtered required check never reports on docs-only PRs and blocks them
+#   forever. If branch protection is ever turned on for main/dev, EITHER remove
+#   the `paths:` blocks below, or drop "Typecheck and unit tests" from the
+#   required list. See #143.
+on:
+  push:
+    branches: [main, dev]
+    tags: ["v*"]
+    paths:
+      - "apps/mobile/**"
+      - ".github/workflows/mobile.yml"
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - "apps/mobile/**"
+      - ".github/workflows/mobile.yml"
+
+# The app is a self-contained npm project under apps/mobile (it must NOT use the
+# root bun workspace/lockfile), so every `run:` step executes there.
+defaults:
+  run:
+    working-directory: apps/mobile
+
+# Cancel superseded runs for the same ref (e.g. new push to an open PR).
+concurrency:
+  group: mobile-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Platform-neutral gate: runs on every trigger, including PRs. Name kept as
+  # "Typecheck and unit tests" because that is the string referenced by branch
+  # protection rules / docs.
+  test:
+    name: Typecheck and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          # Node >= 23.6 runs the TypeScript test files natively (type-stripping),
+          # matching the local toolchain. No build step or extra deps required.
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - name: Install dependencies (deterministic)
+        run: npm ci --legacy-peer-deps
+
+      - name: Check release version metadata
+        run: npm run check:versions
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+  android:
+    # Heavy native build runs only on real merges (push to main/dev/tags):
+    # an open PR gets the test job above and nothing more.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Cache Gradle
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            apps/mobile/android/.gradle
+          key: ${{ runner.os }}-gradle-${{ hashFiles('apps/mobile/android/**/*.gradle*', 'apps/mobile/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Expo prebuild
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Setup signing
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* && -n "${{ secrets.KEYSTORE_BASE64 }}" ]]; then
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/app/release.keystore
+            echo "RELEASE_STORE_FILE=release.keystore" >> "$GITHUB_ENV"
+            echo "RELEASE_STORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }}" >> "$GITHUB_ENV"
+            echo "RELEASE_KEY_ALIAS=${{ secrets.KEY_ALIAS }}" >> "$GITHUB_ENV"
+            echo "RELEASE_KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}" >> "$GITHUB_ENV"
+            echo "Signing: production keystore"
+          else
+            rm -f android/app/debug.keystore
+            keytool -genkey -v -keystore android/app/debug.keystore -storepass android \
+              -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+            echo "Signing: debug keystore (non-release build)"
+          fi
+
+      - name: Build APK
+        working-directory: apps/mobile/android
+        run: ./gradlew assembleRelease
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: app-release
+          path: apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+
+  ios:
+    name: Unsigned iOS Simulator build
+    needs: test
+    # iOS is NOT built for the prerelease line. Prereleases are Android-only
+    # (dev pushes ship a GitHub Prerelease APK; iOS has no store channel in
+    # this setup), so a macOS runner on every dev push is pure wasted spend.
+    # iOS therefore builds only on push to main or on a v* release tag.
+    if: github.event_name != 'pull_request' && github.ref != 'refs/heads/dev'
+    # macos-15 (Xcode 16.4 / Swift 6.1) fails dependency resolution for Expo 57 /
+    # React Native 0.86: "package 'apple' is using Swift tools version 6.2.0 but
+    # the installed version is 6.1.0". macos-26 ships Xcode 26.x / Swift 6.2+.
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          # Node 20 on purpose: only the test job needs >= 23.6 for TS
+          # type-stripping. Native builds have no such requirement.
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - name: Install dependencies (deterministic)
+        run: npm ci --legacy-peer-deps
+
+      - name: Validate Expo config and plugin resolution
+        run: npx expo config --type introspect --json > expo-config.introspect.json
+
+      - name: Export iOS JavaScript bundle
+        run: npx expo export --platform ios --output-dir dist
+
+      - name: Prebuild native iOS project
+        run: npx expo prebuild --platform ios --no-install
+
+      - name: Install CocoaPods dependencies
+        working-directory: apps/mobile/ios
+        run: pod install
+
+      - name: Resolve Xcode workspace and scheme
+        id: xc
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          workspaces=(ios/*.xcworkspace)
+          workspace="${workspaces[0]:-}"
+          if [ -z "$workspace" ]; then
+            echo "::error::No .xcworkspace was generated by expo prebuild."
+            exit 1
+          fi
+          scheme=$(xcodebuild -workspace "$workspace" -list -json | node -e "
+            const d = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+            const all = (d.workspace && d.workspace.schemes) || [];
+            const app = all.filter((s) => s !== 'Pods' && !s.startsWith('Pods-'));
+            if (app.length === 0) { console.error('No application scheme found in workspace'); process.exit(1); }
+            process.stdout.write(app[0]);
+          ")
+          echo "workspace=$workspace" >> "$GITHUB_OUTPUT"
+          echo "scheme=$scheme" >> "$GITHUB_OUTPUT"
+          echo "Using workspace='$workspace' scheme='$scheme'"
+
+      - name: Build unsigned iPhone Simulator app
+        run: |
+          set -euo pipefail
+          NSUnbufferedIO=YES xcodebuild \
+            -workspace "${{ steps.xc.outputs.workspace }}" \
+            -scheme "${{ steps.xc.outputs.scheme }}" \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath ios/build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee xcodebuild.log
+
+      - name: Upload xcodebuild log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-xcodebuild-log
+          path: apps/mobile/xcodebuild.log
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # Tag v* → GitHub Release (single APK)
+  # Google Play is the ONLY store channel for release versions
+  # (upload itself runs in publish-play-store.yml on prod tags).
+  # F-Droid/App Store publishes were removed.
+  release:
+    needs: [android]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: app-release
+
+      - name: Create GitHub Release (APK only)
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app-release.apk
+          generate_release_notes: true
+
+  # Push to dev → GitHub Prerelease (APK only, no stores)
+  # Dev builds publish only as GitHub prerelease APKs, no stores — which is
+  # also why the iOS job above is skipped on dev.
+  prerelease:
+    needs: [android]
+    if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: app-release
+
+      - name: Create GitHub Prerelease (dev)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dev-${{ github.run_number }}
+          name: "Dev build #${{ github.run_number }} (${{ github.sha }})"
+          prerelease: true
+          generate_release_notes: true
+          files: app-release.apk

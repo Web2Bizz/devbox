@@ -39,6 +39,10 @@ const accent = {
   border: "#FFD9CC",
   /** Border on dark muted bg. Warm maroon edge. */
   borderDark: "#4A2633",
+  /** Глубокий magenta — фон баннера revert (session/[id]). */
+  bannerBg: "#7A1E43",
+  /** Светлый персик — цвет ТЕКСТА заголовка баннера (UpdateBanner, dark). */
+  bannerText: "#FFE4D9",
   /** Banner dark bg. Warm near-black. */
   bannerDark: "#1F1016",
   /** Chip bg light/dark alias — kept explicit for call sites. */
@@ -49,15 +53,29 @@ const accent = {
 // ── Neutral — grays / backgrounds used throughout the app ────────────────────
 const neutral = {
   white: "#ffffff",
+  /** Почти-белый — подложка карточки/диффа (DiffView). */
+  gray10: "#fafafa",
+  /** Светлая подложка строки, светлее gray50 (SessionInfo). */
+  gray25: "#f8f8f8",
   gray50: "#f5f5f5",
   gray100: "#e5e5e5",
+  /** Подложка превью изображения (ImageAttachments). */
+  gray150: "#f0f0f0",
   gray200: "#cccccc",
+  /** Светлый бордер/приглушённая иконка (disabled chevron в light). */
+  gray225: "#dddddd",
   gray300: "#999999",
   gray400: "#888888",
+  /** Приглушённый вторичный текст в тёмной теме (meta-значения). */
+  gray450: "#aaaaaa",
   gray500: "#666666",
   gray600: "#444444",
   gray700: "#2a2a2a",
+  /** Бордер строки/секции в тёмной теме — между gray700 и gray800. */
+  gray750: "#3a3a3a",
   gray800: "#1a1a1a",
+  /** Глубокая тёмная подложка (главный экран, composer). */
+  gray850: "#151515",
   gray900: "#0a0a0a",
   black: "#000000",
 } as const
@@ -106,6 +124,32 @@ const semantic = {
   info: "#FF5E62",
 } as const
 
+// ── Roles — токены по смыслу, а не по «степени серого» ──────────────────────
+// Каждый hex ниже взят из конкретного места в коде и переименован по своей
+// роли. Значение (вид) не меняется — оно то же, что раньше было инлайном.
+const roles = {
+  /** Плейсхолдер / приглушённый текст в тёмной теме. */
+  textPlaceholder: "#bbbbbb",
+  /** Неактивный/выключенный текст: disabled-пункты, приглушённые иконки. */
+  textDisabled: "#555555",
+  /** Приглушённый вторичный текст на error-экранах (ErrorBoundary subtitle). */
+  textMutedDark: "#a0a0a0",
+  /** Текст кода в тёмной теме (ErrorBoundary code). */
+  textCodeDark: "#cdd3da",
+  /** Track выключенного RN Switch — одинаков в light и dark. */
+  switchTrackOff: "#767577",
+  /** Янтарный «мягкий» текст предупреждения (PermissionPrompt, ReasoningBlock). */
+  warningSoftText: "#d4a574",
+  /** Бордер blockquote — светлая тема. */
+  blockquoteBorderLight: "#d1d5db",
+  /** Бордер blockquote — тёмная тема. */
+  blockquoteBorderDark: "#4a4a5a",
+  /** Фон шапки блока кода — светлая тема (CodeBlock header). */
+  codeHeaderBgLight: "#e8e8e8",
+  /** Самая глубокая подложка в тёмной теме — контейнер SessionInfo (dark). */
+  surfaceDeep: "#111111",
+} as const
+
 // ── Flat export — preferred for StyleSheet / inline color props ──────────────
 export const colors = {
   // accent
@@ -121,6 +165,8 @@ export const colors = {
   accentBannerDark: accent.bannerDark,
   accentChipBg: accent.chipBg,
   accentChipBgDark: accent.chipBgDark,
+  accentBannerBg: accent.bannerBg,
+  accentBannerText: accent.bannerText,
 
   // neutral aliases (short names for frequent use)
   white: neutral.white,
@@ -128,14 +174,22 @@ export const colors = {
   backgroundLight: neutral.white,
   backgroundDark: neutral.gray900,
   surfaceLight: neutral.gray50,
+  surfaceLight2: neutral.gray25,
+  surfaceLight3: neutral.gray150,
+  surfaceLight4: neutral.gray10,
   surfaceDark: neutral.gray800,
   surfaceDark2: neutral.gray700,
+  borderDark2: neutral.gray750,
+  surfaceDark4: neutral.gray850,
+  surfaceDeep: roles.surfaceDeep,
   borderLight: neutral.gray100,
+  borderLight2: neutral.gray225,
   borderDark: neutral.gray800,
   textPrimaryLight: neutral.gray900,
   textPrimaryDark: neutral.white,
   textSecondaryLight: neutral.gray500,
   textSecondaryDark: neutral.gray400,
+  textSecondaryAltDark: neutral.gray450,
   textTertiaryLight: neutral.gray300,
   textTertiaryDark: neutral.gray500,
 
@@ -147,10 +201,22 @@ export const colors = {
   warning: semantic.warning,
   info: semantic.info,
 
+  // roles — по смыслу, не по ступени серой шкалы
+  textPlaceholder: roles.textPlaceholder,
+  textDisabled: roles.textDisabled,
+  textMutedDark: roles.textMutedDark,
+  textCodeDark: roles.textCodeDark,
+  switchTrackOff: roles.switchTrackOff,
+  warningSoftText: roles.warningSoftText,
+  blockquoteBorderLight: roles.blockquoteBorderLight,
+  blockquoteBorderDark: roles.blockquoteBorderDark,
+  codeHeaderBgLight: roles.codeHeaderBgLight,
+
   // groups for iteration
   accentGroup: accent,
   neutral: neutral,
   semantic: semantic,
+  roles: roles,
 } as const
 
 // ── Theme object — light / dark semantic mapping ────────────────────────────
@@ -158,37 +224,52 @@ export const theme = {
   light: {
     background: neutral.white,
     surface: neutral.gray50,
+    surfaceAlt: neutral.gray25,
     surfaceHover: neutral.gray100,
     border: neutral.gray100,
+    borderAlt: neutral.gray225,
     text: neutral.gray900,
     textSecondary: neutral.gray500,
     textTertiary: neutral.gray300,
+    textMuted: neutral.gray450,
     accent: accent.DEFAULT,
     accentStrong: accent.strong,
     accentMuted: accent.muted,
     accentBorder: accent.border,
+    accentBannerBg: accent.bannerBg,
     accentChipBg: accent.chipBg,
+    blockquoteBorder: roles.blockquoteBorderLight,
+    codeHeaderBg: roles.codeHeaderBgLight,
   },
   dark: {
     background: neutral.gray900,
     surface: neutral.gray800,
+    surfaceAlt: neutral.gray750,
+    surfaceDeep: roles.surfaceDeep,
     surfaceHover: neutral.gray700,
     border: neutral.gray800,
     text: neutral.white,
     textSecondary: neutral.gray400,
     textTertiary: neutral.gray500,
+    textMuted: roles.textMutedDark,
+    textPlaceholder: roles.textPlaceholder,
+    textDisabled: roles.textDisabled,
+    codeText: roles.textCodeDark,
     accent: accent.light,
     accentPale: accent.pale,
     accentExtraPale: accent.extraPale,
     accentMuted: accent.mutedDark,
     accentBorder: accent.borderDark,
+    accentBannerText: accent.bannerText,
     accentChipBg: accent.chipBgDark,
+    blockquoteBorder: roles.blockquoteBorderDark,
   },
 } as const
 
 export type Colors = typeof colors
 export type Theme = typeof theme
 export type AccentColors = typeof accent
+export type RoleColors = typeof roles
 export type Spacing = typeof spacing
 export type Breakpoints = typeof breakpoints
 export type Layout = typeof layout

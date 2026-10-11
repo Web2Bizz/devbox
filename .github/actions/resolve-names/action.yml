@@ -1,0 +1,67 @@
+name: Resolve Registry Names
+description: |
+  Нейминг для Docker (монорепозиторий). Нижний регистр github.repository,
+  ORG/REPO/SERVICE для образов в self-hosted registry.
+
+  Используется:
+    - docker.yml → image_path (REGISTRY/REPO_LOWER) и service_image_path (REGISTRY/OWNER/REPO/SERVICE)
+    - discover-services → services JSON из apps/* и services/*
+
+  СКОП ТОЛЬКО DOCKER — npm (scoped @ORG/REPO) тут не существует. Другие правила.
+
+inputs:
+  registry:
+    description: "Registry prefix для Docker image (например docker.registry.web2bizz.team). Если пусто — image_path не формируется"
+    required: false
+    default: ""
+  sanitized:
+    description: "Санитизировать owner/service (a-z0-9._~-) — true"
+    required: false
+    default: "true"
+  service:
+    description: "Имя сервиса (директория в apps/ или services/). Генерирует service_image_path как ORG/REPO/SERVICE"
+    required: false
+    default: ""
+  discover-services:
+    description: "Искать сервисы в apps/* и services/* и вывести services JSON"
+    required: false
+    default: "false"
+
+outputs:
+  repo_lower:
+    description: "github.repository в нижнем регистре (owner/repo)"
+    value: ${{ steps.resolve.outputs.repo_lower }}
+  owner:
+    description: "Оригинальный owner (до '/')"
+    value: ${{ steps.resolve.outputs.owner }}
+  owner_lower:
+    description: "owner в нижнем регистре (санитизирован)"
+    value: ${{ steps.resolve.outputs.owner_lower }}
+  repo_name:
+    description: "Имя репозитория (после '/'), нижний регистр"
+    value: ${{ steps.resolve.outputs.repo_name }}
+  image_path:
+    description: "Полный путь Docker образа: <registry>/<repo_lower>"
+    value: ${{ steps.resolve.outputs.image_path }}
+  service_image_path:
+    description: "Путь образа для сервиса: <registry>/<owner_lower>/<repo_name>/<service>"
+    value: ${{ steps.resolve.outputs.service_image_path }}
+  service_name:
+    description: "Санитизированное имя сервиса"
+    value: ${{ steps.resolve.outputs.service_name }}
+  services:
+    description: "JSON массив сервисов из apps/* и services/*"
+    value: ${{ steps.resolve.outputs.services }}
+
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: bash
+      env:
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        INPUT_REGISTRY: ${{ inputs.registry }}
+        INPUT_SANITIZED: ${{ inputs.sanitized }}
+        INPUT_SERVICE: ${{ inputs.service }}
+        INPUT_DISCOVER_SERVICES: ${{ inputs.discover-services }}
+      run: node "${{ github.action_path }}/../../../scripts/resolve-names.js"

@@ -37,6 +37,9 @@
   --shadow-glow-blur-color-accent: rgb(255 42 122 / 0.2);
   --glow-accent-16: rgb(255 42 122 / 0.16);
 
+  /* Затемнение под мобильным drawer (`.app-sidebar-overlay`) — scrim. */
+  --overlay-scrim: rgb(0 0 0 / 0.5);
+
   --shadow-brand-glow: 0 8px 12px rgb(255 42 122 / 0.25);
   --filter-logo-glow: drop-shadow(0 8px 12px rgb(255 42 122 / 0.25));
 }
@@ -352,7 +355,7 @@ body:has(.app-shell) {
   position: fixed;
   inset: 0;
   z-index: 40;
-  background: rgb(0 0 0 / 0.5);
+  background: var(--overlay-scrim);
 }
 
 .app-sidebar-drawer {

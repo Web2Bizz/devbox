@@ -47,7 +47,79 @@ Header кита (`shape=rounded`, default `sharp`!) несёт `sm:rounded-xl` �
 `--accent: var(--brand-1)`, `--gradient-brand`, `--filter-logo-glow`,
 утилиты `.text-gradient-brand` / `.logo-glow` / `.shadow-brand-glow`.
 
-## 3. Правило радиусов
+### Оверлей / scrim
+
+| Токен             | Значение              | Роль                                              |
+| ----------------- | --------------------- | ------------------------------------------------- |
+| `--overlay-scrim` | `rgb(0 0 0 / 0.5)`    | затемнение под мобильным drawer (`.app-sidebar-overlay`) |
+
+Токен должен быть объявлен в `:root` (и `.dark`, если значение
+темо-зависимо) в `app/globals.css` и использоваться в `.app-sidebar-overlay`.
+Прямой литерал `rgb(0 0 0 / 0.5)` в селекторе — magic-color; hex/rgba
+разрешены только в блоке палитры `:root` / `.dark`.
+
+> Статус: токен зафиксирован здесь, но **кодовая правка `globals.css`
+> ещё не внесена** — `.app-sidebar-overlay` пока пишет литерал напрямую.
+
+## 3. Зарегистрированные компоненты
+
+Guard сверяет с этим списком каждое объявление компонента в UI-файлах
+frontend. Новый компонент **не считается зарегистрированным**, пока его имя
+не добавлено сюда.
+
+### 3.1 Экраны и layouts (Next App Router, `app/`)
+
+- `RootLayout`
+- `RootPage`
+- `RootError`
+- `RootLoading`
+- `AuthGroupLayout`
+- `LoginPage`
+- `LoginForm`
+- `RegisterForm`
+- `DashboardGroupLayout`
+- `DashboardHeader`
+- `DashboardShell`
+- `ChatSegmentLayout`
+- `ChatRedirectPage`
+- `OrganizationsPage`
+- `OrganizationDetailPage`
+- `AcceptInvitePage`
+- `AcceptInviteInner`
+- `ProfilePage`
+- `ProjectsPage`
+- `ProjectDetailPage`
+- `ProjectSessionChatPage`
+- `RegistryPage`
+- `RegistriesPage`
+- `NpmPage`
+- `SecretsPage`
+- `UserDetailPage`
+- `App`
+
+### 3.2 Компоненты (`src/components/`)
+
+- `AuthHeader`
+- `ChatInput`
+- `ChatMessageRow`
+- `ChatWindow`
+- `CreateOrganizationDialog`
+- `CreateProjectDialog`
+- `RunningSessionRow`
+- `RunningSessionsTab`
+- `SessionRow`
+- `SessionsTab`
+- `ProjectCardSkeleton`
+- `ProjectDetailSkeleton`
+- `ProjectsHeaderSkeleton`
+
+### 3.3 Инфраструктура (`src/i18n`, `src/providers`)
+
+- `I18nProvider`
+- `Providers`
+- `ReactQueryDevtools`
+
+## 4. Правило радиусов
 
 **Sidebar + Content = Header.** `.app-sidebar` и `.app-content` используют
 `border-radius: var(--radius-lg)` — визуально тот же радиус, что у бара
@@ -72,13 +144,13 @@ Header. Только `var()`-ссылки; hex — только в `:root` / `.d
 `position: static; max-width: 100%; margin: 0` и `.app-header` с
 `border-radius: 0` — удалены, не возвращать).
 
-## 3.1 Запреты декора
+## 4.1 Запреты декора
 
 - **Градиенты в блоках запрещены.** `linear-gradient`/`radial-gradient`/`conic-gradient` не использовать для `background` блоков, карточек, панелей, секций. Единственное исключение — **кнопки** (`Button variant="primaryBrand"` и аналогичные бренд-кнопки) — им градиент разрешён. Текстовый градиент `.text-gradient-brand` для логотипа/вордмарка — тоже ок (это текст, не блок).
 - **Тени запрещены.** `box-shadow`/`drop-shadow`/`filter: drop-shadow` не использовать для блоков и карточек. Исключение — фокус-ринги/доступность (`:focus-visible`) и бренд-кнопки если того требует кит; декоративные `shadow-*`/`shadow-brand-glow` на блоках — нельзя.
 - **CSS-трансформации запрещены.** `transform`/`translate`/`scale`/`rotate`/`skew` и `transition: transform` не применять к блокам/карточкам для декора (hover-подъёмы, наклоны и т.п. — нельзя). Разрешены только трансформации, требуемые доступностью/китом (Radix `DropdownMenu`/`Drawer` анимации, `Sidebar` chevron — уже в `globals.css`).
 
-## 4. Структура шелла
+## 5. Структура шелла
 
 ```tsx
 <div className="app-shell-container mx-auto w-full max-w-none px-2"> // full-width, 8px по бокам
@@ -125,7 +197,7 @@ Header. Только `var()`-ссылки; hex — только в `:root` / `.d
   не трогать, открываeтся триггером из Header (`menuToggleSlot`).
 - Mobile `<768px`: одна колонка (`header / content`), aside скрыт.
 
-## 5. Бренд
+## 6. Бренд
 
 `SidebarBrand` (`src/components/layout/Sidebar.tsx`: `Image`
 `/devbox-logo.png` 36 `priority` + `.logo-glow`, `DevBox` в
@@ -158,7 +230,7 @@ Header. Только `var()`-ссылки; hex — только в `:root` / `.d
 - Mobile drawer: свой `<SidebarBrand />`-фолбэк + кнопка закрытия.
 - i18n `en`/`ru` через `useI18n`, URL плоские (кука `devbox-locale`).
 
-## 6. Плоский Content, без вложенных обводок
+## 7. Плоский Content, без вложенных обводок
 
 Внутри `.app-content` / `.page-inner` запрещены вложенные `Card`
 с `border` / `background`, отличным от `transparent` — страница
@@ -201,5 +273,14 @@ Grid/sidebar/header/drawer не трогать.
 рендерит reusable `RegistryHub` (`src/components/registry-hub.tsx`,
 `items[]: { href, title, description }`) — тот же `items[]`-шейп
 переиспользовать для storages/databases хабов. Листовые страницы
-(`/registry/docker`, `/registry/npm`) остаются плоскими (§6 без исключений:
+(`/registry/docker`, `/registry/npm`) остаются плоскими (§7 без исключений:
 h2-строки + `Separator` + `Badge`).
+
+## 8. Журнал решений
+
+| Дата       | Решение                                                                 | Контекст / источник                                                                 |
+| ---------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| 2026-10-11 | Добавлен §3 «Зарегистрированные компоненты» (45 unregistered-component закрыты): §3.1 экраны/layouts `app/`, §3.2 компоненты `src/components/`, §3.3 инфраструктура `src/i18n`/`src/providers` | Guard резолвит `DESIGN.md` per-file и сверяет каждое объявление компонента; секции §3 не было — все компоненты считались незарегистрированными |
+| 2026-10-11 | Из-за вставки реестра перенумерованы секции: правило радиусов §3 → §4 (запреты декора §3.1 → §4.1), структура шелла §4 → §5, бренд §5 → §6, плоский Content §6 → §7; внутренняя ссылка «§6 без исключений» → «§7» | Guard ожидает реестр в §3; нумерация держится сплошной без разрывов |
+| 2026-10-11 | Зафиксирован токен `--overlay-scrim: rgb(0 0 0 / 0.5)` (затемнение под мобильным drawer, `.app-sidebar-overlay`) в §2; объявление в `:root`/`globals.css` и замена литерала в коде — отдельная задача | Единственный оставшийся magic-color в `app/globals.css:355`; hex/rgba законны только внутри блока палитры `:root` / `.dark` |
+| 2026-10-11 | `I18nContext` НЕ внесён в реестр: это объект `createContext`, а не компонент; срабатывание guard на нём — известный false positive | Реестр описывает объявления компонентов; мусорные сущности в дизайн-документ не вносятся |

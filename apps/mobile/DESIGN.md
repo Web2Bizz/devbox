@@ -43,6 +43,8 @@
 | `colors.accentBorder`    | `#FFD9CC`  | бордер на светлом muted                       |
 | `colors.accentBorderDark`| `#4A2633`  | бордер на тёмном muted                        |
 | `colors.accentBannerDark`| `#1F1016`  | тёмный баннерный фон                          |
+| `colors.accentBannerBg`  | `#7A1E43`  | глубокий magenta — фон баннера revert         |
+| `colors.accentBannerText`| `#FFE4D9`  | светлый персик — текст заголовка баннера      |
 | `colors.accentChipBg`    | `#FFF0EA`  | чип, light                                     |
 | `colors.accentChipBgDark`| `#2E1A22`  | чип, dark                                      |
 
@@ -51,24 +53,38 @@
 | Токен         | Hex        |
 | ------------- | ---------- |
 | `white`       | `#ffffff`  |
+| `gray10`      | `#fafafa`  |
+| `gray25`      | `#f8f8f8`  |
 | `gray50`      | `#f5f5f5`  |
 | `gray100`     | `#e5e5e5`  |
+| `gray150`     | `#f0f0f0`  |
 | `gray200`     | `#cccccc`  |
+| `gray225`     | `#dddddd`  |
 | `gray300`     | `#999999`  |
 | `gray400`     | `#888888`  |
+| `gray450`     | `#aaaaaa`  |
 | `gray500`     | `#666666`  |
 | `gray600`     | `#444444`  |
 | `gray700`     | `#2a2a2a`  |
+| `gray750`     | `#3a3a3a`  |
 | `gray800`     | `#1a1a1a`  |
+| `gray850`     | `#151515`  |
 | `gray900`     | `#0a0a0a`  |
 | `black`       | `#000000`  |
 
 Семантические алиасы: `backgroundLight` = `#ffffff`, `backgroundDark` =
-`#0a0a0a`, `surfaceLight` = `#f5f5f5`, `surfaceDark` = `#1a1a1a`,
-`surfaceDark2` = `#2a2a2a`, `borderLight` = `#e5e5e5`, `borderDark` =
-`#1a1a1a`, `textPrimaryLight` = `#0a0a0a`, `textPrimaryDark` = `#ffffff`,
-`textSecondaryLight` = `#666666`, `textSecondaryDark` = `#888888`,
+`#0a0a0a`, `surfaceLight` = `#f5f5f5`, `surfaceLight2` = `#f8f8f8`,
+`surfaceLight3` = `#f0f0f0`, `surfaceLight4` = `#fafafa`,
+`surfaceDark` = `#1a1a1a`, `surfaceDark2` = `#2a2a2a`,
+`surfaceDark4` = `#151515`, `borderLight` = `#e5e5e5`,
+`borderLight2` = `#dddddd`, `borderDark` = `#1a1a1a`,
+`borderDark2` = `#3a3a3a`, `textPrimaryLight` = `#0a0a0a`,
+`textPrimaryDark` = `#ffffff`, `textSecondaryLight` = `#666666`,
+`textSecondaryDark` = `#888888`, `textSecondaryAltDark` = `#aaaaaa`,
 `textTertiaryLight` = `#999999`, `textTertiaryDark` = `#666666`.
+
+Плоские алиасы баннера: `accentBannerBg` = `#7A1E43`,
+`accentBannerText` = `#FFE4D9`.
 
 ### 2.3 Семантика (`colors.semantic.*`)
 
@@ -80,6 +96,24 @@
 | `errorStrong`        | `#dc2626`  | ошибка, текст                       |
 | `warning`            | `#f59e0b`  | предупреждение                      |
 | `info`               | `#FF5E62`  | информация (= акцент светлый)       |
+
+#### Ролевые токены (`colors.roles.*`)
+
+Именованы по роли, а не по ступени серой шкалы. Значения — те же hex, что
+раньше были инлайном в коде.
+
+| Токен                     | Hex        | Роль                                          |
+| ------------------------- | ---------- | --------------------------------------------- |
+| `colors.textPlaceholder`  | `#bbbbbb`  | плейсхолдер/приглушённый текст (dark)          |
+| `colors.textDisabled`     | `#555555`  | неактивный текст, disabled-пункты              |
+| `colors.textMutedDark`    | `#a0a0a0`  | приглушённый вторичный текст на error-экранах |
+| `colors.textCodeDark`     | `#cdd3da`  | текст кода в тёмной теме                       |
+| `colors.switchTrackOff`   | `#767577`  | track выключенного RN `Switch` (одинаков в обеих темах) |
+| `colors.warningSoftText`  | `#d4a574`  | янтарный «мягкий» текст предупреждения        |
+| `colors.blockquoteBorderLight` | `#d1d5db` | бордер blockquote — светлая тема           |
+| `colors.blockquoteBorderDark`  | `#4a4a5a` | бордер blockquote — тёмная тема            |
+| `colors.codeHeaderBgLight`     | `#e8e8e8` | фон шапки блока кода (light)              |
+| `colors.surfaceDeep`           | `#111111` | самая глубокая подложка в тёмной теме    |
 
 ### 2.4 Рампы состояний (легализованы здесь, токенов в `theme.ts` ещё нет)
 
@@ -365,41 +399,38 @@ const text = isDark ? theme.dark.text : theme.light.text
 
 ### 6.4 Известный долг (легализованные токены)
 
-Часть hex из §2.4–§2.5 (`#dcfce7`, `#052e16`, `#3a1a1a`, `rgba(0,0,0,0.5)`
+Часть hex из §2.4 (`#dcfce7`, `#052e16`, `#3a1a1a`, `rgba(0,0,0,0.5)`
 и т.д.) и часть радиусов (§5) **не имеют токена в `theme.ts`** — они
 записаны здесь только чтобы зафиксировать фактическое состояние кода и не
 блокировать guard. План: вынести в `theme.ts` рампами `success*` / `error*` /
 `warning*` / `overlay*` и токеном `radius`, затем удалить эту подсекцию из
 DESIGN.md. Новые значения из этого долга не добавлять.
 
-### 6.5 Открытые magic-color (намеренно НЕ легализованы)
+### 6.5 Закрытый долг (magic-color, 2026-10-11)
 
-Ниже — литералы, которые guard всё ещё ловит и которые **нельзя легализовать
-просто строкой в этом файле**: это реальный долг, требующий правки кода на
-токены. Hex здесь намеренно не приводятся — иначе guard перестанет их
-видеть и долг станет невидимым.
+Долг по открытым magic-color **закрыт**: все 42 хардкода заменены на токены
+в UI-коде mobile.
 
-| Файл                                                       | Строки        | Что это                          | Решение                                                          |
-| ---------------------------------------------------------- | ------------- | -------------------------------- | ---------------------------------------------------------------- |
-| `app/session/[id].tsx`                                      | 1066, 1170, 1199, 1431, 1466, 1487, 1488 | серый-плейсхолдер текста | заменить на `colors.textTertiaryLight` / `…Dark`                  |
-| `app/session/[id].tsx`                                      | 1624          | одноразовый бордер модалки       | вынести как токен акцент-бордер или взять `accentBorder`          |
-| `app/(tabs)/index.tsx`                                      | 1093          | серый чуть темнее `gray900`      | заменить на `colors.surfaceDark2`                                 |
-| `app/(tabs)/settings.tsx`                                   | 233, 248, 282, 353 | `trackColor` выключенных `Switch` | токен `switchTrackOff` в `theme.ts`                        |
-| `packages/uikit/.../DirectoryBrowserSheet.tsx`              | 296, 415, 420 | серые границы/подложки           | `colors.border*` / `colors.surface*`                              |
-| `packages/uikit/.../AiSettingsModal.tsx`, `MessageQueueSheet.tsx` (221, 238), `QuestionPrompt.tsx` (193, 213), `Select.tsx` (156) | — | серый-подложка строки/секции | `colors.surfaceDark2` / `colors.borderDark`                        |
-| `packages/uikit/.../PermissionPrompt.tsx` (51), `ReasoningBlock.tsx` (49) | — | янтарный текст «мягкого» тона | токен `warningSoftText` или `colors.accentPale`                    |
-| `packages/uikit/.../SessionInfo.tsx`                        | 146           | розовый акцент не из палитры     | перевести на `colors.accent*`                                     |
-| `packages/uikit/.../SessionInfo.tsx`                        | 208, 231, 236, 329 | серые вне шкалы            | `colors.neutral.*`                                                |
-| `packages/uikit/.../CodeBlock.tsx` (56), `DiffView.tsx` (57), `ImageAttachments.tsx` (58) | — | серые подложки кода/превью | `colors.surfaceLight` / `surfaceDark`                              |
-| `packages/uikit/.../Markdown.tsx`                           | 82, 123       | бордер blockquote по темам      | токен `blockquoteBorderLight` / `…Dark` в `theme.ts`             |
-| `src/components/ErrorBoundary.tsx`                          | 109, 113      | серые в error-экране            | `colors.textTertiary*`; в коде уже есть комментарий-NOTE про это |
-| `src/components/RepoLinkRow.tsx`                            | 32            | серый-плейсхолдер               | `colors.textTertiary*`                                            |
-| `src/components/UpdateBanner.tsx`                           | 93            | тёплый баннерный фон            | `accentBannerDark` / токен баннера                                |
-| `src/components/chat/CloneRepoSheet.tsx`                    | 115           | фиолетовый акцент иконки        | `colors.accent*`                                                  |
+Что сделано:
 
-Общий принцип разбора: сначала — «есть ли уже токен с этой ролью» (тогда
-замена 1:1), и только если роли нет — новый токен в `theme.ts` с последующей
-строкой в §2 этого файла.
+1. **22 hex вынесены в `packages/uikit/src/theme.ts`** (группы `neutral.*`
+   и `roles.*`) и заменены в коде на `colors.*`:
+   нейтрали `gray10` / `gray25` / `gray150` / `gray225` / `gray450` /
+   `gray750` (+ `gray850` как `surfaceDark4`), ролевые `textPlaceholder` /
+   `textDisabled` / `textMutedDark` / `textCodeDark` / `switchTrackOff` /
+   `warningSoftText` / `blockquoteBorderLight` / `blockquoteBorderDark` /
+   `codeHeaderBgLight` / `surfaceDeep`. Значения не изменились — переименованы
+   по роли. Полный список — §2.2 и §2.3.
+2. **Акцент-баннер**: `bannerBg` `#7A1E43` и `bannerText` `#FFE4D9` добавлены
+   в группу `accent` (`accent.bannerBg` / `accent.bannerText`), плоские
+   экспорты — `colors.accentBannerBg` / `colors.accentBannerText`.
+3. **Три внепалитровых цвета** (`violet-500`, `violet-700`, `pink-500` в
+   `src/components/chat/CloneRepoSheet.tsx`) заменены на бренд-акценты
+   `colors.accent` / `colors.accentStrong` / `colors.accentPale`.
+
+Оставшийся долг — §2.4 (легализованные, но ещё не вынесенные в `theme.ts`
+рампы состояний/оверлеи) и §5 (радиусы-токены). Он отдельный и этим
+проходом не трогался: решение владельца — «сначала 22, остальное потом».
 
 ## 7. Владение
 
@@ -415,4 +446,5 @@ DESIGN.md. Новые значения из этого долга не доба�
 
 | Дата       | Решение                                                                 | Контекст / источник                                                                 |
 | ---------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| 2026-10-11 | Magic-color долг закрыт: 22 hex вынесены в `packages/uikit/src/theme.ts` (нейтрали `gray10/25/150/225/450/750/850` + ролевые токены `textPlaceholder`, `textDisabled`, `textMutedDark`, `textCodeDark`, `switchTrackOff`, `warningSoftText`, `blockquoteBorderLight/Dark`, `codeHeaderBgLight`, `surfaceDeep`) и все 42 хардкода заменены в коде; §6.5 переписан из «Открытые magic-color» в «Закрытый долг» | Решение владельца «сначала 22, остальное потом»: §2.4 (легализованные, но не вынесенные в `theme.ts` рампы/оверлеи) и §5 (радиусы-токены) остаются отдельным долгом; три внепалитровых (`violet-500/700`, `pink-500`) переведены на `colors.accent` / `accentStrong` / `accentPale` |
 | 2026-10-11 | Создан `apps/mobile/DESIGN.md` при переезде приложения в монорепо `apps/mobile`: палитра §2 скопирована из `packages/uikit/src/theme.ts`, §3 — реестр компонентов из `guard.sh --staged --json`, §2.4 зафиксировал легализованные, но ещё не вынесенные в `theme.ts` hex | До файла mobile валидировался против корневого web-`DESIGN.md` и давал 1025 нарушений (957 magic-color, 67 unregistered-component); source of truth — `theme.ts` + реальные литералы UI-кода |

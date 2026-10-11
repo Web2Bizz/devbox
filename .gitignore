@@ -64,6 +64,9 @@ workspace/**
 
 apps/backend/repos/**
 
+# Nx daemon state (local only, cache defaults to node_modules/.cache — already ignored)
+.nx/
+
 # Agent telemetry (internal tooling state, not repo content)
 apps/mobile/.supervisor/
 apps/mobile/.autopilot/

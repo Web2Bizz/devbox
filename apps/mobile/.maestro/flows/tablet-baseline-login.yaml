@@ -1,0 +1,33 @@
+appId: cc.agentlabs.opencode
+name: Tablet baseline - login form centered (maxWidth 500)
+---
+# Tablet baseline for the login screen: the form must be wrapped in a
+# centered container (formWrap: width 100% + maxWidth layout.formMaxWidth =
+# 500, alignSelf center — app/login.tsx) so it doesn't stretch full-width on
+# a 768pt+ tablet. Runs on a phone emulator too (assertions are
+# layout-agnostic); the actual baseline PNG is captured on a tablet AVD into
+# docs/qa/baselines/ (see the takeScreenshot step below).
+#
+# Needs no mock server — stops before any network call.
+
+- launchApp:
+    clearState: true
+- assertVisible:
+    id: "telemetry-consent-card"
+- tapOn:
+    id: "telemetry-decline-button"
+
+# Fresh install has no connection: index renders the "login required" empty
+# state with go-login-button (app/(tabs)/index.tsx).
+- assertVisible:
+    id: "go-login-button"
+- tapOn:
+    id: "go-login-button"
+
+- assertVisible:
+    id: "login-username-input"
+- assertVisible:
+    id: "login-password-input"
+- assertVisible:
+    id: "login-button"
+- takeScreenshot: tablet-login-S1_form_centered

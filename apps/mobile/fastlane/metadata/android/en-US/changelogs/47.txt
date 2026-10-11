@@ -1,0 +1,2 @@
+v0.5.4
+(Changelog pending — fill in before release.)

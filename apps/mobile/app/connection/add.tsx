@@ -1,0 +1,893 @@
+import { useEffect, useState } from "react"
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  ScrollView,
+  StyleSheet,
+  useColorScheme,
+  ActivityIndicator,
+  Alert,
+  Linking,
+} from "react-native"
+import { router } from "expo-router"
+import { Ionicons } from "@expo/vector-icons"
+import { useTranslation } from "react-i18next"
+import { useConnections } from "../../src/stores/connections"
+import type { ConnectionType } from "../../src/lib/types"
+import { probeConnection, shareReport } from "../../src/lib/diagnostics"
+import { parseUrl } from "../../src/lib/diagnostics-classify"
+import { buildAuth } from "../../src/lib/auth"
+import { submitWaitlistSignup, buildWaitlistMailtoUrl, needsManualEscapeHatch, type QueuedSignup } from "../../src/lib/waitlist"
+import { flushPendingSignups, queuePendingSignup, readPendingSignups, dropPendingSignup } from "../../src/lib/waitlist-queue-storage"
+import { HARDCODED_SERVER_URL } from "../../src/lib/server-config"
+import { buildManualLanUrl } from "../../src/lib/lan-manual"
+import { colors } from "@web2bizz/ui-native"
+import { APP_VERSION } from "../../src/lib/app-version"
+
+export default function AddConnectionScreen() {
+  const colorScheme = useColorScheme()
+  const isDark = colorScheme === "dark"
+  const { t } = useTranslation()
+
+  const { addConnection, testConnection } = useConnections()
+
+  const [mode, setMode] = useState<"quick" | "advanced">("quick")
+  const [type, setType] = useState<ConnectionType>("local")
+  const [name, setName] = useState("")
+  const [ip, setIp] = useState("")
+  const [port, setPort] = useState("4096")
+  const [url, setUrl] = useState("")
+  const [directory, setDirectory] = useState("")
+  const [username, setUsername] = useState("")
+  const [password, setPassword] = useState("")
+  const [isConnecting, setIsConnecting] = useState(false)
+  const [waitlistEmail, setWaitlistEmail] = useState("")
+  // "queued" = the POST failed but the signup is persisted on-device and will
+  // be retried on the next foreground/connectivity (AGE-87). It is NOT "sent".
+  const [waitlistState, setWaitlistState] = useState<"idle" | "submitting" | "joined" | "queued">("idle")
+  const [pendingSignup, setPendingSignup] = useState<QueuedSignup | null>(null)
+
+  // Retry anything left over from a previous session as soon as this screen
+  // opens (the root layout also flushes on every foreground), then reflect the
+  // real state back to the user instead of pretending nothing is pending.
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const outcome = await flushPendingSignups().catch(() => null)
+      if (cancelled) return
+      const pending = outcome ? outcome.pending : await readPendingSignups().catch(() => [])
+      if (cancelled) return
+      if (outcome && outcome.synced.length > 0 && pending.length === 0) {
+        setWaitlistState("joined")
+        return
+      }
+      if (pending.length > 0) {
+        setPendingSignup(pending[pending.length - 1])
+        setWaitlistState((current) => (current === "idle" ? "queued" : current))
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const buildUrl = () => {
+    return HARDCODED_SERVER_URL
+  }
+
+  // Manual LAN entry (Advanced → Local): raw ip:port typed by the user into
+  // a full URL — single implementation lives in src/lib/lan-manual (tested).
+  // Null = invalid port (caller shows invalidUrl) or empty host (caller
+  // falls back to the hardcoded server).
+  const buildLanUrl = () => buildManualLanUrl(ip, port)
+
+  const handleQuickConnect = async () => {
+    const serverUrl = buildUrl()
+    if (!serverUrl) {
+      Alert.alert(t("common.error"), t("connection.add.alerts.enterIp"))
+      return
+    }
+
+    setIsConnecting(true)
+
+    // Test connection first. Quick Connect has no username field, so the
+    // connection is intentionally saved without one — buildAuth() defaults
+    // it to "opencode" wherever auth is built. Sending the `username` state
+    // here would leak a value typed earlier in Advanced mode (issue: Back to
+    // Quick silently overriding the default).
+    const result = await testConnection(
+      {
+        id: "",
+        name: name || t("connection.shared.namePlaceholder"),
+        type: "local",
+        url: serverUrl,
+      },
+      password || undefined,
+    )
+
+    if (result.ok) {
+      // Save and go back
+      try {
+        await addConnection(
+          {
+            name: name.trim() || t("connection.shared.namePlaceholder"),
+            type: "local",
+            url: serverUrl,
+          },
+          password || undefined,
+        )
+        setIsConnecting(false)
+        router.back()
+      } catch {
+        setIsConnecting(false)
+        Alert.alert(
+          t("connection.shared.alerts.saveFailedTitle"),
+          t("connection.shared.alerts.saveFailedMessage"),
+        )
+      }
+    } else {
+      // Failed: run active diagnostics and offer a shareable report.
+      const report = await probeConnection(serverUrl, buildAuth(undefined, password))
+      setIsConnecting(false)
+      Alert.alert(
+        t("connection.shared.alerts.connectionFailedTitle"),
+        t("connection.add.alerts.connectionFailedMessage", {
+          summary: report.summary,
+          target: serverUrl,
+          error: result.error || t("connection.shared.alerts.unknownError"),
+        }),
+        [
+          { text: t("common.ok"), style: "cancel" },
+          { text: t("common.shareReport"), onPress: () => shareReport(report) },
+        ],
+      )
+    }
+  }
+
+  const handleAdvancedSave = async () => {
+    if (!name.trim()) {
+      Alert.alert(t("common.error"), t("connection.shared.alerts.enterName"))
+      return
+    }
+
+    // Manual LAN: a typed ip:port becomes a LAN-marked entry (custom URL is
+    // preserved by the store — hardcode enforcement skips discoveredOnLan).
+    // Empty host = the hardcoded main server (legacy behavior).
+    const manualLanUrl = type === "local" ? buildLanUrl() : null
+    if (type === "local" && ip.trim() && !manualLanUrl) {
+      Alert.alert(
+        t("connection.shared.alerts.invalidUrlTitle"),
+        t("connection.shared.alerts.invalidUrlMessage"),
+      )
+      return
+    }
+    const targetUrl = manualLanUrl ?? HARDCODED_SERVER_URL
+    const isManualLan = manualLanUrl != null
+
+    setIsConnecting(true)
+
+    // Pre-flight, mirroring Quick Connect: previously Advanced mode saved
+    // directly with no health check, so bad credentials (401/403) or an
+    // unreachable server silently became the active connection with zero
+    // feedback (issue #76).
+    const result = await testConnection(
+      {
+        id: "",
+        name: name.trim(),
+        type,
+        url: targetUrl,
+        directory: directory.trim() || undefined,
+        username: username.trim() || undefined,
+      },
+      password || undefined,
+    )
+
+    if (result.ok) {
+      try {
+        await addConnection(
+          {
+            name: name.trim(),
+            type,
+            url: targetUrl,
+            directory: directory.trim() || undefined,
+            username: username.trim() || undefined,
+            ...(isManualLan ? { discoveredOnLan: true as const } : {}),
+          },
+          password || undefined,
+        )
+        setIsConnecting(false)
+        router.back()
+      } catch {
+        setIsConnecting(false)
+        Alert.alert(
+          t("connection.shared.alerts.saveFailedTitle"),
+          t("connection.shared.alerts.saveFailedMessage"),
+        )
+      }
+      return
+    }
+
+    // Failed: same "Connection Failed" alert as Quick Connect — run active
+    // diagnostics and offer a shareable report instead of
+    // silently persisting an unreachable/unauthorized connection.
+    const report = await probeConnection(targetUrl, buildAuth(username, password))
+    setIsConnecting(false)
+    Alert.alert(
+      t("connection.shared.alerts.connectionFailedTitle"),
+      t("connection.add.alerts.connectionFailedMessage", {
+        summary: report.summary,
+        target: targetUrl,
+        error: result.error || t("connection.shared.alerts.unknownError"),
+      }),
+      [
+        { text: t("common.ok"), style: "cancel" },
+        { text: t("common.shareReport"), onPress: () => shareReport(report) },
+      ],
+    )
+  }
+
+  const handleJoinWaitlist = async () => {
+    if (waitlistState === "submitting") return
+    const attemptedEmail = waitlistEmail
+    setWaitlistState("submitting")
+    const result = await submitWaitlistSignup(attemptedEmail)
+    if (result.ok) {
+      // Clear any earlier queued attempt for the same address so the flush
+      // doesn't re-post it.
+      void dropPendingSignup(result.email)
+      setPendingSignup(null)
+      setWaitlistState("joined")
+      return
+    }
+
+    if (!result.retryable) {
+      // The server rejected this address; queueing it would retry forever.
+      setWaitlistState(pendingSignup ? "queued" : "idle")
+      Alert.alert(t("connection.add.waitlist.alertTitle"), result.error)
+      return
+    }
+
+    // Offline / timeout / 5xx: persist and retry later instead of dumping the
+    // user into a mail composer they may never send (AGE-87).
+    const entry = await queuePendingSignup(result.email, result.error)
+    if (entry) {
+      setPendingSignup(entry)
+      setWaitlistState("queued")
+      return
+    }
+
+    // Storage refused the write — we cannot promise to finish this later, so
+    // offer the manual email path explicitly rather than claiming success.
+    setWaitlistState("idle")
+    Alert.alert(t("connection.add.waitlist.alertTitle"), t("connection.add.waitlist.queueFailedMessage"), [
+      { text: t("common.cancel"), style: "cancel" },
+      { text: t("connection.add.waitlist.emailUsButton"), onPress: () => void openWaitlistMailto(result.email) },
+    ])
+  }
+
+  // Last-resort, user-initiated only. Never opened automatically.
+  const openWaitlistMailto = async (email: string) => {
+    try {
+      await Linking.openURL(buildWaitlistMailtoUrl(email, APP_VERSION))
+    } catch {
+      Alert.alert(t("connection.add.waitlist.alertTitle"), t("connection.add.waitlist.noMailAppMessage"))
+    }
+  }
+
+  // Explicit "Retry" from the queued state — same code path the foreground
+  // flush uses, so there is only one retry implementation.
+  const handleRetryQueued = async () => {
+    setWaitlistState("submitting")
+    const outcome = await flushPendingSignups().catch(() => null)
+    if (outcome && outcome.pending.length === 0 && outcome.synced.length > 0) {
+      setPendingSignup(null)
+      setWaitlistState("joined")
+      return
+    }
+    if (outcome && outcome.pending.length === 0) {
+      // Nothing left pending and nothing synced: the address was rejected.
+      setPendingSignup(null)
+      setWaitlistState("idle")
+      return
+    }
+    if (outcome) setPendingSignup(outcome.pending[outcome.pending.length - 1])
+    setWaitlistState("queued")
+  }
+
+  // Quick connect mode - simplified
+  if (mode === "quick") {
+    return (
+      <ScrollView
+        style={[styles.container, isDark && styles.containerDark]}
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.quickHeader}>
+          <Ionicons name="wifi" size={48} color={isDark ? "#ffffff" : "#0a0a0a"} />
+          <Text style={[styles.quickTitle, isDark && styles.textDark]}>{t("connection.add.quick.title")}</Text>
+          <Text style={[styles.quickSubtitle, isDark && styles.hintDark]}>{t("connection.add.quick.subtitle")}</Text>
+        </View>
+
+        {/* Server — hardcoded, no domain shown */}
+
+        {/* Optional name */}
+        <Text style={[styles.label, isDark && styles.labelDark]}>{t("connection.add.quick.nameOptionalLabel")}</Text>
+        <TextInput
+          style={[styles.input, isDark && styles.inputDark]}
+          placeholder={t("connection.add.quick.namePlaceholder")}
+          placeholderTextColor={isDark ? "#666666" : "#999999"}
+          value={name}
+          onChangeText={setName}
+        />
+
+        {/* Password if needed */}
+        <Text style={[styles.label, isDark && styles.labelDark]}>{t("connection.add.quick.passwordIfSetLabel")}</Text>
+        <TextInput
+          style={[styles.input, isDark && styles.inputDark]}
+          placeholder={t("connection.add.quick.passwordPlaceholder")}
+          placeholderTextColor={isDark ? "#666666" : "#999999"}
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+          testID="connect-password-input"
+        />
+        <Text style={[styles.usernameHint, isDark && styles.hintDark]}>
+          {t("connection.add.quick.usernameHintPrefix")}
+          <Text style={styles.code}>opencode</Text>
+          {t("connection.add.quick.usernameHintMiddle")}
+          <Text style={styles.usernameHintLink} onPress={() => setMode("advanced")}>
+            {t("connection.add.quick.advancedOptionsLink")}
+          </Text>
+          {t("connection.add.quick.usernameHintSuffix")}
+        </Text>
+
+        {/* Connect button */}
+        <TouchableOpacity
+          style={[styles.connectButton, isDark && styles.connectButtonDark]}
+          onPress={handleQuickConnect}
+          disabled={isConnecting}
+          testID="connect-submit-button"
+        >
+          {isConnecting ? (
+            <ActivityIndicator size="small" color={isDark ? "#0a0a0a" : "#ffffff"} />
+          ) : (
+            <>
+              <Ionicons name="flash" size={20} color={isDark ? "#0a0a0a" : "#ffffff"} />
+              <Text style={[styles.connectButtonText, isDark && styles.connectButtonTextDark]}>
+                {t("connection.add.quick.connectButton")}
+              </Text>
+            </>
+          )}
+        </TouchableOpacity>
+
+        {/* Info about server */}
+        <View style={[styles.helpBox, isDark && styles.helpBoxDark]}>
+          <Text style={[styles.helpTitle, isDark && styles.textDark]}>Подключение к серверу</Text>
+          <Text style={[styles.helpText, isDark && styles.hintDark]}>
+            Введите логин и пароль для подключения.
+          </Text>
+        </View>
+
+        {/* DevBox Connect — Coming Soon */}
+        <View style={[styles.connectCard, isDark && styles.connectCardDark]}>
+          <View style={styles.connectCardHeader}>
+            <Ionicons name="cloud-done-outline" size={28} color={colors.accent} />
+            <View style={styles.connectCardTitles}>
+              <Text style={[styles.connectCardTitle, isDark && styles.textDark]}>
+                {t("connection.add.quick.connectCardTitle")}
+              </Text>
+              <View style={styles.connectCardBadge}>
+                <Text style={styles.connectCardBadgeText}>{t("connection.add.quick.connectCardBadge")}</Text>
+              </View>
+            </View>
+          </View>
+          <Text style={[styles.connectCardDesc, isDark && styles.hintDark]}>
+            {t("connection.add.quick.connectCardDesc")}
+          </Text>
+          {waitlistState === "joined" ? (
+            <View style={styles.waitlistSuccess} testID="waitlist-success">
+              <Ionicons name="checkmark-circle" size={20} color="#22c55e" />
+              <Text style={[styles.waitlistSuccessText, isDark && styles.textDark]}>
+                {t("connection.add.waitlist.successText")}
+              </Text>
+            </View>
+          ) : waitlistState === "queued" ? (
+            <View testID="waitlist-queued">
+              <View style={styles.waitlistSuccess}>
+                <Ionicons name="time-outline" size={20} color="#f59e0b" />
+                <Text style={[styles.waitlistSuccessText, isDark && styles.textDark]}>
+                  {t("connection.add.waitlist.queuedText")}
+                </Text>
+              </View>
+              {needsManualEscapeHatch(pendingSignup) && (
+                <TouchableOpacity
+                  style={styles.waitlistEscapeHatch}
+                  onPress={() => void openWaitlistMailto(pendingSignup?.email ?? waitlistEmail)}
+                  testID="waitlist-email-us"
+                >
+                  <Text style={styles.waitlistEscapeHatchText}>{t("connection.add.waitlist.emailUsLink")}</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity style={styles.waitlistEscapeHatch} onPress={() => void handleRetryQueued()} testID="waitlist-retry">
+                <Text style={styles.waitlistEscapeHatchText}>{t("common.retry")}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              <TextInput
+                style={[styles.input, isDark && styles.inputDark, { marginTop: 12 }]}
+                placeholder="your@email.com"
+                placeholderTextColor={isDark ? "#666666" : "#999999"}
+                value={waitlistEmail}
+                onChangeText={setWaitlistEmail}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+                editable={waitlistState !== "submitting"}
+                testID="waitlist-email-input"
+              />
+              <TouchableOpacity
+                style={styles.waitlistButton}
+                onPress={handleJoinWaitlist}
+                disabled={waitlistState === "submitting"}
+                testID="waitlist-submit-button"
+              >
+                {waitlistState === "submitting" ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <>
+                    <Ionicons name="mail-outline" size={16} color="#ffffff" />
+                    <Text style={styles.waitlistButtonText}>{t("connection.add.waitlist.joinButton")}</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+
+        {/* Advanced mode link */}
+        <TouchableOpacity style={styles.advancedLink} onPress={() => setMode("advanced")}>
+          <Text style={[styles.advancedLinkText, isDark && styles.hintDark]}>
+            {t("connection.add.quick.advancedLink")}
+          </Text>
+          <Ionicons name="chevron-forward" size={16} color={isDark ? "#888888" : "#666666"} />
+        </TouchableOpacity>
+      </ScrollView>
+    )
+  }
+
+  // Advanced mode - full options
+  return (
+    <ScrollView
+      style={[styles.container, isDark && styles.containerDark]}
+      contentContainerStyle={styles.content}
+      keyboardShouldPersistTaps="handled"
+    >
+      <TouchableOpacity style={styles.backToQuick} onPress={() => setMode("quick")}>
+        <Ionicons name="chevron-back" size={16} color={isDark ? "#888888" : "#666666"} />
+        <Text style={[styles.backToQuickText, isDark && styles.hintDark]}>{t("connection.add.advanced.backToQuick")}</Text>
+      </TouchableOpacity>
+
+      {/* Connection Type */}
+      <Text style={[styles.label, isDark && styles.labelDark]}>{t("connection.shared.connectionType")}</Text>
+      <View style={styles.typeContainer}>
+        {[
+          { type: "local" as const, label: t("connection.shared.types.local"), icon: "wifi" as const },
+          { type: "tunnel" as const, label: t("connection.shared.types.tunnel"), icon: "globe" as const },
+          { type: "cloud" as const, label: t("connection.shared.types.cloud"), icon: "cloud" as const },
+        ].map((opt) => (
+          <TouchableOpacity
+            key={opt.type}
+            style={[
+              styles.typeOption,
+              isDark && styles.typeOptionDark,
+              type === opt.type && styles.typeOptionSelected,
+              type === opt.type && isDark && styles.typeOptionSelectedDark,
+            ]}
+            onPress={() => setType(opt.type)}
+          >
+            <Ionicons
+              name={opt.icon}
+              size={20}
+              color={type === opt.type ? (isDark ? "#0a0a0a" : "#ffffff") : isDark ? "#888888" : "#666666"}
+            />
+            <Text
+              style={[
+                styles.typeLabel,
+                isDark && styles.textDark,
+                type === opt.type && styles.typeLabelSelected,
+                type === opt.type && isDark && styles.typeLabelSelectedDark,
+              ]}
+            >
+              {opt.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* Name */}
+      <Text style={[styles.label, isDark && styles.labelDark]}>{t("connection.shared.name")}</Text>
+      <TextInput
+        style={[styles.input, isDark && styles.inputDark]}
+        placeholder={t("connection.shared.namePlaceholder")}
+        placeholderTextColor={isDark ? "#666666" : "#999999"}
+        value={name}
+        onChangeText={setName}
+      />
+
+      {/* URL is hardcoded — not shown to user */}
+
+      {/* Manual LAN server (Local only): typed ip:port is saved as a
+          LAN-marked entry and survives the hardcode migration. Empty = the
+          main server. */}
+      {type === "local" && (
+        <>
+          <Text style={[styles.label, isDark && styles.labelDark]}>{t("connection.add.quick.ipAddressLabel")}</Text>
+          <View style={styles.ipRow}>
+            <TextInput
+              style={[styles.input, styles.ipInput, isDark && styles.inputDark]}
+              placeholder="192.168.1.100"
+              placeholderTextColor={isDark ? "#666666" : "#999999"}
+              value={ip}
+              onChangeText={setIp}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="decimal-pad"
+              testID="lan-ip-input"
+            />
+            <Text style={[styles.ipColon, isDark && styles.labelDark]}>:</Text>
+            <TextInput
+              style={[styles.input, styles.portInput, isDark && styles.inputDark]}
+              placeholder="4096"
+              placeholderTextColor={isDark ? "#666666" : "#999999"}
+              value={port}
+              onChangeText={setPort}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="number-pad"
+              testID="lan-port-input"
+            />
+          </View>
+          <Text style={[styles.hint, isDark && styles.hintDark]}>{t("connection.add.advanced.urlHintPrefix")}http://192.168.1.100:4096</Text>
+        </>
+      )}
+
+      {/* Directory */}
+      <Text style={[styles.label, isDark && styles.labelDark]}>{t("connection.shared.directoryOptional")}</Text>
+      <TextInput
+        style={[styles.input, isDark && styles.inputDark]}
+        placeholder="/path/to/project"
+        placeholderTextColor={isDark ? "#666666" : "#999999"}
+        value={directory}
+        onChangeText={setDirectory}
+        autoCapitalize="none"
+        autoCorrect={false}
+      />
+      <Text style={[styles.hint, isDark && styles.hintDark]}>{t("connection.add.advanced.directoryHint")}</Text>
+
+      {/* Auth */}
+      <Text style={[styles.sectionTitle, isDark && styles.textDark]}>{t("connection.shared.authentication")}</Text>
+
+      <Text style={[styles.label, isDark && styles.labelDark]}>{t("connection.shared.username")}</Text>
+      <TextInput
+        style={[styles.input, isDark && styles.inputDark]}
+        placeholder="admin"
+        placeholderTextColor={isDark ? "#666666" : "#999999"}
+        value={username}
+        onChangeText={setUsername}
+        autoCapitalize="none"
+        autoCorrect={false}
+      />
+
+      <Text style={[styles.label, isDark && styles.labelDark]}>{t("connection.shared.password")}</Text>
+      <TextInput
+        style={[styles.input, isDark && styles.inputDark]}
+        placeholder="password"
+        placeholderTextColor={isDark ? "#666666" : "#999999"}
+        value={password}
+        onChangeText={setPassword}
+        secureTextEntry
+      />
+
+      {/* Save */}
+      <TouchableOpacity
+        style={[styles.connectButton, isDark && styles.connectButtonDark, { marginTop: 32 }]}
+        onPress={handleAdvancedSave}
+        disabled={isConnecting}
+      >
+        {isConnecting ? (
+          <ActivityIndicator size="small" color={isDark ? "#0a0a0a" : "#ffffff"} />
+        ) : (
+          <Text style={[styles.connectButtonText, isDark && styles.connectButtonTextDark]}>
+            {t("connection.add.advanced.saveButton")}
+          </Text>
+        )}
+      </TouchableOpacity>
+    </ScrollView>
+  )
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#ffffff",
+  },
+  containerDark: {
+    backgroundColor: "#0a0a0a",
+  },
+  content: {
+    padding: 16,
+    paddingBottom: 32,
+  },
+  // Quick connect styles
+  quickHeader: {
+    alignItems: "center",
+    paddingVertical: 24,
+  },
+  quickTitle: {
+    fontSize: 24,
+    fontWeight: "700",
+    color: "#0a0a0a",
+    marginTop: 16,
+  },
+  quickSubtitle: {
+    fontSize: 15,
+    color: "#666666",
+    marginTop: 8,
+    textAlign: "center",
+  },
+  ipRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  ipInput: {
+    flex: 1,
+  },
+  ipColon: {
+    fontSize: 20,
+    fontWeight: "600",
+    color: "#0a0a0a",
+  },
+  portInput: {
+    width: 80,
+  },
+  connectButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    padding: 16,
+    borderRadius: 12,
+    backgroundColor: "#0a0a0a",
+    marginTop: 24,
+  },
+  connectButtonDark: {
+    backgroundColor: "#ffffff",
+  },
+  connectButtonText: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#ffffff",
+  },
+  connectButtonTextDark: {
+    color: "#0a0a0a",
+  },
+  helpBox: {
+    backgroundColor: "#f5f5f5",
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 24,
+  },
+  helpBoxDark: {
+    backgroundColor: "#1a1a1a",
+  },
+  helpTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#0a0a0a",
+    marginBottom: 8,
+  },
+  helpText: {
+    fontSize: 13,
+    color: "#666666",
+    lineHeight: 20,
+  },
+  code: {
+    fontFamily: "monospace",
+    backgroundColor: "#e5e5e5",
+    paddingHorizontal: 4,
+    borderRadius: 4,
+  },
+  usernameHint: {
+    fontSize: 12,
+    color: "#666666",
+    marginTop: 6,
+    marginBottom: 4,
+    lineHeight: 18,
+  },
+  usernameHintLink: {
+    color: colors.accent,
+    fontWeight: "600",
+  },
+  advancedLink: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    paddingVertical: 16,
+    marginTop: 16,
+  },
+  advancedLinkText: {
+    fontSize: 14,
+    color: "#666666",
+  },
+  backToQuick: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingVertical: 8,
+  },
+  backToQuickText: {
+    fontSize: 14,
+    color: "#666666",
+  },
+  // Original styles
+  label: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#0a0a0a",
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  labelDark: {
+    color: "#ffffff",
+  },
+  typeContainer: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  typeOption: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: "#f5f5f5",
+    gap: 6,
+  },
+  typeOptionDark: {
+    backgroundColor: "#1a1a1a",
+  },
+  typeOptionSelected: {
+    backgroundColor: "#0a0a0a",
+  },
+  typeOptionSelectedDark: {
+    backgroundColor: "#ffffff",
+  },
+  typeLabel: {
+    fontSize: 13,
+    fontWeight: "500",
+    color: "#666666",
+  },
+  textDark: {
+    color: "#ffffff",
+  },
+  typeLabelSelected: {
+    color: "#ffffff",
+  },
+  typeLabelSelectedDark: {
+    color: "#0a0a0a",
+  },
+  hint: {
+    fontSize: 13,
+    color: "#666666",
+    marginTop: 8,
+  },
+  hintDark: {
+    color: "#888888",
+  },
+  input: {
+    backgroundColor: "#f5f5f5",
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: "#0a0a0a",
+  },
+  inputDark: {
+    backgroundColor: "#1a1a1a",
+    color: "#ffffff",
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#0a0a0a",
+    marginTop: 32,
+    marginBottom: 8,
+  },
+  connectCard: {
+    backgroundColor: colors.accentMuted,
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 24,
+    borderWidth: 1,
+    borderColor: colors.accentBorder,
+  },
+  connectCardDark: {
+    backgroundColor: colors.accentMutedDark,
+    borderColor: colors.accentBorderDark,
+  },
+  connectCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 8,
+  },
+  connectCardTitles: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  connectCardTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#0a0a0a",
+  },
+  connectCardBadge: {
+    backgroundColor: colors.accent,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  connectCardBadgeText: {
+    color: "#ffffff",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  connectCardDesc: {
+    fontSize: 13,
+    color: "#666666",
+    lineHeight: 20,
+  },
+  waitlistButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: colors.accent,
+    marginTop: 12,
+  },
+  waitlistButtonText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#ffffff",
+  },
+  waitlistSuccess: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 12,
+  },
+  waitlistSuccessText: {
+    flex: 1,
+    fontSize: 13,
+    color: "#0a0a0a",
+    lineHeight: 20,
+  },
+  waitlistEscapeHatch: {
+    marginTop: 8,
+    paddingVertical: 4,
+  },
+  waitlistEscapeHatchText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.accent,
+  },
+})

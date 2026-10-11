@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Яркий современный градиент Pink -> Orange -->
+    <linearGradient id="devboxGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF2A7A" />
+      <stop offset="50%" stop-color="#FF5E62" />
+      <stop offset="100%" stop-color="#FF9966" />
+    </linearGradient>
+
+    <!-- Мягкая свечение-тень для глубины на темном/светлом фоне -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#FF2A7A" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <!-- Иконка DevBox в стиле Outline -->
+  <g filter="url(#glow)">
+    <!-- Внешний геокуб (Контейнер DevBox) -->
+    <path
+      d="M 256,64
+         L 432,160
+         V 352
+         L 256,448
+         L 80,352
+         V 160
+         Z"
+      fill="none"
+      stroke="url(#devboxGradient)"
+      stroke-width="32"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+
+
+    <!-- Символ Промпта '>' (AI Agent / Dev Environment) -->
+    <path
+      d="M 160,168 L 224,208 L 160,248"
+      fill="none"
+      stroke="url(#devboxGradient)"
+      stroke-width="32"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+  </g>
+</svg>

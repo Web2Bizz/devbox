@@ -1,0 +1,4 @@
+# .devbox-project — тег проекта для Trello-задач (task-manager pipeline, ранее .trello-project).
+# Сгенерировано scripts/task-manager/init.sh. Без секретов — можно коммитить.
+# BOARD/LIST — дефолтные доска/лист (точные имена); запоминаются через create.sh --save-defaults.
+NAME=letnull19a/opencode-mobile

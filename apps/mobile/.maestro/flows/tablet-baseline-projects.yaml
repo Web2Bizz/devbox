@@ -1,0 +1,50 @@
+appId: cc.agentlabs.opencode
+name: Tablet baseline - projects grid 1/2/3 columns
+---
+# Tablet baseline for the projects grid: FlatList uses numColumns from
+# useTablet() (1 col <768, 2 cols >=768, 3 cols >=1024 — src/lib/use-tablet.ts)
+# with key={numColumns} + columnWrapperStyle gap, and projectCard has flex: 1
+# so cards share the row width. On >=1024 the list content is centered with
+# maxWidth (app/(tabs)/index.tsx).
+#
+# The CI job starts `node tests/fixtures/mock-opencode-server.ts --port 4098
+# --seed-sessions` on the runner host BEFORE this flow runs (same seed as
+# all-sessions.yaml: two sessions in two directories -> two project cards).
+# The emulator reaches the host via 127.0.0.1 (adb reverse, see
+# scripts/run-e2e-flows.sh). Runs on a phone emulator too (1-col assertions
+# hold); the 2/3-col baseline PNGs are captured on a tablet AVD into
+# docs/qa/baselines/.
+
+- launchApp:
+    clearState: true
+- assertVisible:
+    id: "telemetry-consent-card"
+- tapOn:
+    id: "telemetry-decline-button"
+
+- assertVisible:
+    text: "No Connection"
+- tapOn:
+    id: "add-connection-button"
+- tapOn:
+    id: "connect-ip-input"
+- inputText: "127.0.0.1:4098"
+- hideKeyboard
+- tapOn:
+    id: "connect-submit-button"
+
+# 40s margin: see activation-positive.yaml — the connect handshake's own
+# fetches are individually capped at 30s (src/lib/sdk.ts REQUEST_TIMEOUT_MS).
+- extendedWaitUntil:
+    visible:
+      id: "connection-status-dot"
+    timeout: 40000
+
+# Seeded sessions render as project cards inside the adaptive grid.
+- extendedWaitUntil:
+    visible:
+      id: "project-list"
+    timeout: 15000
+- assertVisible:
+    text: "Default Project Session"
+- takeScreenshot: tablet-projects-S1_grid

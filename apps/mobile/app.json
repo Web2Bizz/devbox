@@ -1,0 +1,93 @@
+{
+  "expo": {
+    "name": "DevBox",
+    "slug": "opencode-mobile",
+    "version": "0.6.0",
+    "orientation": "portrait",
+    "scheme": "opencode",
+    "userInterfaceStyle": "automatic",
+    "icon": "./assets/icon.png",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "cc.agentlabs.opencode",
+      "buildNumber": "1",
+      "entitlements": {
+        "aps-environment": "production"
+      },
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "Use Face ID to unlock DevBox and access your sessions securely.",
+        "NSSpeechRecognitionUsageDescription": "DevBox uses speech recognition so you can dictate prompts to your AI coding agent hands-free.",
+        "NSMicrophoneUsageDescription": "DevBox uses the microphone to capture your voice when using speech-to-text input.",
+        "NSPhotoLibraryUsageDescription": "DevBox can attach images from your photo library to messages to your AI coding agent.",
+        "NSCameraUsageDescription": "DevBox can capture images with your camera and attach them to messages to your AI coding agent.",
+        "NSLocalNetworkUsageDescription": "DevBox uses your local network to connect to self-hosted DevBox servers running on your LAN.",
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
+          "NSAllowsArbitraryLoadsInWebContent": false
+        },
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "cc.agentlabs.opencode",
+      "versionCode": 53,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1F1016"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-local-authentication",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#ffffff",
+          "sounds": []
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "OpenCode can attach images from your photo library to messages to your AI coding agent.",
+          "cameraPermission": "OpenCode can capture images with your camera and attach them to messages to your AI coding agent."
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "OpenCode uses the microphone to capture your voice when using speech-to-text input.",
+          "speechRecognitionPermission": "OpenCode uses speech recognition so you can dictate prompts to your AI coding agent hands-free."
+        }
+      ],
+      "expo-localization",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/adaptive-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#1F1016"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}

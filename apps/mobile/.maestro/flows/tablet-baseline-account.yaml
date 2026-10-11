@@ -1,0 +1,26 @@
+appId: cc.agentlabs.opencode
+name: Tablet baseline - account centered content (maxWidth 640)
+---
+# Tablet baseline for the account screen: root is a ScrollView whose content
+# is centered (flexGrow 1 + padding 24 + maxWidth layout.contentMaxWidth =
+# 640, alignSelf center, width 100% — app/(tabs)/account.tsx, same pattern as
+# settings.tsx) so it doesn't stretch full-width on a 768pt+ tablet.
+#
+# Navigation uses a deep link (opencode://account, scheme from app.json) so
+# the flow doesn't depend on the tab-bar label locale (nav.accountTab =
+# "Account"/"Аккаунт"). Needs no mock server — covers the not-logged-in
+# branch (account-login-button testID). The logged-in branch shares the same
+# ScrollView/content style. Baseline PNG goes to docs/qa/baselines/ on a
+# tablet AVD.
+
+- launchApp:
+    clearState: true
+- assertVisible:
+    id: "telemetry-consent-card"
+- tapOn:
+    id: "telemetry-decline-button"
+
+- openLink: opencode://account
+- assertVisible:
+    id: "account-login-button"
+- takeScreenshot: tablet-account-S1_centered

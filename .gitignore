@@ -10,9 +10,9 @@ tmp/opencode/
 # Deps
 node_modules/
 
-# Lockfiles — bun.lock is the single source of truth (see .bun-version).
-# npm/pnpm/yarn locks are not used; keep them out of the tree.
-package-lock.json
+# Lockfiles — коммитятся. bun.lock (root) для bun workspaces,
+# apps/mobile/package-lock.json для npm/Expo: без локера сборка в CI/CD
+# невоспроизводима. pnpm/yarn не используются.
 pnpm-lock.yaml
 yarn.lock
 

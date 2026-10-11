@@ -47,7 +47,11 @@ services:
     healthcheck:
       # oven/bun images carry the bun runtime (no wget/curl guaranteed),
       # so probe via bun. Port follows the app's listen port.
-      test: ["CMD-SHELL", "bun -e 'const p=process.env.APP_BACKEND_PORT||process.env.PORT||3100;const r=await fetch(`http://localhost:${p}/health`);if(!r.ok)process.exit(1)'"]
+      # NOTE: `$${p}` — the double $ escapes compose interpolation, so the
+      # container receives a literal `${p}` that bun expands at runtime. A bare
+      # `${p}` is interpolated by compose itself, renders as `http://localhost:/health`
+      # and makes the probe fail forever.
+      test: ["CMD-SHELL", "bun -e 'const p=process.env.APP_BACKEND_PORT||process.env.PORT||3100;const r=await fetch(`http://localhost:$${p}/health`);if(!r.ok)process.exit(1)'"]
       interval: 10s
       timeout: 5s
       retries: 6

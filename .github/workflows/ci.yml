@@ -31,6 +31,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -45,8 +47,13 @@ jobs:
           # GitHub masks secrets.* in logs automatically; empty → public-only install.
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Lint (tsc --noEmit)
-        run: bun run lint
+      - uses: nrwl/nx-set-shas@v4
+        id: setshas
+        with:
+          main-branch-name: main
+
+      - name: Lint affected (tsc --noEmit)
+        run: bunx nx affected -t lint --base=${{ steps.setshas.outputs.base }} --head=${{ steps.setshas.outputs.head }}
 
       - name: No console.* in backend src (use AppLogger)
         run: |
@@ -55,8 +62,8 @@ jobs:
             exit 1
           fi
 
-      - name: Build
-        run: bun run build
+      - name: Build affected
+        run: bunx nx affected -t build --base=${{ steps.setshas.outputs.base }} --head=${{ steps.setshas.outputs.head }}
 
-      - name: Test
-        run: bun run test
+      - name: Test affected
+        run: bunx nx affected -t test --base=${{ steps.setshas.outputs.base }} --head=${{ steps.setshas.outputs.head }}

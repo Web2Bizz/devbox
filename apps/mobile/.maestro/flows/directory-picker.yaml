@@ -1,76 +1,94 @@
 appId: cc.agentlabs.opencode
 name: Directory picker - browse server folders and create a session in one
 ---
-# New-feature regression coverage for DirectoryBrowserSheet
-# (src/components/chat/DirectoryBrowserSheet.tsx): New Session -> Browse
-# Folders -> the sheet lists the mock server's fake directory tree -> tapping
-# a folder navigates into it -> Up navigation returns to the parent -> tapping
-# "Use this folder" creates a session scoped to the chosen directory.
+# Regression coverage for DirectoryBrowserSheet
+# (packages/uikit/src/components/chat/DirectoryBrowserSheet.tsx): New Session
+# sheet -> Browse Folders -> the sheet lists the mock server's fake directory
+# tree -> tapping a folder navigates into it -> Up navigation returns to the
+# parent -> tapping "Use this folder" creates a session scoped to the chosen
+# directory.
 #
-# The CI job starts `node tests/fixtures/mock-opencode-server.ts --port 4099`
-# (normal mode, no --fail-auth / --seed-sessions) on the runner host BEFORE
-# this flow runs. Its fake filesystem (FAKE_FILE_TREE in
+# Real-UI notes (flows adapted to the verified app): connect goes through the
+# login gate's LAN discovery (see activation-positive.yaml header — the old
+# the old Add-Connection button/the old Quick-Connect address field/the old status-dot indicator/the old new-session FAB
+# ids never existed in code). The mock is the NORMAL-mode instance on port
+# 4096 (discovered as 10.0.2.2:4096): its fake filesystem (FAKE_FILE_TREE in
 # tests/fixtures/mock-opencode-server.ts) is:
 #   /mock/project             -> frontend/ (dir), backend/ (dir), README.md (file)
 #   /mock/project/frontend    -> (empty)
 #   /mock/project/backend     -> (empty)
 # and GET /project (FAKE_SERVER_PROJECTS) additionally lists a "docs-project"
-# server-known project, exercised as a secondary assertion below.
+# server-known project, exercised as a secondary assertion below. (Port 4099
+# in CI runs an identical normal-mode mock; discovery only probes :4096, so
+# this flow targets the :4096 instance.)
+#
+# Session creation opens via the New Project tab (tabPress opens the sheet
+# through the global UI store). Tab labels are i18n; CI emulators run en-US.
 
 - launchApp:
     clearState: true
 
-# Fresh install lands on the login gate (app/login.tsx — the _layout.tsx auth
-# gate redirects unauthenticated users to /login), not the old "No Connection"
-# empty state.
+# Login gate -> LAN discovery -> local login (real connect path).
 - assertVisible:
     text: "Вход"
 - assertVisible:
-    id: "login-mode-account"
-- assertVisible:
     id: "login-mode-local"
-- assertVisible:
-    id: "login-username-input"
-- assertVisible:
-    id: "login-password-input"
-- assertVisible:
-    id: "login-button"
 - tapOn:
-    id: "add-connection-button"
+    id: "login-mode-local"
 - tapOn:
-    id: "connect-ip-input"
-- inputText: "127.0.0.1:4099"
-- hideKeyboard
-- tapOn:
-    id: "connect-submit-button"
-
-# 40s margin: see activation-positive.yaml — the connect handshake's own
-# fetches are individually capped at 30s (src/lib/sdk.ts REQUEST_TIMEOUT_MS).
+    id: "login-lan-find-button"
 - extendedWaitUntil:
     visible:
-      id: "connection-status-dot"
+      id: "lan-candidate-0"
+    timeout: 120000
+- tapOn:
+    id: "lan-use-0"
+- extendedWaitUntil:
+    visible:
+      text: ".*10.0.2.2:4096.*"
+    timeout: 10000
+- tapOn:
+    id: "login-username-input"
+- inputText: "e2e-user"
+- tapOn:
+    id: "login-password-input"
+- inputText: "e2e-pass"
+- hideKeyboard
+- tapOn:
+    id: "login-button"
+
+# 40s margin: the login handshake's own fetches are individually capped
+# (CONNECTION_TEST_TIMEOUT_MS = 12s in src/stores/connections.ts, plus the
+# 30s sdk cap) — the wait must not be shorter than the code path it waits on.
+- extendedWaitUntil:
+    visible:
+      id: "project-list"
     timeout: 40000
 - takeScreenshot: dirpicker-S1_connected
 
-# Open the New Session modal (long-press the FAB for the full options sheet)
-- longPressOn:
-    id: "new-session-fab"
-- assertVisible:
-    text: "New Session"
-# GET /project surfaces "docs-project" under "Server Projects" (excludes the
-# current project, mock-project) — confirms the project-list endpoint wired up.
-# The modal fetches it async on open, so wait rather than assert immediately.
+# Open the New Session sheet via the New Project tab.
+- tapOn:
+    text: "New Project"
 - extendedWaitUntil:
     visible:
-      text: "docs-project"
+      text: ".*New Session.*"
+    timeout: 15000
+# GET /project surfaces "docs-project" under "Server Projects" (excludes the
+# current project, mock-project) — confirms the project-list endpoint wired up.
+# The sheet fetches it async on open, so wait rather than assert immediately.
+- extendedWaitUntil:
+    visible:
+      text: ".*docs-project.*"
     timeout: 10000
 - takeScreenshot: dirpicker-S2_new_session_modal
 
-# Open the folder browser
+# Open the folder browser.
 - tapOn:
     id: "browse-folders-button"
-- assertVisible:
-    text: "Browse Folders"
+- extendedWaitUntil:
+    visible:
+      text: ".*Browse Folders.*"
+    timeout: 10000
 # Diagnostic screenshot before the (previously flaky, see issue #104) wait
 # below — if this ever regresses again, compare this frame against
 # dirpicker-S2 to see whether the sheet actually opened.
@@ -87,16 +105,16 @@ name: Directory picker - browse server folders and create a session in one
     text: "README.md"
 - takeScreenshot: dirpicker-S3_root_listing
 
-# Navigate into "frontend"
+# Navigate into "frontend".
 - tapOn:
     id: "directory-row-frontend"
 - extendedWaitUntil:
     visible:
-      text: "No subfolders here"
+      text: ".*No subfolders here.*"
     timeout: 10000
 - takeScreenshot: dirpicker-S4_inside_frontend
 
-# Up navigation must return to the root listing
+# Up navigation must return to the root listing.
 - tapOn:
     id: "directory-up-button"
 - extendedWaitUntil:
@@ -107,12 +125,12 @@ name: Directory picker - browse server folders and create a session in one
     id: "directory-row-backend"
 - takeScreenshot: dirpicker-S5_up_navigation_back_to_root
 
-# Navigate into "backend" and select it
+# Navigate into "backend" and select it.
 - tapOn:
     id: "directory-row-backend"
 - extendedWaitUntil:
     visible:
-      text: "No subfolders here"
+      text: ".*No subfolders here.*"
     timeout: 10000
 - takeScreenshot: dirpicker-S6_inside_backend
 - tapOn:
@@ -120,11 +138,11 @@ name: Directory picker - browse server folders and create a session in one
 
 # The app creates a session scoped to /mock/project/backend (mock POST
 # /session reads x-opencode-directory) and navigates straight to it — the
-# native header's directory badge must show "backend".
+# native header shows the mock's session title "Mock Session".
 - extendedWaitUntil:
     visible:
       id: "chat-message-input"
     timeout: 15000
 - assertVisible:
-    text: "backend"
+    text: ".*Mock Session.*"
 - takeScreenshot: dirpicker-S7_session_created_in_backend

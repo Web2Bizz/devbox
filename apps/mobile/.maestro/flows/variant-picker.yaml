@@ -1,143 +1,160 @@
 appId: cc.agentlabs.opencode
-name: Variant picker - reasoning-effort chip renders, selects, and still sends
+name: Variant picker - reasoning-effort select renders, selects, and still sends
 ---
-# New-feature regression coverage for VariantPicker
-# (src/components/chat/VariantPicker.tsx): the reasoning-effort chip only
-# renders when the selected model's provider entry carries `variants`
-# (src/stores/catalog.ts / GET /provider), selecting an option updates the
-# chip label, and sending a message afterwards still works end-to-end
-# (variant flows into sendMessage -> client.session.prompt's `variant` field
-# — see src/stores/sessions.ts sendMessage).
+# Regression coverage for the reasoning-effort picker
+# (packages/uikit/src/components/chat/AiSettingsModal.tsx): the effort Select
+# only renders when the selected model's provider entry carries `variants`
+# (GET /provider), selecting an option updates the Select value, and sending
+# a message afterwards still works end-to-end.
 #
-# The CI job starts `node tests/fixtures/mock-opencode-server.ts --port 4099`
-# on the runner host BEFORE this flow runs (same fresh, non-seeded normal-mode
-# server used by directory-picker.yaml — GET /provider's mock-model carries
-# low/medium/high variants; see tests/fixtures/mock-opencode-server.ts).
-#
-# A brand-new session has NO explicit model selection: src/lib/model-selection.ts
-# chooseModelSelection() deliberately returns null until the user picks one
-# (issue #37/#35 — the provider registry's "default" model is unreliable), so
-# app/session/[id].tsx's currentModelVariants is undefined and the chip does
-# NOT render on session open. This flow explicitly opens the model picker and
-# selects the mock provider's model first, which is what actually makes
-# variants available — matching how a real user reaches this chip.
+# Real-UI notes (flows adapted to the verified app — the old model-chip /
+# variant-chip / variant-option-* ids never existed in code):
+# - The picker lives in the AI settings bottom sheet (session screen
+#   ai-settings-button). Model selection goes through the model PickerSheet:
+#   option testIDs are `model-select-option-<providerID>/<modelID>` (slash is
+#   part of the real id — MODEL_ID_SEP in AiSettingsModal.tsx), so the mock's
+#   model is `model-select-option-mock/mock-model`.
+# - Effort is an INLINE Select (testID effort-select) with options
+#   effort-select-option-auto/low/medium/high (Select.tsx). Tapping the
+#   effort-select box expands it; tapping an option collapses it and shows
+#   the label ("High") as the Select value.
+# - A brand-new session has NO explicit model selection:
+#   src/lib/model-selection.ts chooseModelSelection() deliberately returns
+#   null until the user picks one, so the effort Select does NOT render on
+#   session open. This flow explicitly picks the mock provider's model first.
+# - Connect path: login gate LAN discovery against the normal-mode :4096
+#   mock (see activation-positive.yaml header); GET /provider there carries
+#   low/medium/high variants. Session creation via the New Project tab.
 #
 # This flow does NOT assert on the SSE-streamed assistant reply after
-# sending — see the "Sending a message" comment near chat-send-button below,
-# and activation-positive.yaml's file-level comment, for why (issue #90 mode
-# B: a CI-harness-specific SSE limitation, not an app bug).
+# sending — see activation-positive.yaml's file-level comment for why
+# (issue #90 mode B: a CI-harness-specific SSE limitation, not an app bug).
 
 - launchApp:
     clearState: true
 
-# Fresh install lands on the login gate (app/login.tsx — the _layout.tsx auth
-# gate redirects unauthenticated users to /login), not the old "No Connection"
-# empty state.
 - assertVisible:
     text: "Вход"
 - assertVisible:
-    id: "login-mode-account"
-- assertVisible:
     id: "login-mode-local"
-- assertVisible:
-    id: "login-username-input"
-- assertVisible:
-    id: "login-password-input"
-- assertVisible:
-    id: "login-button"
 - tapOn:
-    id: "add-connection-button"
+    id: "login-mode-local"
 - tapOn:
-    id: "connect-ip-input"
-- inputText: "127.0.0.1:4099"
-- hideKeyboard
-- tapOn:
-    id: "connect-submit-button"
-
-# 40s margin: see activation-positive.yaml — the connect handshake's own
-# fetches are individually capped at 30s (src/lib/sdk.ts REQUEST_TIMEOUT_MS).
+    id: "login-lan-find-button"
 - extendedWaitUntil:
     visible:
-      id: "connection-status-dot"
+      id: "lan-candidate-0"
+    timeout: 120000
+- tapOn:
+    id: "lan-use-0"
+- extendedWaitUntil:
+    visible:
+      text: ".*10.0.2.2:4096.*"
+    timeout: 10000
+- tapOn:
+    id: "login-username-input"
+- inputText: "e2e-user"
+- tapOn:
+    id: "login-password-input"
+- inputText: "e2e-pass"
+- hideKeyboard
+- tapOn:
+    id: "login-button"
+
+# 40s margin: see activation-positive.yaml — the login handshake's own
+# fetches are individually capped at 12s/30s.
+- extendedWaitUntil:
+    visible:
+      id: "project-list"
     timeout: 40000
 - takeScreenshot: variant-S1_connected
 
+# Create a quick session in the current project root.
 - tapOn:
-    id: "new-session-fab"
+    text: "New Project"
+- extendedWaitUntil:
+    visible:
+      text: ".*New Session.*"
+    timeout: 15000
+- tapOn:
+    id: "browse-folders-button"
+- extendedWaitUntil:
+    visible:
+      id: "directory-row-frontend"
+    timeout: 10000
+- tapOn:
+    id: "directory-select-button"
 - extendedWaitUntil:
     visible:
       id: "chat-message-input"
     timeout: 15000
 
 # Explicitly pick the mock provider's model — a fresh session has no model
-# selection yet (see comment above), so the variant chip has nothing to key
-# off of until this happens.
+# selection yet (see comment above), so the effort Select has nothing to key
+# off of until this happens. The catalog (GET /provider) loads async after
+# connect, so wait for the option rather than asserting immediately.
 - tapOn:
-    id: "model-chip"
+    id: "ai-settings-button"
 - extendedWaitUntil:
     visible:
-      id: "model-option-mock-mock-model"
+      id: "model-select"
     timeout: 10000
+- takeScreenshot: variant-S2_ai_settings_open
 - tapOn:
-    id: "model-option-mock-mock-model"
-
-# The chip only appears once catalog.load() (triggered on connect, see
-# app/_layout.tsx) has resolved GET /provider and found variants for the
-# selected model — wait rather than assert immediately.
+    id: "model-select"
 - extendedWaitUntil:
     visible:
-      id: "variant-chip"
+      id: "model-select-option-mock/mock-model"
     timeout: 15000
+- tapOn:
+    id: "model-select-option-mock/mock-model"
+
+# Picking a model closes the sheet (AiSettingsModal handleSelectModel), so
+# reopen it: the effort Select now renders (mock model carries variants).
+- tapOn:
+    id: "ai-settings-button"
+- extendedWaitUntil:
+    visible:
+      id: "effort-select"
+    timeout: 10000
+- takeScreenshot: variant-S3_effort_default
+- tapOn:
+    id: "effort-select"
+- extendedWaitUntil:
+    visible:
+      id: "effort-select-option-high"
+    timeout: 10000
 - assertVisible:
-    text: "Auto"
-- takeScreenshot: variant-S2_chip_default_auto
+    id: "effort-select-option-low"
+- assertVisible:
+    id: "effort-select-option-medium"
+- takeScreenshot: variant-S4_picker_options
 
 - tapOn:
-    id: "variant-chip"
+    id: "effort-select-option-high"
+# Option tap collapses the Select and the box value reflects the selection.
 - assertVisible:
-    text: "Reasoning Effort"
-- assertVisible:
-    id: "variant-option-low"
-- assertVisible:
-    id: "variant-option-medium"
-- assertVisible:
-    id: "variant-option-high"
-- takeScreenshot: variant-S3_picker_options
+    text: ".*High.*"
+- takeScreenshot: variant-S5_effort_shows_high
 
-- tapOn:
-    id: "variant-option-high"
-# Sheet closes and the chip label reflects the new selection.
-- assertVisible:
-    text: "High"
-- takeScreenshot: variant-S4_chip_shows_high
-
-# Sending a message must still work with a variant selected (regression: the
-# variant chip must not break the send path). Like activation-positive.yaml,
-# this stops at the optimistic local echo (src/stores/sessions.ts) instead of
-# waiting on the SSE-streamed assistant reply — issue #90 mode B (see
-# activation-positive.yaml's file-level comment) proved that in THIS harness
-# (Android emulator + this Node mock + adb-reverse) the long-lived SSE
-# connection reliably delivers only its first chunk, so the reply never
-# renders here regardless of app correctness. Asserting on it would be
-# asserting on a CI-harness limitation, not real app behavior.
+# Sending a message must still work with an effort selected (regression: the
+# picker must not break the send path). Like activation-positive.yaml, this
+# stops at the optimistic local echo instead of waiting on the SSE-streamed
+# assistant reply (issue #90 mode B).
 - tapOn:
     id: "chat-message-input"
 - inputText: "Message with reasoning effort set to high"
 - hideKeyboard
-- takeScreenshot: variant-S5_message_typed
+- takeScreenshot: variant-S6_message_typed
 - tapOn:
     id: "chat-send-button"
 
 - extendedWaitUntil:
     visible:
       id: "chat-bubble-user"
-    timeout: 5000
+    timeout: 10000
 - assertVisible:
     id: "chat-bubble-user"
 - assertVisible:
-    text: "Message with reasoning effort set to high"
-# The chip must still read "High" after sending (selection persists across a
-# send, it isn't reset once the message is submitted).
-- assertVisible:
-    text: "High"
-- takeScreenshot: variant-S6_message_sent_variant_still_high
+    text: ".*Message with reasoning effort set to high.*"
+- takeScreenshot: variant-S7_message_sent

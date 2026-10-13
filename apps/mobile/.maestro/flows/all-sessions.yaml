@@ -1,93 +1,165 @@
 appId: cc.agentlabs.opencode
 name: All sessions across directories - list + open-across-project (regression #46/#48)
 ---
-# New-feature regression coverage for the "all sessions across all projects"
-# list: src/stores/sessions.ts loadSessions() intentionally uses
-# clientForDirectory(undefined) (a directory-less client) so GET /session
-# returns sessions from every directory, not just the active connection's.
+# Regression coverage for sessions living in different directories: sessions
+# created in two folders must each render as its own project card on the
+# projects tab (app/(tabs)/index.tsx groups by (connection, directory)), and
+# opening a session that belongs to a directory OTHER than the current one
+# must actually open it (src/stores/sessions.ts selectSession threads the
+# session's directory+connectionId into clientForDirectory — GitHub issues
+# #46/#48), not silently fail or open the wrong session.
 #
-# Also locks in the fix for GitHub issues #46/#48: tapping a session that
-# belongs to a directory OTHER than the active connection's must actually
-# open it (src/stores/sessions.ts selectSession uses clientForDirectory(dir)
-# when the session's directory differs from the active one), not silently
-# fail or open the wrong session.
+# SCOPE CHANGE (flows adapted to the verified app): the old version relied on
+# --seed-sessions (port 4098) plus session-item-* testIDs that never existed
+# in code — sessions are NOT rendered as a flat session list anywhere; the
+# projects tab shows per-directory PROJECT CARDS (testIDs carry a generated
+# connection UUID, so this flow taps them by their exact path text instead)
+# and the project screen (app/project/[directory].tsx) lists that directory's
+# sessions as untagged rows. Discovery only probes :4096, so seeds are
+# unreachable; instead this flow creates two REAL sessions in two REAL
+# directories (backend, frontend) against the normal-mode :4096 mock and then
+# exercises the cross-directory open. The mock ENFORCES per-directory scoping
+# (GET /session/:id and .../message 404 unless x-opencode-directory matches
+# the session's directory), so a #46/#48 regression still fails this flow's
+# session-screen assertions with 404s rather than passing silently.
 #
-# The CI job starts `node tests/fixtures/mock-opencode-server.ts --port 4098
-# --seed-sessions` on the runner host BEFORE this flow runs. --seed-sessions
-# pre-populates two fixed-ID sessions before any connection is made:
-#   seed-default -> directory /mock/project        (matches the active
-#                   connection's default project — GET /project/current)
-#   seed-other   -> directory /mock/project/other-dir (a DIFFERENT directory)
-#
-# Why this can actually FAIL if #46/#48 regresses: the mock ENFORCES
-# per-directory scoping — GET /session/seed-other and
-# GET /session/seed-other/message return 404 unless the request carries
-# x-opencode-directory: /mock/project/other-dir. With the fix present, the
-# app threads the session's directory through selectSession ->
-# clientForDirectory, sends the right header, and the session screen renders.
-# Without it, the request goes out with the wrong (or no) directory header,
-# the mock 404s, and the session-screen assertions below (title, directory
-# badge, empty state) fail.
+# Connect path: login gate LAN discovery (see activation-positive.yaml
+# header). Tab labels are i18n; CI emulators run en-US.
 
 - launchApp:
     clearState: true
 
-# Fresh install lands on the login gate (app/login.tsx — the _layout.tsx auth
-# gate redirects unauthenticated users to /login), not the old "No Connection"
-# empty state.
 - assertVisible:
     text: "Вход"
 - assertVisible:
-    id: "login-mode-account"
-- assertVisible:
     id: "login-mode-local"
-- assertVisible:
-    id: "login-username-input"
-- assertVisible:
-    id: "login-password-input"
-- assertVisible:
-    id: "login-button"
 - tapOn:
-    id: "add-connection-button"
+    id: "login-mode-local"
 - tapOn:
-    id: "connect-ip-input"
-- inputText: "127.0.0.1:4098"
-- hideKeyboard
-- tapOn:
-    id: "connect-submit-button"
-
-# 40s margin: see activation-positive.yaml — the connect handshake's own
-# fetches are individually capped at 30s (src/lib/sdk.ts REQUEST_TIMEOUT_MS).
+    id: "login-lan-find-button"
 - extendedWaitUntil:
     visible:
-      id: "connection-status-dot"
+      id: "lan-candidate-0"
+    timeout: 120000
+- tapOn:
+    id: "lan-use-0"
+- extendedWaitUntil:
+    visible:
+      text: ".*10.0.2.2:4096.*"
+    timeout: 10000
+- tapOn:
+    id: "login-username-input"
+- inputText: "e2e-user"
+- tapOn:
+    id: "login-password-input"
+- inputText: "e2e-pass"
+- hideKeyboard
+- tapOn:
+    id: "login-button"
+
+# 40s margin: see activation-positive.yaml — the login handshake's own
+# fetches are individually capped at 12s/30s.
+- extendedWaitUntil:
+    visible:
+      id: "project-list"
     timeout: 40000
 - takeScreenshot: allsessions-S1_connected
 
-# Both seeded sessions must appear, even though only one belongs to the
-# active connection's own directory.
+# Create session A inside backend (New Project tab -> Browse Folders).
+- tapOn:
+    text: "New Project"
 - extendedWaitUntil:
     visible:
-      text: "Default Project Session"
+      text: ".*New Session.*"
     timeout: 15000
-- assertVisible:
-    text: "Cross-Project Session"
-- takeScreenshot: allsessions-S2_both_directories_listed
-
-# Open the session from the OTHER directory (#46/#48 regression).
 - tapOn:
-    id: "session-item-seed-other"
+    id: "browse-folders-button"
+- extendedWaitUntil:
+    visible:
+      id: "directory-row-backend"
+    timeout: 10000
+- tapOn:
+    id: "directory-row-backend"
+- extendedWaitUntil:
+    visible:
+      text: ".*No subfolders here.*"
+    timeout: 10000
+- tapOn:
+    id: "directory-select-button"
 - extendedWaitUntil:
     visible:
       id: "chat-message-input"
     timeout: 15000
 - assertVisible:
-    text: "Cross-Project Session"
+    text: ".*Mock Session.*"
+
+# Back to the projects tab and create session B inside frontend the same way.
+- back
+- extendedWaitUntil:
+    visible:
+      id: "project-list"
+    timeout: 15000
+- tapOn:
+    text: "New Project"
+- extendedWaitUntil:
+    visible:
+      text: ".*New Session.*"
+    timeout: 15000
+- tapOn:
+    id: "browse-folders-button"
+- extendedWaitUntil:
+    visible:
+      id: "directory-row-frontend"
+    timeout: 10000
+- tapOn:
+    id: "directory-row-frontend"
+- extendedWaitUntil:
+    visible:
+      text: ".*No subfolders here.*"
+    timeout: 10000
+- tapOn:
+    id: "directory-select-button"
+- extendedWaitUntil:
+    visible:
+      id: "chat-message-input"
+    timeout: 15000
+- back
+- extendedWaitUntil:
+    visible:
+      id: "project-list"
+    timeout: 15000
+
+# Both directories must render as their own project cards (exact path texts —
+# card testIDs embed a generated connection UUID, so text taps are used).
+- extendedWaitUntil:
+    visible:
+      text: "/mock/project/backend"
+    timeout: 15000
 - assertVisible:
-    text: "other-dir"
-# Confirms GET /session/seed-other/message actually resolved (empty state,
-# not stuck loading / errored) — i.e. the cross-directory session genuinely
-# opened, not just navigated to a dead screen.
+    text: "/mock/project/frontend"
+- takeScreenshot: allsessions-S2_both_directories_listed
+
+# Open the session from the OTHER directory (#46/#48 regression): project
+# card -> project screen -> session row.
+- tapOn:
+    text: "/mock/project/backend"
+- extendedWaitUntil:
+    visible:
+      id: "project-header-card"
+    timeout: 10000
 - assertVisible:
-    text: "Start a conversation"
+    text: ".*Mock Session.*"
+- tapOn:
+    text: "Mock Session"
+- extendedWaitUntil:
+    visible:
+      id: "chat-message-input"
+    timeout: 15000
+- assertVisible:
+    text: ".*Mock Session.*"
+# Confirms GET /session/:id/message actually resolved (empty state, not stuck
+# loading / errored) — i.e. the cross-directory session genuinely opened with
+# the right directory header, not just navigated to a dead screen.
+- assertVisible:
+    text: ".*Start a conversation.*"
 - takeScreenshot: allsessions-S3_cross_directory_session_opened

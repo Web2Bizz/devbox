@@ -8,7 +8,7 @@
     "dev": "bun --bun nest start -b swc --watch",
     "build": "nest build -b swc",
     "start": "bun dist/main.js",
-    "lint": "tsc --noEmit -p tsconfig.json && eslint .",
+    "lint": "tsc --noEmit -p tsconfig.json && biome lint .",
     "test": "bun test --pass-with-no-tests dist",
     "test:e2e": "bun run build && bun dist/api/versioning.e2e.js && bun dist/opencode/opencode.e2e.js && bun dist/projects/projects.e2e.js && bun dist/projects/github/github.e2e.js && bun dist/common/external/external-client.e2e.js && bun dist/common/external/external-error.spec.js && bun dist/common/external/retry.spec.js && bun dist/env.spec.js && bun dist/auth/auth.e2e.js && bun dist/repos/repos.service.spec.js && bun dist/repos/repos.e2e.js && bun dist/docker-registry/docker-registry.service.spec.js && bun dist/docker-registry/docker-registry.e2e.js && bun dist/npm-registry/npm-registry.service.spec.js && bun dist/npm-registry/npm-registry.e2e.js && bun dist/organizations/organizations.service.spec.js && bun dist/organizations/organizations.e2e.js",
     "test:e2e:auth": "bun run build && bun dist/auth/auth.e2e.js",
@@ -41,9 +41,7 @@
     "@types/node": "^22.7.4",
     "@types/pg": "^8.11.0",
     "drizzle-kit": "^0.31.11",
-    "eslint": "^10.12.0",
-    "typescript": "^6.0.3",
-    "typescript-eslint": "^8.71.2"
+    "typescript": "^6.0.3"
   },
   "engines": {
     "node": ">=22",

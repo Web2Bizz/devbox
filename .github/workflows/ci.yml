@@ -52,7 +52,7 @@ jobs:
         with:
           main-branch-name: main
 
-      # no-console in backend src is enforced by eslint (backend lint script),
+      # no-console in backend src is enforced by biome (backend lint script),
       # scoped to runtime sources — spec/e2e/test reporters are excluded.
       - name: Lint affected (tsc --noEmit)
         run: bunx nx affected -t lint --base=${{ steps.setshas.outputs.base }} --head=${{ steps.setshas.outputs.head }}

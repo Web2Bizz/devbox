@@ -190,26 +190,21 @@ async function main(): Promise<void> {
   for (const c of checks) {
     try {
       await c.run();
-      // eslint-disable-next-line no-console
       console.log(`ok - ${c.name}`);
     } catch (err) {
       failed += 1;
-      // eslint-disable-next-line no-console
       console.error(`FAIL - ${c.name}: ${(err as Error).message}`);
     }
   }
   if (failed > 0) {
-    // eslint-disable-next-line no-console
     console.error(`${failed}/${checks.length} repos scanner checks failed`);
     process.exitCode = 1;
   } else {
-    // eslint-disable-next-line no-console
     console.log(`${checks.length}/${checks.length} repos scanner checks passed`);
   }
 }
 
 void main().catch((err: unknown) => {
-  // eslint-disable-next-line no-console
   console.error(`repos scanner checks failed to run: ${(err as Error).message}`);
   process.exit(1);
 });

@@ -486,21 +486,17 @@ async function main(): Promise<void> {
   for (const c of checks) {
     try {
       await c.run();
-      // eslint-disable-next-line no-console
       console.log(`ok - ${c.name}`);
     } catch (err) {
       failed += 1;
-      // eslint-disable-next-line no-console
       console.error(`FAIL - ${c.name}: ${(err as Error).message}`);
     }
   }
   if (failed > 0) {
-    // eslint-disable-next-line no-console
     console.error(`${failed}/${checks.length} npm-registry checks failed`);
     process.exitCode = 1;
     throw new Error(`${failed}/${checks.length} npm-registry checks failed`);
   } else {
-    // eslint-disable-next-line no-console
     console.log(`${checks.length}/${checks.length} npm-registry checks passed`);
   }
 }

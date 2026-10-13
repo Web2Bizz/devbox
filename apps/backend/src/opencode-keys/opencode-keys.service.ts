@@ -1,0 +1,101 @@
+import { Injectable } from "@nestjs/common";
+import { eq } from "drizzle-orm";
+import { AppLogger } from "../common/app-logger.service.js";
+import { DbService, dbUnavailable, type DbClient } from "../db/db.service.js";
+import { userOpencodeKeys, type UserOpencodeKeyRow } from "../db/schema.js";
+
+/** Stored per-user key row (ciphertext only — plaintext never persisted). */
+export interface StoredOpencodeKey {
+  userId: string;
+  encryptedKey: string;
+  iv: string;
+  /** ISO-8601 timestamp */
+  updatedAt: string;
+}
+
+function toStored(row: UserOpencodeKeyRow): StoredOpencodeKey {
+  return {
+    userId: row.userId,
+    encryptedKey: row.encryptedKey,
+    iv: row.iv,
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+/**
+ * OpencodeKeysService — Postgres-backed per-user OpenCode API-key store
+ * (strict, no memory fallback).
+ *
+ * Every method hits `user_opencode_keys` (drizzle/0005); failures funnel
+ * through `dbUnavailable` → 503 EXTERNAL_UNAVAILABLE (Retry-After 30 via
+ * ApiErrorFilter), logged once with the correlationId. Plaintext keys never
+ * reach this service (callers encrypt via CryptoService first); nothing
+ * secret-bearing is ever logged (fixed event names only).
+ */
+@Injectable()
+export class OpencodeKeysService {
+  constructor(
+    private readonly logger: AppLogger = new AppLogger("OpencodeKeysService"),
+    private readonly db: DbService,
+  ) {}
+
+  /** Live drizzle client — throws 503 EXTERNAL_UNAVAILABLE when Postgres is down. */
+  private client(): DbClient {
+    return this.db.client;
+  }
+
+  /** Upserts the caller's encrypted key (insert or rotate on conflict). */
+  async save(
+    userId: string,
+    input: { encryptedKey: string; iv: string },
+    correlationId?: string,
+  ): Promise<StoredOpencodeKey> {
+    try {
+      const rows = await this.client()
+        .insert(userOpencodeKeys)
+        .values({ userId, encryptedKey: input.encryptedKey, iv: input.iv })
+        .onConflictDoUpdate({
+          target: userOpencodeKeys.userId,
+          set: {
+            encryptedKey: input.encryptedKey,
+            iv: input.iv,
+            updatedAt: new Date(),
+          },
+        })
+        .returning();
+      this.logger.info("[opencode-keys] key saved");
+      return toStored(rows[0]);
+    } catch (err) {
+      dbUnavailable("userOpencodeKeys.save", err, this.logger, correlationId);
+    }
+  }
+
+  /** Loads the caller's row (null when no key was ever stored). */
+  async findByUserId(
+    userId: string,
+    correlationId?: string,
+  ): Promise<StoredOpencodeKey | null> {
+    try {
+      const rows = await this.client()
+        .select()
+        .from(userOpencodeKeys)
+        .where(eq(userOpencodeKeys.userId, userId))
+        .limit(1);
+      return rows.length > 0 ? toStored(rows[0]) : null;
+    } catch (err) {
+      dbUnavailable("userOpencodeKeys.findByUserId", err, this.logger, correlationId);
+    }
+  }
+
+  /** Deletes the caller's row (idempotent — missing row is still ok). */
+  async deleteByUserId(userId: string, correlationId?: string): Promise<void> {
+    try {
+      await this.client()
+        .delete(userOpencodeKeys)
+        .where(eq(userOpencodeKeys.userId, userId));
+      this.logger.info("[opencode-keys] key deleted");
+    } catch (err) {
+      dbUnavailable("userOpencodeKeys.deleteByUserId", err, this.logger, correlationId);
+    }
+  }
+}

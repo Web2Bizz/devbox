@@ -11,7 +11,7 @@
  *   surface (503 EXTERNAL_UNAVAILABLE + Retry-After 30 + correlationId)
  *   instead of silently passing. Never logs secrets (URLs carry
  *   credentials — only reachability outcomes are logged).
- * - `applyTestMigrations(url)` — applies drizzle/0001..0004 in order
+ * - `applyTestMigrations(url)` — applies drizzle/0001..0005 in order
  *   (idempotent IF NOT EXISTS) so the suite starts from a known schema.
  */
 import { readFileSync } from "node:fs";
@@ -72,6 +72,7 @@ const MIGRATION_FILES = [
   "0002_github_installations.sql",
   "0003_users.sql",
   "0004_organizations.sql",
+  "0005_user_opencode_keys.sql",
 ];
 
 /** Locates apps/backend/drizzle from src/ or dist/ layouts (CJS __dirname). */
@@ -80,7 +81,7 @@ function drizzleDir(): string {
 }
 
 /**
- * Applies drizzle/0001..0004 in file order (node-pg runs multi-statement
+ * Applies drizzle/0001..0005 in file order (node-pg runs multi-statement
  * scripts in one query; files are IF NOT EXISTS idempotent).
  */
 export async function applyTestMigrations(url: string): Promise<void> {

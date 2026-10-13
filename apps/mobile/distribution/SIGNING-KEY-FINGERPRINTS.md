@@ -50,7 +50,6 @@ apksigner verify --print-certs path/to/app-release.apk | grep SHA-256
 
 | Channel | Format needed | Location |
 |---------|--------------|----------|
-| F-Droid `AllowedAPKSigningKeys` | lowercase hex, no colons | `distribution/fdroid-submission/metadata.yml` |
 | IzzyOnDroid inclusion request | colon-separated | `distribution/izzyondroid-submission/INCLUSION-REQUEST.md` |
 | Google Play App Signing | uploaded via console | (Play manages separately if App Signing enabled) |
 

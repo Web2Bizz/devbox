@@ -12,3 +12,6 @@ npm-debug.log*
 **/.graphify
 **/tmp/opencode
 **/.opencode/.cache
+apps/mobile
+images/
+contracts/

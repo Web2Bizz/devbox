@@ -127,6 +127,27 @@ export const users = pgTable("users", {
 
 export type UserRow = typeof users.$inferSelect;
 
+/**
+ * Per-user OpenCode API keys (durable contract; see
+ * drizzle/0005_user_opencode_keys.sql). One row per user (user_id is both
+ * PK and FK → users(id) ON DELETE CASCADE, so deleting a user drops their
+ * key). The API key itself is stored ONLY as AES-256-GCM ciphertext
+ * (encrypted_key = base64(ct || tag), iv = base64(iv)) — plaintext never
+ * touches the DB, the logs, or the wire back to the client.
+ */
+export const userOpencodeKeys = pgTable("user_opencode_keys", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  encryptedKey: text("encrypted_key").notNull(),
+  iv: text("iv").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export type UserOpencodeKeyRow = typeof userOpencodeKeys.$inferSelect;
+
 export type GithubInstallationRow = typeof githubInstallations.$inferSelect;
 
 /**

@@ -8,6 +8,7 @@
 FROM oven/bun:1.4.2 AS deps
 WORKDIR /app
 COPY package.json bun.lock* bunfig.toml .npmrc .bun-version ./
+COPY apps/backend/package.json ./apps/backend/
 COPY apps/frontend/package.json ./apps/frontend/
 RUN --mount=type=secret,id=NPM_TOKEN,env=NPM_TOKEN bun install
 

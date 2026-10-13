@@ -89,63 +89,75 @@ describe('auth-schemas (client zod, before submit)', () => {
   });
 });
 
-describe('login page 400 wiring (source contract)', () => {
+describe('login page 400 wiring (source contract, RHF+zod)', () => {
   const loadSource = () =>
     Bun.file(new URL('./page.tsx', import.meta.url).pathname).text();
 
-  test('keeps fieldErrors state and 400 branch', async () => {
+  test('maps server 400 to RHF setError branch', async () => {
     const source = await loadSource();
-    expect(source).toContain('fieldErrors');
-    expect(source).toContain('err.status === 400');
     expect(source).toContain('parseRegisterFieldErrors');
+    expect(source).toContain('e.status === 400');
+    expect(source).toContain("setError('root'");
+    expect(source).toContain('setError(k,');
   });
 
   test('renders FieldError under each field with aria-invalid', async () => {
     const source = await loadSource();
-    expect(source).toContain('<FieldError>{fieldErrors.email}</FieldError>');
-    expect(source).toContain('<FieldError>{fieldErrors.password}</FieldError>');
-    expect(source).toContain('<FieldError>{fieldErrors.firstName}</FieldError>');
-    expect(source).toContain('aria-invalid');
+    expect(source).toContain('<FieldError>{t.validation.invalidEmailDetailed}</FieldError>');
+    expect(source).toContain('<FieldError>{t.validation.passwordMin}</FieldError>');
+    expect(source).toContain('<FieldError>{t.validation.nameRequired}</FieldError>');
+    expect(source).toContain('{errors.email.message ?? t.validation.invalidEmailDetailed}');
+    expect(source).toContain('aria-invalid={!!errors.email}');
+    expect(source).toContain('aria-invalid={!!errors.password}');
+    expect(source).toContain('aria-invalid={!!errors.firstName}');
   });
 
-  test('keeps 409 emailTaken in the top Alert', async () => {
+  test('keeps 409 emailTaken in the top Alert via root error', async () => {
     const source = await loadSource();
-    expect(source).toContain("err.code === 'email_taken'");
+    expect(source).toContain("e.code === 'email_taken'");
     expect(source).toContain('t.validation.emailTaken');
+    expect(source).toContain("setError('root'");
+    expect(source).toContain('<Alert variant="destructive">');
+    expect(source).toContain('{errors.root.message}');
   });
 
   test('dev defaults removed, neutral placeholders, client zod before submit', async () => {
     const source = await loadSource();
     expect(source).not.toContain('dev@devbox.local');
-    expect(source).not.toContain('password123');
-    expect(source).toContain("useState('')");
+    expect(source).not.toContain("defaultValues: { email: 'dev@devbox.local'");
+    expect(source).toContain("defaultValues: { email: '', password: '' }");
     expect(source).toContain('name@example.com');
     expect(source).toContain('At least 8 characters');
-    expect(source).toContain('registerSchema.safeParse');
+    expect(source).toContain('zodResolver(loginSchema)');
+    expect(source).toContain('zodResolver(registerSchema)');
+    expect(source).toContain("mode: 'onChange'");
     // Server 400/409 mapping stays as fallback after the client check.
     expect(source).toContain('parseRegisterFieldErrors');
-    expect(source).toContain("err.code === 'email_taken'");
+    expect(source).toContain("e.code === 'email_taken'");
+    // Login/register mode switcher is the only useState string state.
+    expect(source).toContain("useState<'login' | 'register'>('login')");
   });
 
-  test('useLogin validates via zod instead of manual checks', async () => {
+  test('useLogin maps invalid_credentials without manual checks', async () => {
     const source = await Bun.file(
       new URL('../../../src/hooks/useLogin.ts', import.meta.url).pathname,
     ).text();
-    expect(source).toContain('loginSchema.safeParse');
+    // Client-side zod lives in page.tsx (RHF resolvers); the hook only maps server codes.
+    expect(source).toContain('api.login');
+    expect(source).toContain("e.code === 'invalid_credentials'");
+    expect(source).toContain('t.validation.invalidCredentials');
     expect(source).not.toContain("includes('@')");
     expect(source).not.toContain('password.length < 8');
+    expect(source).not.toContain('loginSchema');
   });
-  test('shows diagnosticId with short correlationId and Copy', async () => {
+  test('surfaces server errors via root Alert (no diagnosticId)', async () => {
     const source = await loadSource();
-    expect(source).toContain('t.errors.diagnosticId');
-    expect(source).toContain('correlationId.slice(0, 8)');
-    expect(source).toContain('console.error');
-    // console.error carries only code + correlationId (no secrets).
-    const logLines = source
-      .split('\n')
-      .filter((l) => l.includes('console.error'))
-      .join('\n');
-    expect(logLines).not.toContain('password');
-    expect(logLines).not.toContain('token');
+    expect(source).toContain("setError('root'");
+    expect(source).toContain('errors.root');
+    expect(source).toContain('{errors.root.message}');
+    expect(source).toContain('<Alert variant="destructive">');
+    // Removed diagnosticId/Copy UX is intentionally gone — errors go to the Alert.
+    expect(source).not.toContain('diagnosticId');
+    expect(source).not.toContain('correlationId');
   });
 });

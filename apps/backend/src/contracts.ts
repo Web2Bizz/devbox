@@ -128,11 +128,16 @@ export interface AuthSession extends AuthTokens {
   user: AuthUser;
 }
 
-/** PUT / DELETE /api/v1/opencode/key result (carries no secret). */
+/** PUT /api/v1/opencode/key result (carries no secret). */
 export interface OpencodeKeyResult {
   ok: boolean;
   /** ISO-8601 timestamp */
   updatedAt: string;
+}
+
+/** DELETE /api/v1/opencode/key result (idempotent, no timestamp). */
+export interface OpencodeKeyDeleteResult {
+  ok: boolean;
 }
 
 /** GET /api/v1/opencode/key — whether the caller has a key stored. */

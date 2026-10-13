@@ -22,6 +22,7 @@ import { opencodeKeySchema, type OpencodeKeyInput } from "./dto.js";
 import { OpencodeBillingService } from "./opencode-billing.service.js";
 import {
   OpencodeKeyBodyDto,
+  OpencodeKeyDeleteResultDto,
   OpencodeKeyResultDto,
   OpencodeKeyStatusDto,
   OpencodeUsageDto,
@@ -114,12 +115,12 @@ export class OpencodeKeysController {
   @Delete("key")
   @Version("1")
   @V1Endpoint("Delete your stored OpenCode API key")
-  @ApiResponse({ status: 200, type: OpencodeKeyResultDto })
+  @ApiResponse({ status: 200, type: OpencodeKeyDeleteResultDto })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
   async deleteKey(
     @ReqUser() identity: RequestIdentity,
     @Req() req?: { correlationId?: string },
-  ): Promise<{ ok: boolean }> {
+  ): Promise<OpencodeKeyDeleteResultDto> {
     await this.keys.deleteByUserId(this.ownUserId(identity), req?.correlationId);
     return { ok: true };
   }

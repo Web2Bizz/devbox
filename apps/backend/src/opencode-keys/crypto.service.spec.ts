@@ -30,7 +30,8 @@ async function main(): Promise<void> {
     assert.fail("expected throw");
   };
   let passed = 0;
-  const check = (name: string, fn: () => void): void => {    try {
+  const check = (name: string, fn: () => void): void => {
+    try {
       fn();
       passed += 1;
       console.log(`ok - ${name}`);

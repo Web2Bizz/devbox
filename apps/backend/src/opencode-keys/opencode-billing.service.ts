@@ -49,14 +49,19 @@ export class OpencodeBillingService {
   ) {}
 
   private billingUrl(): string {
-    try {
-      return validateEnv(process.env).opencodeBillingUrl;
-    } catch {
-      // Read-only fallback for the outbound target (never logged); request
-      // validation failures still fail fast at boot via ConfigModule.
-      return DEFAULT_OPENCODE_BILLING_URL;
-    }
+  const raw = (process.env.OPENCODE_BILLING_URL ?? "").trim();
+  // Unset → documented read-only default (never logged); set-but-invalid
+  // must fail fast instead of silently masking a config error.
+  if (!raw) return DEFAULT_OPENCODE_BILLING_URL;
+  try {
+    return validateEnv(process.env).opencodeBillingUrl;
+  } catch (err) {
+    this.logger.warn(
+      "[opencode-billing] invalid OPENCODE_BILLING_URL, refusing silent fallback",
+    );
+    throw err;
   }
+}
 
   async getUsage(userId: string, correlationId?: string): Promise<OpencodeUsage> {
     const stored = await this.keys.findByUserId(userId, correlationId);

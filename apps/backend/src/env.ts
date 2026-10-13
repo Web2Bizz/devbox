@@ -26,6 +26,14 @@ export interface AppEnv {
   opencodeUrl: string;
   /** Optional bearer token for the opencode server ('' = unauthenticated; never logged). */
   opencodeToken: string;
+  /**
+   * Server secret for per-user OpenCode API-key encryption at rest
+   * ('' = unconfigured — key endpoints answer 500; explicit values must be
+   * ≥ 32 chars; never logged).
+   */
+  opencodeKeysEncryptionKey: string;
+  /** Upstream usage endpoint (GET, per-user Bearer; never carries secrets). */
+  opencodeBillingUrl: string;
   /** May be '' when no credentials/host configured — pg stub stays skipped. */
   databaseUrl: string;
   corsOrigins: string[];
@@ -276,6 +284,8 @@ export const envRawSchema = z.object({
   JWT_REFRESH_TTL: z.string().optional(),
   AUTH_LEGACY_MOCK_FALLBACK: z.string().optional(),
   ORG_INVITE_TTL_SEC: z.string().optional(),
+  OPENCODE_KEYS_ENCRYPTION_KEY: z.string().optional(),
+  OPENCODE_BILLING_URL: z.string().optional(),
 });
 
 export type EnvRaw = z.infer<typeof envRawSchema>;
@@ -303,6 +313,18 @@ export const DEFAULT_JWT_REFRESH_TTL_SEC = 604800;
 
 /** Default organization invite-token TTL (24h, in seconds). */
 export const DEFAULT_ORG_INVITE_TTL_SEC = 86400;
+
+/**
+ * Default upstream OpenCode usage endpoint (GET with per-user Bearer).
+ * WARNING: unverified — no public billing/usage path was discoverable on
+ * opencode.ai (probed 2026-10-13: /api/*usage, /zen/v1/*usage, api.opencode.ai
+ * catch-all 200 "Not Found"). Override via OPENCODE_BILLING_URL in .env when
+ * the real endpoint is known (see .env.example).
+ */
+export const DEFAULT_OPENCODE_BILLING_URL = "https://api.opencode.ai/usage";
+
+/** Minimum OPENCODE_KEYS_ENCRYPTION_KEY length (AES-256 key material, SHA-256 derived). */
+export const MIN_OPENCODE_KEYS_ENCRYPTION_KEY_LENGTH = 32;
 
 /** Minimum explicit JWT secret length (dev ephemeral fallback bypasses this). */
 export const MIN_JWT_SECRET_LENGTH = 32;
@@ -673,6 +695,53 @@ export function validateEnvWithWarnings(
 
   // --- opencode auth (optional bearer; never echoed in errors/logs) ----------
   const opencodeToken = firstNonEmpty(env.OPENCODE_TOKEN);
+
+  // --- per-user OpenCode keys (encryption secret + billing endpoint) ---------
+  // The encryption secret is REQUIRED for key storage but stays optional at
+  // boot (fail-fast happens at use-time in CryptoService, never here): an
+  // unset secret WARNs and key endpoints answer 500 opencode_keys_unconfigured
+  // instead of breaking every other suite at boot. An explicit secret shorter
+  // than 32 chars is ERROR (value never echoed — it is key material).
+  // Rotation is out of scope: one key per deploy, no re-encrypt (see .env.example).
+  const opencodeKeysEncryptionKeyRaw = firstNonEmpty(
+    env.OPENCODE_KEYS_ENCRYPTION_KEY,
+  );
+  let opencodeKeysEncryptionKey = "";
+  if (opencodeKeysEncryptionKeyRaw) {
+    if (
+      opencodeKeysEncryptionKeyRaw.length <
+      MIN_OPENCODE_KEYS_ENCRYPTION_KEY_LENGTH
+    ) {
+      throw new Error(
+        `[env] OPENCODE_KEYS_ENCRYPTION_KEY must be at least ${MIN_OPENCODE_KEYS_ENCRYPTION_KEY_LENGTH} chars (see .env.example).`,
+      );
+    }
+    opencodeKeysEncryptionKey = opencodeKeysEncryptionKeyRaw;
+  } else {
+    warn(
+      "[env] WARN OPENCODE_KEYS_ENCRYPTION_KEY is not configured — " +
+        "per-user OpenCode key endpoints answer 500 opencode_keys_unconfigured. " +
+        "Set it explicitly (see .env.example).",
+    );
+  }
+  // Billing endpoint: full-URL knob so the unverified default path can be
+  // corrected without a code change. Set-but-invalid URL is ERROR (fail-fast
+  // like OPENCODE_URL); empty → default + WARN. Read-only config (outbound
+  // GET target, carries no secrets itself).
+  const opencodeBillingRaw = firstNonEmpty(env.OPENCODE_BILLING_URL);
+  let opencodeBillingUrl: string;
+  if (opencodeBillingRaw) {
+    opencodeBillingUrl = assertValidUrl(
+      opencodeBillingRaw,
+      "OPENCODE_BILLING_URL",
+    );
+  } else {
+    opencodeBillingUrl = DEFAULT_OPENCODE_BILLING_URL;
+    warn(
+      "[env] WARN OPENCODE_BILLING_URL is unset, falling back to " +
+        `${DEFAULT_OPENCODE_BILLING_URL} (unverified default, see .env.example).`,
+    );
+  }
 
   // --- database --------------------------------------------------------------
   // NOTE: explicit value passes through untouched; never echoed in errors/logs.
@@ -1359,6 +1428,8 @@ export function validateEnvWithWarnings(
       backendSocket,
       opencodeUrl,
       opencodeToken,
+      opencodeKeysEncryptionKey,
+      opencodeBillingUrl,
       databaseUrl,
       corsOrigins,
       requestTimeoutMs,

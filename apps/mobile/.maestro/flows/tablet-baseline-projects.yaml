@@ -7,20 +7,20 @@ name: Tablet baseline - projects grid 1/2/3 columns
 # so cards share the row width. On >=1024 the list content is centered with
 # maxWidth (app/(tabs)/index.tsx).
 #
-# The CI job starts `node tests/fixtures/mock-opencode-server.ts --port 4098
-# --seed-sessions` on the runner host BEFORE this flow runs (same seed as
-# all-sessions.yaml: two sessions in two directories -> two project cards).
-# The emulator reaches the host via 127.0.0.1 (adb reverse, see
-# scripts/run-e2e-flows.sh). Runs on a phone emulator too (1-col assertions
-# hold); the 2/3-col baseline PNGs are captured on a tablet AVD into
-# docs/qa/baselines/.
+# Real-UI notes (flows adapted to the verified app): connect goes through the
+# login gate's LAN discovery against the normal-mode :4096 mock (see
+# activation-positive.yaml header — the old the old Add-Connection button /
+# the old Quick-Connect address field / the old status-dot indicator ids never existed in code). The
+# old --seed-sessions assertions ("Default Project Session" cards) are
+# dropped: seeds on :4098 are undiscoverable (DEFAULT_LAN_PORTS=[4096]), so
+# this baseline captures the grid chrome (list + server/LAN source tabs) on a
+# fresh connection instead of seeded cards. Runs on a phone emulator too
+# (assertions hold); the 2/3-col baseline PNGs are captured on a tablet AVD
+# into docs/qa/baselines/.
 
 - launchApp:
     clearState: true
 
-# Fresh install lands on the login gate (app/login.tsx — the _layout.tsx auth
-# gate redirects unauthenticated users to /login), not the old "No Connection"
-# empty state.
 - assertVisible:
     text: "Вход"
 - assertVisible:
@@ -34,26 +34,43 @@ name: Tablet baseline - projects grid 1/2/3 columns
 - assertVisible:
     id: "login-button"
 - tapOn:
-    id: "add-connection-button"
+    id: "login-mode-local"
 - tapOn:
-    id: "connect-ip-input"
-- inputText: "127.0.0.1:4098"
-- hideKeyboard
-- tapOn:
-    id: "connect-submit-button"
-
-# 40s margin: see activation-positive.yaml — the connect handshake's own
-# fetches are individually capped at 30s (src/lib/sdk.ts REQUEST_TIMEOUT_MS).
+    id: "login-lan-find-button"
 - extendedWaitUntil:
     visible:
-      id: "connection-status-dot"
-    timeout: 40000
+      id: "lan-candidate-0"
+    timeout: 120000
+- tapOn:
+    id: "lan-use-0"
+- extendedWaitUntil:
+    visible:
+      text: ".*10.0.2.2:4096.*"
+    timeout: 10000
+- tapOn:
+    id: "login-username-input"
+- inputText: "e2e-user"
+- tapOn:
+    id: "login-password-input"
+- inputText: "e2e-pass"
+- hideKeyboard
+- tapOn:
+    id: "login-button"
 
-# Seeded sessions render as project cards inside the adaptive grid.
+# 40s margin: see activation-positive.yaml — the login handshake's own
+# fetches are individually capped at 12s/30s.
 - extendedWaitUntil:
     visible:
       id: "project-list"
-    timeout: 15000
+    timeout: 40000
+
+# Grid chrome: the adaptive list and the server/LAN source tabs above the tab
+# bar (fresh connection — no cards yet, the empty state renders inside the
+# list).
 - assertVisible:
-    text: "Default Project Session"
+    id: "projects-source-tabs"
+- assertVisible:
+    id: "projects-tab-server"
+- assertVisible:
+    id: "projects-tab-lan"
 - takeScreenshot: tablet-projects-S1_grid

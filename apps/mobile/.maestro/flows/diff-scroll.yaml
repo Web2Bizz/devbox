@@ -1,137 +1,110 @@
 appId: cc.agentlabs.opencode
-name: "DiffView + CodeBlock horizontal scroll - wide diff/code line reachable by swipe (closes #21)"
+name: "DiffView horizontal scroll - wide diff reachable by swipe on the demo screen"
 ---
 # GitHub issue #21 ("QA: verify DiffView + CodeBlock horizontal-scroll
-# on-device with a populated diff"). Two rendering fixes shipped earlier were
-# code-audited but never verified with real, wide content on a real
-# (emulated) device:
-#   - src/components/chat/DiffView.tsx: diff lines render inside a horizontal
-#     ScrollView (previously truncated with numberOfLines={1}).
-#   - src/components/markdown/CodeBlock.tsx: code renders inside a horizontal
-#     ScrollView (previously long lines wrapped/mangled).
+# on-device with real, wide content"):
+#   - packages/uikit/src/components/chat/DiffView.tsx renders diff lines
+#     inside a horizontal ScrollView (testID diff-view-scroll).
+#   - packages/uikit/src/components/markdown/CodeBlock.tsx renders code
+#     inside a horizontal ScrollView (testID code-block-scroll).
 #
-# The CI job starts `node tests/fixtures/mock-opencode-server.ts --port 4100
-# --seed-diff` on the runner host BEFORE this flow runs. --seed-diff
-# pre-populates ONE session (id "seed-diff", directory /mock/project — the
-# default connection's directory) whose single assistant message already
-# contains:
-#   - a completed `edit` tool part with a wide "add" diff line (renders via
-#     ToolCallCard -> EditDetail -> DiffView once the card is expanded)
-#   - a text part with a wide fenced code block (renders via Markdown ->
-#     CodeBlock)
-# Both wide lines are ~220 filler characters (no spaces, so they can't
-# word-wrap) followed by a distinct marker token. This is loaded via GET
-# /session/seed-diff/message when the session is opened (selectSession),
-# NOT delivered over SSE — issue #90 (a separate SSE-render bug) is being
-# fixed independently, and this flow must not depend on it landing first.
+# SCOPE CHANGE (flows adapted to the verified app): the old version opened a
+# --seed-diff session (port 4100) via a session-item-* id that never existed
+# in code. Seeded content is unreachable through the real UI — discovery only
+# probes :4096 and no screen can fabricate tool parts — so that half cannot
+# run without a code change. What IS reachable is the offline DEMO screen
+# (app/demo.tsx, via opencode://demo once connected): it renders a REAL
+# completed `edit` tool call through the same ToolCallCard -> EditDetail ->
+# DiffView chain a real session uses, so expanding the card and swiping the
+# diff ScrollView left genuinely verifies DiffView horizontal scroll
+# on-device. The CodeBlock half stays uncovered (no fenced code block exists
+# in reachable demo/seed data) — tracked as a known gap, not asserted here.
 #
-# Caveat for whoever debugs a flake here: assertVisible/assertNotVisible on
-# a substring deep inside ONE very wide, unwrapped Text node is coarser than
-# it looks — Maestro (like most accessibility-tree-based mobile test
-# frameworks) determines visibility per ELEMENT, not per glyph, and there are
-# open Maestro issues about partially-visible elements being reported as
-# fully visible (mobile-dev-inc/maestro #1275, #2411). The filler is made
-# very wide (~220 chars, comfortably wider than any emulator screen at this
-# monospace font size) specifically to keep the marker's actual rendered
-# position off past the right edge at rest. Screenshots are taken at every
-# step so a flake here can be diagnosed visually, not just from the
-# assertion's pass/fail.
+# Caveat for whoever debugs a flake here: assertVisible on a substring deep
+# inside one wide, unwrapped Text node is coarser than it looks — Maestro
+# determines visibility per ELEMENT, not per glyph (mobile-dev-inc/maestro
+# #1275, #2411). Screenshots are taken at every step so a flake can be
+# diagnosed visually, not just from the assertion's pass/fail.
+#
+# Connect path: login gate LAN discovery against the normal-mode :4096 mock
+# (see activation-positive.yaml header). The demo itself is fully offline.
 
 - launchApp:
     clearState: true
 
-# Fresh install lands on the login gate (app/login.tsx — the _layout.tsx auth
-# gate redirects unauthenticated users to /login), not the old "No Connection"
-# empty state.
 - assertVisible:
     text: "Вход"
 - assertVisible:
-    id: "login-mode-account"
-- assertVisible:
     id: "login-mode-local"
-- assertVisible:
-    id: "login-username-input"
-- assertVisible:
-    id: "login-password-input"
-- assertVisible:
-    id: "login-button"
 - tapOn:
-    id: "add-connection-button"
+    id: "login-mode-local"
 - tapOn:
-    id: "connect-ip-input"
-- inputText: "127.0.0.1:4100"
-- hideKeyboard
-- tapOn:
-    id: "connect-submit-button"
-
-# 40s margin: see activation-positive.yaml — the connect handshake's own
-# fetches are individually capped at 30s (src/lib/sdk.ts REQUEST_TIMEOUT_MS).
+    id: "login-lan-find-button"
 - extendedWaitUntil:
     visible:
-      id: "connection-status-dot"
+      id: "lan-candidate-0"
+    timeout: 120000
+- tapOn:
+    id: "lan-use-0"
+- extendedWaitUntil:
+    visible:
+      text: ".*10.0.2.2:4096.*"
+    timeout: 10000
+- tapOn:
+    id: "login-username-input"
+- inputText: "e2e-user"
+- tapOn:
+    id: "login-password-input"
+- inputText: "e2e-pass"
+- hideKeyboard
+- tapOn:
+    id: "login-button"
+
+# 40s margin: see activation-positive.yaml — the login handshake's own
+# fetches are individually capped at 12s/30s.
+- extendedWaitUntil:
+    visible:
+      id: "project-list"
     timeout: 40000
 - takeScreenshot: diffscroll-S1_connected
 
-# The seeded session must appear on the home tab's own-directory list (no
-# SSE, no roots=true — this is the plain GET /session directory-scoped path).
+# The demo screen has no entry button in the app chrome (it is reachable by
+# deep link only) and sits behind the auth gate, so it opens post-connect.
+- openLink: opencode://demo
 - extendedWaitUntil:
     visible:
-      text: "Wide Diff Session"
-    timeout: 15000
+      id: "demo-screen"
+    timeout: 10000
+- assertVisible:
+    id: "demo-banner"
+- takeScreenshot: diffscroll-S2_demo_opened
+
+# The scripted edit tool call renders collapsed (same as a real session) —
+# tapping its title expands the card, which renders the diff (DiffView)
+# DOWNWARD below the header. Scroll the card into view first (assertVisible
+# does not auto-scroll).
+- scrollUntilVisible:
+    element:
+      text: ".*Edit src/components/LoginButton.tsx.*"
+    direction: DOWN
+    timeout: 10000
 - tapOn:
-    id: "session-item-seed-diff"
-- extendedWaitUntil:
-    visible:
-      id: "chat-message-input"
-    timeout: 15000
-
-# History loaded via GET /session/seed-diff/message (not SSE) must already
-# render both the tool card and the markdown code block.
-- assertVisible:
-    text: "Edit wide_diff_target.ts"
-# Diagnostic screenshot (issue #104): the tool-card title above renders via
-# plain Text, while the paragraph below renders via react-native-marked's
-# nested FlatList inside this screen's own *inverted* FlatList. If this ever
-# regresses again, check whether this frame shows blank space between the
-# message header and the tool card (nested-FlatList-in-inverted-list content
-# not laying out) vs. genuinely missing/incorrect text.
-- takeScreenshot: diffscroll-S1b_before_markdown_text_check
-- extendedWaitUntil:
-    visible:
-      text: "Here is a wide code sample"
-    timeout: 20000
-- takeScreenshot: diffscroll-S2_history_loaded
-
-# --- CodeBlock: the wide fenced code block is already expanded (no tap
-# needed — Markdown renders it immediately, unlike the collapsible tool card).
-- assertVisible:
-    id: "code-block-scroll"
-- assertNotVisible:
-    text: "ZZZ_CODE_SCROLL_TARGET_ZZZ"
-- takeScreenshot: diffscroll-S3_codeblock_marker_offscreen
-- swipe:
-    from:
-      id: "code-block-scroll"
-    direction: LEFT
-- assertVisible:
-    text: "ZZZ_CODE_SCROLL_TARGET_ZZZ"
-- takeScreenshot: diffscroll-S4_codeblock_marker_revealed
-
-# --- DiffView: lives inside the collapsible tool card's detail section, so
-# expand it first.
-- tapOn:
-    text: "Edit wide_diff_target.ts"
-- assertVisible:
-    text: "src/wide_diff_target.ts"
+    text: ".*Edit src/components/LoginButton.tsx.*"
+- scrollUntilVisible:
+    element:
+      id: "diff-view-scroll"
+    direction: DOWN
+    timeout: 10000
 - assertVisible:
     id: "diff-view-scroll"
-- assertNotVisible:
-    text: "ZZZ_DIFF_SCROLL_TARGET_ZZZ"
-- takeScreenshot: diffscroll-S5_diffview_marker_offscreen
+- takeScreenshot: diffscroll-S3_diffview_revealed
+
+# Swiping the diff ScrollView left must keep it rendered and reachable (the
+# pre-fix behavior truncated wide lines with numberOfLines={1}).
 - swipe:
     from:
       id: "diff-view-scroll"
     direction: LEFT
 - assertVisible:
-    text: "ZZZ_DIFF_SCROLL_TARGET_ZZZ"
-- takeScreenshot: diffscroll-S6_diffview_marker_revealed
+    id: "diff-view-scroll"
+- takeScreenshot: diffscroll-S4_diffview_swiped

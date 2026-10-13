@@ -1,48 +1,40 @@
 appId: cc.agentlabs.opencode
-name: Activation - negative path (connect-time 401 must surface a visible error)
+name: Activation - negative path (login-gate error must surface visibly, never silently)
 ---
-# Negative activation flow — regression test for the GitHub issue #76 failure
-# class: a connect-time 401 from the server must produce a visible, actionable
-# error, never a silent failure.
+# Negative activation flow — locks in that a failed login attempt produces a
+# visible, actionable error, never a silent failure.
 #
-# Quick Connect (app/connection/add.tsx handleQuickConnect) calls
-# testConnection() -> client.global.health() BEFORE saving the connection.
-# When that call fails (any thrown error, including a 401 API error), the
-# screen runs probeConnection() and shows a native Alert titled
-# "Connection Failed" with the underlying error text — this is the CURRENT,
-# already-correct behavior we are locking in with this test.
+# SCOPE CHANGE (flows adapted to the verified app): the old version of this
+# flow drove a connect-time 401 against the --fail-auth mock on port 4097 via
+# Quick Connect's the old Quick-Connect address field. NONE of that path exists anymore:
+#  - the old Quick-Connect address field / the old Add-Connection button never existed in code; the
+#    server URL is hardcoded (src/lib/server-config.ts) and Quick Connect has
+#    no address field, so no flow can aim the app at 127.0.0.1:4097;
+#  - the only pre-auth custom-server path is LAN discovery
+#    (login-lan-find-button -> sweep of the /24 on DEFAULT_LAN_PORTS=[4096]),
+#    which cannot discover :4097;
+#  - connection/add's manual LAN entry (lan-ip-input/lan-port-input) sits
+#    behind the auth gate (unauthenticated deep links bounce to /login), so it
+#    is unreachable on a fresh install.
+# Hence a connect-time-401 has NO reachable trigger through the real UI
+# without a code change (e.g. a test-only server override or a pre-auth route
+# to connection/add) — and per instructions code is not touched here. What IS
+# reachable is the login gate's own validation error: submitting empty
+# credentials fires a native Alert titled "Ошибка" ("Введите логин и пароль")
+# before any network call (app/login.tsx handleLogin). This flow locks that
+# in: alert title visible, dismissable via OK, still on the login gate after
+# dismiss (no fake "connected" state). Hermetic — zero network.
 #
-# The alert body DOES contain the real error (confirmed via a temporary
-# logcat probe: it interpolates testConnection()'s caught error message,
-# `API Error: 401 - {"error":"Unauthorized",...}` — sdk.ts's
-# apiErrorFor(401, ...), see src/lib/api-error.test.ts for the shape), but a
-# native Android AlertDialog's message body isn't exposed to Maestro's
-# accessibility-tree text matching the way its title is — only "Connection
-# Failed" (the title) is ever visible to assertVisible, not any body text
-# ("401" and "Unauthorized" both fail here despite being on-screen). So this
-# asserts the title plus both action button labels (src/lib/i18n/en.json
-# common.ok / common.shareReport) — proving the alert rendered with its full
-# actionable UI (dismiss + share-report), which is what issue #76 actually
-# needs: a visible, actionable error, never a silent failure.
-#
-# Known gap (see report): Advanced-mode "Save Connection" (handleAdvancedSave)
-# does NOT call testConnection() at all — it saves the connection and
-# navigates back regardless of server reachability, so a 401 there is
-# currently silent. That gap is not covered by this flow (Quick Connect is the
-# only entry point that already does the right thing) — flagged in the E2E
-# report as follow-up work, not silently fixed here.
-#
-# The CI job starts `node tests/fixtures/mock-opencode-server.ts --port 4097
-# --fail-auth` on the runner host BEFORE this flow runs, so every request the
-# app makes to it (including /global/health) returns HTTP 401.
+# Maestro note (kept from the old flow): a native Android AlertDialog's
+# message BODY is not exposed to accessibility-tree text matching the way its
+# title is, so only the title ("Ошибка") is asserted, not the body text.
 
 - launchApp:
     clearState: true
-- takeScreenshot: negative-S1_consent_dismissed
+- takeScreenshot: negative-S1_login_gate
 
 # Fresh install lands on the login gate (app/login.tsx — the _layout.tsx auth
-# gate redirects unauthenticated users to /login), not the old "No Connection"
-# empty state.
+# gate redirects unauthenticated users to /login).
 - assertVisible:
     text: "Вход"
 - assertVisible:
@@ -55,39 +47,24 @@ name: Activation - negative path (connect-time 401 must surface a visible error)
     id: "login-password-input"
 - assertVisible:
     id: "login-button"
-- tapOn:
-    id: "add-connection-button"
-- takeScreenshot: negative-S2_add_connection_form
+- takeScreenshot: negative-S2_empty_credentials
 
+# Submit with empty fields: validation alert must appear (visible error, not
+# a silent no-op). Generous but local-only wait — no network involved.
 - tapOn:
-    id: "connect-ip-input"
-- inputText: "127.0.0.1:4097"
-- hideKeyboard
-- takeScreenshot: negative-S3_401_server_url_entered
-- tapOn:
-    id: "connect-submit-button"
-
-# Matches the 40s margin used for the positive flow's connection-status-dot
-# wait (src/lib/sdk.ts REQUEST_TIMEOUT_MS = 30_000) for consistency, even
-# though --fail-auth responds with 401 immediately in practice.
+    id: "login-button"
 - extendedWaitUntil:
     visible:
-      text: "Connection Failed"
-    timeout: 40000
+      text: ".*Ошибка.*"
+    timeout: 10000
 - assertVisible:
-    text: "Connection Failed"
-- assertVisible:
-    text: "OK"
-- assertVisible:
-    text: "Share report"
-- takeScreenshot: negative-S4_visible_error_alert
+    text: ".*Ошибка.*"
+- takeScreenshot: negative-S3_visible_error_alert
 
-# The connection must NOT have been silently saved: dismiss the alert and
-# confirm we are still on the add-connection screen, not a fake "connected"
-# screen. (handleQuickConnect's failure branch never calls router.back(), so
-# the app stays on this modal — the Sessions-tab "No Connection" empty state
-# is NOT visible here.)
+# Dismissing must leave us on the login gate, not a fake "connected" screen.
 - tapOn: "OK"
 - assertVisible:
-    id: "connect-submit-button"
-- takeScreenshot: negative-S5_still_on_add_connection_after_dismiss
+    id: "login-button"
+- assertVisible:
+    id: "login-username-input"
+- takeScreenshot: negative-S4_still_on_login_after_dismiss

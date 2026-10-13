@@ -1,15 +1,31 @@
 appId: cc.agentlabs.opencode
 name: Activation - positive path (connect -> send message)
 ---
-# Positive activation flow: first launch -> quick connect
-# to the mock opencode server (tests/fixtures/mock-opencode-server.ts, run
-# normally on the port below) -> connected indicator -> new session -> send a
-# message -> assert it sends (optimistic echo), WITHOUT waiting for the
-# SSE-streamed reply. See "Why no reply assertion" below.
+# Positive activation flow: first launch -> login gate -> LAN discovery finds
+# the mock opencode server (tests/fixtures/mock-opencode-server.ts, normal
+# mode on port 4096) -> local login -> projects -> new session via the folder
+# browser -> send a message -> assert it sends (optimistic echo), WITHOUT
+# waiting for the SSE-streamed reply. See "Why no reply assertion" below.
 #
-# The CI job starts `node tests/fixtures/mock-opencode-server.ts --port 4096`
-# on the runner host BEFORE this flow runs. The Android emulator reaches the
-# runner host via the standard emulator alias 127.0.0.1.
+# Real-UI notes (flows adapted to the verified app — only testIDs that exist
+# in code are used):
+# - Fresh install lands on the login gate (app/login.tsx). There is NO
+#   the old Add-Connection button and NO the old Quick-Connect address field anywhere in the app: the
+#   main server URL is hardcoded (src/lib/server-config.ts) and Quick Connect
+#   has no address field. A custom server is reachable pre-auth ONLY as a LAN
+#   entry: login "Local server" mode -> "Find server on LAN"
+#   (login-lan-find-button) -> LanDiscoveryModal sweep -> "Use" (lan-use-N).
+# - The sweep probes the emulator's /24 on DEFAULT_LAN_PORTS ([4096]) with a
+#   32-wide worker pool, so the mock answers as 10.0.2.2:4096 (host loopback
+#   alias; the mock binds 0.0.0.0). KNOWN RISK: run-e2e-flows.sh notes
+#   10.0.2.2 was unreliable headless for its shell probes — if RN fetch to
+#   10.0.2.2 fails too, lan-candidate-0 never appears and every connect flow
+#   fails here, deterministically, with no app bug involved.
+# - "Connected" is proven by project-list rendering (app/(tabs)/index.tsx
+#   only renders it with an active, non-errored connection). The old
+#   the old status-dot indicator id never existed in code. Sessions are created via
+#   the New Project tab -> "New Session" sheet -> "Browse Folders" (the index
+#   FAB was removed; the old new-session FAB never existed).
 #
 # Why no reply assertion (issue #90 mode B — full investigation on the issue
 # and PR #102): the assistant reply is delivered over the app's SSE
@@ -45,65 +61,103 @@ name: Activation - positive path (connect -> send message)
     clearState: true
 - takeScreenshot: positive-S1_launch
 
-# Fresh install lands on the login gate (app/login.tsx — the _layout.tsx auth
-# gate redirects unauthenticated users to /login), not the old "No Connection"
-# empty state.
+# Login gate: account/local entry choice + username/password form.
 - assertVisible:
     text: "Вход"
 - assertVisible:
     id: "login-mode-account"
 - assertVisible:
     id: "login-mode-local"
+- takeScreenshot: positive-S2_login_gate
+- tapOn:
+    id: "login-mode-local"
+- assertVisible:
+    id: "login-lan-find-button"
+- tapOn:
+    id: "login-lan-find-button"
+
+# LAN sweep finds the mock as 10.0.2.2:4096. Generous timeout: a full /24
+# sweep with all-1.5s-timeouts takes ~12s+ even when nothing answers.
+- extendedWaitUntil:
+    visible:
+      id: "lan-scan-modal"
+    timeout: 10000
+- extendedWaitUntil:
+    visible:
+      id: "lan-candidate-0"
+    timeout: 120000
+- takeScreenshot: positive-S3_lan_found
+- tapOn:
+    id: "lan-use-0"
+
+# Picked server becomes the active LAN connection: local login form renders.
+- extendedWaitUntil:
+    visible:
+      text: ".*10.0.2.2:4096.*"
+    timeout: 10000
 - assertVisible:
     id: "login-username-input"
 - assertVisible:
     id: "login-password-input"
 - assertVisible:
     id: "login-button"
-- takeScreenshot: positive-S2_empty_state
+- takeScreenshot: positive-S4_local_login_form
 - tapOn:
-    id: "add-connection-button"
-
-- assertVisible:
-    id: "connect-ip-input"
-- takeScreenshot: positive-S3_add_connection_form
+    id: "login-username-input"
+- inputText: "e2e-user"
 - tapOn:
-    id: "connect-ip-input"
-- inputText: "127.0.0.1:4096"
+    id: "login-password-input"
+- inputText: "e2e-pass"
 - hideKeyboard
-- takeScreenshot: positive-S4_server_url_entered
 - tapOn:
-    id: "connect-submit-button"
+    id: "login-button"
 
-# Quick Connect fires up to 3 sequential/parallel network calls before the
-# dot renders (testConnection's health(), then addConnection's parallel
-# project.current() + path.get()), and each individual fetch is capped by
-# src/lib/sdk.ts REQUEST_TIMEOUT_MS = 30_000. A 20s wait here raced that
-# 30s client-side timeout and flaked in CI (first real run, #82) even
-# though the mock server was up and reachable. 40s gives the app's own
-# timeout room to complete; this still asserts the real thing, just with a
-# wait that isn't shorter than the code path it's waiting on.
+# Local login testConnections the LAN entry (12s client cap) then routes to
+# the projects tab. project-list only renders with an active, non-errored
+# connection, so this IS the connected assertion.
 - extendedWaitUntil:
     visible:
-      id: "connection-status-dot"
+      id: "project-list"
     timeout: 40000
-- assertVisible:
-    id: "connection-status-dot"
 - takeScreenshot: positive-S5_connected
 
+# New session via the New Project tab (tabPress opens the sheet through the
+# global UI store — app/(tabs)/_layout.tsx). Tab labels are i18n
+# (nav.newProjectTab); CI emulators run en-US so the en label holds.
 - tapOn:
-    id: "new-session-fab"
+    text: "New Project"
+- extendedWaitUntil:
+    visible:
+      text: ".*New Session.*"
+    timeout: 15000
+- takeScreenshot: positive-S6_new_session_sheet
+- tapOn:
+    id: "browse-folders-button"
+- extendedWaitUntil:
+    visible:
+      text: ".*Browse Folders.*"
+    timeout: 10000
+- extendedWaitUntil:
+    visible:
+      id: "directory-row-frontend"
+    timeout: 10000
+- takeScreenshot: positive-S7_browser_open
+# Create in the current project root (/mock/project = mock DEFAULT_DIRECTORY).
+- tapOn:
+    id: "directory-select-button"
 - extendedWaitUntil:
     visible:
       id: "chat-message-input"
     timeout: 15000
-- takeScreenshot: positive-S6_session_opened
+- assertVisible:
+    text: ".*Mock Session.*"
+- takeScreenshot: positive-S8_session_opened
 
 - tapOn:
     id: "chat-message-input"
 - inputText: "Hello from the activation e2e test"
 - hideKeyboard
-- takeScreenshot: positive-S7_message_typed
+- takeScreenshot: positive-S9_message_typed
 - tapOn:
     id: "chat-send-button"
 
@@ -114,9 +168,9 @@ name: Activation - positive path (connect -> send message)
 - extendedWaitUntil:
     visible:
       id: "chat-bubble-user"
-    timeout: 5000
+    timeout: 10000
 - assertVisible:
     id: "chat-bubble-user"
 - assertVisible:
-    text: "Hello from the activation e2e test"
-- takeScreenshot: positive-S8_message_sent
+    text: ".*Hello from the activation e2e test.*"
+- takeScreenshot: positive-S10_message_sent

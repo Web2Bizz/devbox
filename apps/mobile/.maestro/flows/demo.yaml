@@ -1,52 +1,64 @@
 appId: cc.agentlabs.opencode
 name: Demo mode - offline scripted walkthrough (no server, zero-server activation)
 ---
-# Covers the "Try a demo" activation path added for the ~0% 7-day retention
-# problem: an installer with no self-hosted `opencode serve` server used to
-# hit a dead end at the no-connection empty state (see activation-positive.yaml
-# / activation-negative-401.yaml for the "has a server" paths). This flow
-# never starts a mock opencode server and never taps add-connection-button —
-# app/demo.tsx (src/lib/demo-script.ts) is fully offline, hardcoded, local
-# data rendered through the same chat components a real session uses.
+# Covers the offline demo screen (app/demo.tsx, src/lib/demo-script.ts):
+# fully offline, hardcoded, local data rendered through the same chat
+# components a real session uses. This flow never needs a mock server for
+# the demo itself — but the demo route sits behind the auth gate, so it
+# connects first (login gate LAN discovery against the normal-mode :4096
+# mock — see activation-positive.yaml header), then opens the demo via deep
+# link (the screen has no entry button in the app chrome; the old
+# the old Try-Demo button id never existed in code).
 #
-# Verifies: the empty-state CTA exists and doesn't disturb the pre-existing
-# add-connection-button (same testID, same position — activation-positive.yaml
-# still taps it first), the demo screen renders a scripted conversation
-# (reasoning -> tool call -> diff -> permission prompt) through the real
+# Verifies: the demo screen renders a scripted conversation (reasoning ->
+# tool call -> diff -> permission prompt) through the real
 # MessageBubble/ToolCallCard/DiffView/PermissionPrompt components, the
 # permission step responds locally (no network — there is no server to talk
 # to), and the closing CTA actually routes to the real connect form
-# (app/connection/add.tsx), not a fake/dead link.
+# (app/connection/add.tsx, reachable post-auth), not a fake/dead link.
 
 - launchApp:
     clearState: true
 
-# Fresh install lands on the login gate (app/login.tsx — the _layout.tsx auth
-# gate redirects unauthenticated users to /login), not the old "No Connection"
-# empty state.
+# Login gate -> LAN discovery -> local login (real connect path).
 - assertVisible:
     text: "Вход"
 - assertVisible:
-    id: "login-mode-account"
-- assertVisible:
     id: "login-mode-local"
-- assertVisible:
-    id: "login-username-input"
-- assertVisible:
-    id: "login-password-input"
-- assertVisible:
-    id: "login-button"
-- takeScreenshot: demo-S1_empty_state
-# add-connection-button must still be the first/only thing tapped here — this
-# flow only ever taps it in this reachability check (visible, not tapped),
-# to lock in that its position wasn't disturbed by the new button.
-- assertVisible:
-    id: "add-connection-button"
 - tapOn:
-    id: "try-demo-button"
+    id: "login-mode-local"
+- tapOn:
+    id: "login-lan-find-button"
+- extendedWaitUntil:
+    visible:
+      id: "lan-candidate-0"
+    timeout: 120000
+- tapOn:
+    id: "lan-use-0"
+- extendedWaitUntil:
+    visible:
+      text: ".*10.0.2.2:4096.*"
+    timeout: 10000
+- tapOn:
+    id: "login-username-input"
+- inputText: "e2e-user"
+- tapOn:
+    id: "login-password-input"
+- inputText: "e2e-pass"
+- hideKeyboard
+- tapOn:
+    id: "login-button"
+- extendedWaitUntil:
+    visible:
+      id: "project-list"
+    timeout: 40000
+- takeScreenshot: demo-S1_connected
 
-- assertVisible:
-    id: "demo-screen"
+- openLink: opencode://demo
+- extendedWaitUntil:
+    visible:
+      id: "demo-screen"
+    timeout: 10000
 - assertVisible:
     id: "demo-banner"
 - takeScreenshot: demo-S2_demo_screen_opened
@@ -55,7 +67,7 @@ name: Demo mode - offline scripted walkthrough (no server, zero-server activatio
 # Maestro `text` matches the element's FULL text as a regex, so a phrase
 # taken from a longer message must be wrapped in `.*…*` (the user message is
 # a full sentence, not the bare phrase). Verified against a CI run where the
-# demo screen rendered correctly but this bare-substring assert failed.
+# demo screen rendered correctly but a bare-substring assert failed.
 - assertVisible:
     id: "chat-bubble-user"
 - assertVisible:
@@ -63,7 +75,7 @@ name: Demo mode - offline scripted walkthrough (no server, zero-server activatio
 - assertVisible:
     id: "chat-bubble-assistant"
 - assertVisible:
-    text: "Thinking"
+    text: ".*Thinking.*"
 - takeScreenshot: demo-S3_conversation
 
 # Tool call card is collapsed by default (same behavior as a real session) —
@@ -93,7 +105,7 @@ name: Demo mode - offline scripted walkthrough (no server, zero-server activatio
 # demo state, never a real sessionClient.permission.reply() network call.
 - scrollUntilVisible:
     element:
-      text: "Permission Required"
+      text: ".*Permission Required.*"
     direction: DOWN
     timeout: 10000
 - takeScreenshot: demo-S5_permission_prompt
@@ -120,6 +132,10 @@ name: Demo mode - offline scripted walkthrough (no server, zero-server activatio
 - takeScreenshot: demo-S7_cta
 - tapOn:
     id: "demo-connect-button"
+- extendedWaitUntil:
+    visible:
+      id: "connect-submit-button"
+    timeout: 10000
 - assertVisible:
-    id: "connect-ip-input"
+    id: "connect-password-input"
 - takeScreenshot: demo-S8_connect_form_reached

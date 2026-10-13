@@ -7,6 +7,7 @@ import { CommonModule } from './common/common.module.js';
 import { DockerRegistryModule } from './docker-registry/docker-registry.module.js';
 import { NpmRegistryModule } from './npm-registry/npm-registry.module.js';
 import { OpencodeModule } from './opencode/opencode.module.js';
+import { OpencodeKeysModule } from './opencode-keys/opencode-keys.module.js';
 import { OrganizationsModule } from './organizations/organizations.module.js';
 import { ProjectsModule } from './projects/projects.module.js';
 import { ReposModule } from './repos/repos.module.js';
@@ -23,6 +24,7 @@ import { validateConfigForNest } from './env.js';
     }),
     CommonModule,
     OpencodeModule,
+    OpencodeKeysModule,
     DockerRegistryModule,
     NpmRegistryModule,
     DbModule,

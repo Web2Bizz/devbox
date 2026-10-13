@@ -104,10 +104,27 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      - name: Install dependencies
-        run: npm install --legacy-peer-deps
+      - name: Install dependencies (deterministic)
+        run: npm ci --legacy-peer-deps
+
+      # android/ is committed (48 files) and expo prebuild output is fully
+      # determined by its inputs, so the result is cached on a hash of the
+      # Expo config, manifests and this workflow. On cache hit the inputs are
+      # identical, hence the cached android/ copy that cache-restore writes
+      # over the checkout is identical to what prebuild would regenerate —
+      # the step can be skipped. NOTE: the key must NOT contain github.sha
+      # (that would never hit).
+      - name: Cache Expo prebuild
+        id: prebuild-cache
+        uses: actions/cache@v5
+        with:
+          path: apps/mobile/android
+          key: ${{ runner.os }}-prebuild-${{ hashFiles('apps/mobile/app.json', 'apps/mobile/app.config.js', 'apps/mobile/package.json', 'apps/mobile/package-lock.json', 'apps/mobile/eas.json', '.github/workflows/mobile.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-prebuild-
 
       - name: Expo prebuild
+        if: steps.prebuild-cache.outputs.cache-hit != 'true'
         run: npx expo prebuild --platform android --no-install
 
       - name: Setup signing

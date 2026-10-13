@@ -22,8 +22,8 @@ images/
   opencode/   # separate compose stack for the opencode image (Dokploy)
 docs/         # env validation, auth, npm registry, migration notes
 DESIGN.md     # repo-wide design-system referat (frontend + mobile)
-.github/workflows/  # 10 workflows (ci, docker, mobile,
-                    # publish-play-store, publish-fdroid, cua-smoke,
+.github/workflows/  # 8 workflows (ci, docker, mobile,
+                    # publish-play-store,
                     # activation-e2e, product-intelligence, triage-reviews,
                     # bump-version) — most with paths filters; mobile.yml is the
                     # single conditional workflow for the Android native build
@@ -55,8 +55,8 @@ cd apps/mobile && npm install --legacy-peer-deps && npx expo start
 ```
 
 Mobile-воркфлоу в CI: `mobile.yml` (paths-фильтр `apps/mobile/**`: tests +
-conditional Android build + Release/Prerelease) и ручные
-`publish-play-store.yml` / `publish-fdroid.yml`
+conditional Android build + Release/Prerelease) и ручной
+`publish-play-store.yml`
 (`workflow_dispatch`, без paths-фильтров). `activation-e2e.yml` тоже
 paths-gated (`apps/mobile/app/**`, `src/**`, `packages/**`).
 
@@ -220,9 +220,9 @@ npx expo start                   # see apps/mobile/AGENTS.md for gates
 
 ## CI / Docker
 
-Workflows live in the root `.github/workflows/` — 11 of them: `ci`, `docker`,
-`mobile`, `publish-play-store`, `publish-fdroid`,
-`cua-smoke`, `activation-e2e`, `product-intelligence`, `triage-reviews`,
+Workflows live in the root `.github/workflows/` — 8 of them: `ci`, `docker`,
+`mobile`, `publish-play-store`,
+`activation-e2e`, `product-intelligence`, `triage-reviews`,
 `bump-version`. Most are gated by `paths:` filters, so `mobile.yml` only runs
 on `apps/mobile/**` changes and the web/docker stack only on its own paths;
 the `publish-*` mobile workflows are manual (`workflow_dispatch`).
@@ -236,7 +236,7 @@ the `publish-*` mobile workflows are manual (`workflow_dispatch`).
   `docker.registry.web2bizz.team/<owner>/<repo>/<service>` (not GHCR).
 - Mobile has its own workflows (`mobile.yml` → tests + conditional Android
   native build + Release/Prerelease, `publish-*.yml`) and `activation-e2e.yml`
-  / `cua-smoke.yml` for smoke tests.
+  for smoke tests.
 
 - Images build `FROM oven/bun:1.4.2` (3 stages each): backend on the `-slim`
   base, frontend on the regular one. Backend runs `bun dist/main.js`, frontend

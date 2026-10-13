@@ -22,7 +22,7 @@ No `lint`/`format` scripts despite `CONTRIBUTING.md` mentioning `npm run lint` �
 ## Version bump (single source: `package.json`)
 
 1. Bump `version` in `package.json` only.
-2. Bump `expo.android.versionCode` in `app.json` (integer, monotonic — Play/F-Droid key upgrades off it).
+2. Bump `expo.android.versionCode` in `app.json` (integer, monotonic — Play key upgrades off it).
 3. Run `node scripts/sync-version.mjs` — syncs `app.json` version + `android/app/build.gradle` versionName.
 4. Create `distribution/changelogs/<versionCode>.txt` and `fastlane/metadata/android/en-US/changelogs/<versionCode>.txt` — first line must be `v<version>` (enforced by `check:versions`).
 5. `npx expo prebuild --clean --platform android --no-install` if versionCode changed (prebuild regenerates native project).

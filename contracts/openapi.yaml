@@ -703,6 +703,140 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+  /api/v1/opencode/key:
+    get:
+      summary: Whether you have an OpenCode API key stored (existence only, never the key)
+      operationId: getOpencodeKeyStatusV1
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: key status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpencodeKeyStatus'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    put:
+      summary: Store your own OpenCode API key (AES-256-GCM at rest, never returned or logged)
+      operationId: putOpencodeKeyV1
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpencodeKeyBody'
+      responses:
+        '200':
+          description: stored (ok + updatedAt, no secret echo)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpencodeKeyResult'
+        '400':
+          description: bad request (validation)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: key encryption is not configured (code opencode_keys_unconfigured)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    delete:
+      summary: Delete your stored OpenCode API key (idempotent)
+      operationId: deleteOpencodeKeyV1
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpencodeKeyResult'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/opencode/usage:
+    get:
+      summary: Live OpenCode balance+usage for your stored key (per-user Bearer, no cache)
+      operationId: getOpencodeUsageV1
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: live balance+usage (updatedAt = upstream response time)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpencodeUsage'
+        '401':
+          description: missing/invalid bearer, or the stored key was rejected upstream (code opencode_key_invalid)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: no key stored for this user (code opencode_key_missing)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '429':
+          description: upstream rate limit (code EXTERNAL_RATE_LIMITED, retry later)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: upstream unavailable or shape mismatch (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '504':
+          description: upstream timeout (code EXTERNAL_TIMEOUT)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
   /api/v1/users/{id}:
     get:
       summary: Get own user profile (403 for anyone else — no enumeration)
@@ -2578,6 +2712,50 @@ components:
           properties:
             user:
               $ref: '#/components/schemas/AuthUser'
+    OpencodeKeyBody:
+      type: object
+      required: [apiKey]
+      description: Your own OpenCode API key (stored AES-256-GCM encrypted, never returned or logged).
+      properties:
+        apiKey:
+          type: string
+          minLength: 20
+          maxLength: 1024
+    OpencodeKeyResult:
+      type: object
+      required: [ok, updatedAt]
+      properties:
+        ok:
+          type: boolean
+          example: true
+        updatedAt:
+          type: string
+          format: date-time
+    OpencodeKeyStatus:
+      type: object
+      required: [configured]
+      description: Key existence only (never the key itself).
+      properties:
+        configured:
+          type: boolean
+          example: true
+        updatedAt:
+          type: string
+          format: date-time
+    OpencodeUsage:
+      type: object
+      required: [balance, usage, updatedAt]
+      description: Live upstream balance+usage (updatedAt = upstream response time, no cache).
+      properties:
+        balance:
+          type: number
+          example: 42.5
+        usage:
+          type: number
+          example: 7.25
+        updatedAt:
+          type: string
+          format: date-time
     AuthRegister:
       type: object
       required: [firstName, lastName, email, password]

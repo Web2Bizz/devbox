@@ -57,6 +57,8 @@ is the only place that validates them (zod@4), and `docs/env-validation.md`
 | `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` | Set but shorter than 32 chars |
 | `JWT_ACCESS_TTL` / `JWT_REFRESH_TTL` | Set but not `15m`/`1h`/`7d`/seconds 60–7776000 |
 | `AUTH_LEGACY_MOCK_FALLBACK` | Set but not `true`/`false` (`1`/`0` ok) |
+| `OPENCODE_KEYS_ENCRYPTION_KEY` | Set but shorter than 32 chars (value never echoed) |
+| `OPENCODE_BILLING_URL` | Set but not a URL with a host (unset → unverified default, never an error) |
 
 Broken composites (`http://:` from `${...}` interpolation with an empty HOST)
 are NOT errors: they recompose from the parts + WARN.
@@ -87,6 +89,8 @@ are NOT errors: they recompose from the parts + WARN.
 | `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` unset → ephemeral dev secret | WARN + random per boot (tokens die on restart); set explicitly for production |
 | `JWT_ACCESS_TTL` / `JWT_REFRESH_TTL` unset → `15m` / `7d` | Dev defaults (seconds 900 / 604800) |
 | `AUTH_LEGACY_MOCK_FALLBACK` unset → `true` | Dev default: `x-user-id` mock identity still accepted; set `false` for production |
+| `OPENCODE_KEYS_ENCRYPTION_KEY` unset → key endpoints 500 | WARN + `opencode_keys_unconfigured` at use-time (never boot fail-fast); set explicitly for production |
+| `OPENCODE_BILLING_URL` unset → `https://api.opencode.ai/usage` | Unverified default (no public billing path discoverable) + WARN; override in `.env` when known |
 | `GITHUB_APP_INSTALLATION_ID` set | **Deprecated** legacy single-install dev fallback — prefer per-user installations via the install flow |
 | `PROJECTS_ROOT` points to a missing directory | File browser 404s until it exists |
 | Unknown app-prefixed key (`APP_BACKEND_PORTT`, …) | Likely typo — only `APP_/OPENCODE_/POSTGRES_/DATABASE_URL/CORS_/REQUEST_TIMEOUT_MS/EXTERNAL_/LOG_LEVEL/NEXT_PUBLIC_/GITHUB_/DOCKER_/DOCKER_REGISTRY_/NPM_/NPM_REGISTRY_/JWT_/AUTH_/PROJECTS_ROOT` prefixes are reported; unrelated OS vars (`PATH`, `HOME`, …) stay silent |
@@ -96,7 +100,8 @@ are NOT errors: they recompose from the parts + WARN.
 `DATABASE_URL`, `POSTGRES_PASSWORD`, `DOCKER_REGISTRY_USER/PASSWORD/TOKEN`,
 `NPM_REGISTRY_TOKEN`, `NPM_TOKEN` (legacy fallback),
 `NPM_REGISTRY_USER/PASSWORD` (basic pair), `JWT_ACCESS_SECRET`,
-`JWT_REFRESH_SECRET`, password hashes, access/refresh tokens,
+`JWT_REFRESH_SECRET`, `OPENCODE_KEYS_ENCRYPTION_KEY`, per-user OpenCode API
+keys, password hashes, access/refresh tokens,
 private keys, tokens: never appear in
 errors, warnings, or logs — only key NAMES plus the `.env.example` pointer.
 `AppLogger` additionally scrubs secret keys, `scheme://user:pass@host`

@@ -701,19 +701,15 @@ let failed = 0;
 for (const c of checks) {
   try {
     c.run();
-    // eslint-disable-next-line no-console
     console.log(`ok - ${c.name}`);
   } catch (err) {
     failed += 1;
-    // eslint-disable-next-line no-console
     console.error(`FAIL - ${c.name}: ${(err as Error).message}`);
   }
 }
 if (failed > 0) {
-  // eslint-disable-next-line no-console
   console.error(`${failed}/${checks.length} env checks failed`);
   process.exitCode = 1;
 } else {
-  // eslint-disable-next-line no-console
   console.log(`${checks.length}/${checks.length} env checks passed`);
 }

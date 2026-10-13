@@ -223,11 +223,9 @@ async function main(): Promise<void> {
     }
     try {
       await c.run();
-      // eslint-disable-next-line no-console
       console.log(`ok - ${c.name}`);
     } catch (err) {
       failed += 1;
-      // eslint-disable-next-line no-console
       console.error(`FAIL - ${c.name}: ${(err as Error).message}`);
     } finally {
       if (prevRepos === undefined) delete process.env.REPOS_ROOT;
@@ -237,18 +235,15 @@ async function main(): Promise<void> {
     }
   }
   if (failed > 0) {
-    // eslint-disable-next-line no-console
     console.error(`${failed}/${checks.length} project strict-root checks failed`);
     process.exitCode = 1;
     throw new Error(`${failed}/${checks.length} project strict-root checks failed`);
   } else {
-    // eslint-disable-next-line no-console
     console.log(`${checks.length}/${checks.length} project strict-root checks passed`);
   }
 }
 
 void main().catch((err: unknown) => {
-  // eslint-disable-next-line no-console
   console.error(`project strict-root checks failed to run: ${(err as Error).message}`);
   process.exit(1);
 });

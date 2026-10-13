@@ -14,7 +14,6 @@ export default function RootError({
 }) {
   const { t } = useI18n();
   useEffect(() => {
-    // eslint-disable-next-line no-console
     console.error(error);
   }, [error]);
 

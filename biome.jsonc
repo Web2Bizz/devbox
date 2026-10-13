@@ -1,0 +1,78 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
+  // NOTE (lint-only rollout): only `biome lint` is wired into the per-app
+  // `lint` scripts (tsc --noEmit && biome lint .). The formatter
+  // (`biome format`) is deliberately NOT enforced — turning it on would
+  // reformat the whole tree in one go. Revisit formatting as a separate,
+  // dedicated change. (This file is JSONC so these comments are legal;
+  // Biome 2.x parses plain biome.json as strict JSON.)
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    // Single root binary for the monorepo: only the bun-workspace apps are
+    // in scope (apps/mobile is a separate npm project with its own setup).
+    // node_modules/ is always ignored by Biome; dist/ and .next/ are also
+    // git-ignored (picked up via useIgnoreFile above) but force-ignored
+    // here as well, plus coverage/ which is NOT git-ignored — built output
+    // and reports must never be linted even when present on disk.
+    "includes": [
+      "apps/backend/**",
+      "apps/frontend/**",
+      "!!**/dist/**",
+      "!!**/.next/**",
+      "!!**/node_modules/**",
+      "!!**/coverage/**"
+    ]
+  },
+  "javascript": {
+    // NestJS uses legacy parameter decorators (@Body(), @Query(),
+    // @Headers(), ...) throughout the backend — without this flag every
+    // controller fails to parse. Parser-only setting, not a lint rule.
+    "parser": { "unsafeParameterDecoratorsEnabled": true }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      // Deliberately `preset: "none"` (NOT "recommended"): enabling the
+      // whole recommended set blindly would surface dozens of unrelated
+      // diagnostics across the tree. Only the console rule below (the
+      // eslint `no-console` replacement, verified via
+      // `biome explain noConsole` -> lint/suspicious/noConsole) is
+      // enforced; widen the set later as a separate change.
+      "preset": "none",
+      "suspicious": {
+        // Replaces eslint `no-console`: bans console.* in runtime sources
+        // (backend: use AppLogger from src/common/app-logger.service.ts).
+        "noConsole": "error"
+      }
+    }
+  },
+  "overrides": [
+    {
+      // Test reporters: console in spec/e2e/test files is the test reporter,
+      // not runtime logging — same scoping as the previous eslint config.
+      "includes": [
+        "**/*.spec.ts",
+        "**/*.spec.tsx",
+        "**/*.e2e.ts",
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/__tests__/**"
+      ],
+      "linter": { "rules": { "suspicious": { "noConsole": "off" } } }
+    },
+    {
+      // Frontend baseline exception (checked 2026-10-13): the only console.*
+      // in frontend runtime code is console.error in the Next.js error
+      // boundary below, which reports the render error. No AppLogger
+      // equivalent exists on the client, and app code is out of scope for
+      // this rollout — so the rule stays on for the rest of the frontend
+      // with this single-file exception instead of weakening the frontend.
+      "includes": ["apps/frontend/app/error.tsx"],
+      "linter": { "rules": { "suspicious": { "noConsole": "off" } } }
+    }
+  ]
+}

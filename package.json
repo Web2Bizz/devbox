@@ -30,6 +30,7 @@
     "bun": ">=1.4.2"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.15",
     "@web2bizz/scaffold": "^0.1.7",
     "nx": "^23.3.0",
     "pm2": "^6.0.14"

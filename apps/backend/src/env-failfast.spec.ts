@@ -171,11 +171,9 @@ async function main(): Promise<void> {
     }
     try {
       await c.run();
-      // eslint-disable-next-line no-console
       console.log(`ok - ${c.name}`);
     } catch (err) {
       failed += 1;
-      // eslint-disable-next-line no-console
       console.error(`FAIL - ${c.name}: ${(err as Error).message}`);
     } finally {
       if (prevRepos === undefined) delete process.env.REPOS_ROOT;
@@ -185,18 +183,15 @@ async function main(): Promise<void> {
     }
   }
   if (failed > 0) {
-    // eslint-disable-next-line no-console
     console.error(`${failed}/${checks.length} env fail-fast checks failed`);
     process.exitCode = 1;
     throw new Error(`${failed}/${checks.length} env fail-fast checks failed`);
   } else {
-    // eslint-disable-next-line no-console
     console.log(`${checks.length}/${checks.length} env fail-fast checks passed`);
   }
 }
 
 void main().catch((err: unknown) => {
-  // eslint-disable-next-line no-console
   console.error(`env fail-fast checks failed to run: ${(err as Error).message}`);
   process.exit(1);
 });

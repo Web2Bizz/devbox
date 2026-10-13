@@ -17,10 +17,6 @@ name: Tablet baseline - projects grid 1/2/3 columns
 
 - launchApp:
     clearState: true
-- assertVisible:
-    id: "telemetry-consent-card"
-- tapOn:
-    id: "telemetry-decline-button"
 
 - assertVisible:
     text: "No Connection"

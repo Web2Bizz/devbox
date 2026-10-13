@@ -1,7 +1,7 @@
 appId: cc.agentlabs.opencode
-name: Activation - positive path (consent -> connect -> send message)
+name: Activation - positive path (connect -> send message)
 ---
-# Positive activation flow: first launch -> telemetry consent -> quick connect
+# Positive activation flow: first launch -> quick connect
 # to the mock opencode server (tests/fixtures/mock-opencode-server.ts, run
 # normally on the port below) -> connected indicator -> new session -> send a
 # message -> assert it sends (optimistic echo), WITHOUT waiting for the
@@ -34,7 +34,7 @@ name: Activation - positive path (consent -> connect -> send message)
 # output in production; the bug they hit there was the 401-retry storm, not
 # a missing/undelivered reply). Asserting on the reply here would therefore
 # be asserting on a CI-harness limitation, not real app behavior — so this
-# flow verifies everything reliably observable (consent, connect, session
+# flow verifies everything reliably observable (connect, session
 # creation, message send) and stops short of the SSE round trip. If a real
 # fix for the underlying RN-Android streaming limitation ever lands (a native
 # SSE module, WebSocket transport, etc.), restore the extendedWaitUntil +
@@ -44,10 +44,6 @@ name: Activation - positive path (consent -> connect -> send message)
 - launchApp:
     clearState: true
 - takeScreenshot: positive-S1_launch_consent_modal
-- assertVisible:
-    id: "telemetry-consent-card"
-- tapOn:
-    id: "telemetry-decline-button"
 
 - assertVisible:
     text: "No Connection"

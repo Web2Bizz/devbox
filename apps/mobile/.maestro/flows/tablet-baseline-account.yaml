@@ -15,10 +15,6 @@ name: Tablet baseline - account centered content (maxWidth 640)
 
 - launchApp:
     clearState: true
-- assertVisible:
-    id: "telemetry-consent-card"
-- tapOn:
-    id: "telemetry-decline-button"
 
 - openLink: opencode://account
 - assertVisible:

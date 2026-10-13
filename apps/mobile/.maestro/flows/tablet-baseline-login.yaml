@@ -12,10 +12,6 @@ name: Tablet baseline - login form centered (maxWidth 500)
 
 - launchApp:
     clearState: true
-- assertVisible:
-    id: "telemetry-consent-card"
-- tapOn:
-    id: "telemetry-decline-button"
 
 # Fresh install has no connection: index renders the "login required" empty
 # state with go-login-button (app/(tabs)/index.tsx).

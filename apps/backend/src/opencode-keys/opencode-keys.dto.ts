@@ -6,13 +6,19 @@ export class OpencodeKeyBodyDto {
   apiKey!: string;
 }
 
-/** PUT / DELETE /api/v1/opencode/key result (carries no secret). */
+/** PUT /api/v1/opencode/key result (carries no secret). */
 export class OpencodeKeyResultDto {
   @ApiProperty({ example: true })
   ok!: boolean;
 
   @ApiProperty({ example: "2026-10-13T00:00:00.000Z" })
   updatedAt!: string;
+}
+
+/** DELETE /api/v1/opencode/key result (idempotent, no timestamp). */
+export class OpencodeKeyDeleteResultDto {
+  @ApiProperty({ example: true })
+  ok!: boolean;
 }
 
 /** GET /api/v1/opencode/key — whether the caller has a key stored. */

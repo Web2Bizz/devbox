@@ -214,7 +214,9 @@ export interface AcceptInviteRequest {
 
 /**
  * Per-user OpenCode keys — mirrors backend contracts.ts (additive, verbatim).
- * PUT/DELETE /api/v1/opencode/key (own key, encrypted at rest, never echoed),
+ * PUT /api/v1/opencode/key (own key, encrypted at rest, never echoed),
+ * DELETE /api/v1/opencode/key (idempotent { ok }),
+ * GET /api/v1/opencode/key (existence only), GET /api/v1/opencode/usage
  * GET /api/v1/opencode/key (existence only), GET /api/v1/opencode/usage
  * (live upstream { balance, usage, updatedAt }).
  */
@@ -222,6 +224,10 @@ export interface OpencodeKeyResult {
   ok: boolean;
   /** ISO-8601 timestamp */
   updatedAt: string;
+}
+
+export interface OpencodeKeyDeleteResult {
+  ok: boolean;
 }
 
 export interface OpencodeKeyStatus {

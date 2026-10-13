@@ -781,7 +781,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OpencodeKeyResult'
+                $ref: '#/components/schemas/OpencodeKeyDeleteResult'
         '401':
           description: missing/invalid bearer
           content:
@@ -2731,6 +2731,14 @@ components:
         updatedAt:
           type: string
           format: date-time
+    OpencodeKeyDeleteResult:
+      type: object
+      required: [ok]
+      description: Idempotent delete acknowledgement (no timestamp).
+      properties:
+        ok:
+          type: boolean
+          example: true
     OpencodeKeyStatus:
       type: object
       required: [configured]

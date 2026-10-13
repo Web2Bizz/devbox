@@ -57,7 +57,7 @@ const SECRET_KEYS = new Set([
   'passwordhash',
   'password_hash',
   // Per-user OpenCode keys: the server-side encryption secret plus the
-  // per-user API key field (PUT /api/v1/opencode/key body) must never reach
+  // per-user API key field (PUT /api/v1/key body) must never reach
   // logs (values scrubbed, keys redacted).
   'opencodekeysencryptionkey',
   'opencode_keys_encryption_key',

@@ -1,12 +1,12 @@
 import { ApiProperty } from "@nestjs/swagger";
 
-/** PUT /api/v1/opencode/key request body (the raw key — never echoed back). */
+/** PUT /api/v1/key request body (the raw key — never echoed back). */
 export class OpencodeKeyBodyDto {
   @ApiProperty({ example: "opencode_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", minLength: 20 })
   apiKey!: string;
 }
 
-/** PUT /api/v1/opencode/key result (carries no secret). */
+/** PUT /api/v1/key result (carries no secret). */
 export class OpencodeKeyResultDto {
   @ApiProperty({ example: true })
   ok!: boolean;
@@ -15,13 +15,13 @@ export class OpencodeKeyResultDto {
   updatedAt!: string;
 }
 
-/** DELETE /api/v1/opencode/key result (idempotent, no timestamp). */
+/** DELETE /api/v1/key result (idempotent, no timestamp). */
 export class OpencodeKeyDeleteResultDto {
   @ApiProperty({ example: true })
   ok!: boolean;
 }
 
-/** GET /api/v1/opencode/key — whether the caller has a key stored. */
+/** GET /api/v1/key — whether the caller has a key stored. */
 export class OpencodeKeyStatusDto {
   @ApiProperty({ example: true })
   configured!: boolean;
@@ -30,7 +30,7 @@ export class OpencodeKeyStatusDto {
   updatedAt?: string;
 }
 
-/** GET /api/v1/opencode/usage — live upstream balance+usage. */
+/** GET /api/v1/usage — live upstream balance+usage. */
 export class OpencodeUsageDto {
   @ApiProperty({ example: 42.5 })
   balance!: number;

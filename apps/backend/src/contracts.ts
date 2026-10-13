@@ -128,26 +128,26 @@ export interface AuthSession extends AuthTokens {
   user: AuthUser;
 }
 
-/** PUT /api/v1/opencode/key result (carries no secret). */
+/** PUT /api/v1/key result (carries no secret). */
 export interface OpencodeKeyResult {
   ok: boolean;
   /** ISO-8601 timestamp */
   updatedAt: string;
 }
 
-/** DELETE /api/v1/opencode/key result (idempotent, no timestamp). */
+/** DELETE /api/v1/key result (idempotent, no timestamp). */
 export interface OpencodeKeyDeleteResult {
   ok: boolean;
 }
 
-/** GET /api/v1/opencode/key — whether the caller has a key stored. */
+/** GET /api/v1/key — whether the caller has a key stored. */
 export interface OpencodeKeyStatus {
   configured: boolean;
   /** ISO-8601 timestamp (present only when configured). */
   updatedAt?: string;
 }
 
-/** GET /api/v1/opencode/usage — live upstream balance+usage (no cache/TTL). */
+/** GET /api/v1/usage — live upstream balance+usage (no cache/TTL). */
 export interface OpencodeUsage {
   balance: number;
   usage: number;

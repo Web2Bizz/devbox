@@ -40,18 +40,18 @@ function isUserId(value: string): boolean {
  *   token). Only the identity's own user_id is ever read/written — there is
  *   no user-id parameter to tamper with. Non-uuid mock identities (legacy
  *   dev fallback) are rejected with 401 instead of leaking a driver error.
- * - PUT /api/v1/opencode/key { apiKey } — zod-validated, encrypted with
+ * - PUT /api/v1/key { apiKey } — zod-validated, encrypted with
  *   CryptoService (AES-256-GCM) before storage; answers { ok, updatedAt }
  *   (the key is never returned, never logged).
- * - GET /api/v1/opencode/key — { configured, updatedAt? } (existence only).
- * - DELETE /api/v1/opencode/key — idempotent { ok: true }.
- * - GET /api/v1/opencode/usage — { balance, usage, updatedAt } via the
+ * - GET /api/v1/key — { configured, updatedAt? } (existence only).
+ * - DELETE /api/v1/key — idempotent { ok: true }.
+ * - GET /api/v1/usage — { balance, usage, updatedAt } via the
  *   per-user key (missing → 404 opencode_key_missing; rejected → 401
  *   opencode_key_invalid; upstream outage → 429/5xx typed errors).
  */
 @ApiTags("opencode-keys")
 @ApiBearerAuth()
-@Controller("opencode")
+@Controller()
 @UseGuards(JwtAuthGuard)
 export class OpencodeKeysController {
   constructor(

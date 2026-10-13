@@ -703,7 +703,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/v1/opencode/key:
+  /api/v1/key:
     get:
       summary: Whether you have an OpenCode API key stored (existence only, never the key)
       operationId: getOpencodeKeyStatusV1
@@ -794,7 +794,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/v1/opencode/usage:
+  /api/v1/usage:
     get:
       summary: Live OpenCode balance+usage for your stored key (per-user Bearer, no cache)
       operationId: getOpencodeUsageV1

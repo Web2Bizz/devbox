@@ -14,7 +14,7 @@ node --test src/lib/auth.test.ts # single test file
 npm run check:versions           # verifies package.json ↔ app.json ↔ android/app/build.gradle ↔ changelogs
 node scripts/sync-version.mjs    # sync versionName from package.json → app.json + build.gradle
 npx expo start --clear           # start with cache clear
-npx expo run:android / run:ios   # dev build (needed for native modules)
+npx expo run:android   # dev build (needed for native modules)
 ```
 
 No `lint`/`format` scripts despite `CONTRIBUTING.md` mentioning `npm run lint` — there is no ESLint/Prettier config; `typecheck` + `test` are the CI gates (`.github/workflows/mobile.yml`).
@@ -53,7 +53,7 @@ No `lint`/`format` scripts despite `CONTRIBUTING.md` mentioning `npm run lint` �
 ## Gotchas
 
 - `typecheck` excludes `**/*.test.ts` and `tests/fixtures/**` — tests can have looser types that `tsc` won't catch.
-- Native modules (`expo-secure-store`, `expo-local-authentication`, notifications) don't work in Expo Go — need `expo run:android/ios` dev build.
+- Native modules (`expo-secure-store`, `expo-local-authentication`, notifications) don't work in Expo Go — need an `expo run:android` dev build.
 - Legacy peer deps: `npm ci --legacy-peer-deps` in CI; plain `npm install` fails on peer conflicts (Expo 57 + RN 0.86 + React 19).
 - Node version split: CI `test` job uses Node 24 (type-stripping), `build` job uses Node 20. Local Node 23.6+ required for `npm test` on `.ts` files.
 - `distribution/` and `fastlane/metadata/` changelogs must exist per versionCode — missing file fails `check:versions` and blocks CI.

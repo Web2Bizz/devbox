@@ -22,9 +22,11 @@ images/
   opencode/   # separate compose stack for the opencode image (Dokploy)
 docs/         # env validation, auth, npm registry, migration notes
 DESIGN.md     # repo-wide design-system referat (frontend + mobile)
-.github/workflows/  # 12 workflows (ci, docker, build/ios-ci/publish-*,
-                    # cua-smoke, activation-e2e, product-intelligence, triage-reviews,
-                    # bump-version) — most with paths filters
+.github/workflows/  # 11 workflows (ci, docker, mobile, publish-app-store,
+                    # publish-play-store, publish-fdroid, cua-smoke,
+                    # activation-e2e, product-intelligence, triage-reviews,
+                    # bump-version) — most with paths filters; mobile.yml is the
+                    # single conditional workflow for native builds (replaces build/ios-ci)
 docker-compose.yml
 .bun-version / bunfig.toml / bun.lock
 ```
@@ -52,9 +54,11 @@ expo-специфичное разрешение). Запуск — только
 cd apps/mobile && npm install --legacy-peer-deps && npx expo start
 ```
 
-Mobile-воркфлоу в CI (`.github/workflows/mobile.yml`,
-`publish-app-store.yml`, `publish-play-store.yml`, `publish-fdroid.yml`)
-запускаются по paths-фильтрам `apps/mobile/**`.
+Mobile-воркфлоу в CI: `mobile.yml` (paths-фильтр `apps/mobile/**`: tests +
+conditional Android/iOS builds + Release/Prerelease) и ручные
+`publish-app-store.yml` / `publish-play-store.yml` / `publish-fdroid.yml`
+(`workflow_dispatch`, без paths-фильтров). `activation-e2e.yml` тоже
+paths-gated (`apps/mobile/app/**`, `src/**`, `packages/**`).
 
 ## images/opencode
 
@@ -200,9 +204,9 @@ Volumes: `pgdata` (данные PG — бэкап командой выше) · 
 | `bun run dev:shutdown` | stop cluster + kill pm2 daemon        |
 | `bun run dev:backend`| backend dev (`bun --bun nest start --watch`, :3000) |
 | `bun run dev:frontend`| frontend dev (next dev, :3001)        |
-| `bun run build`      | build all workspaces (`bun --filter …`)|
-| `bun run lint`       | `tsc --noEmit` per workspace          |
-| `bun run test`       | `bun test --pass-with-no-tests` per workspace |
+| `bun run build`      | build all workspaces (`bun --filter …`); in CI the same goes via `nx affected` (touched projects only) |
+| `bun run lint`       | `tsc --noEmit` + `biome lint` per workspace (Biome replaces eslint — no eslint config left) |
+| `bun run test`       | `bun test --pass-with-no-tests` per workspace; in CI via `nx affected` (backend tests run on `dist`, so build precedes test) |
 | `docker compose up --build` | full stack (pg + backend + frontend) |
 
 `apps/mobile` is **not** in `workspaces` and has no `bun --filter` script — it
@@ -216,37 +220,38 @@ npx expo start                   # see apps/mobile/AGENTS.md for gates
 
 ## CI / Docker
 
-Workflows live in the root `.github/workflows/` — 12 of them: `ci`, `docker`,
-`build`, `ios-ci`, `publish-app-store`, `publish-play-store`,
-`publish-fdroid`, `cua-smoke`, `activation-e2e`, `product-intelligence`,
-`triage-reviews`, `bump-version`. Most are gated by `paths:` filters, so the
-mobile workflows only run on `apps/mobile/**` changes and the web/docker stack
-only on its own paths.
+Workflows live in the root `.github/workflows/` — 11 of them: `ci`, `docker`,
+`mobile`, `publish-app-store`, `publish-play-store`, `publish-fdroid`,
+`cua-smoke`, `activation-e2e`, `product-intelligence`, `triage-reviews`,
+`bump-version`. Most are gated by `paths:` filters, so `mobile.yml` only runs
+on `apps/mobile/**` changes and the web/docker stack only on its own paths;
+the `publish-*` mobile workflows are manual (`workflow_dispatch`).
 
 - CI (`ci.yml`) uses `oven-sh/setup-bun@v2` with `bun-version-file: .bun-version`,
-  then `bun install` / `bun run lint` / `bun run build` / `bun run test`.
+  then `bun install`, resolves base/head via `nrwl/nx-set-shas`, and runs
+  `nx affected -t lint` → `build` → `test` (only touched projects; order
+  matters — backend tests run against compiled `dist`).
+- Docker (`docker.yml`, push to `dev` + manual) discovers services in
+  `apps/*`, intersects with the Nx affected set, and pushes to the self-hosted
+  `docker.registry.web2bizz.team/<owner>/<repo>/<service>` (not GHCR).
 - Mobile has its own workflows (`mobile.yml` → tests + conditional Android/iOS
   native builds + Release/Prerelease, `publish-*.yml`) and `activation-e2e.yml`
   / `cua-smoke.yml` for smoke tests.
 
-- Images build `FROM oven/bun:1.4.2` (3 stages each); backend runs
-  `bun dist/main.js`, frontend runs `bun apps/frontend/server.js` (Next standalone,
+- Images build `FROM oven/bun:1.4.2` (3 stages each): backend on the `-slim`
+  base, frontend on the regular one. Backend runs `bun dist/main.js`, frontend
+  runs `bun apps/frontend/server.js` (Next standalone,
   `output: 'standalone'` preserved). Healthchecks probe via `bun -e fetch(…)`.
 - `images/opencode/` is a separate Dokploy stack — see its section above.
 
 ### CI status — NOT green (honest)
 
-As of the last runs on `main`, most workflows fail. The dominant cause is
-**missing repository secrets in the new repo**, not code: `ci` and `docker`
-fail at `bun install` with
-
-```
-GET https://npm.registry.web2bizz.team/@web2bizz/ui/-/ui-0.26.0.tgz - 401
-```
-
-i.e. `secrets.NPM_TOKEN` is empty in the new repository. Fix = populate
-`NPM_TOKEN` (and any other store/publish secrets) in repo settings. Until that
-happens, do not read a red CI as a code regression.
+As of 2026-10-13 on `ci/normalize-builds-publish`: Install ✓, Lint
+(affected) ✓, Build (affected) ✓, Mobile CI ✓. Red is `Test affected` —
+6 frontend `login page 400 wiring` contract tests fail (100 pass / 6 fail
+across 19 files); backend `dist` tests pass. Secrets (`NPM_TOKEN`,
+`DOCKER_REGISTRY_PASSWORD`) are set, so this is test debt, not missing auth.
+Until it is fixed, do not read a red CI as an infra regression.
 
 ## Node fallback
 

@@ -21,6 +21,10 @@
     "includes": [
       "apps/backend/**",
       "apps/frontend/**",
+      // Belt-and-braces: the allowlist above already scopes mobile out
+      // (separate npm project, never linted by this config) — this negation
+      // keeps it out even if the allowlist is ever broadened to apps/**.
+      "!!apps/mobile/**",
       "!!**/dist/**",
       "!!**/.next/**",
       "!!**/node_modules/**",

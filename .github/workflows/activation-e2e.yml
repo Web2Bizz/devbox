@@ -1,7 +1,7 @@
 name: Activation E2E (Maestro)
 
 # Deterministic regression coverage for the activation flow (first open ->
-# telemetry consent -> server URL entry -> connect -> send first message),
+# server URL entry -> connect -> send first message),
 # including the connect-time-401 negative case tied to the 0%-7-day-retention
 # / GitHub issue #76 investigation.
 #

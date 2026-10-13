@@ -58,6 +58,8 @@ function baseEnv(): Source {
     JWT_REFRESH_TTL: '7d',
     AUTH_LEGACY_MOCK_FALLBACK: 'false',
     ORG_INVITE_TTL_SEC: '86400',
+    OPENCODE_KEYS_ENCRYPTION_KEY: 'test-opencode-keys-encryption-key-not-real-0123456789',
+    OPENCODE_BILLING_URL: 'https://billing.example.com/usage',
   } as Source;
 }
 
@@ -109,6 +111,8 @@ const checks: Array<{ name: string; run: () => void }> = [
       assert.equal(env.jwtRefreshTtlSec, 604800);
       assert.equal(env.authLegacyMockFallback, false);
       assert.equal(env.orgInviteTtlSec, 86400);
+      assert.equal(env.opencodeKeysEncryptionKey, 'test-opencode-keys-encryption-key-not-real-0123456789');
+      assert.equal(env.opencodeBillingUrl, 'https://billing.example.com/usage');
       assert.deepEqual(warnings, []);
     },
   },
@@ -692,6 +696,40 @@ const checks: Array<{ name: string; run: () => void }> = [
         () => validateEnv({ ...baseEnv(), ORG_INVITE_TTL_SEC: 'forever' } as Source),
         /\[env\] ORG_INVITE_TTL_SEC/,
         'bad invite ttl',
+      );
+    },
+  },
+  {
+    name: 'OPENCODE_KEYS_ENCRYPTION_KEY unset → empty + WARN; short is ERROR without echo',
+    run: () => {
+      const unset = validateEnvWithWarnings(without(baseEnv(), 'OPENCODE_KEYS_ENCRYPTION_KEY'));
+      assert.equal(unset.env.opencodeKeysEncryptionKey, '');
+      assert.ok(
+        unset.warnings.some((w) => w.includes('OPENCODE_KEYS_ENCRYPTION_KEY') && w.includes('WARN')),
+        `expected encryption-key WARN, got: ${JSON.stringify(unset.warnings)}`,
+      );
+      const msg = expectThrow(
+        () => validateEnv({ ...baseEnv(), OPENCODE_KEYS_ENCRYPTION_KEY: 'too-short' } as Source),
+        /\[env\] OPENCODE_KEYS_ENCRYPTION_KEY/,
+        'short encryption key',
+      );
+      assert.ok(msg.includes('.env.example'));
+      assert.ok(!msg.includes('too-short'), 'secret leaked into the error');
+    },
+  },
+  {
+    name: 'OPENCODE_BILLING_URL unset → default + WARN; garbage is ERROR',
+    run: () => {
+      const unset = validateEnvWithWarnings(without(baseEnv(), 'OPENCODE_BILLING_URL'));
+      assert.equal(unset.env.opencodeBillingUrl, 'https://api.opencode.ai/usage');
+      assert.ok(
+        unset.warnings.some((w) => w.includes('OPENCODE_BILLING_URL') && w.includes('WARN')),
+        `expected billing-url WARN, got: ${JSON.stringify(unset.warnings)}`,
+      );
+      expectThrow(
+        () => validateEnv({ ...baseEnv(), OPENCODE_BILLING_URL: '::bad::' } as Source),
+        /\[env\] OPENCODE_BILLING_URL/,
+        'bad billing url',
       );
     },
   },

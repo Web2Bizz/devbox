@@ -56,6 +56,13 @@ const SECRET_KEYS = new Set([
   'jwtttl',
   'passwordhash',
   'password_hash',
+  // Per-user OpenCode keys: the server-side encryption secret plus the
+  // per-user API key field (PUT /api/v1/opencode/key body) must never reach
+  // logs (values scrubbed, keys redacted).
+  'opencodekeysencryptionkey',
+  'opencode_keys_encryption_key',
+  'opencodekey',
+  'opencode_key',
 ]);
 
 /** Matches `scheme://user:pass@host` credentials inside URL strings. */
@@ -88,6 +95,7 @@ function liveSecrets(): string[] {
     process.env.NPM_REGISTRY_PASSWORD,
     process.env.JWT_ACCESS_SECRET,
     process.env.JWT_REFRESH_SECRET,
+    process.env.OPENCODE_KEYS_ENCRYPTION_KEY,
   ]) {
     if (v && v.length >= 4) out.push(v);
   }

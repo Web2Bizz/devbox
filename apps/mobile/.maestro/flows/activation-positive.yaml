@@ -43,10 +43,23 @@ name: Activation - positive path (connect -> send message)
 
 - launchApp:
     clearState: true
-- takeScreenshot: positive-S1_launch_consent_modal
+- takeScreenshot: positive-S1_launch
 
+# Fresh install lands on the login gate (app/login.tsx — the _layout.tsx auth
+# gate redirects unauthenticated users to /login), not the old "No Connection"
+# empty state.
 - assertVisible:
-    text: "No Connection"
+    text: "Вход"
+- assertVisible:
+    id: "login-mode-account"
+- assertVisible:
+    id: "login-mode-local"
+- assertVisible:
+    id: "login-username-input"
+- assertVisible:
+    id: "login-password-input"
+- assertVisible:
+    id: "login-button"
 - takeScreenshot: positive-S2_empty_state
 - tapOn:
     id: "add-connection-button"

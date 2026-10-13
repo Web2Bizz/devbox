@@ -20,8 +20,21 @@ name: Directory picker - browse server folders and create a session in one
 - launchApp:
     clearState: true
 
+# Fresh install lands on the login gate (app/login.tsx — the _layout.tsx auth
+# gate redirects unauthenticated users to /login), not the old "No Connection"
+# empty state.
 - assertVisible:
-    text: "No Connection"
+    text: "Вход"
+- assertVisible:
+    id: "login-mode-account"
+- assertVisible:
+    id: "login-mode-local"
+- assertVisible:
+    id: "login-username-input"
+- assertVisible:
+    id: "login-password-input"
+- assertVisible:
+    id: "login-button"
 - tapOn:
     id: "add-connection-button"
 - tapOn:

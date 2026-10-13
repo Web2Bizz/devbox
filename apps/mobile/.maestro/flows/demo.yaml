@@ -21,8 +21,21 @@ name: Demo mode - offline scripted walkthrough (no server, zero-server activatio
 - launchApp:
     clearState: true
 
+# Fresh install lands on the login gate (app/login.tsx — the _layout.tsx auth
+# gate redirects unauthenticated users to /login), not the old "No Connection"
+# empty state.
 - assertVisible:
-    text: "No Connection"
+    text: "Вход"
+- assertVisible:
+    id: "login-mode-account"
+- assertVisible:
+    id: "login-mode-local"
+- assertVisible:
+    id: "login-username-input"
+- assertVisible:
+    id: "login-password-input"
+- assertVisible:
+    id: "login-button"
 - takeScreenshot: demo-S1_empty_state
 # add-connection-button must still be the first/only thing tapped here — this
 # flow only ever taps it in this reachability check (visible, not tapped),

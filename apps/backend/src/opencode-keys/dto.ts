@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * PUT /api/v1/opencode/key — the caller's own OpenCode API key.
+ * PUT /api/v1/key — the caller's own OpenCode API key.
  * Min 20 chars (real keys are long opaque tokens; short strings are almost
  * certainly a paste mistake), max 1024, trimmed. The value is encrypted with
  * CryptoService before storage and is never returned or logged.

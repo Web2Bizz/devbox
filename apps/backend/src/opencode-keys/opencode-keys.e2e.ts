@@ -146,33 +146,33 @@ async function main(): Promise<void> {
   try {
     await check("PUT /key without token → 401 (fallback off)", async () => {
       const res = await fetch(
-        `${base}/api/v1/opencode/key`,
+        `${base}/api/v1/key`,
         json({ apiKey: TEST_API_KEY }, "PUT"),
       );
       assert.equal(res.status, 401);
     });
 
     await check("GET /key without token → 401", async () => {
-      const res = await fetch(`${base}/api/v1/opencode/key`);
+      const res = await fetch(`${base}/api/v1/key`);
       assert.equal(res.status, 401);
     });
 
     await check("DELETE /key without token → 401", async () => {
-      const res = await fetch(`${base}/api/v1/opencode/key`, {
+      const res = await fetch(`${base}/api/v1/key`, {
         method: "DELETE",
       });
       assert.equal(res.status, 401);
     });
 
     await check("GET /usage without token → 401", async () => {
-      const res = await fetch(`${base}/api/v1/opencode/usage`);
+      const res = await fetch(`${base}/api/v1/usage`);
       assert.equal(res.status, 401);
       const body = (await readJson(res)) as { code?: string };
       assert.equal(body.code, "unauthorized");
     });
 
     await check("garbage Bearer → 401", async () => {
-      const res = await fetch(`${base}/api/v1/opencode/usage`, {
+      const res = await fetch(`${base}/api/v1/usage`, {
         headers: { authorization: "Bearer garbage" },
       });
       assert.equal(res.status, 401);
@@ -219,7 +219,7 @@ async function main(): Promise<void> {
     const auth = () => ({ authorization: `Bearer ${access}` });
 
     await check("GET /usage with no key → 404 opencode_key_missing", async () => {
-      const res = await fetch(`${base}/api/v1/opencode/usage`, {
+      const res = await fetch(`${base}/api/v1/usage`, {
         headers: auth(),
       });
       assert.equal(res.status, 404);
@@ -228,7 +228,7 @@ async function main(): Promise<void> {
     });
 
     await check("GET /key with no key → configured:false", async () => {
-      const res = await fetch(`${base}/api/v1/opencode/key`, {
+      const res = await fetch(`${base}/api/v1/key`, {
         headers: auth(),
       });
       assert.equal(res.status, 200);
@@ -237,7 +237,7 @@ async function main(): Promise<void> {
     });
 
     await check("PUT /key short apiKey → 400", async () => {
-      const res = await fetch(`${base}/api/v1/opencode/key`, {
+      const res = await fetch(`${base}/api/v1/key`, {
         ...json({ apiKey: "short" }, "PUT"),
         headers: { "content-type": "application/json", ...auth() },
       });
@@ -245,7 +245,7 @@ async function main(): Promise<void> {
     });
 
     await check("PUT /key missing body → 400", async () => {
-      const res = await fetch(`${base}/api/v1/opencode/key`, {
+      const res = await fetch(`${base}/api/v1/key`, {
         ...json({}, "PUT"),
         headers: { "content-type": "application/json", ...auth() },
       });
@@ -253,7 +253,7 @@ async function main(): Promise<void> {
     });
 
     await check("PUT /key → 200 {ok,updatedAt}, no secret echo", async () => {
-      const res = await fetch(`${base}/api/v1/opencode/key`, {
+      const res = await fetch(`${base}/api/v1/key`, {
         ...json({ apiKey: TEST_API_KEY }, "PUT"),
         headers: { "content-type": "application/json", ...auth() },
       });
@@ -296,7 +296,7 @@ async function main(): Promise<void> {
     });
 
     await check("GET /key → configured:true + updatedAt", async () => {
-      const res = await fetch(`${base}/api/v1/opencode/key`, {
+      const res = await fetch(`${base}/api/v1/key`, {
         headers: auth(),
       });
       assert.equal(res.status, 200);
@@ -311,7 +311,7 @@ async function main(): Promise<void> {
     await check("GET /usage happy path → {balance,usage,updatedAt}", async () => {
       mode = "ok";
       lastAuth = null;
-      const res = await fetch(`${base}/api/v1/opencode/usage`, {
+      const res = await fetch(`${base}/api/v1/usage`, {
         headers: auth(),
       });
       assert.equal(res.status, 200);
@@ -330,7 +330,7 @@ async function main(): Promise<void> {
 
     await check("upstream 401 → 401 opencode_key_invalid (no echo)", async () => {
       mode = "reject";
-      const res = await fetch(`${base}/api/v1/opencode/usage`, {
+      const res = await fetch(`${base}/api/v1/usage`, {
         headers: auth(),
       });
       assert.equal(res.status, 401);
@@ -341,7 +341,7 @@ async function main(): Promise<void> {
 
     await check("upstream 429 → 429 EXTERNAL_RATE_LIMITED", async () => {
       mode = "ratelimit";
-      const res = await fetch(`${base}/api/v1/opencode/usage`, {
+      const res = await fetch(`${base}/api/v1/usage`, {
         headers: auth(),
       });
       assert.equal(res.status, 429);
@@ -351,7 +351,7 @@ async function main(): Promise<void> {
 
     await check("upstream bad shape → 503 EXTERNAL_UNAVAILABLE", async () => {
       mode = "badshape";
-      const res = await fetch(`${base}/api/v1/opencode/usage`, {
+      const res = await fetch(`${base}/api/v1/usage`, {
         headers: auth(),
       });
       assert.equal(res.status, 503);
@@ -362,7 +362,7 @@ async function main(): Promise<void> {
 
     await check("upstream hang → 504 EXTERNAL_TIMEOUT", async () => {
       mode = "hang";
-      const res = await fetch(`${base}/api/v1/opencode/usage`, {
+      const res = await fetch(`${base}/api/v1/usage`, {
         headers: auth(),
       });
       assert.equal(res.status, 504);
@@ -374,7 +374,7 @@ async function main(): Promise<void> {
       const prev = process.env.OPENCODE_BILLING_URL;
       process.env.OPENCODE_BILLING_URL = "http://127.0.0.1:9/usage";
       try {
-        const res = await fetch(`${base}/api/v1/opencode/usage`, {
+        const res = await fetch(`${base}/api/v1/usage`, {
           headers: auth(),
         });
         assert.ok(
@@ -393,17 +393,17 @@ async function main(): Promise<void> {
     });
 
     await check("DELETE /key → ok; status flips; usage 404 again", async () => {
-      const del = await fetch(`${base}/api/v1/opencode/key`, {
+      const del = await fetch(`${base}/api/v1/key`, {
         method: "DELETE",
         headers: auth(),
       });
       assert.equal(del.status, 200);
       assert.equal(((await readJson(del)) as { ok?: boolean }).ok, true);
       const status = (await readJson(
-        await fetch(`${base}/api/v1/opencode/key`, { headers: auth() }),
+        await fetch(`${base}/api/v1/key`, { headers: auth() }),
       )) as { configured?: boolean };
       assert.equal(status.configured, false);
-      const usage = await fetch(`${base}/api/v1/opencode/usage`, {
+      const usage = await fetch(`${base}/api/v1/usage`, {
         headers: auth(),
       });
       assert.equal(usage.status, 404);

@@ -10,7 +10,7 @@ import { DEFAULT_OPENCODE_BILLING_URL, validateEnv } from "../env.js";
 import { CryptoService } from "./crypto.service.js";
 import { OpencodeKeysService } from "./opencode-keys.service.js";
 
-/** GET /api/v1/opencode/usage response (minimal contract: balance+usage). */
+/** GET /api/v1/usage response (minimal contract: balance+usage). */
 export interface OpencodeUsage {
   balance: number;
   usage: number;

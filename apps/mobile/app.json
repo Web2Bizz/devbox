@@ -7,27 +7,6 @@
     "scheme": "opencode",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/icon.png",
-    "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "cc.agentlabs.opencode",
-      "buildNumber": "1",
-      "entitlements": {
-        "aps-environment": "production"
-      },
-      "infoPlist": {
-        "NSFaceIDUsageDescription": "Use Face ID to unlock DevBox and access your sessions securely.",
-        "NSSpeechRecognitionUsageDescription": "DevBox uses speech recognition so you can dictate prompts to your AI coding agent hands-free.",
-        "NSMicrophoneUsageDescription": "DevBox uses the microphone to capture your voice when using speech-to-text input.",
-        "NSPhotoLibraryUsageDescription": "DevBox can attach images from your photo library to messages to your AI coding agent.",
-        "NSCameraUsageDescription": "DevBox can capture images with your camera and attach them to messages to your AI coding agent.",
-        "NSLocalNetworkUsageDescription": "DevBox uses your local network to connect to self-hosted DevBox servers running on your LAN.",
-        "NSAppTransportSecurity": {
-          "NSAllowsArbitraryLoads": true,
-          "NSAllowsArbitraryLoadsInWebContent": false
-        },
-        "ITSAppUsesNonExemptEncryption": false
-      }
-    },
     "android": {
       "package": "cc.agentlabs.opencode",
       "versionCode": 57,

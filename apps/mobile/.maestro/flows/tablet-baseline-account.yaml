@@ -8,15 +8,26 @@ name: Tablet baseline - account centered content (maxWidth 640)
 #
 # Navigation uses a deep link (opencode://account, scheme from app.json) so
 # the flow doesn't depend on the tab-bar label locale (nav.accountTab =
-# "Account"/"Аккаунт"). Needs no mock server — covers the not-logged-in
-# branch (account-login-button testID). The logged-in branch shares the same
-# ScrollView/content style. Baseline PNG goes to docs/qa/baselines/ on a
-# tablet AVD.
+# "Account"/"Аккаунт"). Needs no mock server. Logged out, the _layout.tsx auth
+# gate redirects even a deep link to /login, so the account not-logged-in
+# branch (account-login-button testID) is unreachable here — assert the login
+# gate the deep link actually lands on. Baseline PNG goes to docs/qa/baselines/
+# on a tablet AVD.
 
 - launchApp:
     clearState: true
 
 - openLink: opencode://account
 - assertVisible:
-    id: "account-login-button"
+    text: "Вход"
+- assertVisible:
+    id: "login-mode-account"
+- assertVisible:
+    id: "login-mode-local"
+- assertVisible:
+    id: "login-username-input"
+- assertVisible:
+    id: "login-password-input"
+- assertVisible:
+    id: "login-button"
 - takeScreenshot: tablet-account-S1_centered

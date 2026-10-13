@@ -13,13 +13,15 @@ name: Tablet baseline - login form centered (maxWidth 500)
 - launchApp:
     clearState: true
 
-# Fresh install has no connection: index renders the "login required" empty
-# state with go-login-button (app/(tabs)/index.tsx).
+# Fresh install lands straight on the login gate: the _layout.tsx auth gate
+# redirects unauthenticated users to /login, so the old index "login required"
+# empty state with go-login-button is never the first screen — no tap needed.
 - assertVisible:
-    id: "go-login-button"
-- tapOn:
-    id: "go-login-button"
-
+    text: "Вход"
+- assertVisible:
+    id: "login-mode-account"
+- assertVisible:
+    id: "login-mode-local"
 - assertVisible:
     id: "login-username-input"
 - assertVisible:

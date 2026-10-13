@@ -40,8 +40,21 @@ name: Activation - negative path (connect-time 401 must surface a visible error)
     clearState: true
 - takeScreenshot: negative-S1_consent_dismissed
 
+# Fresh install lands on the login gate (app/login.tsx — the _layout.tsx auth
+# gate redirects unauthenticated users to /login), not the old "No Connection"
+# empty state.
 - assertVisible:
-    text: "No Connection"
+    text: "Вход"
+- assertVisible:
+    id: "login-mode-account"
+- assertVisible:
+    id: "login-mode-local"
+- assertVisible:
+    id: "login-username-input"
+- assertVisible:
+    id: "login-password-input"
+- assertVisible:
+    id: "login-button"
 - tapOn:
     id: "add-connection-button"
 - takeScreenshot: negative-S2_add_connection_form

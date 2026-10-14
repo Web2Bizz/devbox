@@ -32,18 +32,22 @@ name: Activation E2E (Maestro)
 # client transport, a CI-harness limitation with no evidence it affects real
 # devices against a real server, so asserting on it here would be asserting
 # on the harness rather than the app.
+#
+# NOTE: this workflow intentionally has NO `push:` trigger. The pull_request
+# check is the only gate for the activation suite. With `push:` present the
+# same commit was tested twice — once as pull_request, and then again as `push`
+# to dev/main the moment the PR merged — and this job is budgeted at 90 minutes
+# of emulator, so that second run was a full duplicate of a suite that had
+# already passed on that exact tree. Removing `push:` means a direct push to
+# dev/main (i.e. bypassing a PR) will NOT run E2E.
+#
+# That is deliberate, not a hole: neither branch is protected today, but branch
+# protection is the documented way to make the PR check mandatory, and once it
+# is enabled every change to dev/main must arrive through a pull_request —
+# exactly where this workflow runs. Until then, workflow_dispatch stays the
+# manual escape hatch for an on-demand run.
 
 on:
-  push:
-    branches: [main, dev]
-    paths:
-      - "apps/mobile/app/**"
-      - "apps/mobile/src/**"
-      - "apps/mobile/packages/**"
-      - "apps/mobile/tests/fixtures/**"
-      - "apps/mobile/.maestro/**"
-      - "apps/mobile/scripts/**"
-      - ".github/workflows/activation-e2e.yml"
   pull_request:
     branches: [main, dev]
     paths:

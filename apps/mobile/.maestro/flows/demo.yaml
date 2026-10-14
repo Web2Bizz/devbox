@@ -20,7 +20,8 @@ name: Demo mode - offline scripted walkthrough (no server, zero-server activatio
 - launchApp:
     clearState: true
 
-# Login gate -> LAN discovery -> local login (real connect path).
+# Login gate -> LAN discovery -> AUTOMATIC connect (real connect path, no
+# login form after picking a LAN candidate).
 - assertVisible:
     text: "Вход"
 - assertVisible:
@@ -35,19 +36,12 @@ name: Demo mode - offline scripted walkthrough (no server, zero-server activatio
     timeout: 120000
 - tapOn:
     id: "lan-use-0"
-- extendedWaitUntil:
-    visible:
-      text: ".*10.0.2.2:4096.*"
-    timeout: 10000
-- tapOn:
-    id: "login-username-input"
-- inputText: "e2e-user"
-- tapOn:
-    id: "login-password-input"
-- inputText: "e2e-pass"
-- hideKeyboard
-- tapOn:
-    id: "login-button"
+
+# app/login.tsx handlePickLan connects immediately (addLanConnection +
+# setActiveConnection, no credentials) and _layout.tsx routes to /(tabs). The
+# address text only flashes during that redirect, so it is never asserted on.
+# project-list only renders with an active, non-errored connection, so waiting
+# for it IS the connected assertion.
 - extendedWaitUntil:
     visible:
       id: "project-list"

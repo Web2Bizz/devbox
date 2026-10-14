@@ -3,9 +3,10 @@ name: Activation - positive path (connect -> send message)
 ---
 # Positive activation flow: first launch -> login gate -> LAN discovery finds
 # the mock opencode server (tests/fixtures/mock-opencode-server.ts, normal
-# mode on port 4096) -> local login -> projects -> new session via the folder
-# browser -> send a message -> assert it sends (optimistic echo), WITHOUT
-# waiting for the SSE-streamed reply. See "Why no reply assertion" below.
+# mode on port 4096) -> AUTOMATIC connection (no login form on the LAN path)
+# -> projects -> new session via the folder browser -> send a message -> assert
+# it sends (optimistic echo), WITHOUT waiting for the SSE-streamed reply.
+# See "Why no reply assertion" below.
 #
 # Real-UI notes (flows adapted to the verified app — only testIDs that exist
 # in code are used):
@@ -21,6 +22,10 @@ name: Activation - positive path (connect -> send message)
 #   10.0.2.2 was unreliable headless for its shell probes — if RN fetch to
 #   10.0.2.2 fails too, lan-candidate-0 never appears and every connect flow
 #   fails here, deterministically, with no app bug involved.
+# - Picking a LAN candidate CONNECTS AUTOMATICALLY: app/login.tsx
+#   handlePickLan calls addLanConnection + setActiveConnection with no
+#   credentials, and _layout.tsx's auth gate then router.replace("/(tabs)").
+#   There is NO login form after lan-use-N on this path — do not add one.
 # - "Connected" is proven by project-list rendering (app/(tabs)/index.tsx
 #   only renders it with an active, non-errored connection). The old
 #   the old status-dot indicator id never existed in code. Sessions are created via
@@ -90,35 +95,23 @@ name: Activation - positive path (connect -> send message)
 - tapOn:
     id: "lan-use-0"
 
-# Picked server becomes the active LAN connection: local login form renders.
-- extendedWaitUntil:
-    visible:
-      text: ".*10.0.2.2:4096.*"
-    timeout: 10000
-- assertVisible:
-    id: "login-username-input"
-- assertVisible:
-    id: "login-password-input"
-- assertVisible:
-    id: "login-button"
-- takeScreenshot: positive-S4_local_login_form
-- tapOn:
-    id: "login-username-input"
-- inputText: "e2e-user"
-- tapOn:
-    id: "login-password-input"
-- inputText: "e2e-pass"
-- hideKeyboard
-- tapOn:
-    id: "login-button"
-
-# Local login testConnections the LAN entry (12s client cap) then routes to
-# the projects tab. project-list only renders with an active, non-errored
-# connection, so this IS the connected assertion.
+# Picking a LAN candidate CONNECTS AUTOMATICALLY — no login form on this path.
+# app/login.tsx handlePickLan does addLanConnection + setActiveConnection
+# directly (no username/password), and _layout.tsx's auth gate sees a client
+# for the active connection and router.replace("/(tabs)"). The old
+# login-username-input/login-password-input/login-button block that used to sit
+# here asserted a screen that does not exist on the LAN path (the address text
+# briefly flashes during the redirect — never assert on it).
+#
+# project-list only renders with an active, non-errored connection (app/(tabs)/
+# index.tsx), so waiting for it IS the connected assertion. 40s margin: the
+# connection handshake fetches are individually capped (CONNECTION_TEST_TIMEOUT_MS
+# = 12s in src/stores/connections.ts, plus the 30s sdk cap).
 - extendedWaitUntil:
     visible:
       id: "project-list"
     timeout: 40000
+- takeScreenshot: positive-S4_connected
 - takeScreenshot: positive-S5_connected
 
 # New session via the New Project tab (tabPress opens the sheet through the

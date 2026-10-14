@@ -25,6 +25,14 @@ name: Activation - negative path (login-gate error must surface visibly, never s
 # in: alert title visible, dismissable via OK, still on the login gate after
 # dismiss (no fake "connected" state). Hermetic — zero network.
 #
+# GUARD: this flow deliberately never touches the LAN discovery path. Picking a
+# LAN candidate connects AUTOMATICALLY (app/login.tsx handlePickLan ->
+# addLanConnection + setActiveConnection, no credentials), so there is NO login
+# form after lan-use-N anywhere in the app — the username/password form asserted
+# here is the ACCOUNT-mode form on the login gate itself (app/login.tsx
+# handleLogin, entryMode="account" on a fresh install). Stays valid as long as
+# it stays off the LAN path.
+#
 # Maestro note (kept from the old flow): a native Android AlertDialog's
 # message BODY is not exposed to accessibility-tree text matching the way its
 # title is, so only the title ("Ошибка") is asserted, not the body text.

@@ -175,10 +175,10 @@ jobs:
         # abandoned upstream, use the supported google_apis path.
         run: |
           yes | sdkmanager --licenses
-          sdkmanager --list | grep system-images;android-28
+          sdkmanager --list | grep "system-images;android-28"
           rm -rf $ANDROID_HOME/system-images/android-28
           sdkmanager --install "system-images;android-28;google_apis;x86_64"
-          sdkmanager --list_installed | grep system-images
+          sdkmanager --list_installed | grep "system-images"
 
       - name: Run activation E2E flows on emulator
         uses: reactivecircus/android-emulator-runner@v2

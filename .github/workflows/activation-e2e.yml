@@ -168,12 +168,25 @@ jobs:
             done
           done
 
+      - name: Pre-install Android system image (visible logs)
+        # android-emulator-runner hides sdkmanager output behind > /dev/null,
+        # so a poisoned/empty cached image ("contains no system images") is
+        # undebuggable. Pre-install here with visible logs: default rev-4 is
+        # abandoned upstream, use the supported google_apis path.
+        run: |
+          yes | sdkmanager --licenses
+          sdkmanager --list | grep system-images;android-28
+          rm -rf $ANDROID_HOME/system-images/android-28
+          sdkmanager --install "system-images;android-28;google_apis;x86_64"
+          sdkmanager --list_installed | grep system-images
+
       - name: Run activation E2E flows on emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 28
           arch: x86_64
-          target: default
+          target: google_apis
+          profile: Nexus 6
           disable-animations: true
           emulator-boot-timeout: 600
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot

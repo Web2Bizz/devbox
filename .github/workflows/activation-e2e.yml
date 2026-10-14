@@ -175,15 +175,15 @@ jobs:
         # abandoned upstream, use the supported google_apis path.
         run: |
           yes | sdkmanager --licenses
-          sdkmanager --list | grep "system-images;android-28"
-          rm -rf $ANDROID_HOME/system-images/android-28
-          sdkmanager --install "system-images;android-28;google_apis;x86_64"
+          sdkmanager --list | grep "system-images;android-30"
+          rm -rf $ANDROID_HOME/system-images/android-30
+          sdkmanager --install "system-images;android-30;google_apis;x86_64"
           sdkmanager --list_installed | grep "system-images"
 
       - name: Run activation E2E flows on emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 28
+          api-level: 30
           arch: x86_64
           target: google_apis
           profile: Nexus 6

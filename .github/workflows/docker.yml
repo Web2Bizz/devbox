@@ -59,6 +59,11 @@ jobs:
 
       - name: Compute affected docker projects
         id: projects
+        env:
+          # discovered уходит в python через env — НЕ подстановкой ${{ }}
+          # в текст скрипта: `"` в JSON рвал двойные кавычки bash-строки
+          # python3 -c "..." и давал json.loads('[backend,frontend,mobile]').
+          DISCOVERED: "${{ steps.discover.outputs.services }}"
         run: |
           DISCOVERED='${{ steps.discover.outputs.services }}'
           echo "Discovered services (apps/*, services/*): $DISCOVERED"
@@ -74,13 +79,13 @@ jobs:
               # Nx не отработал — fail-safe: собираем всё обнаруженное
               echo "matrix=$DISCOVERED" >> "$GITHUB_OUTPUT"
             else
-              AFFECTED=$(echo "$NX_JSON" | python3 -c "
-          import json,sys
-          discovered=json.loads('${{ steps.discover.outputs.services }}')
+              AFFECTED=$(echo "$NX_JSON" | python3 -c '
+          import json,sys,os
+          discovered=json.loads(os.environ["DISCOVERED"])
           affected=json.load(sys.stdin)
           filtered=[p for p in affected if p in discovered]
           print(json.dumps(filtered))
-          ")
+          ')
               echo "matrix=$AFFECTED" >> "$GITHUB_OUTPUT"  # [] — валидно, matrix-job скипается
             fi
           fi

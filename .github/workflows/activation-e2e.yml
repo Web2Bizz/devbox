@@ -65,11 +65,14 @@ defaults:
 jobs:
   activation-e2e:
     runs-on: ubuntu-latest
-    # npm install + expo prebuild + assembleRelease + emulator pipeline,
-    # budgeted at 60 min (emulator-boot-timeout alone is 10 min).
-    # Typical runs finish well under this; the ceiling just avoids flaky kills
-    # on cold Gradle caches.
-    timeout-minutes: 60
+    # npm ci + expo prebuild + assembleRelease + emulator pipeline, budgeted at
+    # 90 min (emulator-boot-timeout alone is 10 min). Raised from 60 on run
+    # 38605417554, where the job was cancelled at the 60-min ceiling (setup
+    # alone was 47 min: resolve/transforms 11.5, native libs 15.8, CMake app
+    # per-ABI 15.6). The extra headroom absorbs cold-cache variance while the
+    # x86_64-only + SDK/build-cache work below attacks the 45-min build step
+    # itself; a 90-min ceiling must not be read as a 90-min target.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v6
 
@@ -103,9 +106,45 @@ jobs:
             ~/.gradle/caches
             ~/.gradle/wrapper
             apps/mobile/android/.gradle
+            # Gradle's LOCAL BUILD CACHE (org.gradle.caching=true, set in
+            # apps/mobile/android/gradle.properties). Already covered by
+            # ~/.gradle/caches above — listed explicitly so the dependency is
+            # visible here, since this cache is the only thing that makes the
+            # "Purge stale generated sources" step below non-destructive:
+            # that rm kills app/build/intermediates (where cxx/ lives), and
+            # build-cache-1 is what puts those task outputs back.
+            ~/.gradle/caches/build-cache-1
           key: ${{ runner.os }}-gradle-${{ hashFiles('apps/mobile/android/**/*.gradle*', 'apps/mobile/android/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
+
+      - name: Cache Android SDK components
+        # The NDK (~2.5 GB unpacked) and the CMake that AGP downloads are NOT
+        # under ~/.gradle/caches, so the Gradle cache above never saved them:
+        # every run paid "gradle config + NDK/CMake download" = 3.2 min in step
+        # timings. system-images is cached for the same reason. Version numbers
+        # are pinned here deliberately (cache key must be a pure expression —
+        # GITHUB_ENV writes are not visible to the `env` context):
+        #   ndk    27.1.12297006 — ExpoRootProjectPlugin.kt fallback ndkVersion
+        #                          (setIfNotExist; not overridden in build.gradle)
+        #   cmake  3.22.1         — AGP default; RN/Expo never set
+        #                          android.externalNativeBuild.cmake.version
+        #                          (android.cmakeVersion is unset in gradle.properties)
+        #   image  android-30/google_apis/x86_64 — must match the
+        #                          android-emulator-runner `api-level`/`target`/`arch`
+        #                          below, or the cached image is never used.
+        # Bump the NDK/CMake pin when upgrading either; a stale-key miss only
+        # costs a download, so a wrong pin degrades to the old behaviour rather
+        # than failing the build.
+        uses: actions/cache@v5
+        with:
+          path: |
+            /usr/local/lib/android/sdk/ndk
+            /usr/local/lib/android/sdk/cmake
+            /usr/local/lib/android/sdk/system-images
+          key: ${{ runner.os }}-android-sdk-ndk-27.1.12297006-cmake-3.22.1-sysimg-30-google_apis-x86_64
+          restore-keys: |
+            ${{ runner.os }}-android-sdk-ndk-27.1.12297006-cmake-3.22.1-
 
       - name: Purge stale generated sources
         # The restore-keys prefix fallback can restore a generated autolinking
@@ -123,13 +162,41 @@ jobs:
 
       - name: Install dependencies & build APK
         run: |
-          npm install --legacy-peer-deps
+          # npm ci, not npm install: package-lock.json is committed, so ci is
+          # deterministic AND skips the dependency-resolution work install does.
+          # --legacy-peer-deps is still required (own npm project, deliberate).
+          npm ci --legacy-peer-deps
           npx expo prebuild --platform android --no-install
           # prebuild already generates android/app/debug.keystore; without this
           # keytool aborts with "alias <androiddebugkey> already exists".
+          # NOT redundant: buildTypes.release uses `signingConfig
+          # signingConfigs.debug` (apps/mobile/android/app/build.gradle), so
+          # assembleRelease is signed with exactly this keystore. Removing the
+          # rm+keytool pair breaks assembleRelease, not just signing.
           rm -f android/app/debug.keystore
           keytool -genkey -v -keystore android/app/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-          cd android && ./gradlew assembleRelease
+          # Gradle flags below are explained BEFORE the command on purpose: a
+          # `#` comment placed between backslash-continued lines is joined into
+          # the command by the line continuation and silently swallows every
+          # flag after it.
+          #
+          # -PreactNativeArchitectures=x86_64 — the emulator below is x86_64, so
+          # building armeabi-v7a/arm64-v8a/x86 as well triples "CMake app"
+          # (15.6 min) + native libs (15.8 min) and triples the adb install cost
+          # (94 s) for ABIs no test ever runs. reactNativeArchitectures is the
+          # documented override point (android/gradle.properties says so
+          # verbatim), and gradle.properties keeps 4 ABIs so mobile.yml (real
+          # release builds, Play Store) is unaffected.
+          #
+          # --configuration-cache — scoped HERE, not in gradle.properties:
+          # org.gradle.caching=true (shared, safe) lives in gradle.properties,
+          # but the configuration cache must not be able to break mobile.yml's
+          # release build. If it ever misbehaves only this job regresses and the
+          # revert is one flag. Gradle 9.3.1 (wrapper) — configuration cache is
+          # stable, and `--configuration-cache` is its documented CLI form.
+          cd android && ./gradlew assembleRelease \
+            -PreactNativeArchitectures=x86_64 \
+            --configuration-cache
 
       - name: Start mock opencode servers
         run: |
@@ -173,10 +240,22 @@ jobs:
         # so a poisoned/empty cached image ("contains no system images") is
         # undebuggable. Pre-install here with visible logs: default rev-4 is
         # abandoned upstream, use the supported google_apis path.
+        #
+        # The `rm -rf` + unconditional reinstall that used to live here would
+        # delete exactly what the "Cache Android SDK components" step restores,
+        # making that cache worth nothing — so it is now conditional: a healthy
+        # cached image is kept as-is, and only a missing/broken one is refetched.
         run: |
           yes | sdkmanager --licenses
+          IMAGE_DIR="$ANDROID_HOME/system-images/android-30/google_apis/x86_64"
+          if [ -d "$IMAGE_DIR" ] && [ -f "$IMAGE_DIR/package.xml" ] && [ -n "$(ls -A "$IMAGE_DIR" 2>/dev/null)" ]; then
+            echo "system image restored from cache and looks intact — skipping reinstall"
+            sdkmanager --list_installed | grep "system-images"
+            exit 0
+          fi
+          echo "system image missing or incomplete — reinstalling"
           sdkmanager --list | grep "system-images;android-30"
-          rm -rf $ANDROID_HOME/system-images/android-30
+          rm -rf "$ANDROID_HOME/system-images/android-30"
           sdkmanager --install "system-images;android-30;google_apis;x86_64"
           sdkmanager --list_installed | grep "system-images"
 
@@ -189,7 +268,13 @@ jobs:
           profile: Nexus 6
           disable-animations: true
           emulator-boot-timeout: 600
-          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
+          # -no-snapshot removed: it disabled snapshot save AND load, pinning
+          # every run to a full cold boot (~75 s). Left to the emulator default
+          # so a saved snapshot can be loaded. Caveat, honestly: this job boots
+          # ONE emulator per run and the AVD is not cached across runs, so the
+          # realistic gain here is ~0 — the real install-time win is the
+          # x86_64-only APK (adb install was 94 s).
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
           # One script file, not one `sh -c` per line — run-e2e-flows.sh does the
           # adb reverse port-forwarding, runs every flow, and captures logcat on
           # exit. (Running maestro line-by-line here broke `cd` persistence and

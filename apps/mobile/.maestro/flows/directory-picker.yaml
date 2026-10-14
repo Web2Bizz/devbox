@@ -28,7 +28,8 @@ name: Directory picker - browse server folders and create a session in one
 - launchApp:
     clearState: true
 
-# Login gate -> LAN discovery -> local login (real connect path).
+# Login gate -> LAN discovery -> AUTOMATIC connect (real connect path, no
+# login form after picking a LAN candidate).
 - assertVisible:
     text: "Вход"
 - assertVisible:
@@ -43,21 +44,13 @@ name: Directory picker - browse server folders and create a session in one
     timeout: 120000
 - tapOn:
     id: "lan-use-0"
-- extendedWaitUntil:
-    visible:
-      text: ".*10.0.2.2:4096.*"
-    timeout: 10000
-- tapOn:
-    id: "login-username-input"
-- inputText: "e2e-user"
-- tapOn:
-    id: "login-password-input"
-- inputText: "e2e-pass"
-- hideKeyboard
-- tapOn:
-    id: "login-button"
 
-# 40s margin: the login handshake's own fetches are individually capped
+# app/login.tsx handlePickLan connects immediately (addLanConnection +
+# setActiveConnection, no credentials) and _layout.tsx routes to /(tabs). The
+# address text only flashes during that redirect, so it is never asserted on.
+# project-list only renders with an active, non-errored connection, so waiting
+# for it IS the connected assertion.
+# 40s margin: the connection handshake's own fetches are individually capped
 # (CONNECTION_TEST_TIMEOUT_MS = 12s in src/stores/connections.ts, plus the
 # 30s sdk cap) — the wait must not be shorter than the code path it waits on.
 - extendedWaitUntil:

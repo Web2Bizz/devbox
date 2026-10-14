@@ -46,21 +46,15 @@ name: "DiffView horizontal scroll - wide diff reachable by swipe on the demo scr
     timeout: 120000
 - tapOn:
     id: "lan-use-0"
-- extendedWaitUntil:
-    visible:
-      text: ".*10.0.2.2:4096.*"
-    timeout: 10000
-- tapOn:
-    id: "login-username-input"
-- inputText: "e2e-user"
-- tapOn:
-    id: "login-password-input"
-- inputText: "e2e-pass"
-- hideKeyboard
-- tapOn:
-    id: "login-button"
 
-# 40s margin: see activation-positive.yaml — the login handshake's own
+# Picking a LAN candidate CONNECTS AUTOMATICALLY (app/login.tsx handlePickLan ->
+# addLanConnection + setActiveConnection, no credentials; _layout.tsx auth gate
+# then routes to /(tabs)) — there is NO login form on this path. The server
+# address text only flashes during that redirect, so it is never asserted on.
+# project-list only renders with an active, non-errored connection, so waiting
+# for it IS the connected assertion.
+
+# 40s margin: see activation-positive.yaml — the connection handshake's own
 # fetches are individually capped at 12s/30s.
 - extendedWaitUntil:
     visible:

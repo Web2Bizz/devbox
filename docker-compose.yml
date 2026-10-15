@@ -1,9 +1,44 @@
+# SINGLE compose file for the whole stack (backend + frontend + opencode).
+# There is no docker-compose.prod.yml / docker-compose.override.yml and no
+# `env_file:` — all configuration arrives via EXTERNAL environment
+# (shell / Dokploy). `.env.example` documents the full variable list;
+# `.env.${NODE_ENV}` files are NOT read by compose, do not create them.
+#
+# Postgres is EXTERNAL: no postgres service here, DATABASE_URL fail-fasts
+# when unset (same `:?` pattern as OPENCODE_SERVER_PASSWORD).
+#
+# Resource limits (ex docker-compose.prod.yml) are baked in directly — they
+# are identical in every environment: backend/frontend 1G/1.0, opencode 2G/2.0.
+#
+# Dev/prod differences (ex docker-compose.override.yml) are env-driven:
+#   BACKEND_PUBLISH  `[ip:]hostport` целиком, default prod `3100` (все
+#                    интерфейсы); dev ставит `127.0.0.1:3100`. Контейнерный
+#                    порт фиксирован `:3100` (совпадает с APP_BACKEND_PORT).
+#   FRONTEND_PUBLISH `[ip:]hostport` целиком, default prod `8080`; dev loopback
+#                    ставит `127.0.0.1:8080`. Контейнерный порт фиксирован `:3000`.
+#   LOG_LEVEL        default `info`; the environment sets `debug`, no file does.
+#   frontend-dev     profile-gated dev server (`--profile dev`): builds the
+#                    `build` stage, runs `bun run dev:next` with bind-mounts.
+#                    Compose cannot conditionally include keys (volumes/target),
+#                    so a `profiles: [dev]` service is used instead of
+#                    variable hacks — prod `docker compose up` is unaffected.
+# Usage:
+#   prod: docker compose up -d --build
+#   dev:  COMPOSE_PROFILES=dev BACKEND_PUBLISH=127.0.0.1:3100 \
+#         FRONTEND_DEV_PUBLISH=127.0.0.1:3001 docker compose --profile dev up --build backend frontend-dev
 services:
   backend:
     build:
       context: .
       dockerfile: apps/backend/Dockerfile
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+        reservations:
+          memory: 256M
     environment:
       APP_BACKEND_PORT: ${APP_BACKEND_PORT:-${PORT:-3100}}
       APP_BACKEND_HOST: ${APP_BACKEND_HOST:-0.0.0.0}
@@ -18,7 +53,7 @@ services:
       REQUEST_TIMEOUT_MS: ${REQUEST_TIMEOUT_MS:-10000}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
-      - "${APP_BACKEND_PORT:-${PORT:-3100}}:3100"
+      - "${BACKEND_PUBLISH:-3100}:3100"
     networks:
       - front
       - back
@@ -42,8 +77,15 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-${APP_BACKEND_SOCKET:-http://localhost:3100}}
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+        reservations:
+          memory: 256M
     ports:
-      - "8080:3000"
+      - "${FRONTEND_PUBLISH:-8080}:3000"
     networks:
       - front
     depends_on:
@@ -56,12 +98,48 @@ services:
       retries: 6
       start_period: 15s
 
+  # Dev server variant (ex docker-compose.override.yml). Enabled only with
+  # `--profile dev` / COMPOSE_PROFILES=dev; prod `docker compose up` ignores it.
+  frontend-dev:
+    profiles:
+      - dev
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+      target: build
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-${APP_BACKEND_SOCKET:-http://localhost:3100}}
+    command: ["bun", "run", "dev:next"]
+    working_dir: /app/apps/frontend
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-${APP_BACKEND_SOCKET:-http://localhost:3100}}
+      NEXT_PUBLIC_PORT: ${NEXT_PUBLIC_PORT:-3001}
+    ports:
+      - "${FRONTEND_DEV_PUBLISH:-127.0.0.1:3001}:3001"
+    volumes:
+      - ./apps/frontend/app:/app/apps/frontend/app
+      - ./apps/frontend/src:/app/apps/frontend/src
+      - ./apps/frontend/public:/app/apps/frontend/public
+      - ./apps/frontend/next.config.mjs:/app/apps/frontend/next.config.mjs
+      - frontend-dev-next:/app/apps/frontend/.next
+    networks:
+      - front
+    depends_on:
+      - backend
+
   # No depends_on from backend: the backend tolerates an unreachable opencode
   # (mock fallback, never throws at boot), so startup order is not enforced.
   opencode:
     build:
       context: images/opencode
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "2.0"
+        reservations:
+          memory: 512M
     cap_drop:
       - ALL
     cap_add:
@@ -95,6 +173,7 @@ services:
       start_period: 30s
 
 volumes:
+  frontend-dev-next:
   opencode-projects:
   opencode-ssh-keys:
   opencode-gh-config:

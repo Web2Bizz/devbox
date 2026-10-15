@@ -268,17 +268,25 @@ jobs:
 
       - name: Upload APK
         # One APK artifact per run, shared by both emulator jobs below
-        # (`needs: [apk]`). Name carries run_number AND run_attempt: the
-        # run_number alone collides on a RE-RUN of the same run (artifact
-        # names are immutable per run — 409 conflict), so the attempt
-        # suffix keeps re-runs working. Retention 1 day because this is an
-        # intermediate consumed inside the same run, not a deliverable.
+        # (`needs: [apk]`). The name carries run_id: unique per run, but
+        # STABLE across re-run attempts of that same run — run_id does NOT
+        # change when an attempt is re-run. That stability is exactly what
+        # makes a PARTIAL re-run work: re-running only `core`/`newer` asks
+        # for the very name the `apk` job already uploaded in attempt 1, so
+        # the download resolves instead of dying on "Artifact not found".
+        # (A run_attempt suffix breaks this: attempt 1 leaves `...-1`
+        # behind while the re-run looks for `...-2`.)
+        # upload-artifact@v7 permits overwriting an existing artifact
+        # within the same run, so a FULL re-run simply replaces this
+        # same-name artifact — no 409 conflict, no immutable-name hazard.
+        # Retention 1 day because this is an intermediate consumed inside
+        # the same run, not a deliverable.
         # if-no-files-found: error (NOT the default warn) so a Gradle path
         # change fails the run instead of silently handing the emulator jobs
         # a missing APK.
         uses: actions/upload-artifact@v7
         with:
-          name: activation-e2e-apk-${{ github.run_number }}-${{ github.run_attempt }}
+          name: activation-e2e-apk-${{ github.run_id }}
           path: apps/mobile/android/app/build/outputs/apk/release/app-release.apk
           retention-days: 1
           if-no-files-found: error
@@ -376,7 +384,7 @@ jobs:
         # unzip.Extract({path: directory}) — no file-name handling exists.
         uses: actions/download-artifact@v8
         with:
-          name: activation-e2e-apk-${{ github.run_number }}-${{ github.run_attempt }}
+          name: activation-e2e-apk-${{ github.run_id }}
           path: apps/mobile/android/app/build/outputs/apk/release
 
       - name: Start mock opencode servers
@@ -485,7 +493,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: activation-e2e-screenshots-core-${{ github.run_number }}-${{ github.run_attempt }}
+          name: activation-e2e-screenshots-core-${{ github.run_id }}
           path: apps/mobile/artifacts/screenshots/*.png
           if-no-files-found: warn
 
@@ -500,7 +508,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: activation-e2e-debug-core-${{ github.run_number }}-${{ github.run_attempt }}
+          name: activation-e2e-debug-core-${{ github.run_id }}
           path: apps/mobile/artifacts/activation-e2e-debug.tar.gz
           if-no-files-found: warn
           # Archiving preserves Maestro's hidden `.maestro` hierarchy and
@@ -589,7 +597,7 @@ jobs:
         # app-release.apk).
         uses: actions/download-artifact@v8
         with:
-          name: activation-e2e-apk-${{ github.run_number }}-${{ github.run_attempt }}
+          name: activation-e2e-apk-${{ github.run_id }}
           path: apps/mobile/android/app/build/outputs/apk/release
 
       - name: Start mock opencode servers
@@ -697,7 +705,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: activation-e2e-screenshots-newer-${{ github.run_number }}-${{ github.run_attempt }}
+          name: activation-e2e-screenshots-newer-${{ github.run_id }}
           path: apps/mobile/artifacts/screenshots/*.png
           if-no-files-found: warn
 
@@ -712,7 +720,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: activation-e2e-debug-newer-${{ github.run_number }}-${{ github.run_attempt }}
+          name: activation-e2e-debug-newer-${{ github.run_id }}
           path: apps/mobile/artifacts/activation-e2e-debug.tar.gz
           if-no-files-found: warn
           # Archiving preserves Maestro's hidden `.maestro` hierarchy and

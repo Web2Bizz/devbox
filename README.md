@@ -62,14 +62,18 @@ paths-gated (`apps/mobile/app/**`, `src/**`, `packages/**`).
 
 ## images/opencode
 
-Отдельный compose-стек для образа `opencode` (`Dockerfile` + `entrypoint.sh` +
-`reload-secrets.sh` + `docker-compose.yml` внутри `images/opencode/`). Он
-**намеренно не входит в корневой `docker-compose.yml`**: поднимается в
-Dokploy, целится во внешнюю сеть `dokploy-network` (`external: true`),
-поднимает контейнер `opencode-dev` на порту `expose 4096` с томами
-(`projects`, `ssh-keys`, `gh-config`, `pnpm-store`, `opencode-data`, …) и
-лимитами CPU/RAM. Требует `OPENCODE_SERVER_PASSWORD` (fail-fast, если не
-задан).
+Образ `opencode` (`Dockerfile` + `entrypoint.sh` + `reload-secrets.sh` +
+`docker-compose.yml` внутри `images/opencode/`). Входит в корневой
+`docker-compose.yml` как сервис `opencode` (локальный `build` из
+`images/opencode/`, сеть `back`, `expose 4096` без публикации наружу —
+порт виден только внутри сети) и дополнительно публикуется через CI
+(`docker.yml`, job `opencode`, вне discovery-матрицы) в self-hosted registry
+для Dokploy/prod-деплоев, забирающих готовый образ. Тома —
+`opencode-*` (`projects`, `ssh-keys`, `gh-config`, `pnpm-store`,
+`opencode-data`, …), лимиты prod — `2G`/`2.0` (тяжёлый образ: Playwright
+Chromium + pm2). Требует `OPENCODE_SERVER_PASSWORD` (fail-fast, если не
+задан). Отдельный `images/opencode/docker-compose.yml` остался для
+standalone-поднятия в Dokploy (внешняя сеть `dokploy-network`).
 
 ## Frontend UI kit (@web2bizz/ui)
 
@@ -171,7 +175,8 @@ Single source: `.env.example` → скопируй в `.env` (gitignored, сек
 | `APP_BACKEND_HOST` | хост backend для сборки URL (пусто → `localhost`) | пусто | пусто | нет |
 | `APP_BACKEND_PROTOCOL` | схема backend URL | `http` | `https` | нет |
 | `APP_BACKEND_SOCKET` | публичный URL backend (браузер + compose default API) | `http://localhost:3100` | `https://api.example.com` | да (prod) |
-| `OPENCODE_URL` | адрес OpenCode stand (`0.0.0.0` маппится на `127.0.0.1` в коде) | `http://127.0.0.1:4096` | `http://127.0.0.1:4096` | нет |
+| `OPENCODE_URL` | адрес OpenCode stand (`0.0.0.0` маппится на `127.0.0.1` в коде; в compose дефолт — `http://opencode:4096` внутри сети) | `http://127.0.0.1:4096` | `http://opencode:4096` | нет |
+| `OPENCODE_SERVER_PASSWORD` | пароль `opencode serve` (compose fail-fast без него; в секреты, не в git) | задай | задай | да (compose) |
 | `POSTGRES_USER` | пользователь Postgres | `devbox` | `devbox` | нет |
 | `POSTGRES_PASSWORD` | пароль Postgres (замени в prod) | `changeme` | замени | да (prod) |
 | `POSTGRES_DB` | имя базы | `devbox` | `devbox` | нет |
@@ -191,9 +196,9 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.
 docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.prod exec postgres pg_dump -U devbox devbox > backup.sql  # бэкап PG
 ```
 
-Порты: `5432` postgres · `3100` backend · `3001` frontend dev (`next dev --turbopack`) / `8080` frontend prod (standalone `:3000`).
-Сети: `front` (frontend↔backend) · `back` (backend↔postgres).
-Volumes: `pgdata` (данные PG — бэкап командой выше) · `frontend-dev-next` (только dev-override, кэш `.next`).
+Порты: `5432` postgres · `3100` backend · `3001` frontend dev (`next dev --turbopack`) / `8080` frontend prod (standalone `:3000`) · `4096` opencode только внутри сети (`expose`, наружу не публикуется).
+Сети: `front` (frontend↔backend) · `back` (backend↔postgres↔opencode).
+Volumes: `pgdata` (данные PG — бэкап командой выше) · `frontend-dev-next` (только dev-override, кэш `.next`) · `opencode-*` (workspace/ssh/gh-config/pnpm-store/pm2/opencode-data/secrets/playwright-browsers).
 
 ## Commands
 

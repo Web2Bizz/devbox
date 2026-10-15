@@ -32,7 +32,7 @@ services:
       # In-network DATABASE_URL always targets the `postgres` service host.
       # Prod POSTGRES_HOST (pg.db.*) is for host→remote access, never the compose network.
       DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-devbox}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-devbox}}
-      OPENCODE_URL: ${OPENCODE_URL:-${OPENCODE_SERVER_URL:-http://host.docker.internal:4096}}
+      OPENCODE_URL: ${OPENCODE_URL:-${OPENCODE_SERVER_URL:-http://opencode:4096}}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:${NEXT_PUBLIC_PORT:-3001},http://localhost:8080}
       REQUEST_TIMEOUT_MS: ${REQUEST_TIMEOUT_MS:-10000}
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -78,8 +78,54 @@ services:
       retries: 6
       start_period: 15s
 
+  # No depends_on from backend: the backend tolerates an unreachable opencode
+  # (mock fallback, never throws at boot), so startup order is not enforced.
+  opencode:
+    build:
+      context: images/opencode
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:?OPENCODE_SERVER_PASSWORD is not set}
+      OPENCODE_API_KEY: ${OPENCODE_API_KEY:-}
+      OPENCODE_BASE_PATH: ${OPENCODE_BASE_PATH:-/}
+    volumes:
+      - opencode-projects:/workspace
+      - opencode-ssh-keys:/root/.ssh
+      - opencode-gh-config:/root/.config/gh
+      - opencode-pnpm-store:/pnpm/store
+      - opencode-pm2-home:/root/.pm2
+      - opencode-data:/root/.local/share/opencode
+      - opencode-secrets:/root/.secrets
+      - opencode-playwright-browsers:/playwright-browsers
+    expose:
+      - 4096
+    networks:
+      - back
+    healthcheck:
+      # curl ships in the image; any HTTP status (even 401/404 behind auth)
+      # means `opencode serve` is up — only a refused connection fails.
+      test: ["CMD-SHELL", "curl -s -o /dev/null http://localhost:4096 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
 volumes:
   pgdata:
+  opencode-projects:
+  opencode-ssh-keys:
+  opencode-gh-config:
+  opencode-pnpm-store:
+  opencode-pm2-home:
+  opencode-data:
+  opencode-secrets:
+  opencode-playwright-browsers:
 
 networks:
   front:

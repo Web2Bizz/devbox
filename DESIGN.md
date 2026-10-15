@@ -2,7 +2,7 @@
 
 Монорепо DevBox: `apps/frontend` (Next.js 16.3 Turbopack + `@web2bizz/ui`),
 `apps/backend` (NestJS API), `apps/mobile` (Expo 57 / React Native 0.86 +
-`@web2bizz/ui-native`), плюс `images/opencode` (образ и compose-заготовка для
+`@web2bizz/ui-native`), плюс `apps/opencode-server` (образ и compose-заготовка для
 сервиса opencode).
 
 Этот файл — **рефера**: общие правила, применимые ко всем UI-приложениями

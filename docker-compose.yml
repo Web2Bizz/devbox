@@ -131,7 +131,7 @@ services:
   # (mock fallback, never throws at boot), so startup order is not enforced.
   opencode:
     build:
-      context: images/opencode
+      context: apps/opencode-server
     restart: unless-stopped
     deploy:
       resources:

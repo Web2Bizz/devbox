@@ -36,16 +36,44 @@ name: Activation E2E (Maestro)
 # NOTE: this workflow intentionally has NO `push:` trigger. The pull_request
 # check is the only gate for the activation suite. With `push:` present the
 # same commit was tested twice — once as pull_request, and then again as `push`
-# to dev/main the moment the PR merged — and this job is budgeted at 90 minutes
-# of emulator, so that second run was a full duplicate of a suite that had
-# already passed on that exact tree. Removing `push:` means a direct push to
-# dev/main (i.e. bypassing a PR) will NOT run E2E.
+# to dev/main the moment the PR merged — and the emulator jobs below are
+# budgeted by the tens of minutes, so that second run was a full duplicate of
+# a suite that had already passed on that exact tree. Removing `push:` means a
+# direct push to dev/main (i.e. bypassing a PR) will NOT run E2E.
 #
 # That is deliberate, not a hole: neither branch is protected today, but branch
 # protection is the documented way to make the PR check mandatory, and once it
 # is enabled every change to dev/main must arrive through a pull_request —
 # exactly where this workflow runs. Until then, workflow_dispatch stays the
 # manual escape hatch for an on-demand run.
+#
+# WHY THIS IS THREE JOBS (and not one 90-minute job anymore):
+# The old single job was CANCELLED at its timeout-minutes: 90 ceiling on run
+# 38643204390 (PR #3). Everything ran healthy and FASTER than the green
+# reference until "Selected device emulator-5554 using port 41921" — then
+# `maestro test tablet-baseline-login` sat silent for ~70 minutes with zero
+# output. That same flow passed in 7 s on the green run and its flow file is
+# byte-identical (git diff empty), i.e. an emulator-side hang, not a
+# functional break. In the single-job layout one hung `maestro test` was
+# unbounded: it could burn the whole 90-minute budget by construction, and
+# the job-level timeout was the only thing that ever stopped it.
+#
+# Three changes, each targeting one link of that chain:
+#   1. per-flow timeout — scripts/run-e2e-flows.sh wraps every
+#      `maestro test` in `timeout ${FLOW_TIMEOUT_SECONDS:-300}`. A hang now
+#      costs at most 5 minutes, shows partial output, and is reported as a
+#      failed flow (exit 124 → rc=1 in core mode).
+#   2. job split — `apk` owns setup+build and emits ONE APK artifact (no
+#      emulator); `core` and `newer` each boot their own emulator, download
+#      that same APK, and run one half of the suite via
+#      `run-e2e-flows.sh core|newer`. They run in PARALLEL, so the suite
+#      costs ~max(core, newer) of emulator time instead of the sum — and a
+#      hang is scoped to one half: newer keeps uploading diagnostics even
+#      when core is stuck, which the old single job could never do.
+#   3. Maestro pinned — MAESTRO_VERSION=2.11.0 in "Install Maestro CLI"
+#      (both runs of the hanging flow happened to install 2.11.0; the
+#      installer always grabs latest, so a release drift would silently swap
+#      suite behaviour in the middle of a flake investigation).
 
 on:
   pull_request:
@@ -67,16 +95,15 @@ defaults:
     working-directory: apps/mobile
 
 jobs:
-  activation-e2e:
+  apk:
     runs-on: ubuntu-latest
-    # npm ci + expo prebuild + assembleRelease + emulator pipeline, budgeted at
-    # 90 min (emulator-boot-timeout alone is 10 min). Raised from 60 on run
-    # 38605417554, where the job was cancelled at the 60-min ceiling (setup
-    # alone was 47 min: resolve/transforms 11.5, native libs 15.8, CMake app
-    # per-ABI 15.6). The extra headroom absorbs cold-cache variance while the
-    # x86_64-only + SDK/build-cache work below attacks the 45-min build step
-    # itself; a 90-min ceiling must not be read as a 90-min target.
-    timeout-minutes: 90
+    # Setup + build only — NO emulator. Historic cold-cache setup+build was
+    # ~47 min (run 38605417554, all-ABI: resolve/transforms 11.5, native
+    # libs 15.8, CMake app per-ABI 15.6); the x86_64-only build here cuts the
+    # native-libs + CMake legs ~3x, so realistic cold is ~25-30 min. 60 min
+    # keeps cold-cache margin without the emulator in the picture; the Gradle
+    # and Android-SDK caches below (unchanged) are what attack that directly.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
 
@@ -126,27 +153,29 @@ jobs:
         # The NDK (~2.5 GB unpacked) and the CMake that AGP downloads are NOT
         # under ~/.gradle/caches, so the Gradle cache above never saved them:
         # every run paid "gradle config + NDK/CMake download" = 3.2 min in step
-        # timings. system-images is cached for the same reason. Version numbers
-        # are pinned here deliberately (cache key must be a pure expression —
-        # GITHUB_ENV writes are not visible to the `env` context):
+        # timings. Version numbers are pinned here deliberately (cache key must
+        # be a pure expression — GITHUB_ENV writes are not visible to the `env`
+        # context):
         #   ndk    27.1.12297006 — ExpoRootProjectPlugin.kt fallback ndkVersion
         #                          (setIfNotExist; not overridden in build.gradle)
         #   cmake  3.22.1         — AGP default; RN/Expo never set
         #                          android.externalNativeBuild.cmake.version
         #                          (android.cmakeVersion is unset in gradle.properties)
-        #   image  android-30/google_apis/x86_64 — must match the
-        #                          android-emulator-runner `api-level`/`target`/`arch`
-        #                          below, or the cached image is never used.
         # Bump the NDK/CMake pin when upgrading either; a stale-key miss only
         # costs a download, so a wrong pin degrades to the old behaviour rather
         # than failing the build.
+        #
+        # system-images is deliberately NOT here. This job builds an APK and
+        # never boots an emulator, so the ~2 GB image was dead weight whose
+        # only effect was to evict the gradle/ndk caches against the repo's
+        # cache limit. It lives in the emulator jobs' scoped system-images-only
+        # caches (see core/newer below) and nowhere else.
         uses: actions/cache@v5
         with:
           path: |
             /usr/local/lib/android/sdk/ndk
             /usr/local/lib/android/sdk/cmake
-            /usr/local/lib/android/sdk/system-images
-          key: ${{ runner.os }}-android-sdk-ndk-27.1.12297006-cmake-3.22.1-sysimg-30-google_apis-x86_64
+          key: ${{ runner.os }}-android-sdk-ndk-27.1.12297006-cmake-3.22.1
           restore-keys: |
             ${{ runner.os }}-android-sdk-ndk-27.1.12297006-cmake-3.22.1-
 
@@ -161,7 +190,21 @@ jobs:
 
       - name: Install Maestro CLI
         run: |
+          # PINNED. Run 38643204390 (the ~70-min hang) and its green reference
+          # BOTH installed 2.11.0, but only because they happened to run on
+          # the same day — the installer grabs whatever release is latest.
+          # MAESTRO_VERSION is the documented pin mechanism
+          # (docs.maestro.dev/.../update-the-maestro-cli#install-a-specific-version:
+          # "set the MAESTRO_VERSION environment variable before running the
+          # update script"); valid values live on
+          # https://github.com/mobile-dev-inc/Maestro/releases
+          # (2.11.0 = tag cli-2.11.0). Bump deliberately, after reading the
+          # changelog — never by drift.
+          # Kept in the apk job (not only in the emulator jobs below) because
+          # it also validates the pin BEFORE the multi-minute build.
+          export MAESTRO_VERSION=2.11.0
           curl -Ls "https://get.maestro.mobile.dev" | bash
+          "$HOME/.maestro/bin/maestro" --version
           echo "$HOME/.maestro/bin" >> $GITHUB_PATH
 
       - name: Install dependencies & build APK
@@ -218,10 +261,123 @@ jobs:
           #     gradle.properties, shared with mobile.yml and unaffected by the
           #     above (this is what restores cxx/ after the purge step).
           #   -PreactNativeArchitectures=x86_64 — see above.
-          #   caches (~/.gradle, android/.gradle, NDK/CMake/system-images) —
-          #     plain file caches, no Gradle configuration semantics involved.
+          #   caches (~/.gradle, android/.gradle, NDK/CMake) — plain file caches,
+          #     no Gradle configuration semantics involved.
           cd android && ./gradlew assembleRelease \
             -PreactNativeArchitectures=x86_64
+
+      - name: Upload APK
+        # One APK artifact per run, shared by both emulator jobs below
+        # (`needs: [apk]`). Name carries run_number AND run_attempt: the
+        # run_number alone collides on a RE-RUN of the same run (artifact
+        # names are immutable per run — 409 conflict), so the attempt
+        # suffix keeps re-runs working. Retention 1 day because this is an
+        # intermediate consumed inside the same run, not a deliverable.
+        # if-no-files-found: error (NOT the default warn) so a Gradle path
+        # change fails the run instead of silently handing the emulator jobs
+        # a missing APK.
+        uses: actions/upload-artifact@v7
+        with:
+          name: activation-e2e-apk-${{ github.run_number }}-${{ github.run_attempt }}
+          path: apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 1
+          if-no-files-found: error
+
+  # =====================================================================
+  # core — the regression gate. Boots ONE emulator, runs CORE_FLOWS only
+  # (run-e2e-flows.sh core: blocking semantics, break-on-failure, rc=1).
+  # Runs in PARALLEL with `newer`; its failure blocks the PR check, its
+  # artifacts are independent of newer's.
+  # =====================================================================
+  core:
+    runs-on: ubuntu-latest
+    needs: [apk]
+    # Realistic path: boot ~2-3 min (capped at 10 by emulator-boot-timeout)
+    # + mock servers ~1 min + the two fast core flows (seconds..1 min each
+    # in green runs). 30 min is >6x that with headroom for a cold
+    # system-image download. The real guard against a hang is per-flow
+    # FLOW_TIMEOUT_SECONDS below (see run-e2e-flows.sh docblock), NOT this
+    # ceiling — this is only the last resort.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      # Node is here ONLY to run the mock servers
+      # (tests/fixtures/mock-opencode-server.ts, dependency-free, executed
+      # with TS type-stripping — Node >= 23.6). No npm ci in this job: the
+      # apk job owns dependency install. Pinned to 24 to match mobile.yml's
+      # test job.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      # sdkmanager in "Pre-install Android system image" is a JVM tool, so
+      # this is required (temurin 17, same as apk). Maestro's CLI bundles its
+      # own JRE and does not need it.
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v4
+
+      - name: Add emulator to PATH
+        run: echo "$ANDROID_HOME/emulator" >> $GITHUB_PATH
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Cache Android SDK system image
+        # Same system-image pin and same api-level/target/arch as the emulator
+        # runner below, or the cache never hits. Deliberately a SEPARATE,
+        # SMALLER entry than the apk job's ndk/cmake/sysimg cache: this job
+        # builds nothing, so restoring ~2.5 GB of NDK + CMake every run would
+        # be pure download time; system-images is the only path it needs.
+        # Key matches the apk job's pins (android-30/google_apis/x86_64).
+        uses: actions/cache@v5
+        with:
+          path: |
+            /usr/local/lib/android/sdk/system-images
+          key: ${{ runner.os }}-android-sdk-sysimg-30-google_apis-x86_64
+          restore-keys: |
+            ${{ runner.os }}-android-sdk-sysimg-30-google_apis-x86_64-
+
+      - name: Install Maestro CLI
+        run: |
+          # PINNED (same 2.11.0, same mechanism and reasoning as the apk job
+          # — MAESTRO_VERSION, documented in the Maestro CLI "update" docs).
+          # Repeated here because GH jobs share no filesystem: this job runs
+          # `maestro`, so this job must install it. PATH from another job
+          # does not carry over.
+          export MAESTRO_VERSION=2.11.0
+          curl -Ls "https://get.maestro.mobile.dev" | bash
+          "$HOME/.maestro/bin/maestro" --version
+          echo "$HOME/.maestro/bin" >> $GITHUB_PATH
+
+      - name: Download APK
+        # The machinery that keeps "one build" while two jobs run the suite.
+        # download-artifact resolves `path:` relative to the workspace root
+        # (it does not honour defaults.run.working-directory) AND treats it
+        # STRICTLY as a destination DIRECTORY: the artifact's zip is extracted
+        # into it. `path:` with a file name is NOT that file — an artifact whose
+        # single entry lives in the archive root (`app-release.apk`, see the
+        # apk job's Upload step) would land in
+        # .../release/app-release.apk/app-release.apk, i.e. a DIRECTORY named
+        # app-release.apk with the APK inside. `adb install` on a directory
+        # fails, and run-e2e-flows.sh's hard `adb install` guard would kill the
+        # job on every run. Hence the directory WITHOUT the file name: the
+        # extracted APK then sits at exactly the path the script installs from
+        # (ROOT=<ws>/apps/mobile, APK=android/app/build/outputs/apk/release/
+        # app-release.apk).
+        # Verified against @actions/artifact: resolveOrCreateDirectory(path) +
+        # unzip.Extract({path: directory}) — no file-name handling exists.
+        uses: actions/download-artifact@v8
+        with:
+          name: activation-e2e-apk-${{ github.run_number }}-${{ github.run_attempt }}
+          path: apps/mobile/android/app/build/outputs/apk/release
 
       - name: Start mock opencode servers
         run: |
@@ -284,7 +440,7 @@ jobs:
           sdkmanager --install "system-images;android-30;google_apis;x86_64"
           sdkmanager --list_installed | grep "system-images"
 
-      - name: Run activation E2E flows on emulator
+      - name: Run CORE activation flows on emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30
@@ -307,7 +463,11 @@ jobs:
           # Monorepo: android-emulator-runner executes `script:` from the
           # workspace root, so cd into apps/mobile — run-e2e-flows.sh derives
           # ROOT from `pwd` and resolves the APK relative to it.
-          script: cd apps/mobile && bash scripts/run-e2e-flows.sh
+          # CORE subset: exactly the 2 blocking activation flows. Each one is
+          # individually wrapped in `timeout ${FLOW_TIMEOUT_SECONDS}` inside
+          # the script, so a hang fails the flow at 5 min (exit 124 → rc=1)
+          # instead of freezing the job for 70 min like run 38643204390 did.
+          script: cd apps/mobile && FLOW_TIMEOUT_SECONDS=300 bash scripts/run-e2e-flows.sh core
 
       - name: Mock server logs
         if: always()
@@ -319,10 +479,13 @@ jobs:
           echo "--- 4100 (seed-diff) ---"; cat /tmp/mock-4100.log || true
 
       - name: Upload screenshots
+        # Artifact names are now per-job (-core / -newer): the two emulator
+        # jobs upload in PARALLEL within the same run, and the old unsuffixed
+        # name would make the two uploads collide/merge into one artifact.
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: activation-e2e-screenshots-${{ github.run_number }}
+          name: activation-e2e-screenshots-core-${{ github.run_number }}-${{ github.run_attempt }}
           path: apps/mobile/artifacts/screenshots/*.png
           if-no-files-found: warn
 
@@ -337,7 +500,219 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: activation-e2e-debug-${{ github.run_number }}
+          name: activation-e2e-debug-core-${{ github.run_number }}-${{ github.run_attempt }}
+          path: apps/mobile/artifacts/activation-e2e-debug.tar.gz
+          if-no-files-found: warn
+          # Archiving preserves Maestro's hidden `.maestro` hierarchy and
+          # prevents upload-artifact from validating generated directory names
+          # such as "consent -> connect", whose `>` character is rejected.
+
+  # =====================================================================
+  # newer — the non-blocking half (issue #104 hardening backlog: newer
+  # surfaces merged after the initial activation suite). Boots its OWN
+  # emulator, runs NEWER_FLOWS via `run-e2e-flows.sh newer`: every flow runs
+  # regardless of failures, and the job is GREEN even when a flow fails by
+  # design — each flow's pass/fail is a ::warning:: line in the log and in
+  # the uploaded screenshots. Runs in PARALLEL with `core`, so its 8 flows
+  # can no longer sit in the same serial queue behind the core pair (and a
+  # hang in one half cannot take the other half's artifacts down with it).
+  # =====================================================================
+  newer:
+    runs-on: ubuntu-latest
+    needs: [apk]
+    # Realistic path: boot ~2-3 min (max 10) + mock servers ~1 min + 8 flows
+    # ≈ 6 min of flow time ≈ 10-15 min total. The 55-min ceiling is a
+    # DERIVED bound, not a vibe: each flow is capped at 300 s by the script,
+    # so the "everything times out" worst case is 8 × 5 = 40 min of flows
+    # + boot 2-3 + adb install ~1.5 (single x86_64 APK, was 94 s cold)
+    # + probe + diag capture ≈ 46-50 min — 45 min was UNDER that worst
+    # case, i.e. it could cancel a run that was still making progress.
+    # 55 keeps ~10% margin over it, and it is acceptable if ever hit,
+    # because every per-flow 124-timeout is already reported in the log
+    # and newer is non-blocking by design.
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v6
+
+      # Node runs the mock servers only (see the core job's note).
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      # sdkmanager in "Pre-install Android system image" is a JVM tool.
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v4
+
+      - name: Add emulator to PATH
+        run: echo "$ANDROID_HOME/emulator" >> $GITHUB_PATH
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Cache Android SDK system image
+        # Same scoped system-images-only cache as the core job (no NDK/CMake
+        # — nothing compiles here), same pins as the emulator runner below.
+        uses: actions/cache@v5
+        with:
+          path: |
+            /usr/local/lib/android/sdk/system-images
+          key: ${{ runner.os }}-android-sdk-sysimg-30-google_apis-x86_64
+          restore-keys: |
+            ${{ runner.os }}-android-sdk-sysimg-30-google_apis-x86_64-
+
+      - name: Install Maestro CLI
+        run: |
+          # PINNED 2.11.0 — identical mechanism/reasoning as the apk job's
+          # step (MAESTRO_VERSION env before the install script); this job
+          # runs `maestro`, so this job installs it (jobs share no FS/PATH).
+          export MAESTRO_VERSION=2.11.0
+          curl -Ls "https://get.maestro.mobile.dev" | bash
+          "$HOME/.maestro/bin/maestro" --version
+          echo "$HOME/.maestro/bin" >> $GITHUB_PATH
+
+      - name: Download APK
+        # Same shared artifact as the core job, extracted the same way.
+        # `path:` is a destination DIRECTORY (workspace-root-relative,
+        # defaults.run.working-directory ignored), NOT a file path: pointing it
+        # at .../release/app-release.apk would create a DIRECTORY with that
+        # name and put the APK inside it, and run-e2e-flows.sh's `adb install`
+        # would fail on a directory. The file-less directory below therefore
+        # puts the extracted APK exactly where the script installs from
+        # (ROOT=<ws>/apps/mobile, APK=android/app/build/outputs/apk/release/
+        # app-release.apk).
+        uses: actions/download-artifact@v8
+        with:
+          name: activation-e2e-apk-${{ github.run_number }}-${{ github.run_attempt }}
+          path: apps/mobile/android/app/build/outputs/apk/release
+
+      - name: Start mock opencode servers
+        run: |
+          set -x
+          mkdir -p artifacts/screenshots
+          # Normal mode on 4096 (positive flow) and --fail-auth on 4097 (negative flow).
+          # 4098 is normal mode + --seed-sessions (two pre-populated sessions in two
+          # different directories, for all-sessions.yaml). 4099 is a fresh normal-mode
+          # instance shared by directory-picker.yaml and variant-picker.yaml (its fake
+          # file tree / provider variants / project list don't affect each other).
+          # 4100 is normal mode + --seed-diff (one session with a pre-existing wide
+          # edit-diff tool call + wide code block, for diff-scroll.yaml / issue #21).
+          # All bind 0.0.0.0 so the emulator can reach them via 10.0.2.2.
+          nohup node tests/fixtures/mock-opencode-server.ts --port 4096 > /tmp/mock-4096.log 2>&1 &
+          nohup node tests/fixtures/mock-opencode-server.ts --port 4097 --fail-auth > /tmp/mock-4097.log 2>&1 &
+          nohup node tests/fixtures/mock-opencode-server.ts --port 4098 --seed-sessions > /tmp/mock-4098.log 2>&1 &
+          nohup node tests/fixtures/mock-opencode-server.ts --port 4099 > /tmp/mock-4099.log 2>&1 &
+          nohup node tests/fixtures/mock-opencode-server.ts --port 4100 --seed-diff > /tmp/mock-4100.log 2>&1 &
+          for port in 4096 4097 4098 4099 4100; do
+            for i in $(seq 1 30); do
+              if curl -sf --connect-timeout 1 -m 3 "http://127.0.0.1:${port}/global/health" > /dev/null 2>&1; then
+                echo "mock server on ${port} responded (may be 401, that's expected on 4097)"
+                break
+              fi
+              # 4097 always 401s -> curl -sf treats that as failure, so also accept "connection made"
+              if curl -s --connect-timeout 1 -m 3 -o /dev/null -w '%{http_code}' "http://127.0.0.1:${port}/global/health" 2>/dev/null | grep -qE '^[0-9]+$'; then
+                echo "mock server on ${port} is up (got an HTTP response)"
+                break
+              fi
+              if [ "$i" = "30" ]; then
+                echo "::error::mock server on port ${port} did not come up in 30s"
+                cat "/tmp/mock-${port}.log" || true
+                exit 1
+              fi
+              sleep 1
+            done
+          done
+
+      - name: Pre-install Android system image (visible logs)
+        # android-emulator-runner hides sdkmanager output behind > /dev/null,
+        # so a poisoned/empty cached image ("contains no system images") is
+        # undebuggable. Pre-install here with visible logs: default rev-4 is
+        # abandoned upstream, use the supported google_apis path.
+        #
+        # The `rm -rf` + unconditional reinstall that used to live here would
+        # delete exactly the "Cache Android SDK components" step restores,
+        # making that cache worth nothing — so it is now conditional: a healthy
+        # cached image is kept as-is, and only a missing/broken one is refetched.
+        run: |
+          yes | sdkmanager --licenses
+          IMAGE_DIR="$ANDROID_HOME/system-images/android-30/google_apis/x86_64"
+          if [ -d "$IMAGE_DIR" ] && [ -f "$IMAGE_DIR/package.xml" ] && [ -n "$(ls -A "$IMAGE_DIR" 2>/dev/null)" ]; then
+            echo "system image restored from cache and looks intact — skipping reinstall"
+            sdkmanager --list_installed | grep "system-images"
+            exit 0
+          fi
+          echo "system image missing or incomplete — reinstalling"
+          sdkmanager --list | grep "system-images;android-30"
+          rm -rf "$ANDROID_HOME/system-images/android-30"
+          sdkmanager --install "system-images;android-30;google_apis;x86_64"
+          sdkmanager --list_installed | grep "system-images"
+
+      - name: Run NEWER activation flows on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          arch: x86_64
+          target: google_apis
+          profile: Nexus 6
+          disable-animations: true
+          emulator-boot-timeout: 600
+          # -no-snapshot removed: it disabled snapshot save AND load, pinning
+          # every run to a full cold boot (~75 s). Left to the emulator default
+          # so a saved snapshot can be loaded. Caveat, honestly: this job boots
+          # ONE emulator per run and the AVD is not cached across runs, so the
+          # realistic gain here is ~0 — the real install-time win is the
+          # x86_64-only APK (adb install was 94 s).
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
+          # One script file, not one `sh -c` per line — run-e2e-flows.sh does the
+          # adb reverse port-forwarding, runs every flow, and captures logcat on
+          # exit. (Running maestro line-by-line here broke `cd` persistence and
+          # left no diagnostics.)
+          # Monorepo: android-emulator-runner executes `script:` from the
+          # workspace root, so cd into apps/mobile — run-e2e-flows.sh derives
+          # ROOT from `pwd` and resolves the APK relative to it.
+          # NEWER subset: the 8 non-blocking flows (issue #104), each wrapped
+          # in the same per-flow `timeout` as core — the tablet-baseline-login
+          # flow that hung run 38643204390 for ~70 min lives here, and is now
+          # capped at 5 min and downgraded to a warning.
+          script: cd apps/mobile && FLOW_TIMEOUT_SECONDS=300 bash scripts/run-e2e-flows.sh newer
+
+      - name: Mock server logs
+        if: always()
+        run: |
+          echo "--- 4096 (normal) ---"; cat /tmp/mock-4096.log || true
+          echo "--- 4097 (fail-auth) ---"; cat /tmp/mock-4097.log || true
+          echo "--- 4098 (seed-sessions) ---"; cat /tmp/mock-4098.log || true
+          echo "--- 4099 (normal, directory-picker + variant-picker) ---"; cat /tmp/mock-4099.log || true
+          echo "--- 4100 (seed-diff) ---"; cat /tmp/mock-4100.log || true
+
+      - name: Upload screenshots
+        # Per-job suffix (-core/-newer): parallel uploads in the same run must
+        # not collide. Same target dir, same if-no-files-found: warn.
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: activation-e2e-screenshots-newer-${{ github.run_number }}-${{ github.run_attempt }}
+          path: apps/mobile/artifacts/screenshots/*.png
+          if-no-files-found: warn
+
+      - name: Package maestro debug + logcat
+        if: always()
+        run: |
+          if [ -d artifacts/diag ]; then
+            tar -C artifacts -czf artifacts/activation-e2e-debug.tar.gz diag
+          fi
+
+      - name: Upload maestro debug + logcat
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: activation-e2e-debug-newer-${{ github.run_number }}-${{ github.run_attempt }}
           path: apps/mobile/artifacts/activation-e2e-debug.tar.gz
           if-no-files-found: warn
           # Archiving preserves Maestro's hidden `.maestro` hierarchy and

@@ -162,9 +162,10 @@ bun run dev:pm2:stop   # pm2 delete ecosystem.config.cjs
 ## Окружение (dev/prod)
 
 Single source: `.env.example` → скопируй в `.env` (gitignored, секреты только
-там). Готовые пары для compose: `.env.dev` (localhost) и `.env.production`
-(шаблон — подставь реальные хосты и пароль перед деплоем). Все файлы —
-машинно-чистые `KEY=VALUE` без комментариев; пояснения живут в таблице ниже.
+там) для локальных запусков без Docker. Compose читает ЕДИНСТВЕННЫЙ
+`docker-compose.yml`; конфиги — только через внешнее окружение (shell/Dokploy),
+никаких `env_file` и `.env.${NODE_ENV}`-файлов compose не читает — не создавай
+их. Пояснения живут в таблице ниже.
 `NEXT_PUBLIC_*` вшиваются в браузерный бандл на `next build` (через build ARG
 в `apps/frontend/Dockerfile`), поэтому смена API URL требует пересборки
 фронтенд-образа.
@@ -186,18 +187,22 @@ Single source: `.env.example` → скопируй в `.env` (gitignored, сек
 | `CORS_ORIGINS` | разрешённые origins фронтенда | `http://localhost:3001,http://localhost:8080` | `https://app.example.com` | да (prod) |
 | `REQUEST_TIMEOUT_MS` | таймаут upstream-запросов backend | `10000` | `10000` | нет |
 | `LOG_LEVEL` | уровень логов | `debug` | `info` | нет |
+| `BACKEND_PUBLISH` | публикация backend (`[ip:]hostport`, контейнерный `:3100` фиксирован) | `127.0.0.1:3100` | `3100` | нет |
+| `FRONTEND_PUBLISH` | публикация frontend prod (`[ip:]hostport`, контейнерный `:3000` фиксирован) | `127.0.0.1:8080` | `8080` | нет |
+| `FRONTEND_DEV_PUBLISH` | публикация dev-сервера (`--profile dev`) | `127.0.0.1:3001` | — | нет |
+| `COMPOSE_PROFILES` | включает `frontend-dev` (`build` + `bun run dev:next` с бинд-маунтами) | `dev` | пусто | нет |
 | `NEXT_PUBLIC_PORT` | порт `next dev` (prod standalone всегда `:3000`) | `3001` | `3001` | нет |
 | `NEXT_PUBLIC_API_URL` | URL backend для браузера (build ARG) | `http://localhost:3100` | `https://api.example.com` | да (prod) |
 | `NPM_TOKEN` | токен приватного registry `@web2bizz` (только env/secret, не в git) | env | CI secret | да (сборка) |
 
 ```bash
-docker compose --env-file .env.dev up --build                       # dev: override (hot-reload, bind-mounts, 127.0.0.1)
-docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production up -d --build  # prod: лимиты, standalone (DATABASE_URL и OPENCODE_SERVER_PASSWORD обязательны)
+docker compose up -d --build   # prod: лимиты вшиты, standalone (DATABASE_URL и OPENCODE_SERVER_PASSWORD обязательны, извне)
+COMPOSE_PROFILES=dev BACKEND_PUBLISH=127.0.0.1:3100 docker compose --profile dev up --build backend frontend-dev  # dev: hot-reload, bind-mounts, 127.0.0.1
 ```
 
-Порты: `3100` backend · `3001` frontend dev (`next dev --turbopack`) / `8080` frontend prod (standalone `:3000`) · `4096` opencode только внутри сети (`expose`, наружу не публикуется). Postgres — внешний (в compose сервиса нет).
+Порты: `3100` backend · `3001` frontend dev (`next dev --turbopack` через `frontend-dev`) / `8080` frontend prod (standalone `:3000`) · `4096` opencode только внутри сети (`expose`, наружу не публикуется). Postgres — внешний (в compose сервиса нет).
 Сети: `front` (frontend↔backend) · `back` (backend↔opencode).
-Volumes: `frontend-dev-next` (только dev-override, кэш `.next`) · `opencode-*` (workspace/ssh/gh-config/pnpm-store/pm2/opencode-data/secrets/playwright-browsers). Бэкап БД — на стороне внешнего Postgres.
+Volumes: `frontend-dev-next` (только `--profile dev`, кэш `.next`) · `opencode-*` (workspace/ssh/gh-config/pnpm-store/pm2/opencode-data/secrets/playwright-browsers). Бэкап БД — на стороне внешнего Postgres.
 
 ## Commands
 
@@ -211,7 +216,7 @@ Volumes: `frontend-dev-next` (только dev-override, кэш `.next`) · `ope
 | `bun run build`      | build all workspaces (`bun --filter …`); in CI the same goes via `nx affected` (touched projects only) |
 | `bun run lint`       | `tsc --noEmit` + `biome lint` per workspace (Biome replaces eslint — no eslint config left) |
 | `bun run test`       | `bun test --pass-with-no-tests` per workspace; in CI via `nx affected` (backend tests run on `dist`, so build precedes test) |
-| `docker compose up --build` | full stack (pg + backend + frontend) |
+| `docker compose up --build` | full stack (backend + frontend + opencode; postgres внешний) |
 
 `apps/mobile` is **not** in `workspaces` and has no `bun --filter` script — it
 is a separate npm project run from its own directory:

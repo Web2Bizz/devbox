@@ -1,8 +1,4 @@
 services:
-  postgres:
-    ports:
-      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
-
   backend:
     ports:
       - "127.0.0.1:${APP_BACKEND_PORT:-${PORT:-3100}}:3100"

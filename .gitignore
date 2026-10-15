@@ -27,7 +27,7 @@ build/
 .env.local
 .env.*.local
 .env.dev
-.env.prod
+.env.production
 
 # npm auth — project .npmrc / bunfig.toml use ${NPM_TOKEN} placeholder (safe to commit).
 # Never commit real tokens: local overrides below are ignored.

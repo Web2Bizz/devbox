@@ -1,24 +1,4 @@
 services:
-  postgres:
-    image: postgres:16
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-devbox}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
-      POSTGRES_DB: ${POSTGRES_DB:-devbox}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    networks:
-      - back
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-devbox} -d ${POSTGRES_DB:-devbox}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
-
   backend:
     build:
       context: .
@@ -29,9 +9,10 @@ services:
       APP_BACKEND_HOST: ${APP_BACKEND_HOST:-0.0.0.0}
       APP_BACKEND_PROTOCOL: ${APP_BACKEND_PROTOCOL:-http}
       APP_BACKEND_SOCKET: ${APP_BACKEND_SOCKET:-http://localhost:${APP_BACKEND_PORT:-${PORT:-3100}}}
-      # In-network DATABASE_URL always targets the `postgres` service host.
-      # Prod POSTGRES_HOST (pg.db.*) is for host→remote access, never the compose network.
-      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-devbox}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-devbox}}
+      # DATABASE_URL must point at the EXTERNAL postgres (no postgres service
+      # in this stack). Fail-fast when unset — same `:?` pattern as
+      # OPENCODE_SERVER_PASSWORD below.
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is not set — point it at the external postgres}
       OPENCODE_URL: ${OPENCODE_URL:-${OPENCODE_SERVER_URL:-http://opencode:4096}}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:${NEXT_PUBLIC_PORT:-3001},http://localhost:8080}
       REQUEST_TIMEOUT_MS: ${REQUEST_TIMEOUT_MS:-10000}
@@ -41,9 +22,6 @@ services:
     networks:
       - front
       - back
-    depends_on:
-      postgres:
-        condition: service_healthy
     healthcheck:
       # oven/bun images carry the bun runtime (no wget/curl guaranteed),
       # so probe via bun. Port follows the app's listen port.
@@ -117,7 +95,6 @@ services:
       start_period: 30s
 
 volumes:
-  pgdata:
   opencode-projects:
   opencode-ssh-keys:
   opencode-gh-config:

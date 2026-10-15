@@ -70,6 +70,14 @@ jobs:
         run: |
           DISCOVERED='${{ steps.discover.outputs.services }}'
           echo "Discovered services (apps/*, services/*): $DISCOVERED"
+          # opencode-server собирается отдельным job'ом `opencode` (свой
+          # build-контекст apps/opencode-server, не корень `.`) — из общей
+          # матрицы исключён всегда: иначе ручной запуск (matrix=DISCOVERED)
+          # и Nx-fail-safe собрали бы его с неверным контекстом и дважды
+          # (дубль job'а `opencode`). В affected-ветке исключение no-op:
+          # без package.json это не Nx-проект и в пересечение не попадает.
+          DISCOVERED=$(echo "$DISCOVERED" | python3 -c "import json,sys; print(json.dumps([s for s in json.load(sys.stdin) if s != 'opencode-server']))")
+          echo "Docker services (opencode-server excluded): $DISCOVERED"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             # ручной запуск — все сервисы из discover
             echo "matrix=$DISCOVERED" >> "$GITHUB_OUTPUT"

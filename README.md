@@ -162,7 +162,7 @@ bun run dev:pm2:stop   # pm2 delete ecosystem.config.cjs
 ## Окружение (dev/prod)
 
 Single source: `.env.example` → скопируй в `.env` (gitignored, секреты только
-там). Готовые пары для compose: `.env.dev` (localhost) и `.env.prod`
+там). Готовые пары для compose: `.env.dev` (localhost) и `.env.production`
 (шаблон — подставь реальные хосты и пароль перед деплоем). Все файлы —
 машинно-чистые `KEY=VALUE` без комментариев; пояснения живут в таблице ниже.
 `NEXT_PUBLIC_*` вшиваются в браузерный бандл на `next build` (через build ARG
@@ -181,8 +181,8 @@ Single source: `.env.example` → скопируй в `.env` (gitignored, сек
 | `POSTGRES_PASSWORD` | пароль Postgres (замени в prod) | `changeme` | замени | да (prod) |
 | `POSTGRES_DB` | имя базы | `devbox` | `devbox` | нет |
 | `POSTGRES_PORT` | хост-порт Postgres | `5432` | `5432` | нет |
-| `POSTGRES_HOST` | хост PG для доступа с хоста (внутри сети всегда `postgres`) | `postgres` | `postgres` | нет |
-| `DATABASE_URL` | строка подключения (в сети — хост `postgres`) | `postgres://devbox:changeme@postgres:5432/devbox` | та же схема, свой пароль | нет |
+| `POSTGRES_HOST` | хост внешней PG (сервиса postgres в compose нет) | `pg.db.web2bizzz.store` | свой хост | нет (код) |
+| `DATABASE_URL` | строка подключения к внешней PG (в compose обязательна — fail-fast) | `postgres://devbox:changeme@pg.db.web2bizzz.store:5432/devbox` | та же схема, свой пароль | да (compose) |
 | `CORS_ORIGINS` | разрешённые origins фронтенда | `http://localhost:3001,http://localhost:8080` | `https://app.example.com` | да (prod) |
 | `REQUEST_TIMEOUT_MS` | таймаут upstream-запросов backend | `10000` | `10000` | нет |
 | `LOG_LEVEL` | уровень логов | `debug` | `info` | нет |
@@ -192,13 +192,12 @@ Single source: `.env.example` → скопируй в `.env` (gitignored, сек
 
 ```bash
 docker compose --env-file .env.dev up --build                       # dev: override (hot-reload, bind-mounts, 127.0.0.1)
-docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.prod up -d --build  # prod: лимиты, standalone
-docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.prod exec postgres pg_dump -U devbox devbox > backup.sql  # бэкап PG
+docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production up -d --build  # prod: лимиты, standalone (DATABASE_URL и OPENCODE_SERVER_PASSWORD обязательны)
 ```
 
-Порты: `5432` postgres · `3100` backend · `3001` frontend dev (`next dev --turbopack`) / `8080` frontend prod (standalone `:3000`) · `4096` opencode только внутри сети (`expose`, наружу не публикуется).
-Сети: `front` (frontend↔backend) · `back` (backend↔postgres↔opencode).
-Volumes: `pgdata` (данные PG — бэкап командой выше) · `frontend-dev-next` (только dev-override, кэш `.next`) · `opencode-*` (workspace/ssh/gh-config/pnpm-store/pm2/opencode-data/secrets/playwright-browsers).
+Порты: `3100` backend · `3001` frontend dev (`next dev --turbopack`) / `8080` frontend prod (standalone `:3000`) · `4096` opencode только внутри сети (`expose`, наружу не публикуется). Postgres — внешний (в compose сервиса нет).
+Сети: `front` (frontend↔backend) · `back` (backend↔opencode).
+Volumes: `frontend-dev-next` (только dev-override, кэш `.next`) · `opencode-*` (workspace/ssh/gh-config/pnpm-store/pm2/opencode-data/secrets/playwright-browsers). Бэкап БД — на стороне внешнего Postgres.
 
 ## Commands
 
@@ -277,7 +276,7 @@ compiled output is plain JS. PM2 fallback: set `script: 'npm', args: 'run dev'`
 
 ## Ports
 
-- `5432` postgres · `3000` backend · `3001` frontend (next dev) / `8080` frontend via compose (Next standalone)
+- `3000` backend · `3001` frontend (next dev) / `8080` frontend via compose (Next standalone)
 
 ## Repos registry (readonly)
 

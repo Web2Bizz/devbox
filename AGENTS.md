@@ -2,8 +2,9 @@
 
 Монорепо: `apps/backend` (NestJS API), `apps/frontend` (Next.js 16.3
 Turbopack + `@web2bizz/ui` 0.26.0), `apps/mobile` (Expo 57 / RN 0.86 +
-`@web2bizz/ui-native`), `contracts/openapi.yaml`, `images/opencode`
-(отдельный compose-стек под Dokploy).
+`@web2bizz/ui-native`), `contracts/openapi.yaml`, `apps/opencode-server`
+(образ opencode, отдельный compose-стек под Dokploy — Dockerfile без
+package.json, не Nx-проект, вне bun workspaces).
 
 `apps/mobile` — самостоятельный npm-проект (свой `package-lock.json`,
 `--legacy-peer-deps`), намеренно **вне bun workspaces**: ставится и запускается

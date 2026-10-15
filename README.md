@@ -2,8 +2,9 @@
 
 Bun workspaces monorepo: NestJS 12 (backend) + Next.js 16.3 + Turbopack
 (frontend) + Expo 57 / React Native 0.86 (mobile, `@web2bizz/ui-native`) +
-Postgres. Shared contract in `contracts/`, deployment images in
-`images/opencode/`.
+Postgres. Shared contract in `contracts/`, opencode server image in
+`apps/opencode-server/` (standalone Dockerfile, no package.json — not a bun
+workspace, like `apps/mobile`).
 
 > Runtime: **Bun 1.4.2** (pinned in `.bun-version` — the single source of truth,
 > mirrored in `packageManager`, `engines`, `oven/bun` Docker tags and CI).
@@ -17,9 +18,8 @@ apps/
   backend/    # NestJS 12 + TypeScript 6 + Zod 4 + Drizzle API (GET /health)
   frontend/   # Next.js 16.3 App Router + React 19 + TypeScript + @web2bizz/ui (output: standalone, bundler: Turbopack)
   mobile/     # Expo 57 / RN 0.86 + @web2bizz/ui-native (standalone npm project, NOT a bun workspace)
+  opencode-server/  # opencode image (Dockerfile + entrypoint.sh + reload-secrets.sh + own docker-compose.yml for Dokploy)
 contracts/    # openapi.yaml (API contract) + opencode-upstream.json
-images/
-  opencode/   # separate compose stack for the opencode image (Dokploy)
 docs/         # env validation, auth, npm registry, migration notes
 DESIGN.md     # repo-wide design-system referat (frontend + mobile)
 .github/workflows/  # 8 workflows (ci, docker, mobile,
@@ -60,19 +60,20 @@ conditional Android build + Release/Prerelease) и ручной
 (`workflow_dispatch`, без paths-фильтров). `activation-e2e.yml` тоже
 paths-gated (`apps/mobile/app/**`, `src/**`, `packages/**`).
 
-## images/opencode
+## apps/opencode-server
 
 Образ `opencode` (`Dockerfile` + `entrypoint.sh` + `reload-secrets.sh` +
-`docker-compose.yml` внутри `images/opencode/`). Входит в корневой
+`docker-compose.yml` внутри `apps/opencode-server/`). Входит в корневой
 `docker-compose.yml` как сервис `opencode` (локальный `build` из
-`images/opencode/`, сеть `back`, `expose 4096` без публикации наружу —
+`apps/opencode-server/`, сеть `back`, `expose 4096` без публикации наружу —
 порт виден только внутри сети) и дополнительно публикуется через CI
-(`docker.yml`, job `opencode`, вне discovery-матрицы) в self-hosted registry
+(`docker.yml`, job `opencode`, вне affected-матрицы — у него нет package.json,
+не Nx-проект) в self-hosted registry
 для Dokploy/prod-деплоев, забирающих готовый образ. Тома —
 `opencode-*` (`projects`, `ssh-keys`, `gh-config`, `pnpm-store`,
 `opencode-data`, …), лимиты prod — `2G`/`2.0` (тяжёлый образ: Playwright
 Chromium + pm2). Требует `OPENCODE_SERVER_PASSWORD` (fail-fast, если не
-задан). Отдельный `images/opencode/docker-compose.yml` остался для
+задан). Отдельный `apps/opencode-server/docker-compose.yml` остался для
 standalone-поднятия в Dokploy (внешняя сеть `dokploy-network`).
 
 ## Frontend UI kit (@web2bizz/ui)
@@ -251,7 +252,7 @@ the `publish-*` mobile workflows are manual (`workflow_dispatch`).
   base, frontend on the regular one. Backend runs `bun dist/main.js`, frontend
   runs `bun apps/frontend/server.js` (Next standalone,
   `output: 'standalone'` preserved). Healthchecks probe via `bun -e fetch(…)`.
-- `images/opencode/` is a separate Dokploy stack — see its section above.
+- `apps/opencode-server/` is a separate Dokploy stack — see its section above.
 
 ### CI status — NOT green (honest)
 

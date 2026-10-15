@@ -4,11 +4,15 @@ name: Docker
 # Только публикация — без redeploy (отдельный процесс).
 # Нейминг — через ./.github/actions/resolve-names: ORG/REPO/SERVICE
 # Сервисы ищутся в apps/* и services/* (монорепозиторий).
-# NOTE(images/opencode): images/* НЕ входит в discovery (только apps/*,
-# services/*) — opencode собирается ниже отдельным job'ом `opencode` вне
-# матрицы (Dockerfile images/opencode/Dockerfile, контекст images/opencode,
-# нейминг через resolve-names: REGISTRY/OWNER/REPO/opencode). Корневой
-# docker-compose.yml при этом использует локальный build из images/opencode,
+# NOTE(apps/opencode-server): opencode-server НЕ входит в affected-матрицу
+# (у него нет package.json — не Nx-проект, в `nx show projects --affected`
+# не появляется, плюс его Dockerfile собирается своим контекстом, а не
+# корнем `.`), поэтому собирается ниже отдельным job'ом `opencode` вне
+# матрицы (Dockerfile apps/opencode-server/Dockerfile, контекст
+# apps/opencode-server, нейминг через resolve-names:
+# REGISTRY/OWNER/REPO/opencode). Корневой
+# docker-compose.yml при этом использует локальный build из
+# apps/opencode-server,
 # так что `docker compose up` работает без registry; публикуемый образ — для
 # Dokploy/prod-деплоев, забирающих готовый образ из registry.
 # NOTE(bun): адаптация шаблона @web2bizz/scaffold под bun-монорепо —
@@ -158,9 +162,11 @@ jobs:
           secrets: |
             NPM_TOKEN=${{ secrets.NPM_TOKEN }}
 
-  # images/opencode — вне discovery по дизайну (только apps/*, services/*),
-  # поэтому собирается явным job'ом: при push — только если затронуты
-  # images/opencode/** или сам workflow; при ручном запуске — всегда.
+  # apps/opencode-server — не Nx-проект (нет package.json) и собирается
+  # своим контекстом, поэтому вне affected-матрицы по дизайну: явный job
+  # ниже, при push — только если затронуты apps/opencode-server/** или сам
+  # workflow; при ручном запуске — всегда. В discovery (apps/*) он появится,
+  # но affected-пересечение его отсекает (как mobile) — двойной сборки нет.
   opencode-filter:
     runs-on: ubuntu-latest
     outputs:
@@ -185,7 +191,7 @@ jobs:
             echo "build=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if git diff --name-only "$BEFORE" "${{ github.sha }}" -- images/opencode .github/workflows/docker.yml | grep -q .; then
+          if git diff --name-only "$BEFORE" "${{ github.sha }}" -- apps/opencode-server .github/workflows/docker.yml | grep -q .; then
             echo "build=true" >> "$GITHUB_OUTPUT"
           else
             echo "build=false" >> "$GITHUB_OUTPUT"
@@ -233,8 +239,8 @@ jobs:
       - name: Build and push opencode image
         uses: docker/build-push-action@v6
         with:
-          context: images/opencode
-          file: images/opencode/Dockerfile
+          context: apps/opencode-server
+          file: apps/opencode-server/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

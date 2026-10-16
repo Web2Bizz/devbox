@@ -8,10 +8,19 @@ name: Docker
 # параллельно с этим (оба на push в dev, см. предупреждение в README шаблона).
 # Отклонения от шаблона и причины:
 #   - webhook — ТОЛЬКО secrets.DOKPLOY_COMPOSE_WEBHOOK, а не закоммиченные
-#     .env.production/.env.development: репо игнорирует `.env.production`
-#     (.gitignore) и принципиально не читает `.env.${NODE_ENV}`-файлы
-#     (см. шапку docker-compose.yml) — capability-секрет в git противоречил
-#     бы этой политике. Имя переменной сохранено как в шаблоне.
+#     файлы: чувствительные значения в git запрещены, поэтому webhook-capability
+#     идёт только через secrets. Имя переменной сохранено как в шаблоне.
+# Build-time env (НЕсекретный, в git): `.env.develop` / `.env.production`
+#   содержат ТОЛЬКО значения с Dockerfile ARG (NEXT_PUBLIC_API_URL для
+#   frontend, OPENCODE_VERSION для opencode) и читаются job'ами docker/opencode
+#   шагом `Load build-time env file` (ветка dev → .env.develop, main →
+#   .env.production; триггер сейчас dev + dispatch — для main оставлена
+#   готовность маппинга, новый триггер НЕ добавлялся). Приоритет: repo vars >
+#   файл (vars.NEXT_PUBLIC_API_URL перекрывает файл; CHANGEME из файла никогда
+#   не запекается — guard падает fail-fast). Compose runtime по-прежнему читает
+#   ТОЛЬКО внешнее окружение (см. шапку docker-compose.yml): чувствительное
+#   (DATABASE_URL, пароли, токены, webhook) — через secrets/vars/compose `:?`,
+#   в `.env.develop`/`.env.production` ему места нет.
 #   - needs-цепочка внутри этого workflow, а не отдельный workflow_run:
 #     deploy видит outputs affected-матрицы/opencode-фильтра и пропускается
 #     при пустой публикации; workflow_run не имел бы к ним доступа.
@@ -181,10 +190,36 @@ jobs:
             type=ref,event=branch
             type=sha,prefix=
 
-      - name: Guard NEXT_PUBLIC_API_URL repo variable
+      - name: Load build-time env file
+        env:
+          VARS_NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+        run: |
+          case "${{ github.ref_name }}" in
+            main) ENV_FILE=.env.production ;;
+            *) ENV_FILE=.env.develop ;;
+          esac
+          test -f "$ENV_FILE" || { echo "::error::$ENV_FILE is missing — tracked build-time env files (.env.develop/.env.production) must exist"; exit 1; }
+          echo "Loading build-time env from $ENV_FILE (branch ${{ github.ref_name }})"
+          set -a
+          # shellcheck disable=SC1090
+          . "./$ENV_FILE"
+          set +a
+          # Priority: repo vars > file — the file never overwrites vars.
+          if [ -n "$VARS_NEXT_PUBLIC_API_URL" ]; then
+            echo "NEXT_PUBLIC_API_URL source: repo vars (overrides $ENV_FILE)" >> "$GITHUB_STEP_SUMMARY"
+            echo "NEXT_PUBLIC_API_URL=$VARS_NEXT_PUBLIC_API_URL" >> "$GITHUB_ENV"
+          else
+            echo "NEXT_PUBLIC_API_URL source: $ENV_FILE" >> "$GITHUB_STEP_SUMMARY"
+            echo "NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL" >> "$GITHUB_ENV"
+          fi
+
+      - name: Guard NEXT_PUBLIC_API_URL build value
         if: matrix.project == 'frontend'
         run: |
-          test -n "${{ vars.NEXT_PUBLIC_API_URL }}" || { echo "::error::vars.NEXT_PUBLIC_API_URL is not set — set it as a GitHub repo variable (Settings → Variables → Actions → NEXT_PUBLIC_API_URL, e.g. https://api.example.com) so the published frontend image bakes the browser-facing API URL instead of localhost"; exit 1; }
+          test -n "$NEXT_PUBLIC_API_URL" || { echo "::error::NEXT_PUBLIC_API_URL is empty — set vars.NEXT_PUBLIC_API_URL (Settings → Variables → Actions) or the value in the branch env file (.env.develop/.env.production) so the published frontend image bakes the browser-facing API URL instead of localhost"; exit 1; }
+          case "$NEXT_PUBLIC_API_URL" in
+            *CHANGEME*) echo "::error::NEXT_PUBLIC_API_URL still holds a CHANGEME placeholder ($NEXT_PUBLIC_API_URL) — the owner must write the real prod backend URL into .env.production"; exit 1 ;;
+          esac
 
       - name: Build and push ${{ matrix.project }} image
         uses: docker/build-push-action@v6
@@ -199,12 +234,13 @@ jobs:
           # NEXT_PUBLIC_* is inlined into the browser bundle at `next build`,
           # so the published frontend image must bake it here — compose now
           # pulls registry images (no local build to inject the arg).
-          # Fail-closed: the guard step above errors BEFORE this build when
-          # the `NEXT_PUBLIC_API_URL` repo variable is unset (no silent
-          # localhost bake). Backend gets NO build-arg — its Dockerfile
-          # declares no ARG; the conditional below renders an empty string
-          # (= no args) for every non-frontend matrix project.
-          build-args: ${{ matrix.project == 'frontend' && format('NEXT_PUBLIC_API_URL={0}', vars.NEXT_PUBLIC_API_URL) || '' }}
+          # Value comes from the `Load build-time env file` step above
+          # (repo vars > .env.develop/.env.production); the guard errors
+          # BEFORE this build when the value is empty or a CHANGEME
+          # placeholder (no silent localhost bake). Backend gets NO build-arg
+          # — its Dockerfile declares no ARG; the conditional below renders an
+          # empty string (= no args) for every non-frontend matrix project.
+          build-args: ${{ matrix.project == 'frontend' && format('NEXT_PUBLIC_API_URL={0}', env.NEXT_PUBLIC_API_URL) || '' }}
           # Private registry auth via BuildKit secret (masked, never --build-arg).
           secrets: |
             NPM_TOKEN=${{ secrets.NPM_TOKEN }}
@@ -283,6 +319,30 @@ jobs:
             type=ref,event=branch
             type=sha,prefix=
 
+      - name: Load build-time env file
+        env:
+          VARS_OPENCODE_VERSION: ${{ vars.OPENCODE_VERSION }}
+        run: |
+          case "${{ github.ref_name }}" in
+            main) ENV_FILE=.env.production ;;
+            *) ENV_FILE=.env.develop ;;
+          esac
+          test -f "$ENV_FILE" || { echo "::error::$ENV_FILE is missing — tracked build-time env files (.env.develop/.env.production) must exist"; exit 1; }
+          echo "Loading build-time env from $ENV_FILE (branch ${{ github.ref_name }})"
+          set -a
+          # shellcheck disable=SC1090
+          . "./$ENV_FILE"
+          set +a
+          # Priority: repo vars > file — the file never overwrites vars
+          # (no vars.OPENCODE_VERSION exists today; the file value then wins).
+          if [ -n "$VARS_OPENCODE_VERSION" ]; then
+            echo "OPENCODE_VERSION source: repo vars (overrides $ENV_FILE)" >> "$GITHUB_STEP_SUMMARY"
+            echo "OPENCODE_VERSION=$VARS_OPENCODE_VERSION" >> "$GITHUB_ENV"
+          else
+            echo "OPENCODE_VERSION source: $ENV_FILE" >> "$GITHUB_STEP_SUMMARY"
+            echo "OPENCODE_VERSION=$OPENCODE_VERSION" >> "$GITHUB_ENV"
+          fi
+
       - name: Build and push opencode image
         uses: docker/build-push-action@v6
         with:
@@ -293,6 +353,11 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # OPENCODE_VERSION is the only ARG of apps/opencode-server/Dockerfile
+          # (default 1.18.32); passing it explicitly makes the branch env file
+          # authoritative (value identical to the default today — no image change).
+          build-args: |
+            OPENCODE_VERSION=${{ env.OPENCODE_VERSION }}
 
   # Redeploy всего compose-стека в Dokploy одним POST на webhook
   # compose-сущности (сценарий `compose` шаблона — см. шапку файла).

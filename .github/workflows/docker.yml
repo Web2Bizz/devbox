@@ -181,6 +181,11 @@ jobs:
             type=ref,event=branch
             type=sha,prefix=
 
+      - name: Guard NEXT_PUBLIC_API_URL repo variable
+        if: matrix.project == 'frontend'
+        run: |
+          test -n "${{ vars.NEXT_PUBLIC_API_URL }}" || { echo "::error::vars.NEXT_PUBLIC_API_URL is not set — set it as a GitHub repo variable (Settings → Variables → Actions → NEXT_PUBLIC_API_URL, e.g. https://api.example.com) so the published frontend image bakes the browser-facing API URL instead of localhost"; exit 1; }
+
       - name: Build and push ${{ matrix.project }} image
         uses: docker/build-push-action@v6
         with:
@@ -194,12 +199,12 @@ jobs:
           # NEXT_PUBLIC_* is inlined into the browser bundle at `next build`,
           # so the published frontend image must bake it here — compose now
           # pulls registry images (no local build to inject the arg).
-          # Backend ignores this arg (no ARG in its Dockerfile); per-env API
-          # URLs come from the `NEXT_PUBLIC_API_URL` repo variable, fallback
-          # mirrors the compose default (APP_BACKEND_SOCKET → :3100), NOT the
-          # Dockerfile last-resort default (:3000).
-          build-args: |
-            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL || 'http://localhost:3100' }}
+          # Fail-closed: the guard step above errors BEFORE this build when
+          # the `NEXT_PUBLIC_API_URL` repo variable is unset (no silent
+          # localhost bake). Backend gets NO build-arg — its Dockerfile
+          # declares no ARG; the conditional below renders an empty string
+          # (= no args) for every non-frontend matrix project.
+          build-args: ${{ matrix.project == 'frontend' && format('NEXT_PUBLIC_API_URL={0}', vars.NEXT_PUBLIC_API_URL) || '' }}
           # Private registry auth via BuildKit secret (masked, never --build-arg).
           secrets: |
             NPM_TOKEN=${{ secrets.NPM_TOKEN }}

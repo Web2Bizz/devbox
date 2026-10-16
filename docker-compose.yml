@@ -46,16 +46,16 @@ services:
         reservations:
           memory: 256M
     environment:
-      APP_BACKEND_PORT: ${APP_BACKEND_PORT:-${PORT:-3100}}
+      APP_BACKEND_PORT: ${APP_BACKEND_PORT:-3100}
       APP_BACKEND_HOST: ${APP_BACKEND_HOST:-0.0.0.0}
       APP_BACKEND_PROTOCOL: ${APP_BACKEND_PROTOCOL:-http}
-      APP_BACKEND_SOCKET: ${APP_BACKEND_SOCKET:-http://localhost:${APP_BACKEND_PORT:-${PORT:-3100}}}
+      APP_BACKEND_SOCKET: ${APP_BACKEND_SOCKET:-http://localhost:3100}
       # DATABASE_URL must point at the EXTERNAL postgres (no postgres service
       # in this stack). Fail-fast when unset — same `:?` pattern as
       # OPENCODE_SERVER_PASSWORD below.
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is not set — point it at the external postgres}
-      OPENCODE_URL: ${OPENCODE_URL:-${OPENCODE_SERVER_URL:-http://opencode:4096}}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:${NEXT_PUBLIC_PORT:-3001},http://localhost:8080}
+      OPENCODE_URL: ${OPENCODE_URL:-http://opencode:4096}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3001,http://localhost:8080}
       REQUEST_TIMEOUT_MS: ${REQUEST_TIMEOUT_MS:-10000}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:

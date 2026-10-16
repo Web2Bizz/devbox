@@ -171,7 +171,7 @@ bun run dev:pm2:stop   # pm2 delete ecosystem.config.cjs
 Single source: `.env.example` → скопируй в `.env` (gitignored, секреты только
 там) для локальных запусков без Docker. Compose читает ЕДИНСТВЕННЫЙ
 `docker-compose.yml`; конфиги — только через внешнее окружение (shell/Dokploy),
-никаких `env_file` и `.env.${NODE_ENV}`-файлов compose не читает — не создавай
+никаких `env_file`; `.env.${NODE_ENV}`-файлы compose в рантайме не читает (`.env.develop`/`.env.production` читает только CI как build-args) — не создавай
 их. Пояснения живут в таблице ниже.
 `NEXT_PUBLIC_*` вшиваются в браузерный бандл на `next build` (через build ARG
 в `apps/frontend/Dockerfile`), поэтому смена API URL требует пересборки

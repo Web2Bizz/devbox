@@ -196,8 +196,6 @@ Single source: `.env.example` → скопируй в `.env` (gitignored, сек
 | `LOG_LEVEL` | уровень логов | `debug` | `info` | нет |
 | `BACKEND_PUBLISH` | публикация backend (`[ip:]hostport`, контейнерный `:3100` фиксирован) | `127.0.0.1:3100` | `3100` | нет |
 | `FRONTEND_PUBLISH` | публикация frontend prod (`[ip:]hostport`, контейнерный `:3000` фиксирован) | `127.0.0.1:8080` | `8080` | нет |
-| `FRONTEND_DEV_PUBLISH` | публикация dev-сервера (`--profile dev`) | `127.0.0.1:3001` | — | нет |
-| `COMPOSE_PROFILES` | включает `frontend-dev` (локальный `build` + `bun run dev:next` с бинд-маунтами; единственный сервис со сборкой) | `dev` | пусто | нет |
 | `TAG` | тег registry-образов backend/frontend/opencode (`.../<service>:${TAG:-latest}`; CI пушит `:dev` + `:<sha>` + `:latest`) | `latest` (дефолт) | `<sha>` (пин sha) | нет |
 | `NEXT_PUBLIC_PORT` | порт `next dev` (prod standalone всегда `:3000`) | `3001` | `3001` | нет |
 | `NEXT_PUBLIC_API_URL` | URL backend для браузера (build ARG) | `http://localhost:3100` | `https://api.example.com` | да (prod) |
@@ -206,13 +204,12 @@ Single source: `.env.example` → скопируй в `.env` (gitignored, сек
 ```bash
 docker login docker.registry.web2bizz.team   # registry приватный: без логина pull не заберёт образы
 docker compose pull && docker compose up -d   # prod: registry-образы, лимиты вшиты, standalone (DATABASE_URL и OPENCODE_SERVER_PASSWORD обязательны, извне)
-docker compose --profile dev pull backend   # dev тоже тянет backend из registry (frontend-dev соберётся локально)
-COMPOSE_PROFILES=dev BACKEND_PUBLISH=127.0.0.1:3100 docker compose --profile dev up --build backend frontend-dev  # dev: hot-reload, bind-mounts, 127.0.0.1 (`--build` собирает ТОЛЬКО frontend-dev — единственный сервис с build)
+BACKEND_PUBLISH=127.0.0.1:3100 FRONTEND_PUBLISH=127.0.0.1:8080 docker compose up -d  # dev: те же registry-образы, loopback-публикация (NEXT_PUBLIC_API_URL уже запечён в образ CI из .env.develop)
 ```
 
-Порты: `3100` backend · `3001` frontend dev (`next dev --turbopack` через `frontend-dev`) / `8080` frontend prod (standalone `:3000`) · `4096` opencode только внутри сети (`expose`, наружу не публикуется). Postgres — внешний (в compose сервиса нет).
+Порты: `3100` backend · `8080` frontend (standalone `:3000`) · `4096` opencode только внутри сети (`expose`, наружу не публикуется). Postgres — внешний (в compose сервиса нет). Порт `3001` (`NEXT_PUBLIC_PORT`) — только хост-локальный `next dev` (`bun run dev:frontend` / pm2), compose его не публикует.
 Сети: `front` (frontend↔backend) · `back` (backend↔opencode).
-Volumes: `frontend-dev-next` (только `--profile dev`, кэш `.next`) · `opencode-*` (workspace/ssh/gh-config/pnpm-store/pm2/opencode-data/secrets/playwright-browsers). Бэкап БД — на стороне внешнего Postgres.
+Volumes: `opencode-*` (workspace/ssh/gh-config/pnpm-store/pm2/opencode-data/secrets/playwright-browsers). Бэкап БД — на стороне внешнего Postgres.
 
 ## Commands
 

@@ -191,6 +191,15 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # NEXT_PUBLIC_* is inlined into the browser bundle at `next build`,
+          # so the published frontend image must bake it here — compose now
+          # pulls registry images (no local build to inject the arg).
+          # Backend ignores this arg (no ARG in its Dockerfile); per-env API
+          # URLs come from the `NEXT_PUBLIC_API_URL` repo variable, fallback
+          # mirrors the compose default (APP_BACKEND_SOCKET → :3100), NOT the
+          # Dockerfile last-resort default (:3000).
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL || 'http://localhost:3100' }}
           # Private registry auth via BuildKit secret (masked, never --build-arg).
           secrets: |
             NPM_TOKEN=${{ secrets.NPM_TOKEN }}

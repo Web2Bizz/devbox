@@ -4,6 +4,12 @@
 # (shell / Dokploy). `.env.example` documents the full variable list;
 # `.env.${NODE_ENV}` files are NOT read by compose, do not create them.
 #
+# Prod services run REGISTRY images, not local builds: backend/frontend/
+# opencode resolve via *_IMAGE (`${...:-registry default}`, tag `:dev` =
+# what CI publishes from the dev branch; override the whole ref per
+# environment, e.g. `.../backend:latest` for prod). The ONLY local build
+# left is the profile-gated `frontend-dev` (see below).
+#
 # Postgres is EXTERNAL: no postgres service here, DATABASE_URL fail-fasts
 # when unset (same `:?` pattern as OPENCODE_SERVER_PASSWORD).
 #
@@ -23,14 +29,16 @@
 #                    so a `profiles: [dev]` service is used instead of
 #                    variable hacks — prod `docker compose up` is unaffected.
 # Usage:
-#   prod: docker compose up -d --build
+#   prod: docker compose up -d
+#         (pulls registry images; DATABASE_URL and OPENCODE_SERVER_PASSWORD
+#         are REQUIRED externals — compose fail-fasts without them)
 #   dev:  COMPOSE_PROFILES=dev BACKEND_PUBLISH=127.0.0.1:3100 \
 #         FRONTEND_DEV_PUBLISH=127.0.0.1:3001 docker compose --profile dev up --build backend frontend-dev
+#         (`--build` rebuilds ONLY the profile-gated frontend-dev; prod
+#         services stay on registry images)
 services:
   backend:
-    build:
-      context: .
-      dockerfile: apps/backend/Dockerfile
+    image: ${BACKEND_IMAGE:-docker.registry.web2bizz.team/web2bizz/devbox/backend:dev}
     restart: unless-stopped
     deploy:
       resources:
@@ -71,11 +79,10 @@ services:
       start_period: 15s
 
   frontend:
-    build:
-      context: .
-      dockerfile: apps/frontend/Dockerfile
-      args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-${APP_BACKEND_SOCKET:-http://localhost:3100}}
+    # NEXT_PUBLIC_API_URL is baked into the registry image at CI build time
+    # (docker.yml passes it as build-arg); a different browser-facing API URL
+    # needs a rebuilt image, runtime env cannot change the bundle.
+    image: ${FRONTEND_IMAGE:-docker.registry.web2bizz.team/web2bizz/devbox/frontend:dev}
     restart: unless-stopped
     deploy:
       resources:
@@ -100,6 +107,10 @@ services:
 
   # Dev server variant (ex docker-compose.override.yml). Enabled only with
   # `--profile dev` / COMPOSE_PROFILES=dev; prod `docker compose up` ignores it.
+  # Deliberately the ONLY service that still `build`s: the registry `frontend`
+  # image holds just the standalone runner (no sources, no devDependencies),
+  # so `bun run dev:next` with bind-mount hot-reload cannot run from it —
+  # dev stays a local build of the `build` stage by design.
   frontend-dev:
     profiles:
       - dev
@@ -130,8 +141,7 @@ services:
   # No depends_on from backend: the backend tolerates an unreachable opencode
   # (mock fallback, never throws at boot), so startup order is not enforced.
   opencode:
-    build:
-      context: apps/opencode-server
+    image: ${OPENCODE_IMAGE:-docker.registry.web2bizz.team/web2bizz/devbox/opencode:dev}
     restart: unless-stopped
     deploy:
       resources:

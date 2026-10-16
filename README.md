@@ -64,9 +64,9 @@ paths-gated (`apps/mobile/app/**`, `src/**`, `packages/**`).
 
 Образ `opencode` (`Dockerfile` + `entrypoint.sh` + `reload-secrets.sh`
 внутри `apps/opencode-server/`). Входит в корневой
-`docker-compose.yml` как сервис `opencode` (локальный `build` из
-`apps/opencode-server/`, сеть `back`, `expose 4096` без публикации наружу —
-порт виден только внутри сети) и дополнительно публикуется через CI
+`docker-compose.yml` как сервис `opencode` (registry-образ
+`${OPENCODE_IMAGE}`, сеть `back`, `expose 4096` без публикации наружу —
+порт виден только внутри сети) и публикуется через CI
 (`docker.yml`, job `opencode`, вне affected-матрицы — у него нет package.json,
 не Nx-проект) в self-hosted registry
 для Dokploy/prod-деплоев, забирающих готовый образ. Тома —
@@ -193,14 +193,17 @@ Single source: `.env.example` → скопируй в `.env` (gitignored, сек
 | `BACKEND_PUBLISH` | публикация backend (`[ip:]hostport`, контейнерный `:3100` фиксирован) | `127.0.0.1:3100` | `3100` | нет |
 | `FRONTEND_PUBLISH` | публикация frontend prod (`[ip:]hostport`, контейнерный `:3000` фиксирован) | `127.0.0.1:8080` | `8080` | нет |
 | `FRONTEND_DEV_PUBLISH` | публикация dev-сервера (`--profile dev`) | `127.0.0.1:3001` | — | нет |
-| `COMPOSE_PROFILES` | включает `frontend-dev` (`build` + `bun run dev:next` с бинд-маунтами) | `dev` | пусто | нет |
+| `COMPOSE_PROFILES` | включает `frontend-dev` (локальный `build` + `bun run dev:next` с бинд-маунтами; единственный сервис со сборкой) | `dev` | пусто | нет |
+| `BACKEND_IMAGE` | registry-образ backend (целиком, с тегом; дефолт — `:dev` из CI) | дефолт | `.../backend:latest` | нет |
+| `FRONTEND_IMAGE` | registry-образ frontend (целиком, с тегом; дефолт — `:dev` из CI) | дефолт | `.../frontend:latest` | нет |
+| `OPENCODE_IMAGE` | registry-образ opencode (целиком, с тегом; дефолт — `:dev` из CI) | дефолт | `.../opencode:latest` | нет |
 | `NEXT_PUBLIC_PORT` | порт `next dev` (prod standalone всегда `:3000`) | `3001` | `3001` | нет |
 | `NEXT_PUBLIC_API_URL` | URL backend для браузера (build ARG) | `http://localhost:3100` | `https://api.example.com` | да (prod) |
 | `NPM_TOKEN` | токен приватного registry `@web2bizz` (только env/secret, не в git) | env | CI secret | да (сборка) |
 
 ```bash
-docker compose up -d --build   # prod: лимиты вшиты, standalone (DATABASE_URL и OPENCODE_SERVER_PASSWORD обязательны, извне)
-COMPOSE_PROFILES=dev BACKEND_PUBLISH=127.0.0.1:3100 docker compose --profile dev up --build backend frontend-dev  # dev: hot-reload, bind-mounts, 127.0.0.1
+docker compose up -d   # prod: registry-образы, лимиты вшиты, standalone (DATABASE_URL и OPENCODE_SERVER_PASSWORD обязательны, извне)
+COMPOSE_PROFILES=dev BACKEND_PUBLISH=127.0.0.1:3100 docker compose --profile dev up --build backend frontend-dev  # dev: hot-reload, bind-mounts, 127.0.0.1 (`--build` собирает ТОЛЬКО frontend-dev — единственный сервис с build)
 ```
 
 Порты: `3100` backend · `3001` frontend dev (`next dev --turbopack` через `frontend-dev`) / `8080` frontend prod (standalone `:3000`) · `4096` opencode только внутри сети (`expose`, наружу не публикуется). Postgres — внешний (в compose сервиса нет).
@@ -219,7 +222,7 @@ Volumes: `frontend-dev-next` (только `--profile dev`, кэш `.next`) · `
 | `bun run build`      | build all workspaces (`bun --filter …`); in CI the same goes via `nx affected` (touched projects only) |
 | `bun run lint`       | `tsc --noEmit` + `biome lint` per workspace (Biome replaces eslint — no eslint config left) |
 | `bun run test`       | `bun test --pass-with-no-tests` per workspace; in CI via `nx affected` (backend tests run on `dist`, so build precedes test) |
-| `docker compose up --build` | full stack (backend + frontend + opencode; postgres внешний) |
+| `docker compose up -d` | full stack from registry images (backend + frontend + opencode; postgres внешний) |
 
 `apps/mobile` is **not** in `workspaces` and has no `bun --filter` script — it
 is a separate npm project run from its own directory:
@@ -246,6 +249,12 @@ the `publish-*` mobile workflows are manual (`workflow_dispatch`).
 - Docker (`docker.yml`, push to `dev` + manual) discovers services in
   `apps/*`, intersects with the Nx affected set, and pushes to the self-hosted
   `docker.registry.web2bizz.team/<owner>/<repo>/<service>` (not GHCR).
+  Tags: `:<branch>` (`dev` on dev) + `:<sha>`. Compose pulls these images via
+  `*_IMAGE` (`:dev` default, whole-ref override per environment).
+  `NEXT_PUBLIC_API_URL` is passed as a frontend build-arg in CI (repo variable
+  `NEXT_PUBLIC_API_URL`, fallback `http://localhost:3100` = compose default) —
+  without it the registry frontend image would bake the Dockerfile last-resort
+  default (`:3000`) instead of the compose default (`:3100`).
   After a successful publish the `deploy` job triggers one Dokploy compose
   redeploy (POST to `secrets.DOKPLOY_COMPOSE_WEBHOOK` — the `compose` scenario
   adapted from `@web2bizz/scaffold` `pipelines/publish/docker`, webhook via

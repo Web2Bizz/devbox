@@ -131,8 +131,12 @@ bun run dev:frontend  # http://localhost:3001 (or $NEXT_PUBLIC_PORT)
 
 ## Quick start (Docker)
 
+Образы лежат в приватном registry — сначала логин, иначе `pull` не заберёт их.
+
 ```bash
 cp .env.example .env
+docker login docker.registry.web2bizz.team
+docker compose pull
 docker compose up -d
 # frontend → http://localhost:8080 (compose maps 8080:3000 to Next standalone via `bun server.js`)
 # backend  → http://localhost:3000/health (`bun dist/main.js` on oven/bun:1.4.2)
@@ -194,15 +198,17 @@ Single source: `.env.example` → скопируй в `.env` (gitignored, сек
 | `FRONTEND_PUBLISH` | публикация frontend prod (`[ip:]hostport`, контейнерный `:3000` фиксирован) | `127.0.0.1:8080` | `8080` | нет |
 | `FRONTEND_DEV_PUBLISH` | публикация dev-сервера (`--profile dev`) | `127.0.0.1:3001` | — | нет |
 | `COMPOSE_PROFILES` | включает `frontend-dev` (локальный `build` + `bun run dev:next` с бинд-маунтами; единственный сервис со сборкой) | `dev` | пусто | нет |
-| `BACKEND_IMAGE` | registry-образ backend (целиком, с тегом; дефолт — `:dev` из CI) | дефолт | `.../backend:latest` | нет |
-| `FRONTEND_IMAGE` | registry-образ frontend (целиком, с тегом; дефолт — `:dev` из CI) | дефолт | `.../frontend:latest` | нет |
-| `OPENCODE_IMAGE` | registry-образ opencode (целиком, с тегом; дефолт — `:dev` из CI) | дефолт | `.../opencode:latest` | нет |
+| `BACKEND_IMAGE` | registry-образ backend (целиком, с тегом; CI пушит `:dev` + `:<sha>`, `:latest` НЕ публикуется) | `docker.registry.web2bizz.team/web2bizz/devbox/backend:dev` | `.../backend:<sha>` (пин sha) | нет |
+| `FRONTEND_IMAGE` | registry-образ frontend (целиком, с тегом; CI пушит `:dev` + `:<sha>`, `:latest` НЕ публикуется) | `docker.registry.web2bizz.team/web2bizz/devbox/frontend:dev` | `.../frontend:<sha>` (пин sha) | нет |
+| `OPENCODE_IMAGE` | registry-образ opencode (целиком, с тегом; CI пушит `:dev` + `:<sha>`, `:latest` НЕ публикуется) | `docker.registry.web2bizz.team/web2bizz/devbox/opencode:dev` | `.../opencode:<sha>` (пин sha) | нет |
 | `NEXT_PUBLIC_PORT` | порт `next dev` (prod standalone всегда `:3000`) | `3001` | `3001` | нет |
 | `NEXT_PUBLIC_API_URL` | URL backend для браузера (build ARG) | `http://localhost:3100` | `https://api.example.com` | да (prod) |
 | `NPM_TOKEN` | токен приватного registry `@web2bizz` (только env/secret, не в git) | env | CI secret | да (сборка) |
 
 ```bash
-docker compose up -d   # prod: registry-образы, лимиты вшиты, standalone (DATABASE_URL и OPENCODE_SERVER_PASSWORD обязательны, извне)
+docker login docker.registry.web2bizz.team   # registry приватный: без логина pull не заберёт образы
+docker compose pull && docker compose up -d   # prod: registry-образы, лимиты вшиты, standalone (DATABASE_URL и OPENCODE_SERVER_PASSWORD обязательны, извне)
+docker compose --profile dev pull backend   # dev тоже тянет backend из registry (frontend-dev соберётся локально)
 COMPOSE_PROFILES=dev BACKEND_PUBLISH=127.0.0.1:3100 docker compose --profile dev up --build backend frontend-dev  # dev: hot-reload, bind-mounts, 127.0.0.1 (`--build` собирает ТОЛЬКО frontend-dev — единственный сервис с build)
 ```
 
@@ -251,10 +257,10 @@ the `publish-*` mobile workflows are manual (`workflow_dispatch`).
   `docker.registry.web2bizz.team/<owner>/<repo>/<service>` (not GHCR).
   Tags: `:<branch>` (`dev` on dev) + `:<sha>`. Compose pulls these images via
   `*_IMAGE` (`:dev` default, whole-ref override per environment).
-  `NEXT_PUBLIC_API_URL` is passed as a frontend build-arg in CI (repo variable
-  `NEXT_PUBLIC_API_URL`, fallback `http://localhost:3100` = compose default) —
-  without it the registry frontend image would bake the Dockerfile last-resort
-  default (`:3000`) instead of the compose default (`:3100`).
+  `NEXT_PUBLIC_API_URL` is passed as a frontend-only build-arg in CI from the
+  `NEXT_PUBLIC_API_URL` repo variable (fail-closed: the frontend job errors
+  before the build when the variable is unset — no silent localhost bake;
+  backend gets no build-arg, its Dockerfile declares no ARG).
   After a successful publish the `deploy` job triggers one Dokploy compose
   redeploy (POST to `secrets.DOKPLOY_COMPOSE_WEBHOOK` — the `compose` scenario
   adapted from `@web2bizz/scaffold` `pipelines/publish/docker`, webhook via

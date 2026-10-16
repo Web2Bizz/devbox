@@ -6,9 +6,10 @@
 #
 # Prod services run REGISTRY images, not local builds: backend/frontend/
 # opencode resolve via *_IMAGE (`${...:-registry default}`, tag `:dev` =
-# what CI publishes from the dev branch; override the whole ref per
-# environment, e.g. `.../backend:latest` for prod). The ONLY local build
-# left is the profile-gated `frontend-dev` (see below).
+# what CI publishes from the dev branch; CI also publishes `:<sha>` — prod
+# override pins that full sha ref per environment, e.g.
+# `.../backend:<sha>`). `:latest` is NOT published, never reference it.
+# The ONLY local build left is the profile-gated `frontend-dev` (see below).
 #
 # Postgres is EXTERNAL: no postgres service here, DATABASE_URL fail-fasts
 # when unset (same `:?` pattern as OPENCODE_SERVER_PASSWORD).

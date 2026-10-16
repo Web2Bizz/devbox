@@ -18,7 +18,7 @@ apps/
   backend/    # NestJS 12 + TypeScript 6 + Zod 4 + Drizzle API (GET /health)
   frontend/   # Next.js 16.3 App Router + React 19 + TypeScript + @web2bizz/ui (output: standalone, bundler: Turbopack)
   mobile/     # Expo 57 / RN 0.86 + @web2bizz/ui-native (standalone npm project, NOT a bun workspace)
-  opencode-server/  # opencode image (Dockerfile + entrypoint.sh + reload-secrets.sh + own docker-compose.yml for Dokploy)
+  opencode-server/  # opencode image (Dockerfile + entrypoint.sh + reload-secrets.sh; deploy via root docker-compose.yml)
 contracts/    # openapi.yaml (API contract) + opencode-upstream.json
 docs/         # env validation, auth, npm registry, migration notes
 DESIGN.md     # repo-wide design-system referat (frontend + mobile)
@@ -62,8 +62,8 @@ paths-gated (`apps/mobile/app/**`, `src/**`, `packages/**`).
 
 ## apps/opencode-server
 
-Образ `opencode` (`Dockerfile` + `entrypoint.sh` + `reload-secrets.sh` +
-`docker-compose.yml` внутри `apps/opencode-server/`). Входит в корневой
+Образ `opencode` (`Dockerfile` + `entrypoint.sh` + `reload-secrets.sh`
+внутри `apps/opencode-server/`). Входит в корневой
 `docker-compose.yml` как сервис `opencode` (локальный `build` из
 `apps/opencode-server/`, сеть `back`, `expose 4096` без публикации наружу —
 порт виден только внутри сети) и дополнительно публикуется через CI
@@ -73,8 +73,10 @@ paths-gated (`apps/mobile/app/**`, `src/**`, `packages/**`).
 `opencode-*` (`projects`, `ssh-keys`, `gh-config`, `pnpm-store`,
 `opencode-data`, …), лимиты prod — `2G`/`2.0` (тяжёлый образ: Playwright
 Chromium + pm2). Требует `OPENCODE_SERVER_PASSWORD` (fail-fast, если не
-задан). Отдельный `apps/opencode-server/docker-compose.yml` остался для
-standalone-поднятия в Dokploy (внешняя сеть `dokploy-network`).
+задан). Отдельного compose-файла у сервиса нет: единый файл — корневой
+`docker-compose.yml` (внутренние сети `front`/`back`); Dokploy деплоит
+корневой стек целиком через compose-redeploy webhook (см. `docker.yml`, job
+`deploy`).
 
 ## Frontend UI kit (@web2bizz/ui)
 
@@ -261,7 +263,7 @@ the `publish-*` mobile workflows are manual (`workflow_dispatch`).
   base, frontend on the regular one. Backend runs `bun dist/main.js`, frontend
   runs `bun apps/frontend/server.js` (Next standalone,
   `output: 'standalone'` preserved). Healthchecks probe via `bun -e fetch(…)`.
-- `apps/opencode-server/` is a separate Dokploy stack — see its section above.
+- `apps/opencode-server/` is part of the root compose stack (service `opencode`) — deployed via the Dokploy compose redeploy (see its section above).
 
 ### CI status — NOT green (honest)
 

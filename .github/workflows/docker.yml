@@ -40,8 +40,8 @@ name: Docker
 # матрицы (Dockerfile apps/opencode-server/Dockerfile, контекст
 # apps/opencode-server, нейминг через resolve-names:
 # REGISTRY/OWNER/REPO/opencode). Корневой
-# docker-compose.yml при этом тянет образы из registry (`*_IMAGE`,
-# дефолт `:dev`); локальный build остался только у `frontend-dev`
+# docker-compose.yml при этом тянет образы из registry (тег через `TAG`,
+# дефолт `:latest`); локальный build остался только у `frontend-dev`
 # (профиль dev). Публикуемые образы — для Dokploy/prod-деплоев,
 # забирающих готовые образы из registry.
 # NOTE(bun): адаптация шаблона @web2bizz/scaffold под bun-монорепо —
@@ -189,6 +189,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=sha,prefix=
+            type=raw,value=latest
 
       - name: Load build-time env file
         env:
@@ -318,6 +319,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=sha,prefix=
+            type=raw,value=latest
 
       - name: Load build-time env file
         env:

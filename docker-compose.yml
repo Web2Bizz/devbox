@@ -5,10 +5,9 @@
 # `.env.${NODE_ENV}` files are NOT read by compose at runtime (only CI reads `.env.develop`/`.env.production` as build-args), do not create them for compose.
 #
 # Prod services run REGISTRY images, not local builds: backend/frontend/
-# opencode resolve via *_IMAGE (`${...:-registry default}`, tag `:dev` =
-# what CI publishes from the dev branch; CI also publishes `:<sha>` — prod
-# override pins that full sha ref per environment, e.g.
-# `.../backend:<sha>`). `:latest` is NOT published, never reference it.
+# opencode resolve via TAG (`.../<service>:${TAG:-latest}`, default `:latest`
+# = what CI publishes on every build alongside `:dev` and `:<sha>`; prod
+# override pins a tag per environment, e.g. `TAG=<sha>`).
 # The ONLY local build left is the profile-gated `frontend-dev` (see below).
 #
 # Postgres is EXTERNAL: no postgres service here, DATABASE_URL fail-fasts
@@ -39,7 +38,7 @@
 #         services stay on registry images)
 services:
   backend:
-    image: ${BACKEND_IMAGE:-docker.registry.web2bizz.team/web2bizz/devbox/backend:dev}
+    image: docker.registry.web2bizz.team/web2bizz/devbox/backend:${TAG:-latest}
     restart: unless-stopped
     deploy:
       resources:
@@ -83,7 +82,7 @@ services:
     # NEXT_PUBLIC_API_URL is baked into the registry image at CI build time
     # (docker.yml passes it as build-arg); a different browser-facing API URL
     # needs a rebuilt image, runtime env cannot change the bundle.
-    image: ${FRONTEND_IMAGE:-docker.registry.web2bizz.team/web2bizz/devbox/frontend:dev}
+    image: docker.registry.web2bizz.team/web2bizz/devbox/frontend:${TAG:-latest}
     restart: unless-stopped
     deploy:
       resources:
@@ -142,7 +141,7 @@ services:
   # No depends_on from backend: the backend tolerates an unreachable opencode
   # (mock fallback, never throws at boot), so startup order is not enforced.
   opencode:
-    image: ${OPENCODE_IMAGE:-docker.registry.web2bizz.team/web2bizz/devbox/opencode:dev}
+    image: docker.registry.web2bizz.team/web2bizz/devbox/opencode:${TAG:-latest}
     restart: unless-stopped
     deploy:
       resources:

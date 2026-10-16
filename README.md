@@ -65,7 +65,7 @@ paths-gated (`apps/mobile/app/**`, `src/**`, `packages/**`).
 Образ `opencode` (`Dockerfile` + `entrypoint.sh` + `reload-secrets.sh`
 внутри `apps/opencode-server/`). Входит в корневой
 `docker-compose.yml` как сервис `opencode` (registry-образ
-`${OPENCODE_IMAGE}`, сеть `back`, `expose 4096` без публикации наружу —
+`docker.registry.web2bizz.team/web2bizz/devbox/opencode:${TAG:-latest}`, сеть `back`, `expose 4096` без публикации наружу —
 порт виден только внутри сети) и публикуется через CI
 (`docker.yml`, job `opencode`, вне affected-матрицы — у него нет package.json,
 не Nx-проект) в self-hosted registry
@@ -198,9 +198,7 @@ Single source: `.env.example` → скопируй в `.env` (gitignored, сек
 | `FRONTEND_PUBLISH` | публикация frontend prod (`[ip:]hostport`, контейнерный `:3000` фиксирован) | `127.0.0.1:8080` | `8080` | нет |
 | `FRONTEND_DEV_PUBLISH` | публикация dev-сервера (`--profile dev`) | `127.0.0.1:3001` | — | нет |
 | `COMPOSE_PROFILES` | включает `frontend-dev` (локальный `build` + `bun run dev:next` с бинд-маунтами; единственный сервис со сборкой) | `dev` | пусто | нет |
-| `BACKEND_IMAGE` | registry-образ backend (целиком, с тегом; CI пушит `:dev` + `:<sha>`, `:latest` НЕ публикуется) | `docker.registry.web2bizz.team/web2bizz/devbox/backend:dev` | `.../backend:<sha>` (пин sha) | нет |
-| `FRONTEND_IMAGE` | registry-образ frontend (целиком, с тегом; CI пушит `:dev` + `:<sha>`, `:latest` НЕ публикуется) | `docker.registry.web2bizz.team/web2bizz/devbox/frontend:dev` | `.../frontend:<sha>` (пин sha) | нет |
-| `OPENCODE_IMAGE` | registry-образ opencode (целиком, с тегом; CI пушит `:dev` + `:<sha>`, `:latest` НЕ публикуется) | `docker.registry.web2bizz.team/web2bizz/devbox/opencode:dev` | `.../opencode:<sha>` (пин sha) | нет |
+| `TAG` | тег registry-образов backend/frontend/opencode (`.../<service>:${TAG:-latest}`; CI пушит `:dev` + `:<sha>` + `:latest`) | `latest` (дефолт) | `<sha>` (пин sha) | нет |
 | `NEXT_PUBLIC_PORT` | порт `next dev` (prod standalone всегда `:3000`) | `3001` | `3001` | нет |
 | `NEXT_PUBLIC_API_URL` | URL backend для браузера (build ARG) | `http://localhost:3100` | `https://api.example.com` | да (prod) |
 | `NPM_TOKEN` | токен приватного registry `@web2bizz` (только env/secret, не в git) | env | CI secret | да (сборка) |
@@ -255,8 +253,8 @@ the `publish-*` mobile workflows are manual (`workflow_dispatch`).
 - Docker (`docker.yml`, push to `dev` + manual) discovers services in
   `apps/*`, intersects with the Nx affected set, and pushes to the self-hosted
   `docker.registry.web2bizz.team/<owner>/<repo>/<service>` (not GHCR).
-  Tags: `:<branch>` (`dev` on dev) + `:<sha>`. Compose pulls these images via
-  `*_IMAGE` (`:dev` default, whole-ref override per environment).
+  Tags: `:<branch>` (`dev` on dev) + `:<sha>` + `:latest`. Compose pulls these images via
+  `TAG` (`:latest` default, tag override per environment).
   `NEXT_PUBLIC_API_URL` is passed as a frontend-only build-arg in CI from the
   `NEXT_PUBLIC_API_URL` repo variable (fail-closed: the frontend job errors
   before the build when the variable is unset — no silent localhost bake;

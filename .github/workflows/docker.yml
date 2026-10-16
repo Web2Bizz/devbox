@@ -1,7 +1,27 @@
 name: Docker
 
-# Сборка и публикация Docker образов в self-hosted registry.
-# Только публикация — без redeploy (отдельный процесс).
+# Сборка и публикация Docker образов в self-hosted registry + redeploy всего
+# compose-стека в Dokploy одним webhook'ом (job `deploy` в конце файла).
+# Redeploy — сценарий `compose` из @web2bizz/scaffold pipelines/publish/docker
+# (ветка feat/dokploy-redeploy-scenarios), АДАПТИРОВАН, не скопирован целиком:
+# целый workflow шаблона не переносим — он запустил бы вторую публикацию
+# параллельно с этим (оба на push в dev, см. предупреждение в README шаблона).
+# Отклонения от шаблона и причины:
+#   - webhook — ТОЛЬКО secrets.DOKPLOY_COMPOSE_WEBHOOK, а не закоммиченные
+#     .env.production/.env.development: репо игнорирует `.env.production`
+#     (.gitignore) и принципиально не читает `.env.${NODE_ENV}`-файлы
+#     (см. шапку docker-compose.yml) — capability-секрет в git противоречил
+#     бы этой политике. Имя переменной сохранено как в шаблоне.
+#   - needs-цепочка внутри этого workflow, а не отдельный workflow_run:
+#     deploy видит outputs affected-матрицы/opencode-фильтра и пропускается
+#     при пустой публикации; workflow_run не имел бы к ним доступа.
+# Required configuration:
+#   secrets.DOCKER_REGISTRY_PASSWORD ... пароль registry (логин: app)
+#   secrets.NPM_TOKEN ................ приватный npm registry (@web2bizz/*)
+#   secrets.DOKPLOY_COMPOSE_WEBHOOK .. REQUIRED для redeploy: URL webhook
+#     compose-сущности (Dokploy → Compose → Deployments → Webhook), только
+#     secret — значений в git нет (документация без значений: README +
+#     CI-only блок в .env.example).
 # Нейминг — через ./.github/actions/resolve-names: ORG/REPO/SERVICE
 # Сервисы ищутся в apps/* и services/* (монорепозиторий).
 # NOTE(apps/opencode-server): opencode-server НЕ входит в affected-матрицу
@@ -254,3 +274,39 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # Redeploy всего compose-стека в Dokploy одним POST на webhook
+  # compose-сущности (сценарий `compose` шаблона — см. шапку файла).
+  # Запускается только если что-то реально опубликовано (непустая affected-
+  # матрица или opencode-билд) и никто не упал; иначе скипается молча.
+  # Ручной workflow_dispatch публикует всё + триггерит redeploy (escape hatch).
+  deploy:
+    name: Trigger Dokploy compose redeploy
+    needs: [affected, docker, opencode-filter, opencode]
+    # always(): docker/opencode скипаются при пустой матрице/фильтре —
+    # без always() deploy тоже скипался бы и условие не вычислилось бы.
+    if: >-
+      always() &&
+      needs.affected.result == 'success' &&
+      needs.opencode-filter.result == 'success' &&
+      (needs.docker.result == 'success' || needs.docker.result == 'skipped') &&
+      (needs.opencode.result == 'success' || needs.opencode.result == 'skipped') &&
+      ((needs.affected.outputs.matrix != '[]' && needs.affected.outputs.matrix != '') ||
+        needs.opencode-filter.outputs.build == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Redeploy compose stack
+        run: |
+          WEBHOOK="${{ secrets.DOKPLOY_COMPOSE_WEBHOOK }}"
+          if [ -z "${WEBHOOK}" ]; then
+            echo "::error::secrets.DOKPLOY_COMPOSE_WEBHOOK is not set — create the compose webhook in Dokploy (Compose → Deployments → Webhook) and add it as a GitHub secret (values never go to git, see README + CI-only block in .env.example)"
+            exit 1
+          fi
+          if curl -fsS --retry 3 --retry-delay 5 -X POST "${WEBHOOK}"; then
+            echo "Dokploy compose redeploy triggered"
+            echo "| compose | triggered |" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::Dokploy compose webhook failed"
+            echo "| compose | failed |" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi

@@ -244,6 +244,15 @@ the `publish-*` mobile workflows are manual (`workflow_dispatch`).
 - Docker (`docker.yml`, push to `dev` + manual) discovers services in
   `apps/*`, intersects with the Nx affected set, and pushes to the self-hosted
   `docker.registry.web2bizz.team/<owner>/<repo>/<service>` (not GHCR).
+  After a successful publish the `deploy` job triggers one Dokploy compose
+  redeploy (POST to `secrets.DOKPLOY_COMPOSE_WEBHOOK` — the `compose` scenario
+  adapted from `@web2bizz/scaffold` `pipelines/publish/docker`, webhook via
+  secrets only, never committed files; skipped when nothing was published).
+  Manual `workflow_dispatch` rebuilds everything and redeploys (escape hatch).
+  REQUIRED owner setup: create the webhook in Dokploy (Compose → Deployments
+  → Webhook) and store its URL as the `DOKPLOY_COMPOSE_WEBHOOK` GitHub secret
+  (value never goes to git; documented without values in `.env.example`,
+  CI-only block).
 - Mobile has its own workflows (`mobile.yml` → tests + conditional Android
   native build + Release/Prerelease, `publish-*.yml`) and `activation-e2e.yml`
   for smoke tests.

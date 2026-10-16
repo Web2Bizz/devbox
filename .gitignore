@@ -28,6 +28,12 @@ build/
 .env.*.local
 .env.dev
 .env.production
+# Build-time NON-sensitive env files ARE tracked (CI bakes them as build-args,
+# docker.yml `Load build-time env file`): un-ignore production, pin develop
+# explicitly so a broader future mask cannot swallow them. Local `.env`,
+# `.env.local`, `.env.*.local` above stay ignored — sensitive values live there.
+!.env.develop
+!.env.production
 
 # npm auth — project .npmrc / bunfig.toml use ${NPM_TOKEN} placeholder (safe to commit).
 # Never commit real tokens: local overrides below are ignored.

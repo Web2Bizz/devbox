@@ -133,7 +133,7 @@ bun run dev:frontend  # http://localhost:3001 (or $NEXT_PUBLIC_PORT)
 
 ```bash
 cp .env.example .env
-docker compose up --build
+docker compose up -d
 # frontend → http://localhost:8080 (compose maps 8080:3000 to Next standalone via `bun server.js`)
 # backend  → http://localhost:3000/health (`bun dist/main.js` on oven/bun:1.4.2)
 ```

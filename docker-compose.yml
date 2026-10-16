@@ -8,7 +8,9 @@
 # opencode resolve via TAG (`.../<service>:${TAG:-latest}`, default `:latest`
 # = what CI publishes on every build alongside `:dev` and `:<sha>`; prod
 # override pins a tag per environment, e.g. `TAG=<sha>`).
-# The ONLY local build left is the profile-gated `frontend-dev` (see below).
+# There are NO local builds and NO profile-gated services in this file: dev runs the SAME
+# services from registry images (the frontend image already carries the
+# CI-baked NEXT_PUBLIC_API_URL from `.env.develop` as a build-arg).
 #
 # Postgres is EXTERNAL: no postgres service here, DATABASE_URL fail-fasts
 # when unset (same `:?` pattern as OPENCODE_SERVER_PASSWORD).
@@ -23,19 +25,15 @@
 #   FRONTEND_PUBLISH `[ip:]hostport` целиком, default prod `8080`; dev loopback
 #                    ставит `127.0.0.1:8080`. Контейнерный порт фиксирован `:3000`.
 #   LOG_LEVEL        default `info`; the environment sets `debug`, no file does.
-#   frontend-dev     profile-gated dev server (`--profile dev`): builds the
-#                    `build` stage, runs `bun run dev:next` with bind-mounts.
-#                    Compose cannot conditionally include keys (volumes/target),
-#                    so a `profiles: [dev]` service is used instead of
-#                    variable hacks — prod `docker compose up` is unaffected.
 # Usage:
 #   prod: docker compose up -d
 #         (pulls registry images; DATABASE_URL and OPENCODE_SERVER_PASSWORD
 #         are REQUIRED externals — compose fail-fasts without them)
-#   dev:  COMPOSE_PROFILES=dev BACKEND_PUBLISH=127.0.0.1:3100 \
-#         FRONTEND_DEV_PUBLISH=127.0.0.1:3001 docker compose --profile dev up --build backend frontend-dev
-#         (`--build` rebuilds ONLY the profile-gated frontend-dev; prod
-#         services stay on registry images)
+#   dev:  BACKEND_PUBLISH=127.0.0.1:3100 FRONTEND_PUBLISH=127.0.0.1:8080 \
+#         docker compose up -d
+#         (SAME services from registry images; loopback publish values come
+#         from the shell. Local hot-reload without compose is `bun run dev`,
+#         see README)
 services:
   backend:
     image: docker.registry.web2bizz.team/web2bizz/devbox/backend:${TAG:-latest}
@@ -105,39 +103,6 @@ services:
       retries: 6
       start_period: 15s
 
-  # Dev server variant (ex docker-compose.override.yml). Enabled only with
-  # `--profile dev` / COMPOSE_PROFILES=dev; prod `docker compose up` ignores it.
-  # Deliberately the ONLY service that still `build`s: the registry `frontend`
-  # image holds just the standalone runner (no sources, no devDependencies),
-  # so `bun run dev:next` with bind-mount hot-reload cannot run from it —
-  # dev stays a local build of the `build` stage by design.
-  frontend-dev:
-    profiles:
-      - dev
-    build:
-      context: .
-      dockerfile: apps/frontend/Dockerfile
-      target: build
-      args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-${APP_BACKEND_SOCKET:-http://localhost:3100}}
-    command: ["bun", "run", "dev:next"]
-    working_dir: /app/apps/frontend
-    environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-${APP_BACKEND_SOCKET:-http://localhost:3100}}
-      NEXT_PUBLIC_PORT: ${NEXT_PUBLIC_PORT:-3001}
-    ports:
-      - "${FRONTEND_DEV_PUBLISH:-127.0.0.1:3001}:3001"
-    volumes:
-      - ./apps/frontend/app:/app/apps/frontend/app
-      - ./apps/frontend/src:/app/apps/frontend/src
-      - ./apps/frontend/public:/app/apps/frontend/public
-      - ./apps/frontend/next.config.mjs:/app/apps/frontend/next.config.mjs
-      - frontend-dev-next:/app/apps/frontend/.next
-    networks:
-      - front
-    depends_on:
-      - backend
-
   # No depends_on from backend: the backend tolerates an unreachable opencode
   # (mock fallback, never throws at boot), so startup order is not enforced.
   opencode:
@@ -183,7 +148,6 @@ services:
       start_period: 30s
 
 volumes:
-  frontend-dev-next:
   opencode-projects:
   opencode-ssh-keys:
   opencode-gh-config:

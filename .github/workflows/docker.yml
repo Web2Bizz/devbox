@@ -41,10 +41,9 @@ name: Docker
 # матрицы (Dockerfile apps/opencode-server/Dockerfile, контекст
 # apps/opencode-server, нейминг через resolve-names:
 # REGISTRY/OWNER/REPO/opencode). Корневой
-# docker-compose.yml при этом тянет образы из registry (тег через `TAG`,
-# дефолт `:latest`); локальный build остался только у `frontend-dev`
-# (профиль dev). Публикуемые образы — для Dokploy/prod-деплоев,
-# забирающих готовые образы из registry.
+# docker-compose.yml при этом тянет ВСЕ образы из registry (тег через `TAG`,
+# дефолт `:latest`; локальных build'ов в compose нет). Публикуемые образы —
+# для Dokploy-деплоев, забирающих готовые образы из registry.
 # NOTE(bun): адаптация шаблона @web2bizz/scaffold под bun-монорепо —
 # setup-bun + `bun install` (NPM_TOKEN через env, см. .npmrc/bunfig.toml),
 # `bunx nx` вместо `pnpm exec`; sdk-job шаблона удалён (пакета @web2bizz/id

@@ -11,16 +11,17 @@ name: Docker
 #     файлы: чувствительные значения в git запрещены, поэтому webhook-capability
 #     идёт только через secrets. Имя переменной сохранено как в шаблоне.
 # Build-time env (НЕсекретный, в git): `.env.develop` / `.env.production`
-#   содержат ТОЛЬКО значения с Dockerfile ARG (NEXT_PUBLIC_API_URL для
-#   frontend, OPENCODE_VERSION для opencode) и читаются job'ами docker/opencode
+#   содержат ТОЛЬКО NEXT_PUBLIC_API_URL для frontend и читаются job'ом docker
 #   шагом `Load build-time env file` (ветка dev → .env.develop, main →
 #   .env.production; триггер сейчас dev + dispatch — для main оставлена
-#   готовность маппинга, новый триггер НЕ добавлялся). Приоритет: repo vars >
-#   файл (vars.NEXT_PUBLIC_API_URL перекрывает файл; CHANGEME из файла никогда
-#   не запекается — guard падает fail-fast). Compose runtime по-прежнему читает
-#   ТОЛЬКО внешнее окружение (см. шапку docker-compose.yml): чувствительное
-#   (DATABASE_URL, пароли, токены, webhook) — через secrets/vars/compose `:?`,
-#   в `.env.develop`/`.env.production` ему места нет.
+#   готовность маппинга, новый триггер НЕ добавлялся). Файл — ЕДИНСТВЕННЫЙ
+#   источник build-значений (vars-override нет; CHANGEME из файла никогда
+#   не запекается — guard падает fail-fast). Версия opencode ниоткуда не
+#   пробрасывается — берётся дефолт Dockerfile (ARG OPENCODE_VERSION).
+#   Compose runtime по-прежнему читает ТОЛЬКО внешнее окружение (см. шапку
+#   docker-compose.yml): чувствительное (DATABASE_URL, пароли, токены,
+#   webhook) — через secrets/vars/compose `:?`, в `.env.develop`/
+#   `.env.production` ему места нет.
 #   - needs-цепочка внутри этого workflow, а не отдельный workflow_run:
 #     deploy видит outputs affected-матрицы/opencode-фильтра и пропускается
 #     при пустой публикации; workflow_run не имел бы к ним доступа.
@@ -192,8 +193,6 @@ jobs:
             type=raw,value=latest
 
       - name: Load build-time env file
-        env:
-          VARS_NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
         run: |
           case "${{ github.ref_name }}" in
             main) ENV_FILE=.env.production ;;
@@ -205,19 +204,14 @@ jobs:
           # shellcheck disable=SC1090
           . "./$ENV_FILE"
           set +a
-          # Priority: repo vars > file — the file never overwrites vars.
-          if [ -n "$VARS_NEXT_PUBLIC_API_URL" ]; then
-            echo "NEXT_PUBLIC_API_URL source: repo vars (overrides $ENV_FILE)" >> "$GITHUB_STEP_SUMMARY"
-            echo "NEXT_PUBLIC_API_URL=$VARS_NEXT_PUBLIC_API_URL" >> "$GITHUB_ENV"
-          else
-            echo "NEXT_PUBLIC_API_URL source: $ENV_FILE" >> "$GITHUB_STEP_SUMMARY"
-            echo "NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL" >> "$GITHUB_ENV"
-          fi
+          # The env file is the ONLY source of build values (no vars-override).
+          echo "NEXT_PUBLIC_API_URL source: $ENV_FILE" >> "$GITHUB_STEP_SUMMARY"
+          echo "NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL" >> "$GITHUB_ENV"
 
       - name: Guard NEXT_PUBLIC_API_URL build value
         if: matrix.project == 'frontend'
         run: |
-          test -n "$NEXT_PUBLIC_API_URL" || { echo "::error::NEXT_PUBLIC_API_URL is empty — set vars.NEXT_PUBLIC_API_URL (Settings → Variables → Actions) or the value in the branch env file (.env.develop/.env.production) so the published frontend image bakes the browser-facing API URL instead of localhost"; exit 1; }
+          test -n "$NEXT_PUBLIC_API_URL" || { echo "::error::NEXT_PUBLIC_API_URL is empty — set the value in the branch env file (.env.develop/.env.production) so the published frontend image bakes the browser-facing API URL instead of localhost"; exit 1; }
           case "$NEXT_PUBLIC_API_URL" in
             *CHANGEME*) echo "::error::NEXT_PUBLIC_API_URL still holds a CHANGEME placeholder ($NEXT_PUBLIC_API_URL) — the owner must write the real prod backend URL into .env.production"; exit 1 ;;
           esac
@@ -236,9 +230,9 @@ jobs:
           # so the published frontend image must bake it here — compose now
           # pulls registry images (no local build to inject the arg).
           # Value comes from the `Load build-time env file` step above
-          # (repo vars > .env.develop/.env.production); the guard errors
-          # BEFORE this build when the value is empty or a CHANGEME
-          # placeholder (no silent localhost bake). Backend gets NO build-arg
+          # (the branch env file .env.develop/.env.production — the only
+          # source); the guard errors BEFORE this build when the value is
+          # empty or a CHANGEME placeholder (no silent localhost bake). Backend gets NO build-arg
           # — its Dockerfile declares no ARG; the conditional below renders an
           # empty string (= no args) for every non-frontend matrix project.
           build-args: ${{ matrix.project == 'frontend' && format('NEXT_PUBLIC_API_URL={0}', env.NEXT_PUBLIC_API_URL) || '' }}
@@ -322,8 +316,6 @@ jobs:
             type=raw,value=latest
 
       - name: Load build-time env file
-        env:
-          VARS_OPENCODE_VERSION: ${{ vars.OPENCODE_VERSION }}
         run: |
           case "${{ github.ref_name }}" in
             main) ENV_FILE=.env.production ;;
@@ -335,15 +327,9 @@ jobs:
           # shellcheck disable=SC1090
           . "./$ENV_FILE"
           set +a
-          # Priority: repo vars > file — the file never overwrites vars
-          # (no vars.OPENCODE_VERSION exists today; the file value then wins).
-          if [ -n "$VARS_OPENCODE_VERSION" ]; then
-            echo "OPENCODE_VERSION source: repo vars (overrides $ENV_FILE)" >> "$GITHUB_STEP_SUMMARY"
-            echo "OPENCODE_VERSION=$VARS_OPENCODE_VERSION" >> "$GITHUB_ENV"
-          else
-            echo "OPENCODE_VERSION source: $ENV_FILE" >> "$GITHUB_STEP_SUMMARY"
-            echo "OPENCODE_VERSION=$OPENCODE_VERSION" >> "$GITHUB_ENV"
-          fi
+          # No version passthrough: opencode builds with the Dockerfile
+          # default (ARG OPENCODE_VERSION). The file is sourced whole for
+          # future build-time values.
 
       - name: Build and push opencode image
         uses: docker/build-push-action@v6
@@ -355,11 +341,9 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          # OPENCODE_VERSION is the only ARG of apps/opencode-server/Dockerfile
-          # (default 1.18.32); passing it explicitly makes the branch env file
-          # authoritative (value identical to the default today — no image change).
-          build-args: |
-            OPENCODE_VERSION=${{ env.OPENCODE_VERSION }}
+          # No build-args: apps/opencode-server/Dockerfile declares
+          # ARG OPENCODE_VERSION with its own default — the image builds
+          # with that version, nothing is passed from CI.
 
   # Redeploy всего compose-стека в Dokploy одним POST на webhook
   # compose-сущности (сценарий `compose` шаблона — см. шапку файла).

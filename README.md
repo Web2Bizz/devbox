@@ -256,9 +256,12 @@ the `publish-*` mobile workflows are manual (`workflow_dispatch`).
   Tags: `:<branch>` (`dev` on dev) + `:<sha>` + `:latest`. Compose pulls these images via
   `TAG` (`:latest` default, tag override per environment).
   `NEXT_PUBLIC_API_URL` is passed as a frontend-only build-arg in CI from the
-  `NEXT_PUBLIC_API_URL` repo variable (fail-closed: the frontend job errors
-  before the build when the variable is unset — no silent localhost bake;
-  backend gets no build-arg, its Dockerfile declares no ARG).
+  branch env file (`.env.develop` on dev, `.env.production` on main — the
+  only source, no repo-vars override; fail-closed: the frontend job errors
+  before the build when the value is empty or a `CHANGEME` placeholder —
+  no silent localhost bake; backend gets no build-arg, its Dockerfile
+  declares no ARG). The opencode image takes its version from the Dockerfile
+  default (`ARG OPENCODE_VERSION`) — CI passes no version build-arg.
   After a successful publish the `deploy` job triggers one Dokploy compose
   redeploy (POST to `secrets.DOKPLOY_COMPOSE_WEBHOOK` — the `compose` scenario
   adapted from `@web2bizz/scaffold` `pipelines/publish/docker`, webhook via

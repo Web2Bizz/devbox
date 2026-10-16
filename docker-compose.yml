@@ -2,7 +2,7 @@
 # There is no docker-compose.prod.yml / docker-compose.override.yml and no
 # `env_file:` — all configuration arrives via EXTERNAL environment
 # (shell / Dokploy). `.env.example` documents the full variable list;
-# `.env.${NODE_ENV}` files are NOT read by compose, do not create them.
+# `.env.${NODE_ENV}` files are NOT read by compose at runtime (only CI reads `.env.develop`/`.env.production` as build-args), do not create them for compose.
 #
 # Prod services run REGISTRY images, not local builds: backend/frontend/
 # opencode resolve via *_IMAGE (`${...:-registry default}`, tag `:dev` =

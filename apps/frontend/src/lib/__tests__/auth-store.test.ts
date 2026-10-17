@@ -4,8 +4,10 @@
  * Covers: isExpiredJwt fail-closed branches (valid / expired / inside-5s-skew
  * / malformed / non-JWT / exp-less), getValidAccessToken passthrough +
  * single-flight refresh, refresh-failure clearing incl. the `devbox-auth`
- * marker cookie, logoutEverywhere idempotency on 401, signOutAndRedirect
- * (router.replace preferred, push fallback, query-cache clear).
+ * marker cookie, client-side marker stamping on setSession/successful
+ * refresh (middleware.ts guard fallback), logoutEverywhere idempotency
+ * on 401, signOutAndRedirect (router.replace preferred, push fallback,
+ * query-cache clear).
  *
  * No secrets hit logs here — tokens only travel in storage/fetch bodies.
  */
@@ -63,15 +65,20 @@ function mintJwt(exp?: number): string {
 const inAnHour = () => Math.floor(Date.now() / 1000) + 3600;
 const anHourAgo = () => Math.floor(Date.now() / 1000) - 3600;
 
-function seed(accessToken: string, refreshToken: string): void {
-  store.setSession({
+function makeSession(accessToken: string, refreshToken: string): never {
+  return {
     accessToken,
     refreshToken,
     tokenType: 'bearer',
     expiresIn: 900,
     user: { id: 'u1', email: 'a@b.c', firstName: 'A', lastName: 'B', provider: 'local', createdAt: new Date().toISOString() },
-  } as never);
-  document.cookie = 'devbox-auth=1; path=/';
+  } as never;
+}
+
+function seed(accessToken: string, refreshToken: string): void {
+  // Маркер `devbox-auth=1` ставит сам setSession (клиентский fallback под
+  // middleware.ts) — ручной document.cookie здесь больше не нужен.
+  store.setSession(makeSession(accessToken, refreshToken));
 }
 
 beforeEach(() => {
@@ -155,6 +162,32 @@ describe('getValidAccessToken', () => {
   test('no tokens at all → null without network', async () => {
     await expect(store.getValidAccessToken()).resolves.toBeNull();
     expect(refreshMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('devbox-auth marker (client fallback под middleware.ts)', () => {
+  test('setSession сам ставит маркер без ручного document.cookie', () => {
+    store.setSession(makeSession(mintJwt(inAnHour()), mintJwt(inAnHour())));
+    expect(document.cookie).toContain('devbox-auth=1');
+  });
+
+  test('clearSession сносит маркер', () => {
+    seed(mintJwt(inAnHour()), mintJwt(inAnHour()));
+    expect(document.cookie).toContain('devbox-auth=1');
+    store.clearSession();
+    expect(document.cookie).not.toContain('devbox-auth=1');
+  });
+
+  test('успешный refresh перевыставляет протухший маркер', async () => {
+    const fresh = mintJwt(inAnHour());
+    seed(mintJwt(anHourAgo()), mintJwt(inAnHour()));
+    // Маркер протух/слетел (backend Set-Cookie не долетел), refresh жив.
+    document.cookie = 'devbox-auth=; path=/; max-age=0';
+    expect(document.cookie).not.toContain('devbox-auth=1');
+    refreshImpl = async () => ({ accessToken: fresh, refreshToken: mintJwt(inAnHour()) });
+
+    await expect(store.getValidAccessToken()).resolves.toBe(fresh);
+    expect(document.cookie).toContain('devbox-auth=1');
   });
 });
 

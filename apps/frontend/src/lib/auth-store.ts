@@ -7,6 +7,14 @@ const REFRESH_KEY = 'devbox-refresh-token';
 /** Readable marker cookie the backend sets on login/register/refresh and
  *  clears on logout — middleware.ts redirects on it alone. */
 const AUTH_MARKER = 'devbox-auth';
+/**
+ * Дефолтный TTL маркера (7d = 604800s) — зеркалит backend
+ * DEFAULT_JWT_REFRESH_TTL_SEC (apps/backend/src/env.ts). AuthSession несёт
+ * только access `expiresIn` (~900s); refresh TTL до клиента не доезжает,
+ * поэтому маркер живёт дефолтом, а не expiresIn (иначе middleware начал бы
+ * отбивать /projects → /login через 15 минут при живом refresh).
+ */
+const DEFAULT_MARKER_MAX_AGE_SEC = 604_800;
 /** Clock-skew / race запас: токен, живущий меньше этого, уже протух. */
 const EXP_SKEW_MS = 5_000;
 
@@ -46,6 +54,9 @@ export function setSession(session: AuthSession): void {
   memoryRefresh = session.refreshToken;
   writeStorage(ACCESS_KEY, session.accessToken);
   writeStorage(REFRESH_KEY, session.refreshToken);
+  // Клиентский дубликат маркера для middleware (см. setAuthMarker):
+  // backend Set-Cookie на кросс-портовом dev к origin'у фронтенда не долетает.
+  setAuthMarker();
 }
 
 export function getAccessToken(): string | null {
@@ -63,6 +74,29 @@ export function clearSession(): void {
   writeStorage(ACCESS_KEY, null);
   writeStorage(REFRESH_KEY, null);
   clearAuthMarker();
+}
+
+/**
+ * Client-side установка маркера `devbox-auth=1` (path=/, SameSite=Lax) —
+ * fallback-дубликат backend Set-Cookie из setSessionCookies
+ * (apps/backend/src/auth/auth.controller.ts: login/register/refresh).
+ * Нужен потому что на кросс-портовом dev (фронт :3001 → API :3000) браузер
+ * привязывает backend Set-Cookie к origin'у backend'а (SameSite=Lax,
+ * domain = хост API, CORS credentials), а middleware.ts читает куки
+ * origin'а фронтенда — маркера нет, и /projects отбивается в /login даже
+ * при успешном login 200. document.cookie ставит маркер на origin фронтенда;
+ * когда оба origin'а совпадают (прод за одним доменом) — идемпотентно
+ * перезаписывает то же имя/значение/path. Токены не светит (только "1").
+ * Best-effort, never throws; симметричен clearAuthMarker.
+ */
+export function setAuthMarker(maxAgeSec: number = DEFAULT_MARKER_MAX_AGE_SEC): void {
+  try {
+    if (typeof document === 'undefined') return;
+    const ttl = Number.isFinite(maxAgeSec) && maxAgeSec > 0 ? Math.floor(maxAgeSec) : DEFAULT_MARKER_MAX_AGE_SEC;
+    document.cookie = `${AUTH_MARKER}=1; path=/; max-age=${ttl}; SameSite=Lax`;
+  } catch {
+    // cookie store unavailable — middleware redirect stays backend-driven
+  }
 }
 
 /**
@@ -125,6 +159,9 @@ function doRefresh(rt: string): Promise<string | null> {
       memoryRefresh = pair.refreshToken;
       writeStorage(ACCESS_KEY, pair.accessToken);
       writeStorage(REFRESH_KEY, pair.refreshToken);
+      // Ротация продлила сессию — обновляем и маркер, иначе протухший
+      // max-age выкинет пользователя из /projects в /login при живом refresh.
+      setAuthMarker();
       return pair.accessToken as string;
     })
     .catch(() => {

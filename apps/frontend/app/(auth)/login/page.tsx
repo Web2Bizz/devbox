@@ -168,7 +168,22 @@ export default function LoginPage() {
   const router = useRouter();
   const { t } = useI18n();
   const [mode, setMode] = useState<'login' | 'register'>('login');
-  const onSuccess = () => router.push('/projects');
+  // Единый onSuccess для LoginForm и RegisterForm: setSession уже синхронно
+  // проштамповал клиентский `devbox-auth` (см. setAuthMarker), поэтому guard
+  // middleware.ts (`devbox-auth=1`) пропустит /projects без bounce в /login.
+  // Раньше был голый router.push: маркер ставил только backend Set-Cookie,
+  // который на кросс-портовом dev (:3001 → :3000, SameSite=Lax) остаётся на
+  // origin'е API — middleware маркера не видел и отбивал /projects → /login.
+  // replace (без записи /login в history) + refresh (перепрогон guard'а со
+  // свежей кукой); если router кинул — полный переход через location.
+  const onSuccess = () => {
+    try {
+      router.replace('/projects');
+      router.refresh();
+    } catch {
+      window.location.assign('/projects');
+    }
+  };
 
   return (
     <Card variant="brand">

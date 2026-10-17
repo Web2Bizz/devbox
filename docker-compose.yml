@@ -82,6 +82,8 @@ services:
     # needs a rebuilt image, runtime env cannot change the bundle.
     image: docker.registry.web2bizz.team/web2bizz/devbox/frontend:${TAG:-latest}
     restart: unless-stopped
+    environment:
+      HOSTNAME: "0.0.0.0"
     deploy:
       resources:
         limits:
@@ -97,7 +99,7 @@ services:
       - backend
     healthcheck:
       # oven/bun runner has no wget — probe the Next standalone via bun fetch.
-      test: ["CMD-SHELL", "bun -e 'const r=await fetch(\"http://localhost:3000/\");if(!r.ok)process.exit(1)'"]
+      test: ["CMD-SHELL", "bun -e 'for(const h of[\"127.0.0.1\",\"localhost\"]){try{const r=await fetch(\"http://\"+h+\":3000/\");if(r.ok)process.exit(0)}catch(e){}}process.exit(1)'"]
       interval: 10s
       timeout: 5s
       retries: 6

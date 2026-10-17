@@ -27,9 +27,10 @@ RUN bun run build:next
 FROM oven/bun:1.4.2 AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-COPY --from=build /app/apps/frontend/.next/standalone ./
-COPY --from=build /app/apps/frontend/.next/static ./apps/frontend/.next/static
-COPY --from=build /app/apps/frontend/public ./apps/frontend/public
+COPY --from=build --chown=bun:bun /app/apps/frontend/.next/standalone ./
+COPY --from=build --chown=bun:bun /app/apps/frontend/.next/static ./apps/frontend/.next/static
+COPY --from=build --chown=bun:bun /app/apps/frontend/public ./apps/frontend/public
+RUN mkdir -p ./apps/frontend/.next/cache/images && chown -R bun:bun ./apps/frontend/.next
 USER bun
 EXPOSE 3000
 CMD ["bun", "apps/frontend/server.js"]

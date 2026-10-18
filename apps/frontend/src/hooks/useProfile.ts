@@ -19,13 +19,21 @@ export interface UseProfileResult {
   dismiss: () => void;
 }
 
-function toProfile(user: { id: string; email: string; firstName: string; lastName: string; createdAt: string }): Profile {
+function toProfile(user: {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  createdAt: string;
+  limits?: Profile['limits'];
+}): Profile {
   return {
     id: user.id,
     name: `${user.firstName} ${user.lastName}`.trim(),
     email: user.email,
     role: 'Owner',
     createdAt: user.createdAt,
+    ...(user.limits ? { limits: user.limits } : {}),
   };
 }
 

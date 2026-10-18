@@ -91,6 +91,18 @@ const ME_USER = {
   provider: 'local' as const,
   createdAt: '2026-01-15T09:00:00.000Z',
 };
+const ME_USER_WITH_LIMITS = {
+  ...ME_USER,
+  limits: {
+    daily: { used: 5, total: 100 },
+    weekly: { used: 20, total: 500 },
+    monthly: { used: 100, total: 2000 },
+  },
+};
+function currentMeUser() {
+  const override = (globalThis as Record<string, unknown>).__TEST_ME_USER__;
+  return (override as typeof ME_USER_WITH_LIMITS | undefined) ?? ME_USER;
+}
 const cannedSession = {
   accessToken: 'test-access',
   refreshToken: 'test-refresh',
@@ -117,7 +129,7 @@ mock.module('../../api/client', () => ({
     }
   },
   api: {
-    me: async () => ME_USER,
+    me: async () => currentMeUser(),
     updateMe: async () => ME_USER,
     logout: async () => ({ ok: true }),
     refresh: async () => ({ ...cannedSession }),
@@ -142,7 +154,7 @@ const { setSession, clearSession } = await import('../../lib/auth-store');
     });
   }
   if (url.includes('/auth/me')) {
-    return new Response(JSON.stringify(ME_USER), {
+    return new Response(JSON.stringify(currentMeUser()), {
       status: 200,
       headers: { 'content-type': 'application/json' },
     });
@@ -155,12 +167,14 @@ const { setSession, clearSession } = await import('../../lib/auth-store');
 
 beforeEach(() => {
   setSession({ ...cannedSession });
+  delete (globalThis as Record<string, unknown>).__TEST_ME_USER__;
 });
 
 afterEach(() => {
   cleanup();
   clearSession();
   pushMock.mockClear();
+  delete (globalThis as Record<string, unknown>).__TEST_ME_USER__;
 });
 
 const USER = { name: 'Devbox Developer', email: 'dev@devbox.local' };
@@ -296,5 +310,146 @@ describe('HeaderProfileDropdown (pure kit AuthorizedUserProfile)', () => {
     } finally {
       document.cookie = 'devbox-locale=; path=/; max-age=0';
     }
+  });
+});
+
+describe('HeaderProfileDropdown limits (daily/weekly/monthly)', () => {
+  test('renders 3 limits with values and progress (en)', async () => {
+    (globalThis as Record<string, unknown>).__TEST_ME_USER__ = ME_USER_WITH_LIMITS;
+    const user = userEvent.setup();
+    render(<HeaderProfileDropdown />);
+
+    const trigger = await screen.findByRole('button', { name: TRIGGER_NAME }, { timeout: FIND_TIMEOUT });
+    await user.click(trigger);
+    await screen.findByRole('menu');
+
+    const group = await screen.findByTestId('profile-limits');
+    expect(group.getAttribute('aria-label')).toBe('Usage limits');
+    expect(screen.getByTestId('profile-limits-title').textContent).toBe('Usage limits');
+
+    expect(screen.getByTestId('profile-limit-daily-label').textContent).toBe('Daily');
+    expect(screen.getByTestId('profile-limit-daily-value').textContent).toBe('5 / 100');
+    expect(screen.getByTestId('profile-limit-weekly-label').textContent).toBe('Weekly');
+    expect(screen.getByTestId('profile-limit-weekly-value').textContent).toBe('20 / 500');
+    expect(screen.getByTestId('profile-limit-monthly-label').textContent).toBe('Monthly');
+    expect(screen.getByTestId('profile-limit-monthly-value').textContent).toBe('100 / 2000');
+
+    // Simple progress: used/total % as aria-valuenow (5%, 4%, 5%).
+    expect(screen.getByTestId('profile-limit-daily-progress').getAttribute('aria-valuenow')).toBe('5');
+    expect(screen.getByTestId('profile-limit-weekly-progress').getAttribute('aria-valuenow')).toBe('4');
+    expect(screen.getByTestId('profile-limit-monthly-progress').getAttribute('aria-valuenow')).toBe('5');
+
+    // Old cases still hold alongside limits.
+    expect(screen.getByRole('link', { name: 'Profile' })).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeDefined();
+  });
+
+  test('hides limits group when backend sends no quota', async () => {
+    const user = userEvent.setup();
+    render(<HeaderProfileDropdown />);
+
+    const trigger = await screen.findByRole('button', { name: TRIGGER_NAME }, { timeout: FIND_TIMEOUT });
+    await user.click(trigger);
+    await screen.findByRole('menu');
+
+    expect(screen.queryByTestId('profile-limits')).toBeNull();
+    expect(screen.getByRole('link', { name: 'Profile' })).toBeDefined();
+  });
+
+  test('ru locale renders translated limit labels', async () => {
+    (globalThis as Record<string, unknown>).__TEST_ME_USER__ = ME_USER_WITH_LIMITS;
+    document.cookie = 'devbox-locale=ru; path=/';
+    try {
+      const user = userEvent.setup();
+      render(
+        <I18nProvider>
+          <HeaderProfileDropdown />
+        </I18nProvider>,
+      );
+
+      const trigger = await screen.findByRole('button', { name: TRIGGER_NAME }, { timeout: FIND_TIMEOUT });
+      await user.click(trigger);
+      await screen.findByRole('menu');
+
+      expect(screen.getByTestId('profile-limits-title').textContent).toBe('Лимиты использования');
+      expect(screen.getByTestId('profile-limit-daily-label').textContent).toBe('Дневной');
+      expect(screen.getByTestId('profile-limit-daily-value').textContent).toBe('5 / 100');
+      expect(screen.getByTestId('profile-limit-weekly-label').textContent).toBe('Недельный');
+      expect(screen.getByTestId('profile-limit-weekly-value').textContent).toBe('20 / 500');
+      expect(screen.getByTestId('profile-limit-monthly-label').textContent).toBe('Месячный');
+      expect(screen.getByTestId('profile-limit-monthly-value').textContent).toBe('100 / 2000');
+      expect(screen.getByRole('link', { name: 'Профиль' })).toBeDefined();
+      expect(screen.getByRole('button', { name: 'Выйти' })).toBeDefined();
+    } finally {
+      document.cookie = 'devbox-locale=; path=/; max-age=0';
+    }
+  });
+
+  test('partial limits render only the present bucket', async () => {
+    (globalThis as Record<string, unknown>).__TEST_ME_USER__ = {
+      ...ME_USER,
+      limits: { daily: { used: 7, total: 10 } },
+    };
+    const user = userEvent.setup();
+    render(<HeaderProfileDropdown />);
+
+    const trigger = await screen.findByRole('button', { name: TRIGGER_NAME }, { timeout: FIND_TIMEOUT });
+    await user.click(trigger);
+    await screen.findByRole('menu');
+
+    expect(screen.getByTestId('profile-limits')).toBeDefined();
+    expect(screen.getByTestId('profile-limit-daily-value').textContent).toBe('7 / 10');
+    expect(screen.getByTestId('profile-limit-daily-progress').getAttribute('aria-valuenow')).toBe('70');
+    expect(screen.queryByTestId('profile-limit-weekly')).toBeNull();
+    expect(screen.queryByTestId('profile-limit-monthly')).toBeNull();
+  });
+
+  test('total=0 renders 0% without NaN', async () => {
+    (globalThis as Record<string, unknown>).__TEST_ME_USER__ = {
+      ...ME_USER,
+      limits: { daily: { used: 0, total: 0 } },
+    };
+    const user = userEvent.setup();
+    render(<HeaderProfileDropdown />);
+
+    const trigger = await screen.findByRole('button', { name: TRIGGER_NAME }, { timeout: FIND_TIMEOUT });
+    await user.click(trigger);
+    await screen.findByRole('menu');
+
+    expect(screen.getByTestId('profile-limit-daily-value').textContent).toBe('0 / 0');
+    expect(screen.getByTestId('profile-limit-daily-progress').getAttribute('aria-valuenow')).toBe('0');
+  });
+
+  test('over-quota clamps progress to 100', async () => {
+    (globalThis as Record<string, unknown>).__TEST_ME_USER__ = {
+      ...ME_USER,
+      limits: { monthly: { used: 2500, total: 2000 } },
+    };
+    const user = userEvent.setup();
+    render(<HeaderProfileDropdown />);
+
+    const trigger = await screen.findByRole('button', { name: TRIGGER_NAME }, { timeout: FIND_TIMEOUT });
+    await user.click(trigger);
+    await screen.findByRole('menu');
+
+    expect(screen.getByTestId('profile-limit-monthly-value').textContent).toBe('2500 / 2000');
+    expect(screen.getByTestId('profile-limit-monthly-progress').getAttribute('aria-valuenow')).toBe('100');
+    expect(screen.queryByTestId('profile-limit-daily')).toBeNull();
+  });
+
+  test('negative used clamps progress to 0', async () => {
+    (globalThis as Record<string, unknown>).__TEST_ME_USER__ = {
+      ...ME_USER,
+      limits: { weekly: { used: -5, total: 100 } },
+    };
+    const user = userEvent.setup();
+    render(<HeaderProfileDropdown />);
+
+    const trigger = await screen.findByRole('button', { name: TRIGGER_NAME }, { timeout: FIND_TIMEOUT });
+    await user.click(trigger);
+    await screen.findByRole('menu');
+
+    expect(screen.getByTestId('profile-limit-weekly-value').textContent).toBe('-5 / 100');
+    expect(screen.getByTestId('profile-limit-weekly-progress').getAttribute('aria-valuenow')).toBe('0');
   });
 });

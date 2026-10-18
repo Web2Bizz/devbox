@@ -87,6 +87,19 @@ export interface ApiError {
   correlationId: string;
 }
 
+/** Single quota bucket: consumed units vs granted total. */
+export interface LimitQuota {
+  used: number;
+  total: number;
+}
+
+/** Optional usage limits attached to the identity (all buckets optional). */
+export interface AuthLimits {
+  daily?: LimitQuota;
+  weekly?: LimitQuota;
+  monthly?: LimitQuota;
+}
+
 /** POST /api/v1/auth/register + login response user (never carries passwordHash) */
 export interface AuthUser {
   id: string;
@@ -96,6 +109,8 @@ export interface AuthUser {
   provider: 'local' | 'sso-oauth' | 'github-app';
   /** ISO-8601 timestamp */
   createdAt: string;
+  /** Optional usage limits — absent when the backend sends no quota. */
+  limits?: AuthLimits;
 }
 
 /** Token pair (short-lived access + rotating refresh). */

@@ -21,12 +21,13 @@ export type UseProfileResult = {
   dismiss: () => void;
 };
 
-function toProfile(user: AuthUser): Profile {
+function toProfile(user: AuthUser & { limits?: Profile['limits'] }): Profile {
   return {
     id: user.id,
     name: `${user.firstName} ${user.lastName}`.trim(),
     email: user.email,
     createdAt: user.createdAt,
+    ...(user.limits ? { limits: user.limits } : {}),
   };
 }
 

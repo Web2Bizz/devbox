@@ -275,6 +275,12 @@ export const ru: Dictionary = {
     signOut: 'Выйти',
     login: 'Войти',
     noEmail: 'Нет email',
+    limits: {
+      title: 'Лимиты использования',
+      daily: 'Дневной',
+      weekly: 'Недельный',
+      monthly: 'Месячный',
+    },
   },
   orgs: {
     titleA: 'Организации',

@@ -36,12 +36,31 @@ export type SecretItem = {
   updatedAt: string;
 };
 
+/** Single quota bucket: consumed units vs granted total. */
+export type LimitQuota = {
+  used: number;
+  total: number;
+};
+
+/**
+ * Optional usage limits (all buckets optional). Frontend-local: '@rush-code/contracts'
+ * AuthUser carries no 'limits' yet (backend + contracts/openapi.yaml have no quota fields) —
+ * when the wire contract gains it, delete these and import from the package instead.
+ */
+export type AuthLimits = {
+  daily?: LimitQuota;
+  weekly?: LimitQuota;
+  monthly?: LimitQuota;
+};
+
 export type Profile = {
   id: string;
   name: string;
   email: string;
   /** ISO-8601 */
   createdAt: string;
+  /** Optional usage limits (extra-contract wire field, mirrors AuthUser.limits). */
+  limits?: AuthLimits;
 };
 
 export type AiProviderStatus = 'connected' | 'disconnected' | 'error';

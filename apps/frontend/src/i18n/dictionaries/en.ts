@@ -275,6 +275,12 @@ export const en: Dictionary = {
     signOut: 'Sign out',
     login: 'Log in',
     noEmail: 'No email',
+    limits: {
+      title: 'Usage limits',
+      daily: 'Daily',
+      weekly: 'Weekly',
+      monthly: 'Monthly',
+    },
   },
   orgs: {
     titleA: 'Organizations',

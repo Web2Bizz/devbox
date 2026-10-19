@@ -275,12 +275,6 @@ export type Dictionary = {
     signOut: string;
     login: string;
     noEmail: string;
-    limits: {
-      title: string;
-      daily: string;
-      weekly: string;
-      monthly: string;
-    };
   };
   orgs: {
     titleA: string;

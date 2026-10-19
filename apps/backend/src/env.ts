@@ -29,11 +29,22 @@ export interface AppEnv {
   /**
    * Server secret for per-user OpenCode API-key encryption at rest
    * ('' = unconfigured — key endpoints answer 500; explicit values must be
-   * ≥ 32 chars; never logged).
+   * ≥ 32 chars; never logged). This is the ACTIVE KEK: new rows are wrapped
+   * with it under `opencodeKeysActiveKeyId`.
    */
   opencodeKeysEncryptionKey: string;
-  /** Upstream usage endpoint (GET, per-user Bearer; never carries secrets). */
-  opencodeBillingUrl: string;
+  /**
+   * Previous KEK secret (rotation window only, '' = none). While set, rows
+   * wrapped with the previous KEK stay readable (dual-read); the lazy +
+   * background re-encrypt pass re-wraps them under the active KEK. Remove
+   * once no stale rows remain. Explicit values must be ≥ 32 chars; never
+   * logged.
+   */
+  opencodeKeysEncryptionKeyPrevious: string;
+  /** Active KEK version id for new rows (default "v1"; stored plaintext). */
+  opencodeKeysActiveKeyId: string;
+  /** Previous KEK version id (default "v0"; stored plaintext, not a secret). */
+  opencodeKeysPreviousKeyId: string;
   /** May be '' when no credentials/host configured — pg stub stays skipped. */
   databaseUrl: string;
   corsOrigins: string[];
@@ -285,7 +296,9 @@ export const envRawSchema = z.object({
   AUTH_LEGACY_MOCK_FALLBACK: z.string().optional(),
   ORG_INVITE_TTL_SEC: z.string().optional(),
   OPENCODE_KEYS_ENCRYPTION_KEY: z.string().optional(),
-  OPENCODE_BILLING_URL: z.string().optional(),
+  OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS: z.string().optional(),
+  OPENCODE_KEYS_ACTIVE_KEY_ID: z.string().optional(),
+  OPENCODE_KEYS_PREVIOUS_KEY_ID: z.string().optional(),
 });
 
 export type EnvRaw = z.infer<typeof envRawSchema>;
@@ -314,17 +327,21 @@ export const DEFAULT_JWT_REFRESH_TTL_SEC = 604800;
 /** Default organization invite-token TTL (24h, in seconds). */
 export const DEFAULT_ORG_INVITE_TTL_SEC = 86400;
 
-/**
- * Default upstream OpenCode usage endpoint (GET with per-user Bearer).
- * WARNING: unverified — no public billing/usage path was discoverable on
- * opencode.ai (probed 2026-10-13: /api/*usage, /zen/v1/*usage, api.opencode.ai
- * catch-all 200 "Not Found"). Override via OPENCODE_BILLING_URL in .env when
- * the real endpoint is known (see .env.example).
- */
-export const DEFAULT_OPENCODE_BILLING_URL = "https://api.opencode.ai/usage";
-
 /** Minimum OPENCODE_KEYS_ENCRYPTION_KEY length (AES-256 key material, SHA-256 derived). */
 export const MIN_OPENCODE_KEYS_ENCRYPTION_KEY_LENGTH = 32;
+
+/** Default KEK version id for newly wrapped rows (stored plaintext, not a secret). */
+export const DEFAULT_OPENCODE_KEYS_ACTIVE_KEY_ID = "v1";
+
+/** Default previous-KEK version id (rotation window only; not a secret). */
+export const DEFAULT_OPENCODE_KEYS_PREVIOUS_KEY_ID = "v0";
+
+/**
+ * Allowed KEK version-id shape: leading alnum + up to 31 alnum/`_`/`-`
+ * (e.g. "v1", "2026-10"). Ids travel in plaintext (`key_id` column), so the
+ * rule only keeps them greppable and SQL-safe.
+ */
+export const OPENCODE_KEYS_KEY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/;
 
 /** Minimum explicit JWT secret length (dev ephemeral fallback bypasses this). */
 export const MIN_JWT_SECRET_LENGTH = 32;
@@ -702,7 +719,32 @@ export function validateEnvWithWarnings(
   // unset secret WARNs and key endpoints answer 500 opencode_keys_unconfigured
   // instead of breaking every other suite at boot. An explicit secret shorter
   // than 32 chars is ERROR (value never echoed — it is key material).
-  // Rotation is out of scope: one key per deploy, no re-encrypt (see .env.example).
+  // Rotation (no downtime): deploy the new secret as
+  // OPENCODE_KEYS_ENCRYPTION_KEY (+ OPENCODE_KEYS_ACTIVE_KEY_ID) and keep the
+  // old one as OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS (+
+  // OPENCODE_KEYS_PREVIOUS_KEY_ID) — dual-read keeps old rows decryptable
+  // while the lazy + `keys:reencrypt` background pass re-wraps them under the
+  // active KEK; drop the previous secret once no stale rows remain.
+  const keyIdOr = (raw: string | undefined, fallback: string, name: string): string => {
+    const id = (raw ?? "").trim() || fallback;
+    if (!OPENCODE_KEYS_KEY_ID_PATTERN.test(id)) {
+      throw new Error(
+        `[env] ${name} must match ${OPENCODE_KEYS_KEY_ID_PATTERN} (e.g. "v2"), got ${JSON.stringify(raw ?? "")}. ` +
+          "Check your .env (see .env.example).",
+      );
+    }
+    return id;
+  };
+  const opencodeKeysActiveKeyId = keyIdOr(
+    firstNonEmpty(env.OPENCODE_KEYS_ACTIVE_KEY_ID),
+    DEFAULT_OPENCODE_KEYS_ACTIVE_KEY_ID,
+    "OPENCODE_KEYS_ACTIVE_KEY_ID",
+  );
+  const opencodeKeysPreviousKeyId = keyIdOr(
+    firstNonEmpty(env.OPENCODE_KEYS_PREVIOUS_KEY_ID),
+    DEFAULT_OPENCODE_KEYS_PREVIOUS_KEY_ID,
+    "OPENCODE_KEYS_PREVIOUS_KEY_ID",
+  );
   const opencodeKeysEncryptionKeyRaw = firstNonEmpty(
     env.OPENCODE_KEYS_ENCRYPTION_KEY,
   );
@@ -724,25 +766,27 @@ export function validateEnvWithWarnings(
         "Set it explicitly (see .env.example).",
     );
   }
-  // Billing endpoint: full-URL knob so the unverified default path can be
-  // corrected without a code change. Set-but-invalid URL is ERROR (fail-fast
-  // like OPENCODE_URL); empty → default + WARN. Read-only config (outbound
-  // GET target, carries no secrets itself).
-  const opencodeBillingRaw = firstNonEmpty(env.OPENCODE_BILLING_URL);
-  let opencodeBillingUrl: string;
-  if (opencodeBillingRaw) {
-    opencodeBillingUrl = assertValidUrl(
-      opencodeBillingRaw,
-      "OPENCODE_BILLING_URL",
-    );
-  } else {
-    opencodeBillingUrl = DEFAULT_OPENCODE_BILLING_URL;
+  // Previous KEK (rotation window only): unset is the normal steady state
+  // (no WARN); set-but-short is ERROR (fail-closed, value never echoed).
+  const opencodeKeysEncryptionKeyPreviousRaw = firstNonEmpty(
+    env.OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS,
+  );
+  let opencodeKeysEncryptionKeyPrevious = "";
+  if (opencodeKeysEncryptionKeyPreviousRaw) {
+    if (
+      opencodeKeysEncryptionKeyPreviousRaw.length <
+      MIN_OPENCODE_KEYS_ENCRYPTION_KEY_LENGTH
+    ) {
+      throw new Error(
+        `[env] OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS must be at least ${MIN_OPENCODE_KEYS_ENCRYPTION_KEY_LENGTH} chars (see .env.example).`,
+      );
+    }
+    opencodeKeysEncryptionKeyPrevious = opencodeKeysEncryptionKeyPreviousRaw;
     warn(
-      "[env] WARN OPENCODE_BILLING_URL is unset, falling back to " +
-        `${DEFAULT_OPENCODE_BILLING_URL} (unverified default, see .env.example).`,
+      "[env] WARN OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS is set (rotation window) — " +
+        "finish the lazy/background re-encrypt pass, then remove it (see .env.example).",
     );
   }
-
   // --- database --------------------------------------------------------------
   // NOTE: explicit value passes through untouched; never echoed in errors/logs.
   const explicitDb = firstNonEmpty(env.DATABASE_URL);
@@ -1429,7 +1473,9 @@ export function validateEnvWithWarnings(
       opencodeUrl,
       opencodeToken,
       opencodeKeysEncryptionKey,
-      opencodeBillingUrl,
+      opencodeKeysEncryptionKeyPrevious,
+      opencodeKeysActiveKeyId,
+      opencodeKeysPreviousKeyId,
       databaseUrl,
       corsOrigins,
       requestTimeoutMs,

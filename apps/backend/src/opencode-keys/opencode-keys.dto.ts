@@ -30,15 +30,41 @@ export class OpencodeKeyStatusDto {
   updatedAt?: string;
 }
 
-/** GET /api/v1/usage — live upstream balance+usage. */
-export class OpencodeUsageDto {
-  @ApiProperty({ example: 42.5 })
-  balance!: number;
+/** Single usage bucket — real `used/limit` pair from upstream (no derivation). */
+export class OpencodeLimitBucketDto {
+  @ApiProperty({ example: 12.5 })
+  used!: number;
 
-  @ApiProperty({ example: 7.25 })
-  usage!: number;
+  @ApiProperty({ example: 100 })
+  limit!: number;
+}
+
+/** GET /api/v1/usage — live Zen Go usage (percent windows mapped to used/limit 100). */
+export class OpencodeUsageDto {
+  @ApiProperty({ required: false, example: 42.5 })
+  balance?: number;
+
+  @ApiProperty({ required: false, example: 7.25 })
+  usage?: number;
 
   /** ISO-8601 time of the upstream response (no cache/TTL in this iteration). */
   @ApiProperty({ example: "2026-10-13T00:00:00.000Z" })
   updatedAt!: string;
+
+  /**
+   * Zen Go windows mapped to used/limit (percent → { used: percent, limit: 100 }).
+   * `rolling` is the Zen 5-hour window; legacy `daily` is kept for old payloads.
+   * Present only when upstream carries finite numbers — never derived.
+   */
+  @ApiProperty({ required: false, type: OpencodeLimitBucketDto })
+  rolling?: OpencodeLimitBucketDto;
+
+  @ApiProperty({ required: false, type: OpencodeLimitBucketDto })
+  daily?: OpencodeLimitBucketDto;
+
+  @ApiProperty({ required: false, type: OpencodeLimitBucketDto })
+  weekly?: OpencodeLimitBucketDto;
+
+  @ApiProperty({ required: false, type: OpencodeLimitBucketDto })
+  monthly?: OpencodeLimitBucketDto;
 }

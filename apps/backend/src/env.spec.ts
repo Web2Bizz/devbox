@@ -59,7 +59,6 @@ function baseEnv(): Source {
     AUTH_LEGACY_MOCK_FALLBACK: 'false',
     ORG_INVITE_TTL_SEC: '86400',
     OPENCODE_KEYS_ENCRYPTION_KEY: 'test-opencode-keys-encryption-key-not-real-0123456789',
-    OPENCODE_BILLING_URL: 'https://billing.example.com/usage',
   } as Source;
 }
 
@@ -112,7 +111,6 @@ const checks: Array<{ name: string; run: () => void }> = [
       assert.equal(env.authLegacyMockFallback, false);
       assert.equal(env.orgInviteTtlSec, 86400);
       assert.equal(env.opencodeKeysEncryptionKey, 'test-opencode-keys-encryption-key-not-real-0123456789');
-      assert.equal(env.opencodeBillingUrl, 'https://billing.example.com/usage');
       assert.deepEqual(warnings, []);
     },
   },
@@ -718,19 +716,61 @@ const checks: Array<{ name: string; run: () => void }> = [
     },
   },
   {
-    name: 'OPENCODE_BILLING_URL unset → default + WARN; garbage is ERROR',
+    name: 'OPENCODE_KEYS rotation vars: defaults v1/v0 + empty previous; explicit ok; short previous ERROR; bad id ERROR',
     run: () => {
-      const unset = validateEnvWithWarnings(without(baseEnv(), 'OPENCODE_BILLING_URL'));
-      assert.equal(unset.env.opencodeBillingUrl, 'https://api.opencode.ai/usage');
+      const unset = validateEnvWithWarnings(
+        without(
+          baseEnv(),
+          'OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS',
+          'OPENCODE_KEYS_ACTIVE_KEY_ID',
+          'OPENCODE_KEYS_PREVIOUS_KEY_ID',
+        ),
+      );
+      assert.equal(unset.env.opencodeKeysEncryptionKeyPrevious, '');
+      assert.equal(unset.env.opencodeKeysActiveKeyId, 'v1');
+      assert.equal(unset.env.opencodeKeysPreviousKeyId, 'v0');
+      const explicit = validateEnv({
+        ...baseEnv(),
+        OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS:
+          'test-opencode-keys-previous-key-not-real-0123456789',
+        OPENCODE_KEYS_ACTIVE_KEY_ID: 'v2',
+        OPENCODE_KEYS_PREVIOUS_KEY_ID: 'v1',
+      } as Source);
+      assert.equal(
+        explicit.opencodeKeysEncryptionKeyPrevious,
+        'test-opencode-keys-previous-key-not-real-0123456789',
+      );
+      assert.equal(explicit.opencodeKeysActiveKeyId, 'v2');
+      assert.equal(explicit.opencodeKeysPreviousKeyId, 'v1');
+      const prevWarn = validateEnvWithWarnings({
+        ...baseEnv(),
+        OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS:
+          'test-opencode-keys-previous-key-not-real-0123456789',
+      } as Source);
       assert.ok(
-        unset.warnings.some((w) => w.includes('OPENCODE_BILLING_URL') && w.includes('WARN')),
-        `expected billing-url WARN, got: ${JSON.stringify(unset.warnings)}`,
+        prevWarn.warnings.some(
+          (w) => w.includes('OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS') && w.includes('WARN'),
+        ),
+        `expected previous-key rotation WARN, got: ${JSON.stringify(prevWarn.warnings)}`,
       );
+      const shortMsg = expectThrow(
+        () =>
+          validateEnv({
+            ...baseEnv(),
+            OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS: 'too-short',
+          } as Source),
+        /\[env\] OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS/,
+        'short previous key',
+      );
+      assert.ok(!shortMsg.includes('too-short'), 'secret leaked into the error');
       expectThrow(
-        () => validateEnv({ ...baseEnv(), OPENCODE_BILLING_URL: '::bad::' } as Source),
-        /\[env\] OPENCODE_BILLING_URL/,
-        'bad billing url',
+        () => validateEnv({ ...baseEnv(), OPENCODE_KEYS_ACTIVE_KEY_ID: 'bad id!' } as Source),
+        /\[env\] OPENCODE_KEYS_ACTIVE_KEY_ID/,
+        'bad active key id',
       );
+      // Empty id falls back to the default (never throws — ids are non-secret).
+      const emptyId = validateEnv({ ...baseEnv(), OPENCODE_KEYS_PREVIOUS_KEY_ID: '' } as Source);
+      assert.equal(emptyId.opencodeKeysPreviousKeyId, 'v0');
     },
   },
 ];

@@ -147,10 +147,31 @@ export interface OpencodeKeyStatus {
   updatedAt?: string;
 }
 
-/** GET /api/v1/usage — live upstream balance+usage (no cache/TTL). */
+/** Single usage bucket — real `used/limit` pair from upstream (no derivation). */
+export interface OpencodeLimitBucket {
+  used: number;
+  limit: number;
+}
+
+/** GET /api/v1/usage — live Zen Go usage (percent windows mapped to used/limit 100). */
 export interface OpencodeUsage {
-  balance: number;
-  usage: number;
+  /** Legacy pay-as-you-go fields — present only for legacy upstream payloads. */
+  balance?: number;
+  /** Legacy pay-as-you-go total — present only for legacy upstream payloads. */
+  usage?: number;
   /** ISO-8601 time of the upstream response */
   updatedAt: string;
+  /**
+   * Zen Go windows mapped to used/limit (`percent` → `{ used: percent, limit: 100 }`).
+   * `rolling` is the Zen 5-hour window (20% of monthly); legacy `daily` has
+   * no Zen equivalent and is kept for old payloads. Present only when the
+   * upstream payload carries finite numbers — never derived from a total.
+   * Upstream shape is the Zen Go endpoint (module OPENCODE_BILLING_URL
+   * constant = https://opencode.ai/zen/go/v1/usage) — the billing service
+   * maps percent windows and passes legacy buckets through when finite.
+   */
+  rolling?: OpencodeLimitBucket;
+  daily?: OpencodeLimitBucket;
+  weekly?: OpencodeLimitBucket;
+  monthly?: OpencodeLimitBucket;
 }

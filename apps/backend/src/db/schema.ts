@@ -129,11 +129,14 @@ export type UserRow = typeof users.$inferSelect;
 
 /**
  * Per-user OpenCode API keys (durable contract; see
- * drizzle/0005_user_opencode_keys.sql). One row per user (user_id is both
- * PK and FK → users(id) ON DELETE CASCADE, so deleting a user drops their
- * key). The API key itself is stored ONLY as AES-256-GCM ciphertext
- * (encrypted_key = base64(ct || tag), iv = base64(iv)) — plaintext never
- * touches the DB, the logs, or the wire back to the client.
+ * drizzle/0005_user_opencode_keys.sql + 0006_user_opencode_keys_key_id.sql).
+ * One row per user (user_id is both PK and FK → users(id) ON DELETE CASCADE,
+ * so deleting a user drops their key). The API key itself is stored ONLY as
+ * AES-256-GCM ciphertext (encrypted_key = base64(ct || tag), iv =
+ * base64(iv)) — plaintext never touches the DB, the logs, or the wire back
+ * to the client. `keyId` names the KEK version that wrapped the row
+ * (dual-read decrypt across the rotation window; legacy '' = pre-versioning
+ * row, readable via the active → previous fallback, lazily re-wrapped).
  */
 export const userOpencodeKeys = pgTable("user_opencode_keys", {
   userId: uuid("user_id")
@@ -141,6 +144,7 @@ export const userOpencodeKeys = pgTable("user_opencode_keys", {
     .references(() => users.id, { onDelete: "cascade" }),
   encryptedKey: text("encrypted_key").notNull(),
   iv: text("iv").notNull(),
+  keyId: text("key_id").notNull().default("v1"),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

@@ -33,7 +33,7 @@ process.env.OPENCODE_KEYS_ENCRYPTION_KEY =
 
 const TEST_API_KEY = "e2e-opencode-api-key-not-real-0123456789abcdef";
 
-type BillingMode = "ok" | "reject" | "ratelimit" | "badshape" | "hang";
+type BillingMode = "ok" | "breakdown" | "zen" | "reject" | "ratelimit" | "badshape" | "hang";
 
 async function main(): Promise<void> {
   // --- Programmable mock billing upstream (per-user Bearer asserted) -------
@@ -60,12 +60,43 @@ async function main(): Promise<void> {
       res.end(JSON.stringify({ nope: true }));
       return;
     }
+    if (mode === "breakdown") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          balance: 42.5,
+          usage: 7.25,
+          daily: { used: 12.5, limit: 100 },
+          weekly: { used: 60, limit: 100 },
+          monthly: { used: 90, limit: 100 },
+        }),
+      );
+      return;
+    }
+    if (mode === "zen") {
+      // Real Zen Go shape: { usage: { rolling, weekly, monthly } } with
+      // { status, percent, resetsAt } (see /v2/docs/console/go limits).
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          usage: {
+            rolling: { status: "ok", percent: 23.5, resetsAt: "2026-10-19T00:00:00.000Z" },
+            weekly: { status: "ok", percent: 60, resetsAt: "2026-10-26T00:00:00.000Z" },
+            monthly: { status: "rate-limited", percent: 92, resetsAt: "2026-11-01T00:00:00.000Z" },
+          },
+        }),
+      );
+      return;
+    }
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ balance: 42.5, usage: 7.25 }));
   });
   await new Promise<void>((resolve) => billing.listen(0, "127.0.0.1", resolve));
   const billingPort = (billing.address() as { port: number }).port;
-  process.env.OPENCODE_BILLING_URL = `http://127.0.0.1:${billingPort}/usage`;
+  // Billing endpoint is a hard-coded module constant (no env override):
+  // requests to it are rerouted to this mock via a fetchWithRetry shim
+  // installed after the app boots (see below).
+  let billingTarget = `http://127.0.0.1:${billingPort}/usage`;
 
   const { resolveTestDb, applyTestMigrations } =
     await import("../db/e2e-db.js");
@@ -129,16 +160,43 @@ async function main(): Promise<void> {
   await app.listen(0);
   const base = await app.getUrl();
 
+  // Reroute the hard-coded billing constant to the mock above through the
+  // live ExternalClient (keeps timeout/retry mapping identical to prod).
+  const { OPENCODE_BILLING_URL, OpencodeBillingService } = await import(
+    "./opencode-billing.service.js"
+  );
+  const billingSvc = app.get(OpencodeBillingService, { strict: false }) as unknown as {
+    external: {
+      fetchWithRetry: (
+        url: string,
+        init: RequestInit,
+        opts: { service: string; operation: string; correlationId?: string },
+      ) => Promise<Response>;
+    };
+  };
+  const realFetchWithRetry = billingSvc.external.fetchWithRetry.bind(
+    billingSvc.external,
+  );
+  billingSvc.external.fetchWithRetry = (url, init, opts) =>
+    realFetchWithRetry(
+      url === OPENCODE_BILLING_URL ? billingTarget : url,
+      init,
+      opts,
+    );
+
   // --- No-secret-in-logs capture (all AppLogger methods, whole suite) ------
+  // Captures { method, args } so the final scans can prove both never-log
+  // secrets AND normal-path shape: warn/error are one-liners with
+  // operation/status/code and no stack (`\n at ` only ever appears on debug).
   const { AppLogger } = await import("../common/app-logger.service.js");
-  const captured: unknown[] = [];
+  const captured: Array<{ method: string; args: unknown[] }> = [];
   const methods = ["debug", "info", "warn", "error"] as const;
   const originals = methods.map((m) => AppLogger.prototype[m]);
   methods.forEach((m, i) => {
     (
       AppLogger.prototype as unknown as Record<string, (...a: unknown[]) => void>
     )[m] = function (...args: unknown[]) {
-      captured.push(args);
+      captured.push({ method: m, args });
       return (originals[i] as (...a: unknown[]) => unknown).apply(this, args);
     };
   });
@@ -278,16 +336,18 @@ async function main(): Promise<void> {
       });
       try {
         const { rows } = await pool.query(
-          "SELECT encrypted_key, iv FROM user_opencode_keys",
+          "SELECT encrypted_key, iv, key_id FROM user_opencode_keys",
         );
         assert.equal(rows.length, 1);
-        const row = rows[0] as { encrypted_key: string; iv: string };
+        const row = rows[0] as { encrypted_key: string; iv: string; key_id: string };
         assert.ok(!row.encrypted_key.includes(TEST_API_KEY));
         assert.ok(!row.iv.includes(TEST_API_KEY));
+        // KEK version envelope: fresh rows are wrapped with the active id.
+        assert.equal(row.key_id, "v1");
         const { CryptoService } = await import("./crypto.service.js");
         const svc = new CryptoService();
         assert.equal(
-          svc.decrypt({ iv: row.iv, data: row.encrypted_key }),
+          svc.decrypt({ keyId: row.key_id, iv: row.iv, data: row.encrypted_key }),
           TEST_API_KEY,
         );
       } finally {
@@ -320,12 +380,137 @@ async function main(): Promise<void> {
         usage?: number;
         updatedAt?: string;
         apiKey?: string;
+        daily?: unknown;
+        weekly?: unknown;
+        monthly?: unknown;
       };
       assert.equal(body.balance, 42.5);
       assert.equal(body.usage, 7.25);
       assert.ok(body.updatedAt);
       assert.equal(body.apiKey, undefined);
       assert.equal(lastAuth, `Bearer ${TEST_API_KEY}`);
+      // Additive breakdown is optional: absent upstream → omitted, never derived.
+      assert.equal(body.daily, undefined);
+      assert.equal(body.weekly, undefined);
+      assert.equal(body.monthly, undefined);
+    });
+
+    await check("GET /usage breakdown passthrough → daily/weekly/monthly", async () => {
+      mode = "breakdown";
+      const res = await fetch(`${base}/api/v1/usage`, {
+        headers: auth(),
+      });
+      assert.equal(res.status, 200);
+      const body = (await readJson(res)) as {
+        balance?: number;
+        usage?: number;
+        daily?: { used?: number; limit?: number };
+        weekly?: { used?: number; limit?: number };
+        monthly?: { used?: number; limit?: number };
+      };
+      assert.equal(body.balance, 42.5);
+      assert.deepEqual(body.daily, { used: 12.5, limit: 100 });
+      assert.deepEqual(body.weekly, { used: 60, limit: 100 });
+      assert.deepEqual(body.monthly, { used: 90, limit: 100 });
+      mode = "ok";
+    });
+
+    await check("billing URL is Zen Go (not the catch-all api.opencode.ai)", async () => {
+      assert.equal(OPENCODE_BILLING_URL, "https://opencode.ai/zen/go/v1/usage");
+    });
+
+    await check("GET /usage Zen Go → rolling/weekly/monthly as used/limit 100", async () => {
+      mode = "zen";
+      const res = await fetch(`${base}/api/v1/usage`, {
+        headers: auth(),
+      });
+      assert.equal(res.status, 200);
+      const body = (await readJson(res)) as {
+        balance?: number;
+        usage?: number;
+        updatedAt?: string;
+        rolling?: { used?: number; limit?: number };
+        weekly?: { used?: number; limit?: number };
+        monthly?: { used?: number; limit?: number };
+      };
+      // Zen payloads carry no balance/usage totals — buckets only, never faked.
+      assert.equal(body.balance, undefined);
+      assert.equal(body.usage, undefined);
+      assert.ok(body.updatedAt);
+      assert.deepEqual(body.rolling, { used: 23.5, limit: 100 });
+      assert.deepEqual(body.weekly, { used: 60, limit: 100 });
+      assert.deepEqual(body.monthly, { used: 92, limit: 100 });
+      mode = "ok";
+    });
+
+    await check("legacy row without keyId stays readable + lazily re-encrypts", async () => {
+      mode = "ok";
+      const { Pool } = await import("pg");
+      const pool = new Pool({
+        connectionString: testDb.url,
+        connectionTimeoutMillis: 5000,
+      });
+      try {
+        // Simulate a pre-versioning row (no KEK id): dual-read fallback
+        // must still open it, then converge it to the active KEK id.
+        await pool.query("UPDATE user_opencode_keys SET key_id = ''");
+        const usage = await fetch(`${base}/api/v1/usage`, { headers: auth() });
+        assert.equal(usage.status, 200);
+        const { rows } = await pool.query(
+          "SELECT encrypted_key, iv, key_id FROM user_opencode_keys",
+        );
+        const row = rows[0] as { encrypted_key: string; iv: string; key_id: string };
+        assert.equal(row.key_id, "v1");
+        const { CryptoService } = await import("./crypto.service.js");
+        const svc = new CryptoService();
+        assert.equal(
+          svc.decrypt({ keyId: row.key_id, iv: row.iv, data: row.encrypted_key }),
+          TEST_API_KEY,
+        );
+      } finally {
+        await pool.end().catch(() => undefined);
+      }
+    });
+
+    await check("rotation: previous KEK decrypts, lazy re-encrypt converges", async () => {
+      mode = "ok";
+      lastAuth = null;
+      const prevKey = process.env.OPENCODE_KEYS_ENCRYPTION_KEY as string;
+      const NEW_KEY = "e2e-opencode-keys-rotation-key-not-real-0123456789abcd";
+      process.env.OPENCODE_KEYS_ENCRYPTION_KEY = NEW_KEY;
+      process.env.OPENCODE_KEYS_ACTIVE_KEY_ID = "v2";
+      process.env.OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS = prevKey;
+      process.env.OPENCODE_KEYS_PREVIOUS_KEY_ID = "v1";
+      const { Pool } = await import("pg");
+      const pool = new Pool({
+        connectionString: testDb.url,
+        connectionTimeoutMillis: 5000,
+      });
+      try {
+        // Old row (keyId v1) opens via the previous KEK, then re-wraps to v2.
+        const usage = await fetch(`${base}/api/v1/usage`, { headers: auth() });
+        assert.equal(usage.status, 200);
+        assert.equal(lastAuth, `Bearer ${TEST_API_KEY}`);
+        const { rows } = await pool.query(
+          "SELECT encrypted_key, iv, key_id FROM user_opencode_keys",
+        );
+        const row = rows[0] as { encrypted_key: string; iv: string; key_id: string };
+        assert.equal(row.key_id, "v2");
+        assert.ok(!row.encrypted_key.includes(TEST_API_KEY));
+      } finally {
+        await pool.end().catch(() => undefined);
+        // Restore the suite KEK and re-wrap the row under it so the
+        // remaining error-mapping checks keep decrypting.
+        process.env.OPENCODE_KEYS_ENCRYPTION_KEY = prevKey;
+        process.env.OPENCODE_KEYS_ACTIVE_KEY_ID = "v1";
+        delete process.env.OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS;
+        process.env.OPENCODE_KEYS_PREVIOUS_KEY_ID = "v0";
+        const put = await fetch(`${base}/api/v1/key`, {
+          ...json({ apiKey: TEST_API_KEY }, "PUT"),
+          headers: { "content-type": "application/json", ...auth() },
+        });
+        assert.equal(put.status, 200);
+      }
     });
 
     await check("upstream 401 → 401 opencode_key_invalid (no echo)", async () => {
@@ -371,8 +556,8 @@ async function main(): Promise<void> {
     });
 
     await check("upstream unreachable → 503 (no secret echo)", async () => {
-      const prev = process.env.OPENCODE_BILLING_URL;
-      process.env.OPENCODE_BILLING_URL = "http://127.0.0.1:9/usage";
+      const prev = billingTarget;
+      billingTarget = "http://127.0.0.1:9/usage";
       try {
         const res = await fetch(`${base}/api/v1/usage`, {
           headers: auth(),
@@ -388,7 +573,7 @@ async function main(): Promise<void> {
         );
         assert.ok(!JSON.stringify(body).includes(TEST_API_KEY));
       } finally {
-        process.env.OPENCODE_BILLING_URL = prev;
+        billingTarget = prev;
       }
     });
 
@@ -416,6 +601,36 @@ async function main(): Promise<void> {
         !dump.includes(process.env.OPENCODE_KEYS_ENCRYPTION_KEY as string),
         "encryption secret reached the logs",
       );
+      // Never-log Bearer/URL/body: fixed messages only — no auth header
+      // value and no upstream URL ever reach AppLogger on this path.
+      assert.ok(!dump.includes("Bearer "), "Bearer value reached the logs");
+      assert.ok(
+        !dump.toLowerCase().includes("opencode.ai/zen/go"),
+        "upstream URL reached the logs",
+      );
+    });
+
+    await check("normal-path warn/error are one-liners with context, no stack", async () => {
+      const normal = captured.filter((e) => e.method === "warn" || e.method === "error");
+      assert.ok(normal.length > 0, "expected warn/error lines from the error-mapping checks");
+      for (const entry of normal) {
+        const text = JSON.stringify(entry.args);
+        // Stacks always contain a newline (JSON-escaped as `\\n`) + an `at`
+        // frame; normal-path warn/error must stay single-line (stack lives
+        // on debug only). Fixed phrases like `unreachable at startup` are
+        // fine — only the escaped newline proves a stack leaked.
+        assert.ok(!text.includes("\\n"), `stack/newline in ${entry.method}: ${text.slice(0, 300)}`);
+      }
+      const warnErrorText = normal.map((e) => JSON.stringify(e.args)).join("\n");
+      // Billing context: operation + status + code on rejected/shape/bad-json lines.
+      assert.ok(warnErrorText.includes("getUsage"), "missing billing operation context");
+      assert.ok(warnErrorText.includes("status="), "missing status context");
+      assert.ok(warnErrorText.includes("code="), "missing code context");
+      // Http filter context: handled line with status/code.
+      assert.ok(warnErrorText.includes("[http] handled"), "missing filter handled line");
+      // Transport context: external retry/failure lines.
+      const allText = JSON.stringify(captured);
+      assert.ok(allText.includes("[external]"), "missing external transport lines");
     });
   } finally {
     methods.forEach((m, i) => {

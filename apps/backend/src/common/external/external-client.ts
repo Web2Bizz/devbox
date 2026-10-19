@@ -11,8 +11,11 @@
  *   network/timeout exhaustion throws ExternalServiceError.
  * - Logs (via AppLogger, correlationId-bound, secrets never logged — no
  *   URL/query/headers/bodies, only service/operation/attempt/latencyMs/
- *   status): debug on start + success, warn on retryable attempt failure,
- *   error on final failure.
+ *   status/code): debug on start + success, warn on retryable attempt
+ *   failure, error on final failure. Normal-path warn/error are one-liners
+ *   without stack (`\n at ` never appears there); diagnostics (cause/stack)
+ *   go to debug only, sanitized by AppLogger (URL credentials masked, live
+ *   secrets scrubbed).
  */
 import { Injectable } from '@nestjs/common';
 import { AppLogger } from '../app-logger.service.js';
@@ -128,7 +131,7 @@ export class ExternalClient {
             const retryable = fromStatus(service, operation, res.status, attempt);
             this.logger.warn(
               `[external] retry service=${service} operation=${operation} ` +
-                `attempt=${attempt} status=${res.status} latencyMs=${latencyMs}`,
+                `attempt=${attempt} status=${res.status} code=${retryable.code} latencyMs=${latencyMs}`,
               correlationId,
             );
             throw retryable;
@@ -145,11 +148,23 @@ export class ExternalClient {
     } catch (err) {
       const latencyMs = Date.now() - startedAt;
       if (err instanceof ExternalServiceError) {
+        // One-liner without stack: [module operation status code].
+        // Cause/stack (if any) goes to debug only — AppLogger sanitizes it
+        // (URL credentials masked, live secrets scrubbed), never to error.
         this.logger.error(
           `[external] failure service=${service} operation=${operation} ` +
-            `code=${err.code} attempt=${err.attempt} latencyMs=${latencyMs}`,
+            `status=${err.status ?? '-'} code=${err.code} attempt=${err.attempt} latencyMs=${latencyMs}`,
           correlationId,
         );
+        if (err.cause !== undefined) {
+          this.logger.debug(
+            `[external] cause service=${service} operation=${operation} code=${err.code} ` +
+              `detail=${String(
+                err.cause instanceof Error ? (err.cause.stack ?? err.cause.message) : err.cause,
+              ).slice(0, 2000)}`,
+            correlationId,
+          );
+        }
         throw err;
       }
       // Non-retryable 4xx normalization (fromStatus) or unexpected throw —
@@ -157,7 +172,16 @@ export class ExternalClient {
       const normalized = fromUnknown(service, operation, err, retryOpts.maxAttempts ?? 1);
       this.logger.error(
         `[external] failure service=${service} operation=${operation} ` +
-          `code=${normalized.code} latencyMs=${latencyMs}`,
+          `status=${normalized.status ?? '-'} code=${normalized.code} latencyMs=${latencyMs}`,
+        correlationId,
+      );
+      this.logger.debug(
+        `[external] cause service=${service} operation=${operation} code=${normalized.code} ` +
+          `detail=${String(
+            normalized.cause instanceof Error
+              ? (normalized.cause.stack ?? normalized.cause.message)
+              : (normalized.cause ?? err),
+          ).slice(0, 2000)}`,
         correlationId,
       );
       throw normalized;

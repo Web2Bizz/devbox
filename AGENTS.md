@@ -28,6 +28,29 @@ package.json, не Nx-проект, вне bun workspaces).
   (`tsc --noEmit`) + `bun --filter frontend build` (`next build --turbopack`).
   После правок mobile — гейты из `apps/mobile/AGENTS.md` (npm, не bun).
 
+## Frontend — слои (apps/frontend)
+
+- `apps/frontend/AGENTS.md` отсутствует — правило слоёв живёт здесь.
+- Источники: `apps/frontend/tsconfig.json` (`@/*` → `./src/*`, `./app/*`;
+  на 2026-10-20 `@/` использует только `app/(dashboard)/profile/page.tsx`
+  (4 импорта), остальной код — на относительных),
+  `apps/frontend/next.config.mjs` (слоёв не задаёт), фактическая структура
+  `app/` + `src/{api,components,features,hooks,i18n,lib}`. Каталогов
+  `entities/` и `shared/` нет — не выдумывать. `src/providers.tsx` — файл
+  в корне `src/` (DESIGN §3.4 пишет `src/providers` исторически).
+- Правило: `app/` — только тонкая композиция (страница владеет
+  `<ФичаСекция />`, бизнес-логика — в `features/` + `hooks/`).
+
+| Слой | Путь | Что класть | Алиас (`@/*`) | Пример импорта |
+| ---- | ---- | ---------- | ------------- | -------------- |
+| Маршруты | `app/` | `page.tsx`, `layout.tsx`, `loading.tsx`, `error.tsx`; `globals.css` | `@/*` → `./app/*` | маршруты резолвит роутер, не импорты |
+| Фичи | `src/features/<имя>/` | фича-модуль целиком: UI-секция + диалоги + локальный статус (`usage/`: `usage-section.tsx`, `api-key-dialog.tsx`, `usage-status.ts`, `__tests__/`) | `@/features/*` | `@/features/usage/usage-section` (из `app/(dashboard)/profile/page.tsx`) |
+| Компоненты | `src/components/` | общие презентационные компоненты (`states`, `layout/`, `profile/`, `projects/`, …) | `@/components/*` | `../../components/states` (из `src/features/usage/`) |
+| Хуки | `src/hooks/` | data-хуки (`useUsage`, `useProfile`, …) + `query-keys.ts` | `@/hooks/*` | `../../hooks/useUsage` (из `src/features/usage/`) |
+| API | `src/api/` | HTTP-клиент, типы контрактов (`client.ts`, `types.ts`) | `@/api/*` | `../../api/types` (из `src/features/usage/`) |
+| Lib | `src/lib/` | утилиты, схемы, сторы (`auth-store`, `format-error`) | `@/lib/*` | `../../lib/auth-store` (из `src/features/usage/`) |
+| i18n | `src/i18n/` | словарь en/ru, провайдер | `@/i18n/*` | `../../i18n` (из `src/features/usage/`) |
+
 ## Фолбэки запрещены по умолчанию
 
 - Никаких тихих фолбэков (дефолтные пути вроде `<cwd>/...`, захардкоженные хосты/порты, подмена отсутствующего значения «удобным») без явного указания пользователя. Не задано → ошибка, а не додумывание.

@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next"
 import { colors } from "@web2bizz/ui-native"
 import { useConnections } from "@/stores/connections"
 import { useEvents } from "@/stores/events"
-import { HARDCODED_SERVER_URL } from "@/lib/server-config"
+import { HARDCODED_SERVER_URL } from "@/utils/server-config"
 
 // How often the badge re-validates the server health in the background, so
 // the dot/text/ping stay fresh without reopening the modal. 30s is a single

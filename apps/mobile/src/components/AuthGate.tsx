@@ -4,7 +4,7 @@ import { Ionicons } from "@expo/vector-icons"
 import { useTranslation } from "react-i18next"
 import { useAuth } from "@/stores/auth"
 
-interface Props {
+type Props = {
   children: ReactNode
 }
 

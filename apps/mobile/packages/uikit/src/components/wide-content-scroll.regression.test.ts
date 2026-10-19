@@ -26,20 +26,20 @@ function readComponent(relativePath: string): string {
 }
 
 test("DiffView wraps diff lines in the shared horizontal-scroll ScrollView", () => {
-  const src = readComponent("chat/DiffView.tsx")
+  const src = readComponent("chat/diff-view/index.tsx")
   assert.match(src, /<ScrollView\s+\{\.\.\.WIDE_CONTENT_SCROLL_CONFIG\}/)
   assert.doesNotMatch(src, /numberOfLines/, "DiffView must not truncate diff line text with numberOfLines")
 })
 
 test("CodeBlock wraps code in the shared horizontal-scroll ScrollView", () => {
-  const src = readComponent("markdown/CodeBlock.tsx")
+  const src = readComponent("markdown/code-block/index.tsx")
   assert.match(src, /<ScrollView\s+\{\.\.\.WIDE_CONTENT_SCROLL_CONFIG\}/)
   assert.doesNotMatch(src, /numberOfLines/, "CodeBlock must not truncate code text with numberOfLines")
 })
 
 test("DiffView and CodeBlock both source the config from the shared, unit-tested module", () => {
-  const diffView = readComponent("chat/DiffView.tsx")
-  const codeBlock = readComponent("markdown/CodeBlock.tsx")
-  assert.match(diffView, /from ["']\.\.\/\.\.\/utils\/scroll-config["']/)
-  assert.match(codeBlock, /from ["']\.\.\/\.\.\/utils\/scroll-config["']/)
+  const diffView = readComponent("chat/diff-view/index.tsx")
+  const codeBlock = readComponent("markdown/code-block/index.tsx")
+  assert.match(diffView, /from ["']\.\.\/\.\.\/\.\.\/utils\/scroll-config["']/)
+  assert.match(codeBlock, /from ["']\.\.\/\.\.\/\.\.\/utils\/scroll-config["']/)
 })

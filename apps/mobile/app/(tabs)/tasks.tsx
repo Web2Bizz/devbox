@@ -4,11 +4,11 @@ import { router } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
 import { useTranslation } from "react-i18next"
 import { useSessions } from "@/stores/sessions"
-import { useSessionsList } from "@/queries/sessions"
+import { useSessionsList } from "@/api/sessions"
 import { useEvents } from "@/stores/events"
-import { selectActiveSessions } from "@/lib/active-tasks"
+import { selectActiveSessions } from "@/utils/active-tasks"
 import { colors } from "@web2bizz/ui-native"
-import type { ListedSession } from "@/lib/listed-session"
+import type { ListedSession } from "@/utils/listed-session"
 
 // Tasks = sessions where the agent is currently doing something:
 // SSE sessionStatus busy/retry, plus optimistic sending (tap → SSE busy gap).

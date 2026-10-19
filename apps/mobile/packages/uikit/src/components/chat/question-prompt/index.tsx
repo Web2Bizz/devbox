@@ -1,0 +1,223 @@
+import { useRef, useState } from "react"
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from "react-native"
+import { Ionicons } from "@expo/vector-icons"
+import { useTranslation } from "react-i18next"
+import { QUESTION_BODY_SCROLL_PROPS } from "../../../utils/session-layout"
+import { colors } from "../../../theme"
+
+type QuestionOption = {
+  label: string
+  description: string
+}
+
+type Question = {
+  question: string
+  header: string
+  options: QuestionOption[]
+  multiple?: boolean
+  custom?: boolean
+}
+
+type Props = {
+  request: {
+    id: string
+    questions: Question[]
+  }
+  isDark: boolean
+  onReply: (answers: string[][]) => void
+  onReject: () => void
+}
+
+export function QuestionPrompt({ request, isDark, onReply, onReject }: Props) {
+  const { t } = useTranslation()
+  const [answers, setAnswers] = useState<string[][]>(request.questions.map(() => []))
+  const [custom, setCustom] = useState("")
+  const [showCustom, setShowCustom] = useState(false)
+  const [current, setCurrent] = useState(0)
+
+  // A question is answered exactly once. Without this guard, a double-tap on a
+  // single-select option schedules two `onReply` timers; the second reply hits
+  // an already-resolved request server-side and surfaces a spurious
+  // "Reply failed" alert even though the answer went through.
+  const replied = useRef(false)
+  const reply = (a: string[][]) => {
+    if (replied.current) return
+    replied.current = true
+    onReply(a)
+  }
+  const reject = () => {
+    if (replied.current) return
+    replied.current = true
+    onReject()
+  }
+
+  const q = request.questions[current]
+  if (!q) return null
+
+  const toggleOption = (label: string) => {
+    setAnswers((prev) => {
+      const copy = [...prev]
+      const selected = copy[current] || []
+      if (q.multiple) {
+        copy[current] = selected.includes(label) ? selected.filter((a) => a !== label) : [...selected, label]
+      } else {
+        copy[current] = [label]
+        if (request.questions.length === 1) {
+          setTimeout(() => reply(copy), 100)
+        }
+      }
+      return copy
+    })
+  }
+
+  const submitCustom = () => {
+    if (!custom.trim()) return
+    const copy = [...answers]
+    copy[current] = [custom.trim()]
+    setAnswers(copy)
+    setCustom("")
+    setShowCustom(false)
+    if (request.questions.length === 1) {
+      reply(copy)
+    }
+  }
+
+  return (
+    <View style={[s.card, isDark && s.cardDark]}>
+      <View style={s.header}>
+        <Ionicons name="chatbubble-ellipses-outline" size={18} color={isDark ? "#888888" : "#666666"} />
+        <Text style={[s.title, isDark && s.textWhite]}>{q.header || t("chat.questionPrompt.headerFallback")}</Text>
+      </View>
+      <ScrollView {...QUESTION_BODY_SCROLL_PROPS} style={s.body} contentContainerStyle={s.options} testID="question-options-scroll">
+        <Text style={[s.question, isDark && s.textWhite]}>{q.question}</Text>
+        {q.options.map((opt) => {
+          const selected = (answers[current] || []).includes(opt.label)
+          return (
+            <TouchableOpacity
+              key={opt.label}
+              style={[
+                s.option,
+                isDark && s.optionDark,
+                selected && s.optionSelected,
+                selected && isDark && s.optionSelectedDark,
+              ]}
+              onPress={() => toggleOption(opt.label)}
+            >
+              <Text
+                style={[
+                  s.optionLabel,
+                  isDark && s.textWhite,
+                  selected && (isDark ? s.optionLabelSelectedDark : s.optionLabelSelected),
+                ]}
+              >
+                {opt.label}
+              </Text>
+              {opt.description ? <Text style={[s.optionDesc, isDark && s.metaDark]}>{opt.description}</Text> : null}
+            </TouchableOpacity>
+          )
+        })}
+
+        {q.custom !== false &&
+          (showCustom ? (
+            <View style={s.customRow}>
+              <TextInput
+                style={[s.customInput, isDark && s.customInputDark]}
+                placeholder={t("chat.questionPrompt.answerPlaceholder")}
+                placeholderTextColor={isDark ? "#666666" : "#999999"}
+                value={custom}
+                onChangeText={setCustom}
+                onSubmitEditing={submitCustom}
+                autoFocus
+              />
+              <TouchableOpacity onPress={submitCustom} style={s.customSubmit}>
+                <Ionicons name="send" size={18} color={isDark ? "#ffffff" : "#0a0a0a"} />
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity style={[s.option, isDark && s.optionDark]} onPress={() => setShowCustom(true)}>
+              <Text style={[s.optionLabel, { color: isDark ? "#ffffff" : "#0a0a0a" }]}>{t("chat.questionPrompt.customAnswerLabel")}</Text>
+            </TouchableOpacity>
+          ))}
+      </ScrollView>
+
+      <View style={s.footer}>
+        <TouchableOpacity onPress={reject}>
+          <Text style={[s.dismiss, isDark && s.metaDark]}>{t("chat.questionPrompt.dismiss")}</Text>
+        </TouchableOpacity>
+        {(request.questions.length > 1 || q.multiple) && (
+          <TouchableOpacity
+            style={[s.submitBtn, isDark && s.submitBtnDark]}
+            onPress={() => {
+              if (current < request.questions.length - 1) {
+                setCurrent(current + 1)
+              } else {
+                reply(answers)
+              }
+            }}
+          >
+            <Text style={[s.submitText, isDark && s.submitTextDark]}>
+              {current < request.questions.length - 1 ? t("chat.questionPrompt.next") : t("chat.questionPrompt.submit")}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
+  )
+}
+
+const s = StyleSheet.create({
+  card: {
+    flexShrink: 1,
+    margin: 12,
+    padding: 16,
+    backgroundColor: "#f5f5f5",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#e5e5e5",
+  },
+  cardDark: { backgroundColor: "#1a1a1a", borderColor: "#2a2a2a" },
+  header: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
+  title: { fontSize: 15, fontWeight: "600", color: "#0a0a0a" },
+  textWhite: { color: "#ffffff" },
+  body: { flexShrink: 1 },
+  question: { fontSize: 14, lineHeight: 20, color: "#0a0a0a" },
+  metaDark: { color: "#666666" },
+
+  options: { gap: 8, paddingBottom: 1 },
+  option: {
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderColor: "#e5e5e5",
+  },
+  optionDark: { backgroundColor: "#2a2a2a", borderColor: colors.borderDark2 },
+  optionSelected: { borderColor: "#0a0a0a", backgroundColor: "#e5e5e5" },
+  optionSelectedDark: { borderColor: "#ffffff", backgroundColor: "#2a2a2a" },
+  optionLabel: { fontSize: 14, fontWeight: "600", color: "#0a0a0a" },
+  optionLabelSelected: { color: "#0a0a0a" },
+  optionLabelSelectedDark: { color: "#ffffff" },
+  optionDesc: { fontSize: 12, color: "#666666", marginTop: 2 },
+
+  customRow: { flexDirection: "row", gap: 8 },
+  customInput: {
+    flex: 1,
+    backgroundColor: "#ffffff",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: "#e5e5e5",
+    color: "#0a0a0a",
+  },
+  customInputDark: { backgroundColor: "#2a2a2a", borderColor: colors.borderDark2, color: "#ffffff" },
+  customSubmit: { justifyContent: "center", alignItems: "center", padding: 8 },
+
+  footer: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 12 },
+  dismiss: { fontSize: 14, color: "#999999" },
+  submitBtn: { backgroundColor: "#0a0a0a", paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 },
+  submitBtnDark: { backgroundColor: "#ffffff" },
+  submitText: { color: "#ffffff", fontWeight: "600", fontSize: 14 },
+  submitTextDark: { color: "#0a0a0a" },
+})

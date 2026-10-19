@@ -87,19 +87,6 @@ export interface ApiError {
   correlationId: string;
 }
 
-/** Single quota bucket: consumed units vs granted total. */
-export interface LimitQuota {
-  used: number;
-  total: number;
-}
-
-/** Optional usage limits attached to the identity (all buckets optional). */
-export interface AuthLimits {
-  daily?: LimitQuota;
-  weekly?: LimitQuota;
-  monthly?: LimitQuota;
-}
-
 /** POST /api/v1/auth/register + login response user (never carries passwordHash) */
 export interface AuthUser {
   id: string;
@@ -109,8 +96,6 @@ export interface AuthUser {
   provider: 'local' | 'sso-oauth' | 'github-app';
   /** ISO-8601 timestamp */
   createdAt: string;
-  /** Optional usage limits — absent when the backend sends no quota. */
-  limits?: AuthLimits;
 }
 
 /** Token pair (short-lived access + rotating refresh). */
@@ -251,8 +236,25 @@ export interface OpencodeKeyStatus {
 }
 
 export interface OpencodeUsage {
-  balance: number;
-  usage: number;
+  /** Legacy pay-as-you-go fields — present only for legacy upstream payloads. */
+  balance?: number;
+  /** Legacy pay-as-you-go total — present only for legacy upstream payloads. */
+  usage?: number;
   /** ISO-8601 time of the upstream response */
   updatedAt: string;
+  /**
+   * Zen Go windows mapped to used/limit (`percent` → `{ used: percent, limit: 100 }`).
+   * `rolling` is the Zen 5-hour window; legacy `daily` has no Zen equivalent.
+   * Present only when upstream carries finite numbers — never derived.
+   */
+  rolling?: OpencodeLimitBucket;
+  daily?: OpencodeLimitBucket;
+  weekly?: OpencodeLimitBucket;
+  monthly?: OpencodeLimitBucket;
+}
+
+/** Single usage bucket — real `used/limit` pair from upstream (no derivation). */
+export interface OpencodeLimitBucket {
+  used: number;
+  limit: number;
 }

@@ -143,13 +143,40 @@ export interface Dictionary {
     subtitle: string;
     savedTitle: string;
     savedDesc: string;
+    overviewTitle: string;
+    overviewDesc: string;
+    editTitle: string;
+    editDesc: string;
     nameLabel: string;
     emailLabel: string;
+    emailReadOnlyHint: string;
     namePlaceholder: string;
     saveChanges: string;
     saving: string;
     reset: string;
     sincePrefix: string;
+  };
+  limits: {
+    title: string;
+    desc: string;
+    rolling: string;
+    daily: string;
+    weekly: string;
+    monthly: string;
+    empty: string;
+    hint: string;
+    invalidTitle: string;
+    invalidDesc: string;
+    addKey: string;
+    dialogTitle: string;
+    dialogDesc: string;
+    keyLabel: string;
+    keyPlaceholder: string;
+    keyHint: string;
+    save: string;
+    saving: string;
+    required: string;
+    tooShort: string;
   };
   aiProviders: {
     titleA: string;
@@ -248,12 +275,6 @@ export interface Dictionary {
     signOut: string;
     login: string;
     noEmail: string;
-    limits: {
-      title: string;
-      daily: string;
-      weekly: string;
-      monthly: string;
-    };
   };
   orgs: {
     titleA: string;

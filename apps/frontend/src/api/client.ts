@@ -13,6 +13,9 @@ import type {
   MemberDto,
   MessagesResponse,
   NpmRegistryStatusResponse,
+  OpencodeKeyResult,
+  OpencodeKeyStatus,
+  OpencodeUsage,
   OrganizationDto,
   ProjectApiDto,
   RegistryCatalogResponse,
@@ -307,6 +310,27 @@ export const api = {
   // private — never indexed). Surfaced as ApiClientError, no fallbacks.
   getUser: (accessToken: string, id: string) =>
     requestV1<AuthUser>(`/users/${encodeURIComponent(id)}`, {
+      headers: { authorization: `Bearer ${accessToken}` },
+    }),
+  // GET /api/v1/usage — live Zen Go usage (+ optional legacy balance/usage,
+  // additive rolling/daily/weekly/monthly breakdown; Zen percent is exposed
+  // as { used: percent, limit: 100 }). Missing key → 404
+  // opencode_key_missing (hook maps it to the no-key empty state, not 0% bars).
+  getUsage: (accessToken: string) =>
+    requestV1<OpencodeUsage>('/usage', {
+      headers: { authorization: `Bearer ${accessToken}` },
+    }),
+  // Per-user OpenCode key — PUT /api/v1/key { apiKey } (zod min 20, max
+  // 1024, encrypted AES-256-GCM at rest, never echoed/logged),
+  // GET /api/v1/key (existence only { configured, updatedAt? }).
+  putKey: (accessToken: string, input: { apiKey: string }) =>
+    requestV1<OpencodeKeyResult>('/key', {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(input),
+    }),
+  getKeyStatus: (accessToken: string) =>
+    requestV1<OpencodeKeyStatus>('/key', {
       headers: { authorization: `Bearer ${accessToken}` },
     }),
 };

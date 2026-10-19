@@ -5,7 +5,7 @@
  * TODO REAL-API: replace mock sources inside hooks with ApiClient calls.
  */
 
-import type { AuthLimits, ProjectScope } from '../api/types';
+import type { ProjectScope } from '../api/types';
 
 export type ProjectStatus = 'active' | 'draft' | 'archived';
 
@@ -39,11 +39,8 @@ export interface Profile {
   id: string;
   name: string;
   email: string;
-  role: string;
   /** ISO-8601 */
   createdAt: string;
-  /** Optional usage limits (mirrors AuthUser.limits, all buckets optional). */
-  limits?: AuthLimits;
 }
 
 export type AiProviderStatus = 'connected' | 'disconnected' | 'error';

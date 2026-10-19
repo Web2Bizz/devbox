@@ -9,6 +9,5 @@ export const MOCK_PROFILE: Profile = {
   id: 'mock-user-1',
   name: 'Devbox Developer',
   email: 'dev@devbox.local',
-  role: 'Owner',
   createdAt: '2026-01-15T09:00:00.000Z',
 };

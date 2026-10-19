@@ -14,26 +14,17 @@ export interface UseProfileResult {
   error: string | null;
   saved: boolean;
   saving: boolean;
-  update: (patch: Pick<Profile, 'name' | 'email'>) => Promise<boolean>;
+  update: (patch: Pick<Profile, 'name'> & Partial<Pick<Profile, 'email'>>) => Promise<boolean>;
   reload: () => void;
   dismiss: () => void;
 }
 
-function toProfile(user: {
-  id: string;
-  email: string;
-  firstName: string;
-  lastName: string;
-  createdAt: string;
-  limits?: Profile['limits'];
-}): Profile {
+function toProfile(user: { id: string; email: string; firstName: string; lastName: string; createdAt: string }): Profile {
   return {
     id: user.id,
     name: `${user.firstName} ${user.lastName}`.trim(),
     email: user.email,
-    role: 'Owner',
     createdAt: user.createdAt,
-    ...(user.limits ? { limits: user.limits } : {}),
   };
 }
 
@@ -108,13 +99,15 @@ export function useProfile(): UseProfileResult {
   }, [nonce, t]);
 
   const update = useCallback(
-    async (patch: Pick<Profile, 'name' | 'email'>) => {
+    async (patch: Pick<Profile, 'name'> & Partial<Pick<Profile, 'email'>>) => {
       setSaving(true);
       setError(null);
       setSaved(false);
       try {
         if (!patch.name.trim()) throw new Error(t.validation.nameRequired);
-        if (!patch.email.includes('@')) throw new Error(t.validation.invalidEmail);
+        // Email is read-only: backend PATCH /auth/me accepts only
+        // firstName/lastName — patch.email (if passed by legacy callers)
+        // is intentionally ignored, never validated nor sent.
         const token = await getValidAccessToken();
         if (!token) {
           void signOutAndRedirect({ router: routerRef.current });

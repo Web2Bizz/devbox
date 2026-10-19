@@ -45,9 +45,13 @@ function isUserId(value: string): boolean {
  *   (the key is never returned, never logged).
  * - GET /api/v1/key — { configured, updatedAt? } (existence only).
  * - DELETE /api/v1/key — idempotent { ok: true }.
- * - GET /api/v1/usage — { balance, usage, updatedAt } via the
+ * - GET /api/v1/usage — live Zen Go usage via the
  *   per-user key (missing → 404 opencode_key_missing; rejected → 401
- *   opencode_key_invalid; upstream outage → 429/5xx typed errors).
+ *   opencode_key_invalid; upstream 429 → 429 EXTERNAL_RATE_LIMITED;
+ *   upstream 5xx → EXTERNAL_UPSTREAM_5XX (status passthrough: 502/500…);
+ *   timeout → 504 EXTERNAL_TIMEOUT; network/non-JSON/shape-mismatch →
+ *   503 EXTERNAL_UNAVAILABLE with Retry-After 30, fixed message
+ *   «сервис временно недоступен, повторите позже», never a mock 200).
  */
 @ApiTags("opencode-keys")
 @ApiBearerAuth()
@@ -84,11 +88,12 @@ export class OpencodeKeysController {
   ): Promise<OpencodeKeyResultDto> {
     const userId = this.ownUserId(identity);
     const correlationId = req?.correlationId;
-    // Encrypt first (fail-fast 500 when unconfigured), persist ciphertext only.
+    // Encrypt first (fail-fast 500 when unconfigured), persist ciphertext only
+    // (envelope carries the active KEK id for rotation dual-read).
     const enc = this.crypto.encrypt((body as OpencodeKeyBodyDto).apiKey);
     const stored = await this.keys.save(
       userId,
-      { encryptedKey: enc.data, iv: enc.iv },
+      { encryptedKey: enc.data, iv: enc.iv, keyId: enc.keyId },
       correlationId,
     );
     return { ok: true, updatedAt: stored.updatedAt };
@@ -132,6 +137,10 @@ export class OpencodeKeysController {
   @ApiResponse({ status: 200, type: OpencodeUsageDto })
   @ApiResponse({ status: 401, description: "missing/invalid bearer or rejected key" })
   @ApiResponse({ status: 404, description: "no key stored (opencode_key_missing)" })
+  @ApiResponse({ status: 429, description: "upstream rate limit (EXTERNAL_RATE_LIMITED, Retry-After)" })
+  @ApiResponse({ status: 502, description: "upstream server error passthrough (EXTERNAL_UPSTREAM_5XX, Retry-After)" })
+  @ApiResponse({ status: 503, description: "upstream unavailable or shape mismatch (EXTERNAL_UNAVAILABLE, Retry-After)" })
+  @ApiResponse({ status: 504, description: "upstream timeout (EXTERNAL_TIMEOUT, Retry-After)" })
   async usage(
     @ReqUser() identity: RequestIdentity,
     @Req() req?: { correlationId?: string },

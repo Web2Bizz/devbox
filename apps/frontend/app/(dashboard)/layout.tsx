@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { DashboardShell } from '../../src/components/dashboard-shell';
+import { DashboardShell } from '@/components/dashboard-shell';
 
 /**
  * Route-group layout: flat URLs (/projects, /secrets, …) wrapped in the shell.

@@ -16,11 +16,11 @@ import {
   EmptyState,
   ErrorState,
   ProjectDetailSkeleton,
-} from '../../../../src/components/states';
-import { SessionsTab } from '../../../../src/components/projects/sessions-tab';
-import { RunningSessionsTab } from '../../../../src/components/projects/running-sessions-tab';
-import { useProject } from '../../../../src/hooks/useProject';
-import { useI18n } from '../../../../src/i18n';
+} from '@/components/states';
+import { SessionsTab } from '@/components/projects/sessions-tab';
+import { RunningSessionsTab } from '@/components/projects/running-sessions-tab';
+import { useProject } from '@/hooks/useProject';
+import { useI18n } from '@/i18n';
 
 /**
  * Route: /projects/[id] — single project (live API via `useProject`).

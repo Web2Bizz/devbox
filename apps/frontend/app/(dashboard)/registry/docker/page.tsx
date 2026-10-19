@@ -7,10 +7,10 @@ import {
   Label,
   Separator,
 } from '@web2bizz/ui/components';
-import { EmptyState, ErrorState, LoadingState } from '../../../../src/components/states';
-import { useRegistries } from '../../../../src/hooks/useRegistries';
-import { useI18n } from '../../../../src/i18n';
-import type { RegistryStatus } from '../../../../src/lib/types';
+import { EmptyState, ErrorState, LoadingState } from '@/components/states';
+import { useRegistries } from '@/hooks/useRegistries';
+import { useI18n } from '@/i18n';
+import type { RegistryStatus } from '@/lib/types';
 
 function statusColor(status: RegistryStatus) {
   if (status === 'up') return 'success' as const;

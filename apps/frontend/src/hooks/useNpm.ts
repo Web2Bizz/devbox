@@ -1,10 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { ApiClientError, api } from '../api/client';
+import { useCallback, useMemo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { api } from '../api/client';
 import { formatApiError } from '../lib/format-error';
 import type { NpmPackageItem } from '../lib/types';
 import { useI18n } from '../i18n';
+import { NPM_QUERY_KEY } from './query-keys';
 
 export interface UseNpmResult {
   packages: NpmPackageItem[];
@@ -15,67 +17,71 @@ export interface UseNpmResult {
 }
 
 /**
- * Live npm status through the backend (live reachability only).
- *
- * v1 shape: one live-status probe mapped to a single-row list
- * (name/url/scope/status, no secrets — auth lives server-side,
- * never logged, never shipped to the browser).
- * Unreachable surfaces as `error` with retry — no silent mock payloads.
- * Flat /npm route (not nested).
+ * Shared fetch — GET /api/v1/registry/npm/status without a token (public
+ * reachability; auth lives server-side in NPM_REGISTRY_* env, never
+ * logged, never shipped to the browser). Throws the raw envelope on
+ * failure (never formats); `formatApiError + t` mapping lives in
+ * `useMemo` in `useNpm`. Module-level (no `t` closure) so concurrent
+ * mounts share one cache entry AND one queryFn identity — dedup to a
+ * single GET /registry/npm/status. Query cancellation arrives via the
+ * `signal` argument (no local AbortController).
+ */
+async function fetchNpmStatus(signal?: AbortSignal): Promise<NpmPackageItem[]> {
+  const data = await api.getNpmStatus(signal ? { signal } : undefined);
+  const url = typeof data?.url === 'string' ? data.url : '';
+  const scope = typeof data?.scope === 'string' ? data.scope : '';
+  return [
+    {
+      id: 'default',
+      name: scope || 'npm',
+      url,
+      scope,
+      status: 'up',
+    },
+  ];
+}
+
+/**
+ * Live npm status hook — GET /api/v1/registry/npm/status via TanStack
+ * Query (contract unchanged: UseNpmResult shape is frozen, only the body
+ * swaps useEffect+nonce → useQuery).
+ * - Cache: NPM_QUERY_KEY (P0 single source), staleTime 60s (reachability
+ *   probe is quasi-static — longer than the shared 30s default), gcTime
+ *   from the shared QueryClient (no override).
+ * - Deduplication: module-level fetchNpmStatus (no `t` closure) so
+ *   concurrent mounts share one in-flight GET.
+ * - Skeleton: `isLoading && !data` (initial only, refetch keeps data via
+ *   placeholderData).
+ * - Unreachable surfaces as `error` with retry — no silent mock payloads.
  */
 export function useNpm(): UseNpmResult {
   const { t } = useI18n();
-  const [packages, setPackages] = useState<NpmPackageItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [nonce, setNonce] = useState(0);
+  const queryClient = useQueryClient();
 
-  useEffect(() => {
-    let cancelled = false;
-    const ctrl = new AbortController();
-    setLoading(true);
-    setError(null);
-    api
-      .getNpmStatus()
-      .then((data) => {
-        if (cancelled) return;
-        const url = typeof data?.url === 'string' ? data.url : '';
-        const scope = typeof data?.scope === 'string' ? data.scope : '';
-        setPackages([
-          {
-            id: 'default',
-            name: scope || 'npm',
-            url,
-            scope,
-            status: 'up',
-          },
-        ]);
-      })
-      .catch((e: unknown) => {
-        if (cancelled || (e as Error)?.name === 'AbortError') return;
-        try {
-          const formatted = formatApiError(e);
-          setPackages([]);
-          if (e instanceof ApiClientError && e.status === 503) {
-            setError(formatted === 'Unexpected error' ? t.errors.unexpected : formatted);
-            return;
-          }
-          setError(formatted === 'Unexpected error' ? t.errors.unexpected : formatted);
-        } catch {
-          setPackages([]);
-          setError(t.errors.unexpected);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-      ctrl.abort();
-    };
-  }, [nonce, t]);
+  const { data, isLoading, error: queryError } = useQuery({
+    queryKey: NPM_QUERY_KEY,
+    queryFn: ({ signal }) => fetchNpmStatus(signal),
+    // Reachability probe is quasi-static — refetch less often than default.
+    staleTime: 60_000,
+    // Keep previous data during refetch to avoid skeleton flash
+    placeholderData: (prev) => prev,
+    retry: 1,
+  });
 
-  const reload = useCallback(() => setNonce((n) => n + 1), []);
+  const error = useMemo(() => {
+    if (!queryError) return null;
+    const formatted = formatApiError(queryError);
+    return formatted === 'Unexpected error' ? t.errors.unexpected : formatted;
+  }, [queryError, t]);
+
+  const packages = data ?? [];
+
+  const reload = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: NPM_QUERY_KEY });
+  }, [queryClient]);
+
+  // Initial skeleton only; background refetch keeps previous data visible
+  const loading = isLoading && !data;
 
   return {
     packages,

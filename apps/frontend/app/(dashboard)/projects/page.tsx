@@ -15,11 +15,11 @@ import {
   CardHeader,
   CardTitle,
 } from '@web2bizz/ui/components';
-import { EmptyState, ErrorState, LoadingState } from '../../../src/components/states';
-import { CreateProjectDialog } from '../../../src/components/projects/create-project-dialog';
-import { useProjects } from '../../../src/hooks/useProjects';
-import { useI18n } from '../../../src/i18n';
-import type { ProjectStatus } from '../../../src/lib/types';
+import { EmptyState, ErrorState, LoadingState } from '@/components/states';
+import { CreateProjectDialog } from '@/components/projects/create-project-dialog';
+import { useProjects } from '@/hooks/useProjects';
+import { useI18n } from '@/i18n';
+import type { ProjectStatus } from '@/lib/types';
 
 function statusColor(status: ProjectStatus) {
   if (status === 'active') return 'success' as const;

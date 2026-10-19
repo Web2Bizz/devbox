@@ -3,9 +3,9 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useRef } from 'react';
-import { ErrorState, ProjectDetailSkeleton } from '../../../../../src/components/states';
-import { useInvite } from '../../../../../src/hooks/useInvite';
-import { useI18n } from '../../../../../src/i18n';
+import { ErrorState, ProjectDetailSkeleton } from '@/components/states';
+import { useInvite } from '@/hooks/useInvite';
+import { useI18n } from '@/i18n';
 
 /**
  * Route: /organizations/invites/accept?token=… — single-use invite accept.

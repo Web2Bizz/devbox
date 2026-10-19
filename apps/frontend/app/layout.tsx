@@ -3,9 +3,9 @@ import type { ReactNode } from 'react';
 import { cookies } from 'next/headers';
 import '@web2bizz/ui/styles.css';
 import './globals.css';
-import { Providers } from '../src/providers';
-import { en } from '../src/i18n/dictionaries/en';
-import { ru } from '../src/i18n/dictionaries/ru';
+import { Providers } from '@/providers';
+import { en } from '@/i18n/dictionaries/en';
+import { ru } from '@/i18n/dictionaries/ru';
 
 /**
  * Localized metadata without breaking flat URLs: the `devbox-locale`

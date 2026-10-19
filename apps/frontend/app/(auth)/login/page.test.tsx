@@ -7,8 +7,8 @@
  * "Unexpected error" for 400, 409 email_taken stays in the top Alert).
  */
 import { describe, expect, test } from 'bun:test';
-import { parseRegisterFieldErrors } from '../../../src/lib/register-field-errors';
-import { loginSchema, registerSchema } from '../../../src/lib/auth-schemas';
+import { parseRegisterFieldErrors } from '@/lib/register-field-errors';
+import { loginSchema, registerSchema } from '@/lib/auth-schemas';
 
 describe('parseRegisterFieldErrors', () => {
   test('maps invalid email to the email field', () => {

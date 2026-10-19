@@ -10,13 +10,13 @@
 // which all read this one cache, can never diverge again.
 import { useEffect } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useConnections } from "../stores/connections"
-import { useEvents } from "../stores/events"
-import { useSessions } from "../stores/sessions"
-import { queryClient } from "../lib/query-client"
-import { queryKeys } from "../lib/query-keys"
-import { mergeSessionLists, type ListedSession } from "../lib/listed-session"
-import type { Client, Session } from "../lib/sdk"
+import { useConnections } from "@/stores/connections"
+import { useEvents } from "@/stores/events"
+import { useSessions } from "@/stores/sessions"
+import { queryClient } from "@/lib/query-client"
+import { queryKeys } from "@/lib/query-keys"
+import { mergeSessionLists, type ListedSession } from "@/lib/listed-session"
+import type { Client, Session } from "@/lib/sdk"
 
 async function fetchSessionsList(): Promise<ListedSession[]> {
   const conn = useConnections.getState()

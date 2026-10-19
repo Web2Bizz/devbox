@@ -1,9 +1,9 @@
 import { create } from "zustand"
 import * as SecureStore from "expo-secure-store"
-import { type Category, defaultPreferences } from "../lib/notifications"
-import { clampPageSize, mergeStoredSettings } from "../lib/settings-merge"
-import { setAppLocale } from "../lib/i18n/config"
-import type { LocalePreference } from "../lib/i18n/locale-resolve"
+import { type Category, defaultPreferences } from "@/lib/notifications"
+import { clampPageSize, mergeStoredSettings } from "@/lib/settings-merge"
+import { setAppLocale } from "@/lib/i18n/config"
+import type { LocalePreference } from "@/lib/i18n/locale-resolve"
 
 const SETTINGS_KEY = "opencode_settings"
 

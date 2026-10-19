@@ -1,9 +1,9 @@
 import { create } from "zustand"
-import { type Session, type Message, type Part, type Event, type MessageWithParts, type Client } from "../lib/sdk"
+import { type Session, type Message, type Part, type Event, type MessageWithParts, type Client } from "@/lib/sdk"
 import { useConnections } from "./connections"
 import { useSettings } from "./settings"
-import { mergeIncomingMessage } from "../lib/message-merge"
-import { applyIncomingParts } from "../lib/part-merge"
+import { mergeIncomingMessage } from "@/lib/message-merge"
+import { applyIncomingParts } from "@/lib/part-merge"
 import {
   createQueuedDraft,
   dequeueDraft,
@@ -11,12 +11,12 @@ import {
   removeDraft,
   updateDraftText,
   type QueuedDraft,
-} from "../lib/message-queue"
-import { pruneRevertedTail } from "../lib/revert-prune"
-import { isColdSessionLoad, isLiveEventForSession } from "../lib/session-load-reconcile"
-import { queryClient } from "../lib/query-client"
-import { queryKeys } from "../lib/query-keys"
-import type { ListedSession } from "../lib/listed-session"
+} from "@/lib/message-queue"
+import { pruneRevertedTail } from "@/lib/revert-prune"
+import { isColdSessionLoad, isLiveEventForSession } from "@/lib/session-load-reconcile"
+import { queryClient } from "@/lib/query-client"
+import { queryKeys } from "@/lib/query-keys"
+import type { ListedSession } from "@/lib/listed-session"
 
 // State split with React Query (see src/queries/):
 // - React Query owns SERVER SNAPSHOTS: the session list, catalogs, project

@@ -17,6 +17,9 @@ config.resolver.extraNodeModules = {
   "@web2bizz/ui-native": path.resolve(__dirname, "packages/uikit"),
   // TODO: deprecated alias @opencode-ai/uikit — удалить через 1 релиз.
   "@opencode-ai/uikit": path.resolve(__dirname, "packages/uikit"),
+  // `@` → src, `@app` → app (mirrors tsconfig paths + babel module-resolver).
+  "@": path.resolve(__dirname, "src"),
+  "@app": path.resolve(__dirname, "app"),
 }
 
 module.exports = config

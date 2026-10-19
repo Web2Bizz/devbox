@@ -96,16 +96,45 @@ export class ApiErrorFilter implements ExceptionFilter {
       // Messages are fixed at construction (never carry upstream bodies or
       // secrets); 5xx upstreams intentionally keep their safe message instead
       // of the generic 'Unexpected server error'.
-      // 503 answers carry Retry-After so clients back off instead of polling
+      // Retryable answers carry Retry-After so clients back off instead of
+      // polling: 429 rate limit + any 5xx (502 passthrough / 503 unavailable /
+      // 504 timeout). 4xx client states (401 invalid / 404 missing key) never
+      // carry it — the fix is user action, not a retry delay.
       // (proxy /api/v1/* and the /api/opencode/* surface throw
       // EXTERNAL_UNAVAILABLE when the opencode server is unreachable —
       // no mock 200s).
-      if (exception.httpStatus === 503) {
+      // Logging: normal-path one-liner with service/operation/status/code,
+      // no stack, no URL/body/Bearer (AppLogger sanitizes); cause/stack (if
+      // any) goes to debug only.
+      if (exception.httpStatus === 429 || exception.httpStatus >= 500) {
         try {
           res.setHeader('Retry-After', '30');
         } catch {
           // headers already sent — ignore
         }
+      }
+      try {
+        const line =
+          `[http] handled service=${exception.service} operation=${exception.operation} ` +
+          `status=${exception.httpStatus} code=${exception.code}`;
+        if (exception.httpStatus === 429 || exception.httpStatus >= 500) {
+          this.logger.error(line, correlationId);
+        } else {
+          this.logger.warn(line, correlationId);
+        }
+        if (exception.cause !== undefined) {
+          this.logger.debug(
+            `[http] cause service=${exception.service} operation=${exception.operation} ` +
+              `code=${exception.code} detail=${String(
+                exception.cause instanceof Error
+                  ? (exception.cause.stack ?? exception.cause.message)
+                  : exception.cause,
+              ).slice(0, 2000)}`,
+            correlationId,
+          );
+        }
+      } catch {
+        // ignore logging failures
       }
       const body: ApiError = {
         code: exception.code,
@@ -134,16 +163,36 @@ export class ApiErrorFilter implements ExceptionFilter {
       }
       // Never leak internals on 500 — generic envelope like the node:http build.
       if (status >= 500) message = 'Unexpected server error';
+      // Normal path: one-liner with status/code, no stack, no body/headers.
+      try {
+        const line = `[http] handled status=${status} code=${code}`;
+        if (status >= 500) {
+          this.logger.error(line, correlationId);
+          this.logger.debug(
+            `[http] cause status=${status} code=${code} detail=${String(
+              (exception as Error)?.stack ?? (exception as Error)?.message ?? String(exception),
+            ).slice(0, 2000)}`,
+            correlationId,
+          );
+        } else {
+          this.logger.warn(line, correlationId);
+        }
+      } catch {
+        // ignore logging failures
+      }
       const body: ApiError = { code, message, correlationId };
       res.status(status).json(body);
       return;
     }
 
-    // Unknown error — message + sanitized stack (no secrets), generic envelope.
+    // Unknown error — fixed one-liner at error (no stack, no secrets);
+    // sanitized detail goes to debug only, generic envelope on the wire.
     try {
-      this.logger.error(
-        `[http] unhandled: ${(exception as Error)?.message ?? String(exception)}`,
-        (exception as Error)?.stack,
+      this.logger.error('[http] unhandled status=500 code=internal_error', correlationId);
+      this.logger.debug(
+        `[http] unhandled cause detail=${String(
+          (exception as Error)?.stack ?? (exception as Error)?.message ?? String(exception),
+        ).slice(0, 2000)}`,
         correlationId,
       );
     } catch {

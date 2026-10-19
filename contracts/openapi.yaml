@@ -821,18 +821,48 @@ paths:
                 $ref: '#/components/schemas/ApiError'
         '429':
           description: upstream rate limit (code EXTERNAL_RATE_LIMITED, retry later)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '502':
+          description: upstream server error passthrough (code EXTERNAL_UPSTREAM_5XX, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '503':
           description: upstream unavailable or shape mismatch (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '504':
-          description: upstream timeout (code EXTERNAL_TIMEOUT)
+          description: upstream timeout (code EXTERNAL_TIMEOUT, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
           content:
             application/json:
               schema:
@@ -2752,8 +2782,8 @@ components:
           format: date-time
     OpencodeUsage:
       type: object
-      required: [balance, usage, updatedAt]
-      description: Live upstream balance+usage (updatedAt = upstream response time, no cache).
+      required: [updatedAt]
+      description: Live Zen Go usage (https://opencode.ai/zen/go/v1/usage — percent windows mapped to used/limit 100; rolling is the 5h window). Legacy balance/usage are optional (old payloads only). Optional rolling/daily/weekly/monthly pass through only when upstream carries finite numbers — never derived.
       properties:
         balance:
           type: number
@@ -2764,6 +2794,25 @@ components:
         updatedAt:
           type: string
           format: date-time
+        rolling:
+          $ref: '#/components/schemas/OpencodeLimitBucket'
+        daily:
+          $ref: '#/components/schemas/OpencodeLimitBucket'
+        weekly:
+          $ref: '#/components/schemas/OpencodeLimitBucket'
+        monthly:
+          $ref: '#/components/schemas/OpencodeLimitBucket'
+    OpencodeLimitBucket:
+      type: object
+      required: [used, limit]
+      description: Real used/limit pair from upstream (no derivation from totals).
+      properties:
+        used:
+          type: number
+          example: 12.5
+        limit:
+          type: number
+          example: 100
     AuthRegister:
       type: object
       required: [firstName, lastName, email, password]

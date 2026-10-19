@@ -13,6 +13,10 @@ module.exports = function (api) {
           alias: {
             "@": "./src",
             "@app": "./app",
+            "@/utils": "./src/shared/utils",
+            "@/api": "./src/shared/api",
+            "@/stores": "./src/shared/stores",
+            "@/shared": "./src/shared",
           },
         },
       ],

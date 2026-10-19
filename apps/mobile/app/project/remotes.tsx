@@ -2,7 +2,7 @@ import { View, Text, FlatList, StyleSheet, useColorScheme, ActivityIndicator } f
 import { Stack, useLocalSearchParams } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
 import { useTranslation } from "react-i18next"
-import { useProjectRemotes } from "@/queries/project"
+import { useProjectRemotes } from "@/api/project"
 import { RepoLinkRow } from "@/components/RepoLinkRow"
 
 // Full remote list of a project (the header card shows the first 3).

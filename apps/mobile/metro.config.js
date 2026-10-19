@@ -20,6 +20,10 @@ config.resolver.extraNodeModules = {
   // `@` → src, `@app` → app (mirrors tsconfig paths + babel module-resolver).
   "@": path.resolve(__dirname, "src"),
   "@app": path.resolve(__dirname, "app"),
+  "@/utils": path.resolve(__dirname, "src/shared/utils"),
+  "@/api": path.resolve(__dirname, "src/shared/api"),
+  "@/stores": path.resolve(__dirname, "src/shared/stores"),
+  "@/shared": path.resolve(__dirname, "src/shared"),
 }
 
 module.exports = config

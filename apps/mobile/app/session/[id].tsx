@@ -3,14 +3,15 @@ import { useLocalSearchParams } from "expo-router"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useTranslation } from "react-i18next"
 import { SessionInfo, keyboardVerticalOffset } from "@web2bizz/ui-native"
-import { useSessionBinding } from "@/lib/session-binding"
-import { useSessionController } from "@/lib/use-session-screen"
-import { SessionHeader } from "@/components/session/SessionHeader"
-import { SessionBanners } from "@/components/session/SessionBanners"
-import { MessageList } from "@/components/session/MessageList"
-import { ComposerDock } from "@/components/session/ComposerDock"
-import { PromptOverlay } from "@/components/session/PromptOverlay"
-import { SessionSheets } from "@/components/session/SessionSheets"
+import { useSessionBinding, useSessionController } from "@/utils/session"
+import {
+  SessionHeader,
+  SessionBanners,
+  MessageList,
+  ComposerDock,
+  PromptOverlay,
+  SessionSheets,
+} from "@/components/session"
 import { s } from "./styles"
 
 export default function SessionScreen() {

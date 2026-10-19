@@ -7,10 +7,10 @@ import {
   Label,
   Separator,
 } from '@web2bizz/ui/components';
-import { EmptyState, ErrorState, LoadingState } from '../../../../src/components/states';
-import { useNpm } from '../../../../src/hooks/useNpm';
-import { useI18n } from '../../../../src/i18n';
-import type { NpmStatus } from '../../../../src/lib/types';
+import { EmptyState, ErrorState, LoadingState } from '@/components/states';
+import { useNpm } from '@/hooks/useNpm';
+import { useI18n } from '@/i18n';
+import type { NpmStatus } from '@/lib/types';
 
 function statusColor(status: NpmStatus) {
   if (status === 'up') return 'success' as const;

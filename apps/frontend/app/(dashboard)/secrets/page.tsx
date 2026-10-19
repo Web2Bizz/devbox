@@ -24,9 +24,9 @@ import {
   Input,
   Label,
 } from '@web2bizz/ui/components';
-import { EmptyState, ErrorState, LoadingState } from '../../../src/components/states';
-import { useSecrets } from '../../../src/hooks/useSecrets';
-import { useI18n } from '../../../src/i18n';
+import { EmptyState, ErrorState, LoadingState } from '@/components/states';
+import { useSecrets } from '@/hooks/useSecrets';
+import { useI18n } from '@/i18n';
 
 /**
  * Route: /secrets — masked list with reveal/copy + confirm before delete.

@@ -1,10 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { ApiClientError, api } from '../api/client';
+import { useCallback, useMemo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { api } from '../api/client';
 import { formatApiError } from '../lib/format-error';
 import type { RegistryItem } from '../lib/types';
 import { useI18n } from '../i18n';
+import { REGISTRIES_QUERY_KEY } from './query-keys';
 
 export interface UseRegistriesResult {
   registries: RegistryItem[];
@@ -15,68 +17,71 @@ export interface UseRegistriesResult {
 }
 
 /**
- * Live registry catalog through the backend proxy
- * (`GET /api/v1/registry/catalog` → `{ repositories }`, live
- * Docker Registry /v2/_catalog only).
- *
- * v1 shape: one live-catalog proxy + a local list of several registries
- * in the frontend (name/url/status, no secrets — auth lives server-side
- * in DOCKER_REGISTRY_* env, never logged, never shipped to the browser).
- * A 503 (unconfigured/unreachable) surfaces as `error` with retry —
- * no silent mock payloads. `[id]` detail route is deferred.
+ * Shared fetch — GET /api/v1/registry/catalog without a token (public
+ * reachability; auth lives server-side in DOCKER_REGISTRY_* env, never
+ * logged, never shipped to the browser). Throws the raw envelope on
+ * failure (never formats); `formatApiError + t` mapping lives in
+ * `useMemo` in `useRegistries`. Module-level (no `t` closure) so
+ * concurrent mounts share one cache entry AND one queryFn identity —
+ * dedup to a single GET /registry/catalog. Query cancellation arrives
+ * via the `signal` argument (no local AbortController).
+ */
+async function fetchRegistries(signal?: AbortSignal): Promise<RegistryItem[]> {
+  const data = await api.getRegistryCatalog(signal ? { signal } : undefined);
+  const repos = Array.isArray(data?.repositories) ? data.repositories : [];
+  return [
+    {
+      id: 'default',
+      name: 'default',
+      url: '',
+      status: 'up',
+      repositories: repos,
+    },
+  ];
+}
+
+/**
+ * Live registry catalog hook — GET /api/v1/registry/catalog via TanStack
+ * Query (contract unchanged: UseRegistriesResult shape is frozen, only the
+ * body swaps useEffect+nonce → useQuery).
+ * - Cache: REGISTRIES_QUERY_KEY (P0 single source), staleTime 60s
+ *   (catalog is quasi-static — longer than the shared 30s default),
+ *   gcTime from the shared QueryClient (no override).
+ * - Deduplication: module-level fetchRegistries (no `t` closure) so
+ *   concurrent mounts share one in-flight GET.
+ * - Skeleton: `isLoading && !data` (initial only, refetch keeps data via
+ *   placeholderData).
+ * - 503 (unconfigured/unreachable) surfaces as `error` with retry —
+ *   no silent mock payloads.
  */
 export function useRegistries(): UseRegistriesResult {
   const { t } = useI18n();
-  const [registries, setRegistries] = useState<RegistryItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [nonce, setNonce] = useState(0);
+  const queryClient = useQueryClient();
 
-  useEffect(() => {
-    let cancelled = false;
-    const ctrl = new AbortController();
-    setLoading(true);
-    setError(null);
-    api
-      .getRegistryCatalog()
-      .then((data) => {
-        if (cancelled) return;
-        const repos = Array.isArray(data?.repositories) ? data.repositories : [];
-        setRegistries([
-          {
-            id: 'default',
-            name: 'default',
-            url: '',
-            status: 'up',
-            repositories: repos,
-          },
-        ]);
-      })
-      .catch((e: unknown) => {
-        if (cancelled || (e as Error)?.name === 'AbortError') return;
-        try {
-          const formatted = formatApiError(e);
-          setRegistries([]);
-          if (e instanceof ApiClientError && e.status === 503) {
-            setError(formatted === 'Unexpected error' ? t.errors.unexpected : formatted);
-            return;
-          }
-          setError(formatted === 'Unexpected error' ? t.errors.unexpected : formatted);
-        } catch {
-          setRegistries([]);
-          setError(t.errors.unexpected);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-      ctrl.abort();
-    };
-  }, [nonce, t]);
+  const { data, isLoading, error: queryError } = useQuery({
+    queryKey: REGISTRIES_QUERY_KEY,
+    queryFn: ({ signal }) => fetchRegistries(signal),
+    // Catalog is quasi-static — refetch less often than the shared default.
+    staleTime: 60_000,
+    // Keep previous data during refetch to avoid skeleton flash
+    placeholderData: (prev) => prev,
+    retry: 1,
+  });
 
-  const reload = useCallback(() => setNonce((n) => n + 1), []);
+  const error = useMemo(() => {
+    if (!queryError) return null;
+    const formatted = formatApiError(queryError);
+    return formatted === 'Unexpected error' ? t.errors.unexpected : formatted;
+  }, [queryError, t]);
+
+  const registries = data ?? [];
+
+  const reload = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: REGISTRIES_QUERY_KEY });
+  }, [queryClient]);
+
+  // Initial skeleton only; background refetch keeps previous data visible
+  const loading = isLoading && !data;
 
   return {
     registries,

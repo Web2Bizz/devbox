@@ -21,12 +21,12 @@ import {
   FieldLabel,
   Input,
 } from '@web2bizz/ui/components';
-import { ApiClientError, api } from '../../../src/api/client';
-import { parseRegisterFieldErrors } from '../../../src/lib/register-field-errors';
-import { loginSchema, registerSchema, type LoginInput, type RegisterInput } from '../../../src/lib/auth-schemas';
-import { setSession } from '../../../src/lib/auth-store';
-import { formatApiError } from '../../../src/lib/format-error';
-import { useI18n } from '../../../src/i18n';
+import { ApiClientError, api } from '@/api/client';
+import { parseRegisterFieldErrors } from '@/lib/register-field-errors';
+import { loginSchema, registerSchema, type LoginInput, type RegisterInput } from '@/lib/auth-schemas';
+import { setSession } from '@/lib/auth-store';
+import { formatApiError } from '@/lib/format-error';
+import { useI18n } from '@/i18n';
 
 function LoginForm({ onSuccess }: { onSuccess: () => void }) {
   const { t } = useI18n();

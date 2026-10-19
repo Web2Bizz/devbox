@@ -125,11 +125,23 @@ mock.module('../../api/client', () => ({
 }));
 
 const { cleanup, render, screen, waitFor } = await import('@testing-library/react');
-const userEvent = (await import('@testing-library/user-event')).default;
+const { QueryClientProvider } = await import('@tanstack/react-query');
+const { createElement, useState } = await import('react');
+const { createQueryClient } = await import('../../lib/query-client');
 const { I18nProvider } = await import('../../i18n');
+const userEvent = (await import('@testing-library/user-event')).default;
 const { HeaderProfileDropdown } = await import('../profile-dropdown');
 const { ProfileDropdownUserTrigger } = await import('@web2bizz/ui/widgets');
 const { setSession, clearSession } = await import('../../lib/auth-store');
+
+// useHeaderProfile is useQuery-backed now (same PROFILE_QUERY_KEY as the
+// /profile page) — every render needs a QueryClientProvider. Fresh client
+// per render keeps tests isolated; within one render concurrent mounts
+// share the entry (dedup 2→1 is covered in useProfile.test.tsx).
+function wrapper({ children }: { children: React.ReactNode }) {
+  const [client] = useState(() => createQueryClient());
+  return createElement(QueryClientProvider, { client }, children);
+}
 
 // Network seam stub (offline fallback; the module mock above is primary).
 // Seeded per test (sign-out clears the store, so beforeEach re-seeds).
@@ -206,7 +218,7 @@ describe('ProfileDropdownUserTrigger rest/ref forward (0.25.9 regression)', () =
 describe('HeaderProfileDropdown (pure kit AuthorizedUserProfile)', () => {
   test('closed trigger exposes menu semantics; click opens with profile + sign-out', async () => {
     const user = userEvent.setup();
-    render(<HeaderProfileDropdown />);
+    render(<HeaderProfileDropdown />, { wrapper });
 
     const trigger = await screen.findByRole('button', { name: TRIGGER_NAME }, { timeout: FIND_TIMEOUT });
     // Radix Slot props must reach the kit trigger (the 0.25.9 bug: they did not).
@@ -229,7 +241,7 @@ describe('HeaderProfileDropdown (pure kit AuthorizedUserProfile)', () => {
 
   test('sign-out pushes /login', async () => {
     const user = userEvent.setup();
-    render(<HeaderProfileDropdown />);
+    render(<HeaderProfileDropdown />, { wrapper });
 
     const trigger = await screen.findByRole('button', { name: TRIGGER_NAME }, { timeout: FIND_TIMEOUT });
     await user.click(trigger);
@@ -241,7 +253,7 @@ describe('HeaderProfileDropdown (pure kit AuthorizedUserProfile)', () => {
 
   test('Escape closes the menu and returns focus to the trigger', async () => {
     const user = userEvent.setup();
-    render(<HeaderProfileDropdown />);
+    render(<HeaderProfileDropdown />, { wrapper });
 
     const trigger = await screen.findByRole('button', { name: TRIGGER_NAME }, { timeout: FIND_TIMEOUT });
     await user.click(trigger);
@@ -256,7 +268,7 @@ describe('HeaderProfileDropdown (pure kit AuthorizedUserProfile)', () => {
 
   test('keyboard: Tab moves focus into the open menu (arrows roving pending kit fix)', async () => {
     const user = userEvent.setup();
-    render(<HeaderProfileDropdown />);
+    render(<HeaderProfileDropdown />, { wrapper });
 
     const trigger = await screen.findByRole('button', { name: TRIGGER_NAME }, { timeout: FIND_TIMEOUT });
     await user.click(trigger);
@@ -285,6 +297,7 @@ describe('HeaderProfileDropdown (pure kit AuthorizedUserProfile)', () => {
         <I18nProvider>
           <HeaderProfileDropdown />
         </I18nProvider>,
+        { wrapper },
       );
 
       const trigger = await screen.findByRole('button', { name: TRIGGER_NAME }, { timeout: FIND_TIMEOUT });

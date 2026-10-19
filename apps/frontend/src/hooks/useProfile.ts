@@ -1,10 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useCallback, useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiClientError, api } from '../api/client';
+import type { AuthUser } from '../api/types';
 import { formatApiError } from '../lib/format-error';
-import { getValidAccessToken, refreshAccessToken, signOutAndRedirect } from '../lib/auth-store';
+import { getValidAccessToken, refreshAccessToken } from '../lib/auth-store';
+import { PROFILE_QUERY_KEY } from './query-keys';
 import type { Profile } from '../lib/types';
 import { useI18n } from '../i18n';
 
@@ -19,7 +21,7 @@ export interface UseProfileResult {
   dismiss: () => void;
 }
 
-function toProfile(user: { id: string; email: string; firstName: string; lastName: string; createdAt: string }): Profile {
+function toProfile(user: AuthUser): Profile {
   return {
     id: user.id,
     name: `${user.firstName} ${user.lastName}`.trim(),
@@ -35,118 +37,164 @@ function splitName(name: string): { firstName: string; lastName: string } {
 }
 
 /**
- * Real profile hook — GET/PATCH /api/v1/auth/me (contract unchanged:
- * UseProfileResult shape is frozen, only the body swapped mock → api).
- * 401 → one silent refresh retry, then the session-expired message.
+ * Dead-session marker — thrown when both tokens are gone (no backend
+ * envelope to throw). Mapped to `t.errors.sessionExpired` in `useMemo`
+ * outside `queryFn`, so the fetch itself stays locale-free: language
+ * switches neither refetch nor re-render identity consumers.
  */
-export function useProfile(): UseProfileResult {
-  const { t } = useI18n();
-  // Стабильная ссылка на router: next/navigation гарантирует стабильность,
-  // но тестовые стабы отдают новый объект каждый рендер — через ref эффект
-  // не уходит в бесконечный рефакт, deps эффекта не меняются ([nonce, t]).
-  const router = useRouter();
-  const routerRef = useRef(router);
-  routerRef.current = router;
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [nonce, setNonce] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    (async () => {
-      try {
-        let token = await getValidAccessToken();
-        if (!token) {
-          // Сессия мертва (оба токена протухли): единый sign-out + /login.
-          void signOutAndRedirect({ router: routerRef.current });
-          if (!cancelled) setError(t.errors.sessionExpired);
-          return;
-        }
-        try {
-          const user = await api.me(token);
-          if (!cancelled) setProfile(toProfile(user));
-        } catch (e) {
-          if (e instanceof ApiClientError && e.status === 401) {
-            token = await refreshAccessToken();
-            if (!token) {
-              void signOutAndRedirect({ router: routerRef.current });
-              if (!cancelled) setError(t.errors.sessionExpired);
-              return;
-            }
-            const user = await api.me(token);
-            if (!cancelled) setProfile(toProfile(user));
-          } else {
-            throw e;
-          }
-        }
-      } catch (e) {
-        if (!cancelled) {
-          const formatted = formatApiError(e);
-          setError(formatted === 'Unexpected error' ? t.errors.unexpected : formatted);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [nonce, t]);
-
-  const update = useCallback(
-    async (patch: Pick<Profile, 'name'> & Partial<Pick<Profile, 'email'>>) => {
-      setSaving(true);
-      setError(null);
-      setSaved(false);
-      try {
-        if (!patch.name.trim()) throw new Error(t.validation.nameRequired);
-        // Email is read-only: backend PATCH /auth/me accepts only
-        // firstName/lastName — patch.email (if passed by legacy callers)
-        // is intentionally ignored, never validated nor sent.
-        const token = await getValidAccessToken();
-        if (!token) {
-          void signOutAndRedirect({ router: routerRef.current });
-          setError(t.errors.sessionExpired);
-          return false;
-        }
-        const { firstName, lastName } = splitName(patch.name);
-        const user = await api.updateMe(token, { firstName, lastName });
-        setProfile(toProfile(user));
-        setSaved(true);
-        return true;
-      } catch (e) {
-        if (e instanceof ApiClientError && e.status === 401) {
-          void signOutAndRedirect({ router: routerRef.current });
-          setError(t.errors.sessionExpired);
-        } else {
-          const formatted = formatApiError(e);
-          setError(formatted === 'Unexpected error' ? t.errors.unexpected : formatted);
-        }
-        return false;
-      } finally {
-        setSaving(false);
-      }
-    },
-    [t],
-  );
-
-  const reload = useCallback(() => setNonce((n) => n + 1), []);
-  const dismiss = useCallback(() => {
-    setError(null);
-    setSaved(false);
-  }, []);
-
-  return { profile, loading, error, saved, saving, update, reload, dismiss };
+class SessionExpiredError extends Error {
+  constructor() {
+    super('session-expired');
+    this.name = 'SessionExpiredError';
+  }
 }
 
 /**
- * Header-only identity hook — same GET /api/v1/auth/me fetch (one silent
- * 401 refresh retry) as useProfile, but with NO useI18n subscription:
+ * Shared fetch — token → api.me → toProfile with one silent 401 refresh
+ * retry (same auth contract `lib/auth-store.ts` documents). Throws the raw
+ * envelope on failure (never formats); `formatApiError + t` mapping lives
+ * in `useMemo` in `useProfile`. Module-level (no `t` closure) so header and
+ * page observers share one cache entry AND one queryFn identity — concurrent
+ * mounts dedup to a single GET /auth/me.
+ */
+async function fetchProfile(): Promise<Profile> {
+  const token = await getValidAccessToken();
+  if (!token) throw new SessionExpiredError();
+  try {
+    return toProfile(await api.me(token));
+  } catch (e) {
+    if (e instanceof ApiClientError && e.status === 401) {
+      const retryToken = await refreshAccessToken();
+      if (!retryToken) throw new SessionExpiredError();
+      return toProfile(await api.me(retryToken));
+    }
+    throw e;
+  }
+}
+
+/**
+ * No retry on terminal auth states (dead session / session 401 — a retry
+ * would only hammer /auth/me); one retry otherwise (shared-client contract).
+ */
+function profileRetry(failureCount: number, error: unknown): boolean {
+  if (error instanceof ApiClientError && error.status === 401) return false;
+  if (error instanceof SessionExpiredError) return false;
+  return failureCount < 1;
+}
+
+/**
+ * Profile hook — GET/PATCH /api/v1/auth/me via TanStack Query (contract
+ * unchanged: UseProfileResult shape is frozen, only the body swapped
+ * useEffect+nonce → useQuery + useMutation).
+ * - Cache: staleTime 30s, gcTime 5m from the shared QueryClient (no override).
+ * - Deduplication: same PROFILE_QUERY_KEY as useHeaderProfile → header +
+ *   /profile + org-page mounts share one in-flight request.
+ * - Skeleton: `isLoading && !data` (initial only, refetch keeps data via
+ *   placeholderData).
+ * - Update: PATCH via useMutation, cache patched via setQueryData (no extra
+ *   GET); saving = isPending, saved is local UI state.
+ */
+export function useProfile(): UseProfileResult {
+  const { t } = useI18n();
+  const queryClient = useQueryClient();
+  const [saved, setSaved] = useState(false);
+
+  const { data, isLoading, error: queryError } = useQuery({
+    queryKey: PROFILE_QUERY_KEY,
+    queryFn: fetchProfile,
+    // Keep previous data during refetch to avoid skeleton flash
+    placeholderData: (prev) => prev,
+    retry: profileRetry,
+  });
+
+  const profile = data ?? null;
+
+  const queryErrorText = useMemo(() => {
+    if (!queryError) return null;
+    if (queryError instanceof SessionExpiredError) return t.errors.sessionExpired;
+    const formatted = formatApiError(queryError);
+    return formatted === 'Unexpected error' ? t.errors.unexpected : formatted;
+  }, [queryError, t]);
+
+  const mutation = useMutation({
+    mutationFn: async (
+      patch: Pick<Profile, 'name'> & Partial<Pick<Profile, 'email'>>,
+    ): Promise<Profile> => {
+      if (!patch.name.trim()) throw new Error(t.validation.nameRequired);
+      // Email is read-only: backend PATCH /auth/me accepts only
+      // firstName/lastName — patch.email (if passed by legacy callers)
+      // is intentionally ignored, never validated nor sent.
+      const token = await getValidAccessToken();
+      if (!token) throw new SessionExpiredError();
+      const attempt = (accessToken: string) => {
+        const { firstName, lastName } = splitName(patch.name);
+        return api.updateMe(accessToken, { firstName, lastName });
+      };
+      try {
+        return toProfile(await attempt(token));
+      } catch (e) {
+        if (e instanceof ApiClientError && e.status === 401) {
+          const retryToken = await refreshAccessToken();
+          if (!retryToken) throw new SessionExpiredError();
+          return toProfile(await attempt(retryToken));
+        }
+        throw e;
+      }
+    },
+    onSuccess: (updated) => {
+      // Patch the cache directly — no extra GET roundtrip; header + page
+      // observers re-render from the same PROFILE_QUERY_KEY entry.
+      queryClient.setQueryData<Profile>(PROFILE_QUERY_KEY, updated);
+      setSaved(true);
+    },
+    onError: () => {
+      setSaved(false);
+    },
+  });
+
+  const mutationErrorText = useMemo(() => {
+    if (!mutation.error) return null;
+    if (mutation.error instanceof SessionExpiredError) return t.errors.sessionExpired;
+    const formatted = formatApiError(mutation.error);
+    return formatted === 'Unexpected error' ? t.errors.unexpected : formatted;
+  }, [mutation.error, t]);
+
+  const error = mutationErrorText ?? queryErrorText;
+
+  const update = useCallback(
+    async (patch: Pick<Profile, 'name'> & Partial<Pick<Profile, 'email'>>) => {
+      setSaved(false);
+      try {
+        await mutation.mutateAsync(patch);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [mutation],
+  );
+
+  const reload = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: PROFILE_QUERY_KEY });
+  }, [queryClient]);
+
+  const dismiss = useCallback(() => {
+    // Local-only: clears the mutation error + saved flag. Never touches the
+    // query cache (no invalidate/clear — header + page stay consistent).
+    mutation.reset();
+    setSaved(false);
+  }, [mutation]);
+
+  // Initial skeleton only; background refetch keeps previous data visible
+  const loading = isLoading && !profile;
+
+  return { profile, loading, error, saved, saving: mutation.isPending, update, reload, dismiss };
+}
+
+/**
+ * Header-only identity hook — same PROFILE_QUERY_KEY (same cache entry and
+ * queryFn as useProfile, so header + page dedup to one GET /auth/me), sliced
+ * via `select` to the data the header renders. NO useI18n subscription:
  * locale switches neither refetch /auth/me nor re-render
  * HeaderProfileDropdown (its userMenu labels are a mount snapshot there).
  * No translated error strings — the header only renders skeleton /
@@ -154,47 +202,18 @@ export function useProfile(): UseProfileResult {
  * for the /profile page, whose error translations are untouched.
  */
 export function useHeaderProfile(): { profile: Profile | null; loading: boolean } {
-  // Стабильная ссылка на router — см. комментарий в useProfile.
-  const router = useRouter();
-  const routerRef = useRef(router);
-  routerRef.current = router;
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data, isLoading } = useQuery({
+    queryKey: PROFILE_QUERY_KEY,
+    queryFn: fetchProfile,
+    placeholderData: (prev) => prev,
+    retry: profileRetry,
+    // Slice: the header observes data only — error/saved/mutation updates
+    // (translated in useProfile) never remap this observer.
+    select: (fetched) => fetched,
+  });
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    (async () => {
-      try {
-        let token = await getValidAccessToken();
-        if (!token) {
-          // Сессия мертва (оба токена протухли): единый sign-out + /login.
-          void signOutAndRedirect({ router: routerRef.current });
-          return;
-        }
-        try {
-          const user = await api.me(token);
-          if (!cancelled) setProfile(toProfile(user));
-        } catch (e) {
-          if (e instanceof ApiClientError && e.status === 401) {
-            token = await refreshAccessToken();
-            if (!token) {
-              void signOutAndRedirect({ router: routerRef.current });
-              return;
-            }
-            const user = await api.me(token);
-            if (!cancelled) setProfile(toProfile(user));
-          }
-          // Non-401: у шапки нет error-UI — остаёмся в unauthorized (login CTA).
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const profile = data ?? null;
+  const loading = isLoading && !profile;
 
   return { profile, loading };
 }

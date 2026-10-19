@@ -1,9 +1,10 @@
 /**
- * useNpm — live status through GET /api/v1/registry/npm/status.
+ * useNpm — live status through GET /api/v1/registry/npm/status
+ * via TanStack Query (P3 migration).
  *
  * Covers: success (status/up + url/scope → single up package),
  * 503 (EXTERNAL_UNAVAILABLE surfaces as error with retry, no mock rows),
- * reload (nonce refetch).
+ * reload (invalidate refetch).
  */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { GlobalRegistrator } from '@happy-dom/global-registrator';
@@ -40,7 +41,15 @@ mock.module('../../api/client', () => ({
 }));
 
 const { cleanup, renderHook, act } = await import('@testing-library/react');
+const { QueryClientProvider } = await import('@tanstack/react-query');
+const { createElement, useState } = await import('react');
+const { createQueryClient } = await import('../../lib/query-client');
 const { useNpm } = await import('../useNpm');
+
+function wrapper({ children }: { children: React.ReactNode }) {
+  const [client] = useState(() => createQueryClient());
+  return createElement(QueryClientProvider, { client }, children);
+}
 
 afterEach(() => {
   cleanup();
@@ -52,17 +61,18 @@ afterEach(() => {
   });
 });
 
-async function settle() {
+async function settle(rounds = 4) {
   await act(async () => {
-    await Promise.resolve();
-    await new Promise((r) => setTimeout(r, 0));
-    await new Promise((r) => setTimeout(r, 0));
+    for (let i = 0; i < rounds; i++) {
+      await Promise.resolve();
+      await new Promise((r) => setTimeout(r, 0));
+    }
   });
 }
 
 describe('useNpm', () => {
   test('200: live status lands on a single up package', async () => {
-    const { result } = renderHook(() => useNpm());
+    const { result } = renderHook(() => useNpm(), { wrapper });
     await settle();
 
     expect(statusMock).toHaveBeenCalledTimes(1);
@@ -87,7 +97,7 @@ describe('useNpm', () => {
         correlationId: 'corr-1',
       });
     };
-    const { result } = renderHook(() => useNpm());
+    const { result } = renderHook(() => useNpm(), { wrapper });
     await settle();
 
     expect(result.current.loading).toBe(false);
@@ -97,7 +107,7 @@ describe('useNpm', () => {
     expect(result.current.isEmpty).toBe(false);
   });
 
-  test('reload: retry refetches the status', async () => {
+  test('reload: invalidate refetches the status', async () => {
     statusImpl = async () => {
       throw new FakeApiClientError({
         code: 'EXTERNAL_UNAVAILABLE',
@@ -106,7 +116,7 @@ describe('useNpm', () => {
         correlationId: 'corr-1',
       });
     };
-    const { result } = renderHook(() => useNpm());
+    const { result } = renderHook(() => useNpm(), { wrapper });
     await settle();
     expect(result.current.error).not.toBeNull();
     expect(statusMock).toHaveBeenCalledTimes(1);
@@ -124,5 +134,62 @@ describe('useNpm', () => {
     expect(statusMock).toHaveBeenCalledTimes(2);
     expect(result.current.error).toBeNull();
     expect(result.current.packages[0].scope).toBe('@web2bizz');
+  });
+
+  test('404: bounded retry (no storm), error surfaces, loading false', async () => {
+    statusImpl = async () => {
+      throw new FakeApiClientError({
+        code: 'not_found',
+        message: 'not found',
+        status: 404,
+        correlationId: 'corr-404',
+      });
+    };
+    const { result } = renderHook(() => useNpm(), { wrapper });
+    await settle(8);
+
+    // retry: 1 → at most 2 attempts, never a storm.
+    expect(statusMock.mock.calls.length).toBeLessThanOrEqual(2);
+    expect(result.current.loading).toBe(false);
+    expect(result.current.packages).toEqual([]);
+    expect(result.current.error).not.toBeNull();
+    expect(result.current.error).toContain('not_found');
+    expect(result.current.isEmpty).toBe(false);
+  });
+
+  test('403: bounded retry (no storm), error surfaces (forbidden)', async () => {
+    statusImpl = async () => {
+      throw new FakeApiClientError({
+        code: 'forbidden',
+        message: 'forbidden',
+        status: 403,
+        correlationId: 'corr-403',
+      });
+    };
+    const { result } = renderHook(() => useNpm(), { wrapper });
+    await settle(8);
+
+    expect(statusMock.mock.calls.length).toBeLessThanOrEqual(2);
+    expect(result.current.loading).toBe(false);
+    expect(result.current.error).not.toBeNull();
+    expect(result.current.error).toContain('forbidden');
+  });
+
+  test('reload keeps data (no skeleton flash, background refetch)', async () => {
+    const { result } = renderHook(() => useNpm(), { wrapper });
+    await settle();
+    expect(result.current.packages.length).toBe(1);
+    expect(result.current.loading).toBe(false);
+
+    act(() => {
+      result.current.reload();
+    });
+    // placeholderData keeps previous data — no skeleton flash.
+    expect(result.current.loading).toBe(false);
+    expect(result.current.packages.length).toBe(1);
+    await settle();
+
+    expect(statusMock).toHaveBeenCalledTimes(2);
+    expect(result.current.error).toBeNull();
   });
 });

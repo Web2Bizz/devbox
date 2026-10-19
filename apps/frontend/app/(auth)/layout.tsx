@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { AuthHeader } from '../../src/components/auth-header';
+import { AuthHeader } from '@/components/auth-header';
 
 /**
  * Route-group layout for (auth): flat URL /login.

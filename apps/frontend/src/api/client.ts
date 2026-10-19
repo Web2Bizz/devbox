@@ -66,12 +66,32 @@ export class ApiClientError extends Error {
 }
 
 async function request<T>(path: string, init: RequestInit = {}, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> {
+  const externalSignal = init.signal as AbortSignal | null | undefined;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   const correlationId = crypto.randomUUID();
+  const onExternalAbort = () => {
+    try {
+      ctrl.abort((externalSignal as AbortSignal).reason);
+    } catch {
+      ctrl.abort();
+    }
+  };
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      clearTimeout(timer);
+      const reason = (externalSignal as AbortSignal).reason;
+      throw reason instanceof Error
+        ? reason
+        : new DOMException('The operation was aborted.', 'AbortError');
+    }
+    externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+  }
   try {
+    const { signal: _externalIgnored, ...restInit } = init;
+    void _externalIgnored;
     const res = await fetch(`${BASE_URL}${path}`, {
-      ...init,
+      ...restInit,
       signal: ctrl.signal,
       headers: {
         'content-type': 'application/json',
@@ -97,6 +117,9 @@ async function request<T>(path: string, init: RequestInit = {}, timeoutMs = DEFA
   } catch (e) {
     if (e instanceof ApiClientError) throw e;
     if ((e as Error).name === 'AbortError') {
+      // React Query cancellation (queryFn signal) must stay an AbortError so
+      // the cancelled query does not surface as a timeout error in the UI.
+      if (externalSignal?.aborted) throw e;
       throw new ApiClientError({
         code: 'timeout',
         message: `Request timed out after ${timeoutMs}ms`,
@@ -112,6 +135,7 @@ async function request<T>(path: string, init: RequestInit = {}, timeoutMs = DEFA
     });
   } finally {
     clearTimeout(timer);
+    externalSignal?.removeEventListener('abort', onExternalAbort);
   }
 }
 
@@ -147,15 +171,25 @@ export const api = {
   // data. Unconfigured/unreachable answers 503 EXTERNAL_UNAVAILABLE
   // («сервис временно недоступен, повторите позже») with Retry-After —
   // surfaced here as ApiClientError (no mock payloads, never 200).
-  getRegistryCatalog: () =>
-    requestV1<RegistryCatalogResponse>('/registry/catalog'),
+  // No token: catalog is public reachability, auth lives server-side.
+  // Optional `signal` forwards React Query cancellation (queryFn signal)
+  // into the timeout controller — no local AbortController in hooks.
+  getRegistryCatalog: (opts?: { signal?: AbortSignal }) =>
+    requestV1<RegistryCatalogResponse>(
+      '/registry/catalog',
+      opts?.signal ? { signal: opts.signal } : {},
+    ),
   // npm surface: 200 always means live Verdaccio /-/ping reachability
   // ({ status: 'up', url, scope }); unconfigured/unreachable answers 503
   // EXTERNAL_UNAVAILABLE («сервис временно недоступен, повторите позже»)
   // with Retry-After — surfaced here as ApiClientError (no mock payloads,
   // token never in payload).
-  getNpmStatus: () =>
-    requestV1<NpmRegistryStatusResponse>('/registry/npm/status'),
+  // Optional `signal` forwards React Query cancellation (queryFn signal).
+  getNpmStatus: (opts?: { signal?: AbortSignal }) =>
+    requestV1<NpmRegistryStatusResponse>(
+      '/registry/npm/status',
+      opts?.signal ? { signal: opts.signal } : {},
+    ),
   // Auth surface (internal accounts): register/login issue the access +
   // rotating refresh pair; refresh/logout carry `credentials: 'include'` so
   // the httpOnly `devbox-refresh` cookie travels cross-origin (frontend

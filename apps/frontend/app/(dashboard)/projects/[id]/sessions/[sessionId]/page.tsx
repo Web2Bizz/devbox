@@ -3,12 +3,12 @@
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@web2bizz/ui/components';
-import { ChatInput } from '../../../../../../src/components/chat/chat-input';
-import { ChatWindow } from '../../../../../../src/components/chat/chat-window';
-import { EmptyState, ErrorState, LoadingState } from '../../../../../../src/components/states';
-import { useChat } from '../../../../../../src/hooks/useChat';
-import { useProject } from '../../../../../../src/hooks/useProject';
-import { useI18n } from '../../../../../../src/i18n';
+import { ChatInput } from '@/components/chat/chat-input';
+import { ChatWindow } from '@/components/chat/chat-window';
+import { EmptyState, ErrorState, LoadingState } from '@/components/states';
+import { useChat } from '@/hooks/useChat';
+import { useProject } from '@/hooks/useProject';
+import { useI18n } from '@/i18n';
 
 /**
  * Route: /projects/[id]/sessions/[sessionId] — session = chat.

@@ -14,11 +14,11 @@ import {
   CardTitle,
   Switch,
 } from '@web2bizz/ui/components';
-import { EmptyState, ErrorState, LoadingState } from '../../../src/components/states';
-import { useAiProviders } from '../../../src/hooks/useAiProviders';
-import { useOpencodeEvents } from '../../../src/hooks/useOpencodeEvents';
-import { useI18n } from '../../../src/i18n';
-import type { AiProviderStatus } from '../../../src/lib/types';
+import { EmptyState, ErrorState, LoadingState } from '@/components/states';
+import { useAiProviders } from '@/hooks/useAiProviders';
+import { useOpencodeEvents } from '@/hooks/useOpencodeEvents';
+import { useI18n } from '@/i18n';
+import type { AiProviderStatus } from '@/lib/types';
 
 function statusColor(status: AiProviderStatus) {
   if (status === 'connected') return 'success' as const;

@@ -12,10 +12,10 @@ import {
   CardHeader,
   CardTitle,
 } from '@web2bizz/ui/components';
-import { EmptyState, ErrorState, LoadingState } from '../../../src/components/states';
-import { CreateOrganizationDialog } from '../../../src/components/organizations/create-organization-dialog';
-import { useOrganizations } from '../../../src/hooks/useOrganizations';
-import { useI18n } from '../../../src/i18n';
+import { EmptyState, ErrorState, LoadingState } from '@/components/states';
+import { CreateOrganizationDialog } from '@/components/organizations/create-organization-dialog';
+import { useOrganizations } from '@/hooks/useOrganizations';
+import { useI18n } from '@/i18n';
 
 /**
  * Route: /organizations — membership-scoped list + create.

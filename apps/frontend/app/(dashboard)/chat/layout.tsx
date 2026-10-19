@@ -1,8 +1,8 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { cookies } from 'next/headers';
-import { en } from '../../../src/i18n/dictionaries/en';
-import { ru } from '../../../src/i18n/dictionaries/ru';
+import { en } from '@/i18n/dictionaries/en';
+import { ru } from '@/i18n/dictionaries/ru';
 
 /**
  * Segment metadata for /chat: localized via the `devbox-locale` cookie

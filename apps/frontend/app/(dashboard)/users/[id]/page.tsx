@@ -7,9 +7,9 @@ import {
   EmptyState,
   ErrorState,
   ProjectDetailSkeleton,
-} from '../../../../src/components/states';
-import { useUser } from '../../../../src/hooks/useUser';
-import { useI18n } from '../../../../src/i18n';
+} from '@/components/states';
+import { useUser } from '@/hooks/useUser';
+import { useI18n } from '@/i18n';
 
 /**
  * Route: /users/[id] — private single profile (GET /api/v1/users/:id).

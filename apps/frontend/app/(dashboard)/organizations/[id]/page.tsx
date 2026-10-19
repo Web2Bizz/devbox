@@ -16,15 +16,15 @@ import {
   EmptyState,
   ErrorState,
   ProjectDetailSkeleton,
-} from '../../../../src/components/states';
-import { useOrganization } from '../../../../src/hooks/useOrganization';
-import { useOrgMembers } from '../../../../src/hooks/useOrgMembers';
-import { useInvite } from '../../../../src/hooks/useInvite';
-import { useProfile } from '../../../../src/hooks/useProfile';
-import { ApiClientError, api } from '../../../../src/api/client';
-import { getValidAccessToken } from '../../../../src/lib/auth-store';
-import type { OrgRole } from '../../../../src/api/types';
-import { useI18n } from '../../../../src/i18n';
+} from '@/components/states';
+import { useOrganization } from '@/hooks/useOrganization';
+import { useOrgMembers } from '@/hooks/useOrgMembers';
+import { useInvite } from '@/hooks/useInvite';
+import { useProfile } from '@/hooks/useProfile';
+import { ApiClientError, api } from '@/api/client';
+import { getValidAccessToken } from '@/lib/auth-store';
+import type { OrgRole } from '@/api/types';
+import { useI18n } from '@/i18n';
 
 function shortId(id: string): string {
   return id.length > 8 ? `${id.slice(0, 8)}…` : id;

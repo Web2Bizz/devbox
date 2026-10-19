@@ -2,8 +2,8 @@
 
 import { useEffect } from 'react';
 import { Alert, AlertDescription, AlertTitle, Button } from '@web2bizz/ui/components';
-import { formatApiError } from '../src/lib/format-error';
-import { useI18n } from '../src/i18n';
+import { formatApiError } from '@/lib/format-error';
+import { useI18n } from '@/i18n';
 
 export default function RootError({
   error,

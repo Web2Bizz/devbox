@@ -1,7 +1,7 @@
 'use client';
 
-import { RegistryHub } from '../../../src/components/registry-hub';
-import { useI18n } from '../../../src/i18n';
+import { RegistryHub } from '@/components/registry-hub';
+import { useI18n } from '@/i18n';
 
 /**
  * Route: /registry — hub with two Card links (Docker → /registry/docker,

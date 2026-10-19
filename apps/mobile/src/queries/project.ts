@@ -6,10 +6,10 @@
 // The Zustand connections store no longer mirrors this data: hooks below are
 // the single source of truth.
 import { useQuery } from "@tanstack/react-query"
-import { useConnections } from "../stores/connections"
-import { queryKeys } from "../lib/query-keys"
-import { ApiError, type Project } from "../lib/sdk"
-import { parseGitConfigRemotes, toRepoLinks, type RepoLink } from "../lib/git-remotes"
+import { useConnections } from "@/stores/connections"
+import { queryKeys } from "@/lib/query-keys"
+import { ApiError, type Project } from "@/lib/sdk"
+import { parseGitConfigRemotes, toRepoLinks, type RepoLink } from "@/lib/git-remotes"
 
 export interface ProjectInfo {
   project: Project | null

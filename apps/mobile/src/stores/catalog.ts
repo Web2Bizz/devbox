@@ -1,7 +1,7 @@
 import { create } from "zustand"
-import type { Agent } from "../lib/sdk"
-import { chooseModelSelection } from "../lib/model-selection"
-import { type ParsedCatalog, type Provider, type ProviderModel } from "../lib/catalog-parse"
+import type { Agent } from "@/lib/sdk"
+import { chooseModelSelection } from "@/lib/model-selection"
+import { type ParsedCatalog, type Provider, type ProviderModel } from "@/lib/catalog-parse"
 
 // Re-exported so existing `import type { Provider } from "../stores/catalog"`
 // call sites (SessionInfo) keep working.

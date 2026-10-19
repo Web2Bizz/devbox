@@ -4,7 +4,7 @@ import { Stack, useRouter } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
 import { useTranslation } from "react-i18next"
 import { MessageBubble, PermissionPrompt } from "@web2bizz/ui-native"
-import { buildDemoScript, buildDemoCompletionMessage, buildDemoDenialMessage } from "../src/lib/demo-script"
+import { buildDemoScript, buildDemoCompletionMessage, buildDemoDenialMessage } from "@/lib/demo-script"
 import { colors } from "@web2bizz/ui-native"
 
 // Reply values of PermissionPrompt's `onReply` (see

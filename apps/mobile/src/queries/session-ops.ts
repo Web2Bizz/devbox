@@ -8,13 +8,13 @@
 // HTTP response) and message history merging is subscription state, not a
 // snapshot. See the sessions store.
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { ApiError, type Client } from "../lib/sdk"
-import { extractPromptFromParts, type PromptFromParts } from "../lib/prompt-from-parts"
-import { useConnections } from "../stores/connections"
-import { useEvents, type PermissionRequest, type QuestionRequest } from "../stores/events"
-import { abortedSessions, useSessions } from "../stores/sessions"
-import { queryKeys } from "../lib/query-keys"
-import type { ListedSession } from "../lib/listed-session"
+import { ApiError, type Client } from "@/lib/sdk"
+import { extractPromptFromParts, type PromptFromParts } from "@/lib/prompt-from-parts"
+import { useConnections } from "@/stores/connections"
+import { useEvents, type PermissionRequest, type QuestionRequest } from "@/stores/events"
+import { abortedSessions, useSessions } from "@/stores/sessions"
+import { queryKeys } from "@/lib/query-keys"
+import type { ListedSession } from "@/lib/listed-session"
 
 export type RevertResult = ({ ok: true } & PromptFromParts) | { ok: false; reason: "unsupported" | "auth" | "error" }
 

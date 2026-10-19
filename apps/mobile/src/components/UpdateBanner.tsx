@@ -15,7 +15,7 @@ import { View, Text, TouchableOpacity, StyleSheet, Linking } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { useTranslation } from "react-i18next"
 import { colors } from "@web2bizz/ui-native"
-import { checkForUpdate, dismissUpdate, CURRENT_VERSION, type AvailableUpdate } from "../lib/update-check"
+import { checkForUpdate, dismissUpdate, CURRENT_VERSION, type AvailableUpdate } from "@/lib/update-check"
 
 export function UpdateBanner({ isDark }: { isDark: boolean }) {
   const { t } = useTranslation()

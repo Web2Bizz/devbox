@@ -1,5 +1,5 @@
 import { create } from "zustand"
-import type { MockRepo } from "../lib/github-mock"
+import type { MockRepo } from "@/lib/github-mock"
 
 // UI-only stub. Backend will later replace addCloned() with a real
 // clone call; the shape { id, name, fullName, path } is kept stable

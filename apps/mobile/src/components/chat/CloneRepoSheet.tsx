@@ -10,9 +10,9 @@ import BottomSheet, {
 import { useTranslation } from "react-i18next"
 import { shouldCapSheetContent, sheetContentCap, SheetHandle } from "@web2bizz/ui-native"
 import { colors } from "@web2bizz/ui-native"
-import { filterMockRepos, type MockRepo } from "../../lib/github-mock"
-import { useClonedProjects } from "../../stores/cloned-projects"
-import { useConnections } from "../../stores/connections"
+import { filterMockRepos, type MockRepo } from "@/lib/github-mock"
+import { useClonedProjects } from "@/stores/cloned-projects"
+import { useConnections } from "@/stores/connections"
 
 interface Props {
   // Parent-owned ref — the sheet is UNCONTROLLED (no `visible` prop): the

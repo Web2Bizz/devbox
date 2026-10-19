@@ -9,12 +9,12 @@
 import React from "react"
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native"
 import { colors } from "@web2bizz/ui-native"
-import { buildCrashReport, shareReport } from "../lib/diagnostics"
-import { log } from "../lib/logbuffer"
+import { buildCrashReport, shareReport } from "@/lib/diagnostics"
+import { log } from "@/lib/logbuffer"
 // Class component — can't use the useTranslation() hook, so resolve strings
 // via the shared i18next instance directly (already initialized by the time
 // this can render, since app/_layout.tsx imports it before mounting).
-import i18n from "../lib/i18n/config"
+import i18n from "@/lib/i18n/config"
 
 interface Props {
   children: React.ReactNode

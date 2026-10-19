@@ -8,10 +8,10 @@
 //   seeded from the snapshot via reseed() — selections are client state,
 //   React Query must not own them.
 import { useQuery } from "@tanstack/react-query"
-import { useConnections } from "../stores/connections"
-import { queryKeys } from "../lib/query-keys"
-import { parseCatalogResponse, type ParsedCatalog, type RawProviderList } from "../lib/catalog-parse"
-import type { Agent, Command } from "../lib/sdk"
+import { useConnections } from "@/stores/connections"
+import { queryKeys } from "@/lib/query-keys"
+import { parseCatalogResponse, type ParsedCatalog, type RawProviderList } from "@/lib/catalog-parse"
+import type { Agent, Command } from "@/lib/sdk"
 
 // Shared fetcher behind both useCatalogData() and the connect-time prefetch
 // in app/_layout.tsx — reads the current client lazily so it never closes

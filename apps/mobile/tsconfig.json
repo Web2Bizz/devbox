@@ -5,6 +5,7 @@
     "types": ["node"],
     "paths": {
       "@/*": ["./src/*"],
+      "@app/*": ["./app/*"],
       "@web2bizz/ui-native": ["./packages/uikit/src/index.ts"],
       "@web2bizz/ui-native/*": ["./packages/uikit/src/*"],
       // TODO: deprecated alias @opencode-ai/uikit — удалить через 1 релиз (rename → @web2bizz/ui-native).

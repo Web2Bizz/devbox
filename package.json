@@ -6,7 +6,8 @@
   "packageManager": "bun@1.4.2",
   "workspaces": [
     "apps/backend",
-    "apps/frontend"
+    "apps/frontend",
+    "packages/contracts"
   ],
   "scripts": {
     "dev": "pm2 start ecosystem.config.cjs --update-env || pm2 restart ecosystem.config.cjs --update-env",
@@ -19,10 +20,10 @@
     "dev:pm2:logs": "pm2 logs",
     "dev:pm2:stop": "pm2 delete ecosystem.config.cjs",
     "dev:pm2:restart": "pm2 restart ecosystem.config.cjs",
-    "build": "bun --filter backend build && bun --filter frontend build",
-    "build:backend": "bun --filter backend build",
-    "build:frontend": "bun --filter frontend build",
-    "lint": "bun --filter backend lint && bun --filter frontend lint",
+    "build": "bun --filter @devbox/contracts build && bun --filter backend build && bun --filter frontend build",
+    "build:backend": "bun --filter @devbox/contracts build && bun --filter backend build",
+    "build:frontend": "bun --filter @devbox/contracts build && bun --filter frontend build",
+    "lint": "bun --filter @devbox/contracts build && bun --filter backend lint && bun --filter frontend lint",
     "test": "bun --filter backend test && bun --filter frontend test"
   },
   "engines": {

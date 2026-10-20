@@ -6,11 +6,13 @@
     "paths": {
       "@/*": ["./src/*"],
       "@/utils/*": ["./src/shared/utils/*"],
+      "@/hooks/*": ["./src/shared/hooks/*"],
       "@/api/*": ["./src/shared/api/*"],
       "@/stores/*": ["./src/shared/stores/*"],
       "@/shared/*": ["./src/shared/*"],
       "@shared/*": ["./src/shared/*"],
       "@utils/*": ["./src/shared/utils/*"],
+      "@hooks/*": ["./src/shared/hooks/*"],
       "@api/*": ["./src/shared/api/*"],
       "@stores/*": ["./src/shared/stores/*"],
       "@app/*": ["./app/*"],

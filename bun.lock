@@ -15,6 +15,7 @@
       "name": "backend",
       "version": "0.1.0",
       "dependencies": {
+        "@devbox/contracts": "workspace:*",
         "@nestjs/common": "^12.1.0",
         "@nestjs/config": "^12.0.1",
         "@nestjs/core": "^12.1.0",
@@ -46,6 +47,7 @@
       "name": "frontend",
       "version": "0.1.0",
       "dependencies": {
+        "@devbox/contracts": "workspace:*",
         "@hookform/resolvers": "5.9.1",
         "@opencode-ai/sdk": "1.18.33",
         "@tanstack/react-query": "^5.104.1",
@@ -69,6 +71,16 @@
         "bun-types": "^1.4.2",
         "happy-dom": "^20.14.5",
         "typescript": "^5.6.2",
+      },
+    },
+    "packages/contracts": {
+      "name": "@devbox/contracts",
+      "version": "0.1.0",
+      "dependencies": {
+        "zod": "^4.6.5",
+      },
+      "peerDependencies": {
+        "zod": "^4.6.5",
       },
     },
   },
@@ -118,6 +130,8 @@
     "@corvu/utils": ["@corvu/utils@0.4.2", "", { "dependencies": { "@floating-ui/dom": "^1.6.11" }, "peerDependencies": { "solid-js": "^1.8" } }, "sha512-Ox2kYyxy7NoXdKWdHeDEjZxClwzO4SKM8plAaVwmAJPxHMqA0rLOoAsa+hBDwRLpctf+ZRnAd/ykguuJidnaTA=="],
 
     "@date-fns/tz": ["@date-fns/tz@1.5.0", "", {}, "sha512-lwYN/vDPeNRULcepoE/LO2Pgx+7/RV+S9ARfbc9lr2DtGkOD7pAiruHvbR1RX3Qyf6ja47EWJDMsNK5vK08DJg=="],
+
+    "@devbox/contracts": ["@devbox/contracts@workspace:packages/contracts"],
 
     "@drizzle-team/brocli": ["@drizzle-team/brocli@0.10.2", "", {}, "sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w=="],
 

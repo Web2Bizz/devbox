@@ -220,10 +220,13 @@ Volumes: `opencode-*` (workspace/ssh/gh-config/pnpm-store/pm2/opencode-data/secr
 | `bun run dev:shutdown` | stop cluster + kill pm2 daemon        |
 | `bun run dev:backend`| backend dev (`bun --bun nest start --watch`, :3000) |
 | `bun run dev:frontend`| frontend dev (next dev, :3001)        |
-| `bun run build`      | build all workspaces (`bun --filter …`); in CI the same goes via `nx affected` (touched projects only) |
-| `bun run lint`       | `tsc --noEmit` + `biome lint` per workspace (Biome replaces eslint — no eslint config left) |
-| `bun run test`       | `bun test --pass-with-no-tests` per workspace; in CI via `nx affected` (backend tests run on `dist`, so build precedes test) |
+| `bun run build`      | `nx run-many -t build` (all projects; `build:backend` / `build:frontend` per app, `build:affected` for touched only) |
+| `bun run lint`       | `nx run-many -t lint` (`tsc --noEmit` + `biome lint` per project; `lint:affected` for touched only; Biome replaces eslint — no eslint config left) |
+| `bun run test`       | `nx run-many -t test` (per-project runner; `test:affected` for touched only; backend tests run on `dist`, so build precedes test) |
+| `bun run graph`      | `nx graph` (project dependency graph) |
 | `docker compose up -d` | full stack from registry images (backend + frontend + opencode; postgres внешний) |
+
+`dev` / `dev:backend` / `dev:frontend` stay on `bun --filter` with a contracts prebuild — PM2 goes past nx. `bun --filter <app> <script>` remains as low-level direct access.
 
 `apps/mobile` is **not** in `workspaces` and has no `bun --filter` script — it
 is a separate npm project run from its own directory:

@@ -259,8 +259,11 @@ Phase C — frontend (hook interiors only, caller contracts frozen):
     test fixtures only (or deleted when e2e covers real flow).
 11. Token storage: in-memory (+ `HttpOnly` cookie only in phase 2); logout
     clears it; 401 from `requestV1` triggers logout + login redirect.
-12. `bun --filter frontend lint` (`tsc --noEmit`) + `next build --turbopack`
-    after every hook change (per `AGENTS.md` frontend checks).
+12. `bun run lint` (`nx run-many -t lint`: `tsc --noEmit` + `biome lint`) +
+    `bun run build` (`nx run-many -t build`, frontend → `next build --turbopack`)
+    after every hook change (per `AGENTS.md` frontend checks; pinpoint with
+    `lint:affected` / `build:affected`, graph via `bun run graph`;
+    low-level — `bun --filter frontend <script>`).
 
 Phase D — cleanup:
 

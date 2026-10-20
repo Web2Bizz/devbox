@@ -32,8 +32,13 @@ package.json, не Nx-проект, вне bun workspaces).
   гейты mobile-приложения.
 - Порядок стилей: `@web2bizz/ui/styles.css` → `globals.css`
   (source order, не менять). Hex — только `:root` / `.dark`.
-- Проверки после правок фронта: `bun --filter frontend lint`
-  (`tsc --noEmit`) + `bun --filter frontend build` (`next build --turbopack`).
+- Проверки после правок фронта: `bun run lint` (`nx run-many -t lint`:
+  `tsc --noEmit` + `biome lint` per project) + `bun run build`
+  (`nx run-many -t build`, фронт → `next build --turbopack`). Точечно —
+  `bun run lint:affected` / `bun run build:affected` (`nx affected -t …`),
+  граф — `bun run graph`. Низкоуровнево — `bun --filter <app> <script>`
+  напрямую; dev-чейны (`dev`, `dev:backend`, `dev:frontend`) остаются на
+  `bun --filter` с prebuild контрактов — PM2 идёт мимо nx.
   После правок mobile — гейты из `apps/mobile/AGENTS.md` (npm, не bun).
 
 ## Frontend — слои (apps/frontend)

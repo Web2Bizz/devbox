@@ -17,6 +17,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
     "lint": "tsc --noEmit -p tsconfig.json",
     "test": "bun test --isolate --pass-with-no-tests src"
   },

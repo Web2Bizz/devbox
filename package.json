@@ -10,21 +10,25 @@
     "packages/contracts"
   ],
   "scripts": {
-    "dev": "pm2 start ecosystem.config.cjs --update-env || pm2 restart ecosystem.config.cjs --update-env",
+    "dev": "bun --filter @devbox/contracts build && (pm2 start ecosystem.config.cjs --update-env || pm2 restart ecosystem.config.cjs --update-env)",
     "dev:shutdown": "pm2 delete ecosystem.config.cjs || true; pm2 kill || true",
     "dev:restart": "pm2 restart ecosystem.config.cjs --update-env",
     "dev:logs": "pm2 logs",
-    "dev:backend": "bun --filter backend dev",
-    "dev:frontend": "bun --filter frontend dev",
+    "dev:backend": "bun --filter @devbox/contracts build && bun --filter backend dev",
+    "dev:frontend": "bun --filter @devbox/contracts build && bun --filter frontend dev",
     "dev:pm2": "pm2 start ecosystem.config.cjs",
     "dev:pm2:logs": "pm2 logs",
     "dev:pm2:stop": "pm2 delete ecosystem.config.cjs",
     "dev:pm2:restart": "pm2 restart ecosystem.config.cjs",
-    "build": "bun --filter @devbox/contracts build && bun --filter backend build && bun --filter frontend build",
-    "build:backend": "bun --filter @devbox/contracts build && bun --filter backend build",
-    "build:frontend": "bun --filter @devbox/contracts build && bun --filter frontend build",
-    "lint": "bun --filter @devbox/contracts build && bun --filter backend lint && bun --filter frontend lint",
-    "test": "bun --filter backend test && bun --filter frontend test"
+    "build": "bunx nx run-many -t build",
+    "build:backend": "bunx nx run backend:build",
+    "build:frontend": "bunx nx run frontend:build",
+    "build:affected": "bunx nx affected -t build",
+    "lint": "bunx nx run-many -t lint",
+    "lint:affected": "bunx nx affected -t lint",
+    "test": "bunx nx run-many -t test",
+    "test:affected": "bunx nx affected -t test",
+    "graph": "bunx nx graph"
   },
   "engines": {
     "node": ">=22",

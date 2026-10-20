@@ -297,5 +297,23 @@ module.exports = {
       autorestart: true,
       env: { ...sharedEnv },
     },
+    {
+      // Local PM2 dev only (same file scope as above — prod/compose use
+      // registry images via docker-compose.yml and never read ecosystem).
+      // Rebuilds @devbox/contracts dist on src change via the package's own
+      // `dev` script (tsc --watch, same compiler as build, output 1:1).
+      // PM2 `watch` stays off — tsc watches itself; autorestart only on crash.
+      // Logs: PM2 default per-app files (as with backend/frontend, no
+      // explicit out_file/error_file): `pm2 logs contracts-watch`.
+      name: 'contracts-watch',
+      cwd: './packages/contracts',
+      script: 'bun',
+      args: 'run dev',
+      instances: 1,
+      exec_mode: 'fork',
+      watch: false,
+      autorestart: true,
+      env: { ...sharedEnv },
+    },
   ],
 };

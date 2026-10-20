@@ -1,17 +1,17 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { AppLogger } from '../common/app-logger.service.js';
-import { ExternalServiceError } from '../common/external/external-error.js';
-import { storageUnavailable } from '../storage/storage-unavailable.js';
-import { WorkspacePathService } from './workspace-path.service.js';
-import { readSubmodules, type SubmoduleEntry } from './workspace-submodules.util.js';
+import { AppLogger } from '../common/app-logger.service';
+import { ExternalServiceError } from '../common/external/external-error';
+import { storageUnavailable } from '../storage/storage-unavailable';
+import { WorkspacePathService } from './workspace-path.service';
+import { readSubmodules, type SubmoduleEntry } from './workspace-submodules.util';
 
-export interface WorkspaceTreeNode {
+export type WorkspaceTreeNode = {
   path: string;
   type: 'file' | 'dir';
   children?: WorkspaceTreeNode[];
-}
+};
 
 const MAX_DEPTH = 5;
 const MAX_ENTRIES = 200;

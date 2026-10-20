@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
-import { ReposController } from './repos.controller.js';
-import { ReposService } from './repos.service.js';
+import { ReposController } from './repos.controller';
+import { ReposService } from './repos.service';
 
 /**
  * ReposModule — readonly git-repo registry

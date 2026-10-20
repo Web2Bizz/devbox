@@ -48,14 +48,14 @@ export function verifyWebhookSignature(
 }
 
 /** Minimal shape of the `installation` webhook event we handle. */
-export interface InstallationWebhookPayload {
+export type InstallationWebhookPayload = {
   action?: string;
   installation?: {
     id?: number;
     account?: { login?: string; type?: string };
     suspended_at?: string | null;
   };
-}
+};
 
 /** Actions we act on; anything else (e.g. installation_repositories) is acked. */
 export const INSTALLATION_ACTIONS = new Set([

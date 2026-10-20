@@ -1,9 +1,9 @@
 import { Module, forwardRef } from '@nestjs/common';
-import { OrganizationsModule } from '../../organizations/organizations.module.js';
-import { WorkspacePathService } from '../../workspaces/workspace-path.service.js';
-import { ProjectsModule } from '../projects.module.js';
-import { ProjectFilesController } from './project-files.controller.js';
-import { ProjectFilesService } from './project-files.service.js';
+import { OrganizationsModule } from '../../organizations/organizations.module';
+import { WorkspacePathService } from '../../workspaces/workspace-path.service';
+import { ProjectsModule } from '../projects.module';
+import { ProjectFilesController } from './project-files.controller';
+import { ProjectFilesService } from './project-files.service';
 
 /**
  * Nested readonly module — imported by ProjectsModule only.

@@ -2450,6 +2450,7 @@ components:
       properties:
         status:
           type: string
+          enum: [ok]
           example: ok
         db:
           type: string
@@ -2892,6 +2893,8 @@ components:
           type: string
           nullable: true
           description: "Machine reason when corrupted (missing-dir, no-git, rev-parse-failed, fsck-failed, timeout, storage-unconfigured, …). storage-unconfigured = REPOS_ROOT empty (required for project writes; fallback chain is readonly-registry only)"
+        scope:
+          $ref: '#/components/schemas/ProjectScope'
     CreateProject:
       type: object
       required: [name]

@@ -1,12 +1,12 @@
 import { Injectable, InternalServerErrorException } from "@nestjs/common";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { AppLogger } from "../common/app-logger.service.js";
+import { AppLogger } from "../common/app-logger.service";
 import {
   DEFAULT_OPENCODE_KEYS_ACTIVE_KEY_ID,
   DEFAULT_OPENCODE_KEYS_PREVIOUS_KEY_ID,
   MIN_OPENCODE_KEYS_ENCRYPTION_KEY_LENGTH,
   OPENCODE_KEYS_KEY_ID_PATTERN,
-} from "../env.js";
+} from "../env";
 
 /** AES-256-GCM params: 12-byte IV, 16-byte auth tag (both base64 at rest). */
 const IV_BYTES = 12;
@@ -20,34 +20,34 @@ const TAG_BYTES = 16;
  *   id (`undefined`/empty) and decrypt via the dual-read fallback.
  * - `iv` is base64(12-byte random IV), `data` is base64(ciphertext || tag).
  */
-export interface EncryptedOpencodeKey {
+export type EncryptedOpencodeKey = {
   /** KEK version id (e.g. "v1"); never a secret, stored in plaintext. */
   keyId: string;
   /** base64(12-byte random IV) */
   iv: string;
   /** base64(ciphertext || 16-byte auth tag) */
   data: string;
-}
+};
 
 /** Decrypt input — `keyId` is optional so pre-versioning rows stay readable. */
-export interface EncryptedOpencodeKeyInput {
+export type EncryptedOpencodeKeyInput = {
   /** KEK version id, or missing/empty for legacy rows. */
   keyId?: string | null;
   /** base64(12-byte random IV) */
   iv: string;
   /** base64(ciphertext || 16-byte auth tag) */
   data: string;
-}
+};
 
-interface KeyEntry {
+type KeyEntry = {
   id: string;
   key: Buffer;
-}
+};
 
-interface Keyring {
+type Keyring = {
   active: KeyEntry;
   previous?: KeyEntry;
-}
+};
 
 function unconfigured(): InternalServerErrorException {
   return new InternalServerErrorException({

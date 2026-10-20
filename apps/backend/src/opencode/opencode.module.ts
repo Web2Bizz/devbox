@@ -1,7 +1,7 @@
 import { Global, Module } from '@nestjs/common';
-import { OpencodeService } from './opencode.service.js';
-import { OpencodeSdkClient } from './opencode-client.js';
-import { OpencodeController } from './opencode.controller.js';
+import { OpencodeService } from './opencode.service';
+import { OpencodeSdkClient } from './opencode-client';
+import { OpencodeController } from './opencode.controller';
 
 /**
  * Global opencode module (mirrors CommonModule) — OpencodeService is

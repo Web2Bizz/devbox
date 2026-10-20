@@ -94,9 +94,9 @@ async function main(): Promise<void> {
   const saved = saveEnv();
   setKeyring(ACTIVE_A);
 
-  const { CryptoService } = await import("./crypto.service.js");
-  const { OpencodeBillingService } = await import("./opencode-billing.service.js");
-  const { AppLogger } = await import("../common/app-logger.service.js");
+  const { CryptoService } = await import("./crypto.service");
+  const { OpencodeBillingService } = await import("./opencode-billing.service");
+  const { AppLogger } = await import("../common/app-logger.service");
 
   let passed = 0;
   const check = async (name: string, fn: () => void | Promise<void>): Promise<void> => {

@@ -3,7 +3,7 @@
 NestJS 12 API that fronts the live opencode server (migrated from `node:http`).
 
 Contract: [`contracts/openapi.yaml`](../../contracts/openapi.yaml) ·
-DTOs: [`src/contracts.ts`](./src/contracts.ts) (duplicated in frontend, no cross-imports).
+DTOs: [`@devbox/contracts`](../../packages/contracts/src/index.ts) (single source of truth; [`src/contracts.ts`](./src/contracts.ts) is a deprecated re-export).
 
 ## Stack (pinned)
 

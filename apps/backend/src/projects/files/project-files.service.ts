@@ -1,18 +1,18 @@
 import { ForbiddenException, Inject, Injectable, NotFoundException, forwardRef } from '@nestjs/common';
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
-import { AppLogger } from '../../common/app-logger.service.js';
-import { ExternalServiceError } from '../../common/external/external-error.js';
-import { storageUnavailable, throwStorageNotConfigured } from '../../storage/storage-unavailable.js';
-import { OrganizationsService } from '../../organizations/organizations.service.js';
-import { WorkspacePathService } from '../../workspaces/workspace-path.service.js';
-import { ProjectsService, ownerKeyOrThrow } from '../projects.service.js';
+import { AppLogger } from '../../common/app-logger.service';
+import { ExternalServiceError } from '../../common/external/external-error';
+import { storageUnavailable, throwStorageNotConfigured } from '../../storage/storage-unavailable';
+import { OrganizationsService } from '../../organizations/organizations.service';
+import { WorkspacePathService } from '../../workspaces/workspace-path.service';
+import { ProjectsService, ownerKeyOrThrow } from '../projects.service';
 
-export interface FileNode {
+export type FileNode = {
   path: string;
   type: 'file' | 'dir';
   children?: FileNode[];
-}
+};
 
 const MAX_DEPTH = 5;
 

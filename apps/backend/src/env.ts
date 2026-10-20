@@ -16,7 +16,7 @@ import {
   resolve as resolvePath,
 } from "node:path";
 
-export interface AppEnv {
+export type AppEnv = {
   backendPort: number;
   backendHost: string;
   backendProtocol: "http" | "https";
@@ -160,7 +160,7 @@ export interface AppEnv {
    * intentionally unsupported (one server-wide policy, auditable).
    */
   orgInviteTtlSec: number;
-}
+};
 
 // --- zod@4 primitive schemas (Standard Schema compatible) --------------------
 
@@ -597,7 +597,7 @@ export function findSuspiciousUnknownKeys(source: NodeJS.ProcessEnv): string[] {
   return out.sort();
 }
 
-export interface EnvValidation {
+export type EnvValidation = {
   env: AppEnv;
   /**
    * Non-fatal notices (`[env] WARN ...`, never fatal, never secret-bearing).
@@ -605,7 +605,7 @@ export interface EnvValidation {
    * main.ts logs them once at boot via AppLogger.
    */
   warnings: string[];
-}
+};
 
 export function validateEnvWithWarnings(
   source: NodeJS.ProcessEnv = process.env,

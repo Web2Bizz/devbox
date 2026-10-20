@@ -8,13 +8,13 @@ import type { RegistryItem } from '../lib/types';
 import { useI18n } from '../i18n';
 import { REGISTRIES_QUERY_KEY } from './query-keys';
 
-export interface UseRegistriesResult {
+export type UseRegistriesResult = {
   registries: RegistryItem[];
   loading: boolean;
   error: string | null;
   isEmpty: boolean;
   reload: () => void;
-}
+};
 
 /**
  * Shared fetch — GET /api/v1/registry/catalog without a token (public

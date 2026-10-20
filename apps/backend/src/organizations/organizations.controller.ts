@@ -14,12 +14,12 @@ import {
   Version,
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiResponse, ApiTags } from "@nestjs/swagger";
-import { JwtAuthGuard } from "../auth/jwt-auth.guard.js";
-import { ReqUser } from "../auth/req-user.decorator.js";
-import type { RequestIdentity } from "../auth/identity.service.js";
-import { NoIndexInterceptor } from "../common/noindex.interceptor.js";
-import { ZodValidationPipe } from "../common/zod-validation.pipe.js";
-import { V1Endpoint } from "../api/version.js";
+import { JwtAuthGuard } from "../auth/jwt-auth.guard";
+import { ReqUser } from "../auth/req-user.decorator";
+import type { RequestIdentity } from "../auth/identity.service";
+import { NoIndexInterceptor } from "../common/noindex.interceptor";
+import { ZodValidationPipe } from "../common/zod-validation.pipe";
+import { V1Endpoint } from "../api/version";
 import {
   OrganizationDto,
   OrganizationInviteDto,
@@ -36,8 +36,8 @@ import {
   type CreateOrganizationInput,
   type UpdateMemberRoleInput,
   type UpdateOrganizationInput,
-} from "./dto.js";
-import { OrganizationsService } from "./organizations.service.js";
+} from "./dto";
+import { OrganizationsService } from "./organizations.service";
 
 /**
  * Organizations CRUD + membership + single-use invites + project links.

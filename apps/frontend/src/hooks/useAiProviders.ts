@@ -8,7 +8,7 @@ import type { AiProvider } from '../lib/types';
 import { useI18n } from '../i18n';
 import { aiProvidersQueryKey } from './query-keys';
 
-export interface UseAiProvidersResult {
+export type UseAiProvidersResult = {
   providers: AiProvider[];
   loading: boolean;
   error: string | null;
@@ -18,7 +18,7 @@ export interface UseAiProvidersResult {
   configure: (id: string) => void;
   reload: () => void;
   dismiss: () => void;
-}
+};
 
 /**
  * Shared fetch — GET /api/opencode/config/providers without auth (the

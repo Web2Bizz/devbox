@@ -1,9 +1,9 @@
 import { Controller, Get, Headers, Version } from '@nestjs/common';
 import { ApiResponse, ApiTags } from '@nestjs/swagger';
-import { V1Endpoint } from '../api/version.js';
-import { ApiErrorDto } from '../api/dto.js';
-import { DockerRegistryService } from './docker-registry.service.js';
-import { RegistryCatalogDto } from './dto.js';
+import { V1Endpoint } from '../api/version';
+import { ApiErrorDto } from '../api/dto';
+import { DockerRegistryService } from './docker-registry.service';
+import { RegistryCatalogDto } from './dto';
 
 /**
  * Docker Registry HTTP API v2 — minimal read surface (GET only).

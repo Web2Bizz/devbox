@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Progress, Skeleton } from '@web2bizz/ui/components';
 import { EmptyState, ErrorState } from '../../components/states';
-import type { OpencodeLimitBucket } from '../../api/types';
+import type { OpencodeLimitBucket } from '@devbox/contracts';
 import { useI18n } from '../../i18n';
 import { useUsage } from '../../hooks/useUsage';
 import { ApiKeyDialog } from './api-key-dialog';

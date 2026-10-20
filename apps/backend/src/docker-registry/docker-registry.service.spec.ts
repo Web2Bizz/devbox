@@ -13,17 +13,17 @@
  * Also executes under `bun test dist` (top-level run, throws on failure).
  */
 import assert from 'node:assert/strict';
-import { AppLogger } from '../common/app-logger.service.js';
-import { ApiErrorFilter } from '../common/api-error.filter.js';
-import { ExternalClient } from '../common/external/external-client.js';
-import { ExternalServiceError } from '../common/external/external-error.js';
-import { computeBackoffDelay, withRetry } from '../common/external/retry.js';
+import { AppLogger } from '../common/app-logger.service';
+import { ApiErrorFilter } from '../common/api-error.filter';
+import { ExternalClient } from '../common/external/external-client';
+import { ExternalServiceError } from '../common/external/external-error';
+import { computeBackoffDelay, withRetry } from '../common/external/retry';
 import {
   dockerRegistryAuthHeaders,
   resolveDockerRegistryConfig,
-} from './docker-registry.config.js';
-import { DockerRegistryService } from './docker-registry.service.js';
-import { validateEnv } from '../env.js';
+} from './docker-registry.config';
+import { DockerRegistryService } from './docker-registry.service';
+import { validateEnv } from '../env';
 
 const SECRET_TOKEN = 'super-secret-token-xyz-never-log';
 const SECRET_PASS = 'super-secret-pass-xyz-never-log';

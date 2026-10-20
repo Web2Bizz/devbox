@@ -21,13 +21,13 @@ import {
 import { createProjectSchema, type CreateProjectInput } from '../../lib/project-schemas';
 import { useI18n } from '../../i18n';
 
-export interface CreateProjectDialogProps {
+export type CreateProjectDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreate: (name: string) => Promise<void>;
   creating?: boolean;
   trigger?: React.ReactNode;
-}
+};
 
 function getZodErrorMessage(code: string, t: ReturnType<typeof useI18n>['t']): string {
   switch (code) {

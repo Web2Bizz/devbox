@@ -1,21 +1,21 @@
 import { Injectable } from "@nestjs/common";
 import { eq, ne } from "drizzle-orm";
-import { AppLogger } from "../common/app-logger.service.js";
-import { DbService, dbUnavailable, type DbClient } from "../db/db.service.js";
-import { userOpencodeKeys, type UserOpencodeKeyRow } from "../db/schema.js";
+import { AppLogger } from "../common/app-logger.service";
+import { DbService, dbUnavailable, type DbClient } from "../db/db.service";
+import { userOpencodeKeys, type UserOpencodeKeyRow } from "../db/schema";
 
 /**
  * Stored per-user key row (ciphertext only — plaintext never persisted).
  * `keyId` names the wrapping KEK version ('' = legacy pre-versioning row).
  */
-export interface StoredOpencodeKey {
+export type StoredOpencodeKey = {
   userId: string;
   encryptedKey: string;
   iv: string;
   keyId: string;
   /** ISO-8601 timestamp */
   updatedAt: string;
-}
+};
 
 function toStored(row: UserOpencodeKeyRow): StoredOpencodeKey {
   return {

@@ -5,10 +5,10 @@ import { Injectable } from '@nestjs/common';
 // node 22+, and survives the CJS build thanks to `module.ignoreDynamic`
 // in `.swcrc`). Never add a value import here or dist/* breaks at boot.
 import type { OpencodeClient } from '@opencode-ai/sdk';
-import { OpencodeService } from './opencode.service.js';
-import { AppLogger } from '../common/app-logger.service.js';
-import { ExternalClient } from '../common/external/external-client.js';
-import { validateEnv } from '../env.js';
+import { OpencodeService } from './opencode.service';
+import { AppLogger } from '../common/app-logger.service';
+import { ExternalClient } from '../common/external/external-client';
+import { validateEnv } from '../env';
 
 type SdkModule = typeof import('@opencode-ai/sdk');
 

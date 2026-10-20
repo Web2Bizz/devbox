@@ -5,23 +5,23 @@ import {
   Inject,
 } from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
-import { AppLogger } from "../../common/app-logger.service.js";
+import { AppLogger } from "../../common/app-logger.service";
 import {
   DbService,
   dbUnavailable,
   type DbClient,
-} from "../../db/db.service.js";
-import { projectChats, type ProjectChatRow } from "../../db/schema.js";
-import { OrganizationsService } from "../../organizations/organizations.service.js";
-import { ProjectsService } from "../projects.service.js";
-import type { CreateChatInput } from "./dto.js";
+} from "../../db/db.service";
+import { projectChats, type ProjectChatRow } from "../../db/schema";
+import { OrganizationsService } from "../../organizations/organizations.service";
+import { ProjectsService } from "../projects.service";
+import type { CreateChatInput } from "./dto";
 
-export interface ProjectChat {
+export type ProjectChat = {
   id: string;
   projectId: string;
   title: string;
   createdAt: string;
-}
+};
 
 function toChat(row: ProjectChatRow): ProjectChat {
   return {

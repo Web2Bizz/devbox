@@ -8,14 +8,14 @@ import type { ChatMessage } from '../../hooks/useChat';
 import { useI18n } from '../../i18n';
 import { ChatMessageRow } from './chat-message';
 
-export interface ChatWindowProps {
+export type ChatWindowProps = {
   messages: ChatMessage[];
   streamingText: string;
   loading?: boolean;
   sending?: boolean;
   error?: string | null;
   onRetry?: () => void;
-}
+};
 
 const STICK_THRESHOLD_PX = 48;
 

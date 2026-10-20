@@ -18,20 +18,20 @@
  *   secrets scrubbed).
  */
 import { Injectable } from '@nestjs/common';
-import { AppLogger } from '../app-logger.service.js';
-import { validateEnv } from '../../env.js';
+import { AppLogger } from '../app-logger.service';
+import { validateEnv } from '../../env';
 import {
   ExternalServiceError,
   fromStatus,
   fromUnknown,
   isRetryableStatus,
   timeoutError,
-} from './external-error.js';
-import { DEFAULT_MAX_DELAY_MS, withRetry, type RetryOptions } from './retry.js';
+} from './external-error';
+import { DEFAULT_MAX_DELAY_MS, withRetry, type RetryOptions } from './retry';
 
 export const FALLBACK_REQUEST_TIMEOUT_MS = 10000;
 
-export interface ExternalFetchOptions {
+export type ExternalFetchOptions = {
   /** Logical upstream, e.g. 'opencode' | 'github'. */
   service: string;
   /** Logical operation, e.g. 'getSession' | 'sendChat'. */
@@ -44,7 +44,7 @@ export interface ExternalFetchOptions {
   allowNonIdempotentRetry?: boolean;
   /** Traced through every attempt log line. */
   correlationId?: string;
-}
+};
 
 function resolveTimeoutMs(explicit?: number): number {
   if (explicit !== undefined && Number.isInteger(explicit) && explicit >= 0) {

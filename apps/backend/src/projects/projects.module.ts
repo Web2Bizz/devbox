@@ -1,13 +1,13 @@
 import { Module, forwardRef } from "@nestjs/common";
-import { DbModule } from "../db/db.module.js";
-import { WorkspacePathService } from "../workspaces/workspace-path.service.js";
-import { GithubLinkService } from "./github-link.service.js";
-import { ProjectsController } from "./projects.controller.js";
-import { ProjectsService } from "./projects.service.js";
-import { ChatsModule } from "./chats/chats.module.js";
-import { ProjectFilesModule } from "./files/project-files.module.js";
-import { GithubModule } from "./github/github.module.js";
-import { SessionsModule } from "./sessions/sessions.module.js";
+import { DbModule } from "../db/db.module";
+import { WorkspacePathService } from "../workspaces/workspace-path.service";
+import { GithubLinkService } from "./github-link.service";
+import { ProjectsController } from "./projects.controller";
+import { ProjectsService } from "./projects.service";
+import { ChatsModule } from "./chats/chats.module";
+import { ProjectFilesModule } from "./files/project-files.module";
+import { GithubModule } from "./github/github.module";
+import { SessionsModule } from "./sessions/sessions.module";
 
 /**
  * ProjectsModule — module-in-module composition:

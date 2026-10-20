@@ -1,6 +1,6 @@
 import { Global, Module } from '@nestjs/common';
-import { AppLogger } from './app-logger.service.js';
-import { ExternalClient } from './external/external-client.js';
+import { AppLogger } from './app-logger.service';
+import { ExternalClient } from './external/external-client';
 
 /**
  * Global logger module — AppLogger is injectable in any provider

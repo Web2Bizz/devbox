@@ -1,10 +1,10 @@
 import { Module, forwardRef } from '@nestjs/common';
-import { GithubModule } from '../projects/github/github.module.js';
-import { CloneJobsRepository } from './clone-jobs.repository.js';
-import { WorkspaceCloneService } from './workspace-clone.service.js';
-import { WorkspacePathService } from './workspace-path.service.js';
-import { WorkspacesController } from './workspaces.controller.js';
-import { WorkspacesService } from './workspaces.service.js';
+import { GithubModule } from '../projects/github/github.module';
+import { CloneJobsRepository } from './clone-jobs.repository';
+import { WorkspaceCloneService } from './workspace-clone.service';
+import { WorkspacePathService } from './workspace-path.service';
+import { WorkspacesController } from './workspaces.controller';
+import { WorkspacesService } from './workspaces.service';
 
 /**
  * WorkspacesModule — per-user workspace surface.

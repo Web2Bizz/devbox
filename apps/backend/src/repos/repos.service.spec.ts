@@ -16,13 +16,13 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { ReposService } from './repos.service.js';
-import { isValidGitRepo } from './repos-git.util.js';
+import { ReposService } from './repos.service';
+import { isValidGitRepo } from './repos-git.util';
 
-interface WarnCall {
+type WarnCall = {
   path?: string;
   reason?: string;
-}
+};
 
 function makeLogger() {
   const warns: WarnCall[] = [];
@@ -32,7 +32,7 @@ function makeLogger() {
       warn: (msg: unknown) => {
         warns.push(msg as WarnCall);
       },
-    } as unknown as import('../common/app-logger.service.js').AppLogger,
+    } as unknown as import('../common/app-logger.service').AppLogger,
   };
 }
 

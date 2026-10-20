@@ -1,9 +1,9 @@
 import { Module } from "@nestjs/common";
-import { DbModule } from "../db/db.module.js";
-import { CryptoService } from "./crypto.service.js";
-import { OpencodeBillingService } from "./opencode-billing.service.js";
-import { OpencodeKeysController } from "./opencode-keys.controller.js";
-import { OpencodeKeysService } from "./opencode-keys.service.js";
+import { DbModule } from "../db/db.module";
+import { CryptoService } from "./crypto.service";
+import { OpencodeBillingService } from "./opencode-billing.service";
+import { OpencodeKeysController } from "./opencode-keys.controller";
+import { OpencodeKeysService } from "./opencode-keys.service";
 
 /**
  * OpencodeKeysModule — per-user OpenCode API keys (encrypted at rest) +

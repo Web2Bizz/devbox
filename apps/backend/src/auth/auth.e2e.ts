@@ -26,7 +26,7 @@ process.env.AUTH_LEGACY_MOCK_FALLBACK = "false";
 
 async function main(): Promise<void> {
   const { resolveTestDb, applyTestMigrations } =
-    await import("../db/e2e-db.js");
+    await import("../db/e2e-db");
   const testDb = await resolveTestDb(
     process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL ?? "",
   );
@@ -45,10 +45,10 @@ async function main(): Promise<void> {
   console.log(`[auth e2e] db mode: ${testDb.mode}`);
 
   const { NestFactory } = await import("@nestjs/core");
-  const { AppModule } = await import("../app.module.js");
-  const { configureApp } = await import("../app.setup.js");
-  const { UsersService } = await import("./users.service.js");
-  const { TokenService } = await import("./token.service.js");
+  const { AppModule } = await import("../app.module");
+  const { configureApp } = await import("../app.setup");
+  const { UsersService } = await import("./users.service");
+  const { TokenService } = await import("./token.service");
 
   let passed = 0;
   let failed = 0;
@@ -232,7 +232,7 @@ async function main(): Promise<void> {
     await check(
       "register duplicate logs warn with correlationId (no secrets)",
       async () => {
-        const { AppLogger } = await import("../common/app-logger.service.js");
+        const { AppLogger } = await import("../common/app-logger.service");
         const seen: Array<{ msg: unknown; cid?: string }> = [];
         const origWarn = AppLogger.prototype.warn;
         (

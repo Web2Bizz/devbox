@@ -40,12 +40,12 @@ const LIVE_SESSION = {
   model: 'live',
 };
 
-interface Flaky {
+type Flaky = {
   server: Server;
   url: string;
   hits: (path: string) => number;
   close: () => Promise<void>;
-}
+};
 
 function startFlaky(): Promise<Flaky> {
   const counts = new Map<string, number>();
@@ -104,8 +104,8 @@ async function main(): Promise<void> {
   process.env.OPENCODE_URL = flaky.url;
 
   const { NestFactory } = await import('@nestjs/core');
-  const { AppModule } = await import('../../app.module.js');
-  const { configureApp } = await import('../../app.setup.js');
+  const { AppModule } = await import('../../app.module');
+  const { configureApp } = await import('../../app.setup');
 
   const app = await NestFactory.create(AppModule, { logger: false });
   configureApp(app);

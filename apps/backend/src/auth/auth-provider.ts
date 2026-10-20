@@ -1,11 +1,11 @@
 import { Injectable, UnauthorizedException } from "@nestjs/common";
-import { AppLogger } from "../common/app-logger.service.js";
-import { PasswordService } from "./password.service.js";
-import { UsersService, type StoredUser } from "./users.service.js";
-import type { AuthProviderId } from "./users.service.js";
+import { AppLogger } from "../common/app-logger.service";
+import { PasswordService } from "./password.service";
+import { UsersService, type StoredUser } from "./users.service";
+import type { AuthProviderId } from "./users.service";
 
 /** Strategy seam for external identity providers (local + future stubs). */
-export interface AuthProvider {
+export type AuthProvider = {
   readonly id: AuthProviderId;
   /** Returns the user on success, null on bad credentials (caller answers 401/409). */
   verify(
@@ -13,7 +13,7 @@ export interface AuthProvider {
     password: string,
     correlationId?: string,
   ): Promise<StoredUser | null>;
-}
+};
 
 export type { AuthProviderId };
 

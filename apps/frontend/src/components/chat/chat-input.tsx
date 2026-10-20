@@ -4,12 +4,12 @@ import { useState, type FormEvent, type KeyboardEvent } from 'react';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@web2bizz/ui/components';
 import { useI18n } from '../../i18n';
 
-export interface ChatInputProps {
+export type ChatInputProps = {
   onSend: (text: string) => void | Promise<void>;
   onStop?: () => void;
   sending?: boolean;
   placeholder?: string;
-}
+};
 
 /**
  * Kit composer (`components` InputGroup): outward `ChatInputProps`

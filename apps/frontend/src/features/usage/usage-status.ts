@@ -3,10 +3,10 @@
 import { ApiClientError } from '../../api/client';
 import { formatApiErrorWithId } from '../../lib/format-error';
 
-export interface UsageStrings {
+export type UsageStrings = {
   sessionExpired: string;
   unexpected: string;
-}
+};
 
 export type UsageStatus =
   | { kind: 'ready' }

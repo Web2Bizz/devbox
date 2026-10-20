@@ -4,7 +4,7 @@ import {
   Injectable,
   InternalServerErrorException,
 } from '@nestjs/common';
-import { throwStorageNotConfigured } from '../storage/storage-unavailable.js';
+import { throwStorageNotConfigured } from '../storage/storage-unavailable';
 import { mkdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -13,16 +13,16 @@ const UUID_RE =
 
 export type ProjectScope = 'user' | 'org';
 
-export interface OrgScopeResolved {
+export type OrgScopeResolved = {
   /** Org id (validated uuid). */
   orgId: string;
   /** Absolute org home: <root>/orgs/<orgId>. */
   absHome: string;
   /** Absolute org-level reserved secrets dir (empty, never served). */
   absSecrets: string;
-}
+};
 
-export interface ProjectResolved {
+export type ProjectResolved = {
   /** 'user' → users/<uuid>/…, 'org' → orgs/<uuid>/… (no workspace segment). */
   scope: ProjectScope;
   /** Scope owner id (user uuid or org uuid, as passed — validated uuid). */
@@ -41,7 +41,7 @@ export interface ProjectResolved {
   abs: string;
   /** Normalized posix-relative path inside content ('.' for root). */
   rel: string;
-}
+};
 
 /**
  * WorkspacePathService — scoped path jail for projects (organizations epic).

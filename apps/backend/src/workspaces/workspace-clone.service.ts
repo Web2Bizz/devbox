@@ -2,13 +2,13 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { execFile } from 'node:child_process';
 import { mkdir, stat } from 'node:fs/promises';
 import { promisify } from 'node:util';
-import { AppLogger } from '../common/app-logger.service.js';
-import { ExternalServiceError } from '../common/external/external-error.js';
-import { storageUnavailable } from '../storage/storage-unavailable.js';
-import { isValidGitRepo } from '../repos/repos-git.util.js';
-import { CloneJobsRepository, type CloneJob } from './clone-jobs.repository.js';
-import { WorkspacePathService } from './workspace-path.service.js';
-import { readSubmodules } from './workspace-submodules.util.js';
+import { AppLogger } from '../common/app-logger.service';
+import { ExternalServiceError } from '../common/external/external-error';
+import { storageUnavailable } from '../storage/storage-unavailable';
+import { isValidGitRepo } from '../repos/repos-git.util';
+import { CloneJobsRepository, type CloneJob } from './clone-jobs.repository';
+import { WorkspacePathService } from './workspace-path.service';
+import { readSubmodules } from './workspace-submodules.util';
 
 const execFileAsync = promisify(execFile);
 

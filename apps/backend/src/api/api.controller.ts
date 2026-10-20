@@ -16,8 +16,8 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { ProxyService } from './proxy.service.js';
-import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
+import { ProxyService } from './proxy.service';
+import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import {
   ApiErrorDto,
   MessagesResponseDto,
@@ -25,11 +25,11 @@ import {
   SendChatResponseDto,
   SessionDto,
   sendChatSchema,
-} from './dto.js';
+} from './dto';
 import {
   DEFAULT_API_VERSION,
   V1Endpoint,
-} from './version.js';
+} from './version';
 
 /**
  * Proxy endpoints.

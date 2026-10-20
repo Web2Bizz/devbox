@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
-import { ApiController } from './api.controller.js';
-import { ProxyService } from './proxy.service.js';
-import { OpencodeModule } from '../opencode/opencode.module.js';
+import { ApiController } from './api.controller';
+import { ProxyService } from './proxy.service';
+import { OpencodeModule } from '../opencode/opencode.module';
 
 @Module({
   imports: [OpencodeModule],

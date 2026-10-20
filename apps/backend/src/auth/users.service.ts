@@ -1,15 +1,15 @@
 import { Injectable } from "@nestjs/common";
 import { eq, sql } from "drizzle-orm";
-import { AppLogger } from "../common/app-logger.service.js";
-import { DbService, dbUnavailable, type DbClient } from "../db/db.service.js";
-import { users, type UserRow } from "../db/schema.js";
-import { PasswordService } from "./password.service.js";
+import { AppLogger } from "../common/app-logger.service";
+import { DbService, dbUnavailable, type DbClient } from "../db/db.service";
+import { users, type UserRow } from "../db/schema";
+import { PasswordService } from "./password.service";
 
 /** Auth provider ids — `local` is live; the rest are 501 stubs (no integration). */
 export type AuthProviderId = "local" | "sso-oauth" | "github-app";
 
 /** Stored user (durable contract = `users` drizzle table, drizzle/0003_users.sql). */
-export interface StoredUser {
+export type StoredUser = {
   id: string;
   firstName: string;
   lastName: string;
@@ -18,7 +18,7 @@ export interface StoredUser {
   provider: AuthProviderId;
   createdAt: string;
   updatedAt: string;
-}
+};
 
 /** Public shape — never carries passwordHash (never logged, never serialized). */
 export function toPublicUser(u: StoredUser): {

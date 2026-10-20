@@ -13,19 +13,19 @@ import {
   Version,
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiResponse, ApiTags } from "@nestjs/swagger";
-import { JwtAuthGuard } from "../../auth/jwt-auth.guard.js";
-import { ReqUser } from "../../auth/req-user.decorator.js";
-import type { RequestIdentity } from "../../auth/identity.service.js";
-import { NoIndexInterceptor } from "../../common/noindex.interceptor.js";
-import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
-import { V1Endpoint } from "../../api/version.js";
-import { ChatsService } from "./chats.service.js";
-import { SessionsService } from "../sessions/sessions.service.js";
+import { JwtAuthGuard } from "../../auth/jwt-auth.guard";
+import { ReqUser } from "../../auth/req-user.decorator";
+import type { RequestIdentity } from "../../auth/identity.service";
+import { NoIndexInterceptor } from "../../common/noindex.interceptor";
+import { ZodValidationPipe } from "../../common/zod-validation.pipe";
+import { V1Endpoint } from "../../api/version";
+import { ChatsService } from "./chats.service";
+import { SessionsService } from "../sessions/sessions.service";
 import {
   ProjectChatDto,
   createChatSchema,
   type CreateChatInput,
-} from "./dto.js";
+} from "./dto";
 
 /**
  * Project chats — Bearer-guarded (JwtAuthGuard, legacy mock fallback in

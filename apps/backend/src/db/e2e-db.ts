@@ -20,10 +20,10 @@ import { Pool } from "pg";
 
 export type TestDbMode = "live" | "unreachable";
 
-export interface TestDb {
+export type TestDb = {
   mode: TestDbMode;
   url: string;
-}
+};
 
 /** Dead-port URL for 503-surface assertions (refused fast, no secrets). */
 export const UNREACHABLE_TEST_DB_URL =

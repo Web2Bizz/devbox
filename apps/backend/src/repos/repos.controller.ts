@@ -1,9 +1,9 @@
 import { BadRequestException, Controller, Get, Headers, Param, Query, Version } from '@nestjs/common';
 import { ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
-import { V1Endpoint } from '../api/version.js';
-import { RepoDto, reposQuerySchema, userSpaceSchema, type ReposQuery } from './dto.js';
-import { ReposService } from './repos.service.js';
+import { ZodValidationPipe } from '../common/zod-validation.pipe';
+import { V1Endpoint } from '../api/version';
+import { RepoDto, reposQuerySchema, userSpaceSchema, type ReposQuery } from './dto';
+import { ReposService } from './repos.service';
 
 /**
  * Readonly git-repo registry — GET only (no POST/PUT/DELETE by design).

@@ -1,17 +1,17 @@
-import type { AppEnv } from '../env.js';
+import type { AppEnv } from '../env';
 
 /**
  * Typed npm-registry config (resolved from AppEnv, never read from
  * process.env directly). Mirrors the EXTERNAL_RETRY_* tuning shape so the
  * startup probe reuses the shared withRetry backoff+jitter policy.
  */
-export interface NpmRegistryRetryConfig {
+export type NpmRegistryRetryConfig = {
   maxAttempts: number;
   baseDelayMs: number;
   maxDelayMs: number;
-}
+};
 
-export interface NpmRegistryConfig {
+export type NpmRegistryConfig = {
   /** Base URL, no trailing slash; '' = unconfigured (health 'skipped'). */
   url: string;
   /** Bearer token — wins over the basic pair when set (never logged). */
@@ -25,7 +25,7 @@ export interface NpmRegistryConfig {
   /** Per-attempt budget ms for GET /-/ping calls. */
   timeoutMs: number;
   retry: NpmRegistryRetryConfig;
-}
+};
 
 export function resolveNpmRegistryConfig(env: AppEnv): NpmRegistryConfig {
   return {

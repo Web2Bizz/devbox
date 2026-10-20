@@ -20,8 +20,8 @@
  */
 import assert from 'node:assert/strict';
 import { GoneException, NotFoundException } from '@nestjs/common';
-import { DEFAULT_ORG_INVITE_TTL_SEC, validateEnvWithWarnings } from '../env.js';
-import { OrganizationsService } from './organizations.service.js';
+import { DEFAULT_ORG_INVITE_TTL_SEC, validateEnvWithWarnings } from '../env';
+import { OrganizationsService } from './organizations.service';
 
 const SPEC_USER = '123e4567-e89b-12d3-a456-426614174001';
 const SPEC_ORG = '123e4567-e89b-12d3-a456-426614174005';

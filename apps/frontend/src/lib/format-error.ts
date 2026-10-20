@@ -13,7 +13,7 @@ export function formatApiError(error: unknown): string {
   return 'Unexpected error';
 }
 
-export interface FormattedApiError {
+export type FormattedApiError = {
   code: string;
   message: string;
   correlationId: string;
@@ -21,7 +21,7 @@ export interface FormattedApiError {
   shortId: string;
   /** `code: message (ID: shortId)` — additive display, envelope untouched. */
   display: string;
-}
+};
 
 /**
  * Full error detail with correlationId for the diagnostic Alert.

@@ -22,9 +22,9 @@
  */
 async function main(): Promise<void> {
   const { NestFactory } = await import("@nestjs/core");
-  const { AppModule } = await import("../app.module.js");
-  const { CryptoService } = await import("./crypto.service.js");
-  const { OpencodeKeysService } = await import("./opencode-keys.service.js");
+  const { AppModule } = await import("../app.module");
+  const { CryptoService } = await import("./crypto.service");
+  const { OpencodeKeysService } = await import("./opencode-keys.service");
 
   const app = await NestFactory.createApplicationContext(AppModule, {
     logger: false,
@@ -40,7 +40,7 @@ async function main(): Promise<void> {
       const code =
         (err as { getResponse?: () => { code?: string } }).getResponse?.()?.code ??
         "opencode_keys_unconfigured";
-      console.error(`keys:reencrypt refused: ${code} (storage unconfigured)`);
+      process.stderr.write(`keys:reencrypt refused: ${code} (storage unconfigured)\n`);
       process.exitCode = 1;
       return;
     }
@@ -85,13 +85,13 @@ async function main(): Promise<void> {
       }
       if (!progressed || stale.length < PAGE) break;
     }
-    console.log(
-      `keys:reencrypt done: ${JSON.stringify({ scanned, reencrypted, unreadable, activeKeyId })}`,
+    process.stdout.write(
+      `keys:reencrypt done: ${JSON.stringify({ scanned, reencrypted, unreadable, activeKeyId })}\n`,
     );
     if (unreadable > 0) {
-      console.error(
+      process.stderr.write(
         `keys:reencrypt: ${unreadable} row(s) unreadable with the configured KEKs — ` +
-          "restore the wrapping KEK as OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS and rerun",
+          "restore the wrapping KEK as OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS and rerun\n",
       );
       process.exitCode = 1;
     }
@@ -101,6 +101,6 @@ async function main(): Promise<void> {
 }
 
 void main().catch((err: unknown) => {
-  console.error(`keys:reencrypt failed to run: ${(err as Error).message}`);
+  process.stderr.write(`keys:reencrypt failed to run: ${(err as Error).message}\n`);
   process.exitCode = 1;
 });

@@ -6,14 +6,14 @@ import {
 } from '@nestjs/common';
 import { createAppAuth } from '@octokit/auth-app';
 import { request as octokitRequest } from '@octokit/request';
-import { AppLogger } from '../../common/app-logger.service.js';
-import { fromUnknown } from '../../common/external/external-error.js';
-import { isGithubConfigured, validateEnv } from '../../env.js';
+import { AppLogger } from '../../common/app-logger.service';
+import { fromUnknown } from '../../common/external/external-error';
+import { isGithubConfigured, validateEnv } from '../../env';
 
-interface CachedToken {
+type CachedToken = {
   token: string;
   expiresAtMs: number;
-}
+};
 
 /** Refresh skew — never hand out a token expiring within the next minute. */
 const EXPIRY_SKEW_MS = 60_000;

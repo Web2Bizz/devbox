@@ -99,7 +99,7 @@ async function main(): Promise<void> {
   let billingTarget = `http://127.0.0.1:${billingPort}/usage`;
 
   const { resolveTestDb, applyTestMigrations } =
-    await import("../db/e2e-db.js");
+    await import("../db/e2e-db");
   const testDb = await resolveTestDb(
     process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL ?? "",
   );
@@ -118,8 +118,8 @@ async function main(): Promise<void> {
   console.log(`[opencode-keys e2e] db mode: ${testDb.mode}`);
 
   const { NestFactory } = await import("@nestjs/core");
-  const { AppModule } = await import("../app.module.js");
-  const { configureApp } = await import("../app.setup.js");
+  const { AppModule } = await import("../app.module");
+  const { configureApp } = await import("../app.setup");
 
   let passed = 0;
   let failed = 0;
@@ -146,8 +146,8 @@ async function main(): Promise<void> {
   const app = await NestFactory.create(AppModule, { logger: false });
   configureApp(app);
   if (testDb.mode === "live") {
-    const { UsersService } = await import("../auth/users.service.js");
-    const { TokenService } = await import("../auth/token.service.js");
+    const { UsersService } = await import("../auth/users.service");
+    const { TokenService } = await import("../auth/token.service");
     const users = app.get(UsersService, { strict: false }) as {
       clearAllForTests: () => Promise<void>;
     };
@@ -163,7 +163,7 @@ async function main(): Promise<void> {
   // Reroute the hard-coded billing constant to the mock above through the
   // live ExternalClient (keeps timeout/retry mapping identical to prod).
   const { OPENCODE_BILLING_URL, OpencodeBillingService } = await import(
-    "./opencode-billing.service.js"
+    "./opencode-billing.service"
   );
   const billingSvc = app.get(OpencodeBillingService, { strict: false }) as unknown as {
     external: {
@@ -188,7 +188,7 @@ async function main(): Promise<void> {
   // Captures { method, args } so the final scans can prove both never-log
   // secrets AND normal-path shape: warn/error are one-liners with
   // operation/status/code and no stack (`\n at ` only ever appears on debug).
-  const { AppLogger } = await import("../common/app-logger.service.js");
+  const { AppLogger } = await import("../common/app-logger.service");
   const captured: Array<{ method: string; args: unknown[] }> = [];
   const methods = ["debug", "info", "warn", "error"] as const;
   const originals = methods.map((m) => AppLogger.prototype[m]);
@@ -344,7 +344,7 @@ async function main(): Promise<void> {
         assert.ok(!row.iv.includes(TEST_API_KEY));
         // KEK version envelope: fresh rows are wrapped with the active id.
         assert.equal(row.key_id, "v1");
-        const { CryptoService } = await import("./crypto.service.js");
+        const { CryptoService } = await import("./crypto.service");
         const svc = new CryptoService();
         assert.equal(
           svc.decrypt({ keyId: row.key_id, iv: row.iv, data: row.encrypted_key }),
@@ -461,7 +461,7 @@ async function main(): Promise<void> {
         );
         const row = rows[0] as { encrypted_key: string; iv: string; key_id: string };
         assert.equal(row.key_id, "v1");
-        const { CryptoService } = await import("./crypto.service.js");
+        const { CryptoService } = await import("./crypto.service");
         const svc = new CryptoService();
         assert.equal(
           svc.decrypt({ keyId: row.key_id, iv: row.iv, data: row.encrypted_key }),

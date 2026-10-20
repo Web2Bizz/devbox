@@ -21,13 +21,13 @@ import {
 import { createOrganizationSchema, type CreateOrganizationInput } from '../../lib/organization-schemas';
 import { useI18n } from '../../i18n';
 
-export interface CreateOrganizationDialogProps {
+export type CreateOrganizationDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreate: (name: string) => Promise<void>;
   creating?: boolean;
   trigger?: React.ReactNode;
-}
+};
 
 function getZodErrorMessage(code: string, t: ReturnType<typeof useI18n>['t']): string {
   switch (code) {

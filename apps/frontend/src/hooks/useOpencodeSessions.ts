@@ -5,7 +5,7 @@ import { opencode, toErrorMessage } from '../api/opencode-client';
 import type { Session } from '@opencode-ai/sdk/client';
 import { useI18n } from '../i18n';
 
-export interface UseOpencodeSessionsResult {
+export type UseOpencodeSessionsResult = {
   sessions: Session[];
   loading: boolean;
   error: string | null;
@@ -15,7 +15,7 @@ export interface UseOpencodeSessionsResult {
   creating: boolean;
   abort: (id: string) => Promise<void>;
   abortingId: string | null;
-}
+};
 
 /**
  * Live session list through the backend reverse-proxy

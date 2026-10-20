@@ -28,16 +28,16 @@ for (const key of ['POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB', 'POSTGRE
   delete process.env[key];
 }
 
-interface CheckResult {
+type CheckResult = {
   name: string;
   ok: boolean;
   detail?: string;
-}
+};
 
 async function main(): Promise<void> {
   const { NestFactory } = await import('@nestjs/core');
-  const { AppModule } = await import('../app.module.js');
-  const { configureApp, setupSwagger } = await import('../app.setup.js');
+  const { AppModule } = await import('../app.module');
+  const { configureApp, setupSwagger } = await import('../app.setup');
 
   const app = await NestFactory.create(AppModule, { logger: false });
   configureApp(app);

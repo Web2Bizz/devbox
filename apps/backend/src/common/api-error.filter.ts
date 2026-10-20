@@ -6,9 +6,9 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import type { ApiError } from '../contracts.js';
-import { AppLogger } from './app-logger.service.js';
-import { ExternalServiceError } from './external/external-error.js';
+import type { ApiError } from '@devbox/contracts';
+import { AppLogger } from './app-logger.service';
+import { ExternalServiceError } from './external/external-error';
 
 function isAbortError(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false;

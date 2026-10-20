@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
-import { AppLogger } from "../common/app-logger.service.js";
-import type { GithubLinkInput } from "./dto.js";
-import { ProjectsService } from "./projects.service.js";
+import { AppLogger } from "../common/app-logger.service";
+import type { GithubLinkInput } from "./dto";
+import { ProjectsService } from "./projects.service";
 
 /**
  * GithubLinkService — pure validation + link assembly, lives inside

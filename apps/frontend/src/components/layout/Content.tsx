@@ -3,14 +3,14 @@
 import type { ReactNode } from 'react';
 import { EmptyState, ErrorState, LoadingState } from '../states';
 
-export interface ContentEmpty {
+export type ContentEmpty = {
   title: string;
   description: string;
   actionLabel?: string;
   onAction?: () => void;
-}
+};
 
-export interface ContentProps {
+export type ContentProps = {
   children: ReactNode;
   /** When true — LoadingState skeleton grid (from states.tsx). */
   isLoading?: boolean;
@@ -23,7 +23,7 @@ export interface ContentProps {
   /** When true + `empty` provided — EmptyState card (from states.tsx). */
   isEmpty?: boolean;
   empty?: ContentEmpty;
-}
+};
 
 /**
  * Full-width page content: semantic <main> + full-width .page-inner

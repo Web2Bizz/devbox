@@ -3,7 +3,7 @@
  * Cookie-only approach: flat URLs (/login, /projects, …) stay untouched,
  * no `[locale]` segment, no middleware rewrite. Default locale `en`.
  */
-export interface Dictionary {
+export type Dictionary = {
   metadata: {
     title: string;
     description: string;
@@ -349,4 +349,4 @@ export interface Dictionary {
     notFoundDesc: string;
     back: string;
   };
-}
+};

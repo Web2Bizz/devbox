@@ -19,6 +19,7 @@
     "test:e2e:repos": "bun run build && bun dist/repos/repos.service.spec.js && bun dist/repos/repos.e2e.js"
   },
   "dependencies": {
+    "@devbox/contracts": "workspace:*",
     "@nestjs/common": "^12.1.0",
     "@nestjs/config": "^12.0.1",
     "@nestjs/core": "^12.1.0",

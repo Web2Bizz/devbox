@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { AppLogger } from '../common/app-logger.service.js';
+import { AppLogger } from '../common/app-logger.service';
 
 export type CloneStatus = 'queued' | 'cloning' | 'ready' | 'failed';
 
-export interface CloneJob {
+export type CloneJob = {
   userId: string;
   userSpace: string;
   repoName: string;
@@ -13,7 +13,7 @@ export interface CloneJob {
   progress: number;
   error: string | null;
   updatedAt: string;
-}
+};
 
 const TERMINAL_READY: CloneStatus = 'ready';
 

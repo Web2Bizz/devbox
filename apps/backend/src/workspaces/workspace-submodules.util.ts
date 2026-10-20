@@ -2,21 +2,21 @@ import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { AppLogger } from '../common/app-logger.service.js';
+import type { AppLogger } from '../common/app-logger.service';
 
 const execFileAsync = promisify(execFile);
 
-export interface SubmoduleEntry {
+export type SubmoduleEntry = {
   path: string;
   url: string | null;
   sha: string | null;
   /** Raw first column of `git submodule status` (' ', '+', '-', 'U'). */
   status: string;
-}
+};
 
-interface WarnLogger {
+type WarnLogger = {
   warn(message: unknown): void;
-}
+};
 
 export const SUBMODULE_TIMEOUT_MS = 30000;
 

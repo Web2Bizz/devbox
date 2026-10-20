@@ -17,7 +17,7 @@ import {
   ExternalServiceError,
   isRetryableStatus,
   isTimeoutError,
-} from './external-error.js';
+} from './external-error';
 
 export const DEFAULT_MAX_ATTEMPTS = 3;
 export const DEFAULT_BASE_DELAY_MS = 200;
@@ -33,7 +33,7 @@ export const NON_IDEMPOTENT_METHODS: ReadonlySet<string> = new Set([
   'DELETE',
 ]);
 
-export interface RetryOptions {
+export type RetryOptions = {
   /** Total attempts including the first (1 = no retry). Default 3. */
   maxAttempts?: number;
   /** Base backoff in ms (doubles per attempt). Default 200. */
@@ -53,14 +53,14 @@ export interface RetryOptions {
   sleep?: (ms: number) => Promise<void>;
   /** Custom retry predicate (default: isRetryableError). */
   shouldRetry?: (err: unknown, attempt: number) => boolean;
-}
+};
 
-export interface ResolvedRetryOptions {
+export type ResolvedRetryOptions = {
   maxAttempts: number;
   baseDelayMs: number;
   maxDelayMs: number;
   jitter: boolean;
-}
+};
 
 /** True for GET/HEAD/OPTIONS (and anything outside the non-idempotent set). */
 export function isIdempotentMethod(method?: string): boolean {

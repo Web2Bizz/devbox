@@ -6,19 +6,19 @@ import {
   Inject,
 } from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
-import { AppLogger } from "../../common/app-logger.service.js";
+import { AppLogger } from "../../common/app-logger.service";
 import {
   DbService,
   dbUnavailable,
   type DbClient,
-} from "../../db/db.service.js";
-import { projectSessions, type ProjectSessionRow } from "../../db/schema.js";
-import { ChatsService } from "../chats/chats.service.js";
-import { ProjectsService } from "../projects.service.js";
-import { OrganizationsService } from "../../organizations/organizations.service.js";
-import type { CreateSessionInput } from "./dto.js";
+} from "../../db/db.service";
+import { projectSessions, type ProjectSessionRow } from "../../db/schema";
+import { ChatsService } from "../chats/chats.service";
+import { ProjectsService } from "../projects.service";
+import { OrganizationsService } from "../../organizations/organizations.service";
+import type { CreateSessionInput } from "./dto";
 
-export interface ProjectSession {
+export type ProjectSession = {
   id: string;
   projectId: string;
   chatId: string | null;
@@ -26,7 +26,7 @@ export interface ProjectSession {
   metadata: Record<string, unknown> | null;
   createdAt: string;
   updatedAt: string;
-}
+};
 
 function toSession(row: ProjectSessionRow): ProjectSession {
   return {

@@ -5,11 +5,11 @@ import { Bubble, BubbleContent, Message, MessageContent, MessageHeader } from '@
 import type { ChatMessage } from '../../hooks/useChat';
 import { useI18n } from '../../i18n';
 
-interface TextBlock {
+type TextBlock = {
   kind: 'text' | 'code';
   lang: string;
   body: string;
-}
+};
 
 /** Split ` ```lang … ``` ` fences — plain paragraphs stay <p>, code goes <pre><code>. */
 function splitBlocks(text: string): TextBlock[] {

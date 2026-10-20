@@ -18,7 +18,7 @@ import {
   urlSchema,
   validateEnv,
   validateEnvWithWarnings,
-} from './env.js';
+} from './env';
 
 type Source = NodeJS.ProcessEnv;
 

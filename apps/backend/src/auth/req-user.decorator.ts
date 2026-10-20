@@ -1,6 +1,6 @@
 import { createParamDecorator, type ExecutionContext } from '@nestjs/common';
-import { readIdentity } from './identity.service.js';
-import type { RequestIdentity } from './identity.service.js';
+import { readIdentity } from './identity.service';
+import type { RequestIdentity } from './identity.service';
 
 export type { RequestIdentity };
 

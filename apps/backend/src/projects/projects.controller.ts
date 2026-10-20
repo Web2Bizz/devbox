@@ -13,7 +13,7 @@ import {
   Version,
 } from "@nestjs/common";
 import { ApiResponse, ApiTags } from "@nestjs/swagger";
-import { NoIndexInterceptor } from "../common/noindex.interceptor.js";import { ZodValidationPipe } from "../common/zod-validation.pipe.js";
+import { NoIndexInterceptor } from "../common/noindex.interceptor";import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import {
   GithubLinkStatusDto,
   ProjectDto,
@@ -23,12 +23,12 @@ import {
   type CreateProjectInput,
   type GithubLinkInput,
   type UpdateProjectInput,
-} from "./dto.js";
-import { V1Endpoint } from "../api/version.js";
-import { GithubLinkService } from "./github-link.service.js";
-import { ProjectsService } from "./projects.service.js";
-import { ChatsService } from "./chats/chats.service.js";
-import { SessionsService } from "./sessions/sessions.service.js";
+} from "./dto";
+import { V1Endpoint } from "../api/version";
+import { GithubLinkService } from "./github-link.service";
+import { ProjectsService } from "./projects.service";
+import { ChatsService } from "./chats/chats.service";
+import { SessionsService } from "./sessions/sessions.service";
 
 /**
  * Projects CRUD + github link endpoints.

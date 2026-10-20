@@ -1,17 +1,17 @@
-import type { AppEnv } from '../env.js';
+import type { AppEnv } from '../env';
 
 /**
  * Typed docker-registry config (resolved from AppEnv, never read from
  * process.env directly). Mirrors the EXTERNAL_RETRY_* tuning shape so the
  * startup probe reuses the shared withRetry backoff+jitter policy.
  */
-export interface DockerRegistryRetryConfig {
+export type DockerRegistryRetryConfig = {
   maxAttempts: number;
   baseDelayMs: number;
   maxDelayMs: number;
-}
+};
 
-export interface DockerRegistryConfig {
+export type DockerRegistryConfig = {
   /** Base URL, no trailing slash; '' = unconfigured (health 'skipped'). */
   url: string;
   /** Basic-auth username ('' when unset/token mode; never logged). */
@@ -23,7 +23,7 @@ export interface DockerRegistryConfig {
   /** Per-attempt budget ms for GET /v2/* calls. */
   timeoutMs: number;
   retry: DockerRegistryRetryConfig;
-}
+};
 
 export function resolveDockerRegistryConfig(env: AppEnv): DockerRegistryConfig {
   return {

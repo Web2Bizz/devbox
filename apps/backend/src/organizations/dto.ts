@@ -1,53 +1,28 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { z } from 'zod';
 
 /**
- * Organizations DTO — zod@4 source of truth, swagger DTOs for parity
- * with contracts/openapi.yaml. Runtime validation via ZodValidationPipe.
+ * Organizations DTO — single source of truth is @devbox/contracts
+ * (verbatim min/max, uuid shapes, defaults + error strings). Swagger DTO
+ * classes below stay as thin @nestjs/swagger wrappers for
+ * contracts/openapi.yaml parity. Runtime validation via ZodValidationPipe.
  * All contracts here are NEW (additive): no existing schema is modified.
  */
-
-export const orgRoleSchema = z.enum(['maintainer', 'user'], {
-  error: 'role must be maintainer or user',
-});
-
-export type OrgRole = z.infer<typeof orgRoleSchema>;
-
-export const createOrganizationSchema = z.object({
-  name: z.string({ error: 'Field "name" is required' }).min(1).max(200),
-  description: z.string().max(2000).optional(),
-  isPrivate: z.boolean().optional().default(true),
-});
-
-export const updateOrganizationSchema = z.object({
-  name: z.string().min(1).max(200).optional(),
-  description: z.string().max(2000).nullable().optional(),
-  isPrivate: z.boolean().optional(),
-});
-
-export const addMemberSchema = z.object({
-  userId: z.string({ error: 'Field "userId" is required' }).uuid({ error: 'userId must be a uuid' }),
-  role: orgRoleSchema.optional().default('user'),
-});
-
-export const updateMemberRoleSchema = z.object({
-  role: orgRoleSchema,
-});
-
-export const createInviteSchema = z.object({
-  role: orgRoleSchema.optional().default('user'),
-});
-
-export const acceptInviteSchema = z.object({
-  token: z.string({ error: 'Field "token" is required' }).min(1).max(500),
-});
-
-export type CreateOrganizationInput = z.infer<typeof createOrganizationSchema>;
-export type UpdateOrganizationInput = z.infer<typeof updateOrganizationSchema>;
-export type AddMemberInput = z.infer<typeof addMemberSchema>;
-export type UpdateMemberRoleInput = z.infer<typeof updateMemberRoleSchema>;
-export type CreateInviteInput = z.infer<typeof createInviteSchema>;
-export type AcceptInviteInput = z.infer<typeof acceptInviteSchema>;
+export {
+  acceptInviteSchema,
+  addMemberSchema,
+  createInviteSchema,
+  createOrganizationSchema,
+  orgRoleSchema,
+  updateMemberRoleSchema,
+  updateOrganizationSchema,
+  type AcceptInviteInput,
+  type AddMemberInput,
+  type CreateInviteInput,
+  type CreateOrganizationInput,
+  type OrgRole,
+  type UpdateMemberRoleInput,
+  type UpdateOrganizationInput,
+} from '@devbox/contracts';
 
 export class CreateOrganizationDto {
   @ApiProperty({ example: 'acme' })

@@ -6,11 +6,11 @@
  * for offline demo/tests (never used by the hook anymore).
  */
 
-export interface MockUser {
+export type MockUser = {
   id: string;
   email: string;
   name: string;
-}
+};
 
 export const MOCK_USER: MockUser = {
   id: 'mock-user-1',

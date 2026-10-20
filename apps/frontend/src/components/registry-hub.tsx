@@ -8,11 +8,11 @@ import {
   CardTitle,
 } from '@web2bizz/ui/components';
 
-export interface RegistryHubItem {
+export type RegistryHubItem = {
   href: string;
   title: string;
   description: string;
-}
+};
 
 /**
  * Reusable hub grid: Card per entry with a direct Next Link.

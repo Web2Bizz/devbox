@@ -10,12 +10,12 @@ import { useI18n } from '../i18n';
 import { LanguageSwitcher } from './language-switcher';
 import { HeaderProfileDropdown } from './profile-dropdown';
 
-export interface DashboardHeaderBreadcrumb {
+export type DashboardHeaderBreadcrumb = {
   label: string;
   href?: string;
-}
+};
 
-export interface DashboardHeaderProps {
+export type DashboardHeaderProps = {
   /** Optional page title rendered left of the controls. */
   title?: ReactNode;
   /** Optional breadcrumb trail (flat URLs, no locale segment). */
@@ -24,7 +24,7 @@ export interface DashboardHeaderProps {
   user?: ReactNode;
   /** Optional page-level actions rendered before theme/language controls. */
   actions?: ReactNode;
-}
+};
 
 export type DashboardShellProps = {
   children: ReactNode;

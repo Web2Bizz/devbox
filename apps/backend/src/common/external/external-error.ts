@@ -17,7 +17,7 @@ export type ExternalErrorCode =
   | 'EXTERNAL_UPSTREAM_5XX'
   | 'GITHUB_AUTH';
 
-export interface ExternalErrorOptions {
+export type ExternalErrorOptions = {
   code: ExternalErrorCode;
   /** Logical upstream, e.g. 'opencode' | 'github' | 'db'. */
   service: string;
@@ -33,7 +33,7 @@ export interface ExternalErrorOptions {
   isRetryable?: boolean;
   /** Original cause (kept off the wire, never serialized to the envelope). */
   cause?: unknown;
-}
+};
 
 const FIXED_MESSAGES: Record<ExternalErrorCode, string> = {
   EXTERNAL_TIMEOUT: 'Upstream request timed out',

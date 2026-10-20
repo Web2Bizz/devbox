@@ -3,14 +3,14 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiClientError, api } from '../api/client';
-import type { AuthUser } from '../api/types';
+import type { AuthUser } from '@devbox/contracts';
 import { formatApiError } from '../lib/format-error';
 import { getValidAccessToken, refreshAccessToken } from '../lib/auth-store';
 import { PROFILE_QUERY_KEY } from './query-keys';
 import type { Profile } from '../lib/types';
 import { useI18n } from '../i18n';
 
-export interface UseProfileResult {
+export type UseProfileResult = {
   profile: Profile | null;
   loading: boolean;
   error: string | null;
@@ -19,7 +19,7 @@ export interface UseProfileResult {
   update: (patch: Pick<Profile, 'name'> & Partial<Pick<Profile, 'email'>>) => Promise<boolean>;
   reload: () => void;
   dismiss: () => void;
-}
+};
 
 function toProfile(user: AuthUser): Profile {
   return {

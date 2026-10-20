@@ -1,19 +1,19 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { DbModule } from './db/db.module.js';
-import { HealthModule } from './health/health.module.js';
-import { ApiModule } from './api/api.module.js';
-import { CommonModule } from './common/common.module.js';
-import { DockerRegistryModule } from './docker-registry/docker-registry.module.js';
-import { NpmRegistryModule } from './npm-registry/npm-registry.module.js';
-import { OpencodeModule } from './opencode/opencode.module.js';
-import { OpencodeKeysModule } from './opencode-keys/opencode-keys.module.js';
-import { OrganizationsModule } from './organizations/organizations.module.js';
-import { ProjectsModule } from './projects/projects.module.js';
-import { ReposModule } from './repos/repos.module.js';
-import { WorkspacesModule } from './workspaces/workspaces.module.js';
-import { AuthModule } from './auth/auth.module.js';
-import { validateConfigForNest } from './env.js';
+import { DbModule } from './db/db.module';
+import { HealthModule } from './health/health.module';
+import { ApiModule } from './api/api.module';
+import { CommonModule } from './common/common.module';
+import { DockerRegistryModule } from './docker-registry/docker-registry.module';
+import { NpmRegistryModule } from './npm-registry/npm-registry.module';
+import { OpencodeModule } from './opencode/opencode.module';
+import { OpencodeKeysModule } from './opencode-keys/opencode-keys.module';
+import { OrganizationsModule } from './organizations/organizations.module';
+import { ProjectsModule } from './projects/projects.module';
+import { ReposModule } from './repos/repos.module';
+import { WorkspacesModule } from './workspaces/workspaces.module';
+import { AuthModule } from './auth/auth.module';
+import { validateConfigForNest } from './env';
 
 @Module({
   imports: [

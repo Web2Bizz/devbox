@@ -15,12 +15,12 @@ import {
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiResponse, ApiTags } from "@nestjs/swagger";
 import type { Response } from "express";
-import { V1Endpoint } from "../api/version.js";
-import { AppLogger } from "../common/app-logger.service.js";
-import { ExternalServiceError } from "../common/external/external-error.js";
-import { ZodValidationPipe } from "../common/zod-validation.pipe.js";
-import { validateEnv } from "../env.js";
-import { LocalAuthProvider } from "./auth-provider.js";
+import { V1Endpoint } from "../api/version";
+import { AppLogger } from "../common/app-logger.service";
+import { ExternalServiceError } from "../common/external/external-error";
+import { ZodValidationPipe } from "../common/zod-validation.pipe";
+import { validateEnv } from "../env";
+import { LocalAuthProvider } from "./auth-provider";
 import {
   AuthSessionDto,
   AuthTokensDto,
@@ -29,7 +29,7 @@ import {
   RefreshBodyDto,
   RegisterBodyDto,
   UpdateMeBodyDto,
-} from "./auth.dto.js";
+} from "./auth.dto";
 import {
   loginSchema,
   refreshSchema,
@@ -39,12 +39,12 @@ import {
   type RefreshInput,
   type RegisterInput,
   type UpdateMeInput,
-} from "./dto.js";
-import { JwtAuthGuard } from "./jwt-auth.guard.js";
-import { ReqUser } from "./req-user.decorator.js";
-import type { RequestIdentity } from "./identity.service.js";
-import { TokenService } from "./token.service.js";
-import { UsersService, toPublicUser } from "./users.service.js";
+} from "./dto";
+import { JwtAuthGuard } from "./jwt-auth.guard";
+import { ReqUser } from "./req-user.decorator";
+import type { RequestIdentity } from "./identity.service";
+import { TokenService } from "./token.service";
+import { UsersService, toPublicUser } from "./users.service";
 
 /** httpOnly refresh cookie (read by POST /auth/refresh via body or cookie). */
 export const REFRESH_COOKIE = "devbox-refresh";

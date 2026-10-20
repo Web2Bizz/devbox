@@ -59,12 +59,12 @@ function secretsLeaked(payload: unknown): boolean {
   );
 }
 
-interface StubOptions {
+type StubOptions = {
   /** Fixed status for /-/ping (used for the 401/403 phases). */
   pingStatus?: number;
   /** When set, /-/ping answers 200 only with this exact Authorization value, else 401. */
   expectAuth?: string;
-}
+};
 
 function startStubVerdaccio(options: StubOptions = {}): Promise<{ server: Server; url: string }> {
   const { pingStatus, expectAuth } = options;
@@ -101,8 +101,8 @@ function startStubVerdaccio(options: StubOptions = {}): Promise<{ server: Server
 
 async function main(): Promise<void> {
   const { NestFactory } = await import('@nestjs/core');
-  const { AppModule } = await import('../app.module.js');
-  const { configureApp } = await import('../app.setup.js');
+  const { AppModule } = await import('../app.module');
+  const { configureApp } = await import('../app.setup');
 
   let passed = 0;
   let failed = 0;

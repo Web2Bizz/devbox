@@ -1,8 +1,8 @@
 import { Module } from "@nestjs/common";
-import { DbModule } from "../db/db.module.js";
-import { WorkspacePathService } from "../workspaces/workspace-path.service.js";
-import { OrganizationsController } from "./organizations.controller.js";
-import { OrganizationsService } from "./organizations.service.js";
+import { DbModule } from "../db/db.module";
+import { WorkspacePathService } from "../workspaces/workspace-path.service";
+import { OrganizationsController } from "./organizations.controller";
+import { OrganizationsService } from "./organizations.service";
 
 /**
  * OrganizationsModule — org CRUD + membership + invites + project links.

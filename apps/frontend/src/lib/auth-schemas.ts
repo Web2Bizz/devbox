@@ -1,31 +1,17 @@
-import { z } from 'zod';
-
 /**
- * Client-side auth validation (mirrors backend register/login rules so
- * typos are caught before the request; server 400/409 mapping in
- * register-field-errors stays as the fallback for backend rejections).
+ * Client auth schemas — re-exported from '@devbox/contracts' (single source).
  *
- * Call sites pass already-trimmed email (the page trims on submit and the
- * hook trims defensively); firstName/lastName trim inside the schema so
- * whitespace-only names fail `min(1)`.
+ * Package `loginSchema`/`registerSchema` are backend-verbatim
+ * (trim-first email regex, name trim/min/max, password min/max) so
+ * client pre-submit checks match server 400s; `parseRegisterFieldErrors`
+ * stays as the server-fallback mapper. zod v4 + @hookform/resolvers 5.9.1
+ * share the same zod 4.6.5 instance, so `zodResolver(loginSchema)` keeps
+ * working with no thin wrapper.
+ *
+ * @deprecated Import from '@devbox/contracts' directly in new code —
+ * this module is a Forward-Only alias kept so `@/lib/auth-schemas`
+ * imports keep compiling.
  */
-export const loginSchema = z.object({
-  email: z.email({ error: 'invalid_email' }),
-  password: z.string({ error: 'required' }).min(8, { error: 'password_min' }),
-});
 
-export const registerSchema = loginSchema.extend({
-  firstName: z
-    .string({ error: 'required' })
-    .trim()
-    .min(1, { error: 'name_required' })
-    .max(100, { error: 'name_too_long' }),
-  lastName: z
-    .string({ error: 'required' })
-    .trim()
-    .min(1, { error: 'name_required' })
-    .max(100, { error: 'name_too_long' }),
-});
-
-export type LoginInput = z.infer<typeof loginSchema>;
-export type RegisterInput = z.infer<typeof registerSchema>;
+export { loginSchema, registerSchema } from '@devbox/contracts';
+export type { LoginInput, RegisterInput } from '@devbox/contracts';

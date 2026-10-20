@@ -1,15 +1,15 @@
 import { Injectable } from "@nestjs/common";
 import { desc, eq } from "drizzle-orm";
-import { AppLogger } from "../../common/app-logger.service.js";
+import { AppLogger } from "../../common/app-logger.service";
 import {
   DbService,
   dbUnavailable,
   type DbClient,
-} from "../../db/db.service.js";
+} from "../../db/db.service";
 import {
   githubInstallations,
   type GithubInstallationRow,
-} from "../../db/schema.js";
+} from "../../db/schema";
 
 /**
  * Stored GitHub App installation (multi-tenant binding).
@@ -17,7 +17,7 @@ import {
  * nullable until the users table exists. installationId is the GitHub
  * numeric id (unique). Tokens are NEVER stored here — only the binding.
  */
-export interface GithubInstallation {
+export type GithubInstallation = {
   userId: string | null;
   installationId: number;
   accountLogin: string | null;
@@ -25,15 +25,15 @@ export interface GithubInstallation {
   suspendedAt: string | null;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface UpsertInstallationInput {
+export type UpsertInstallationInput = {
   installationId: number;
   userId?: string | null;
   accountLogin?: string | null;
   accountType?: string | null;
   suspendedAt?: string | null;
-}
+};
 
 function toInstallation(row: GithubInstallationRow): GithubInstallation {
   return {

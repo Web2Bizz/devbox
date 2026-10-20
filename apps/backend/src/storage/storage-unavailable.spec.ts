@@ -19,13 +19,13 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { validateEnvWithWarnings } from '../env.js';
-import { ReposService } from '../repos/repos.service.js';
-import { ProjectFilesService } from '../projects/files/project-files.service.js';
-import { WorkspaceCloneService } from '../workspaces/workspace-clone.service.js';
-import { CloneJobsRepository } from '../workspaces/clone-jobs.repository.js';
-import { WorkspacePathService } from '../workspaces/workspace-path.service.js';
-import { WorkspacesService } from '../workspaces/workspaces.service.js';
+import { validateEnvWithWarnings } from '../env';
+import { ReposService } from '../repos/repos.service';
+import { ProjectFilesService } from '../projects/files/project-files.service';
+import { WorkspaceCloneService } from '../workspaces/workspace-clone.service';
+import { CloneJobsRepository } from '../workspaces/clone-jobs.repository';
+import { WorkspacePathService } from '../workspaces/workspace-path.service';
+import { WorkspacesService } from '../workspaces/workspaces.service';
 
 type Source = NodeJS.ProcessEnv;
 

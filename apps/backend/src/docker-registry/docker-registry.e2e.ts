@@ -60,8 +60,8 @@ function startStubRegistry(): Promise<{ server: Server; url: string }> {
 
 async function main(): Promise<void> {
   const { NestFactory } = await import('@nestjs/core');
-  const { AppModule } = await import('../app.module.js');
-  const { configureApp } = await import('../app.setup.js');
+  const { AppModule } = await import('../app.module');
+  const { configureApp } = await import('../app.setup');
 
   let passed = 0;
   let failed = 0;

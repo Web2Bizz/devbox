@@ -6,12 +6,12 @@ import { useI18n } from '../i18n';
 
 export type OpencodeStreamStatus = 'connecting' | 'live' | 'reconnecting' | 'error';
 
-export interface UseOpencodeEventsResult {
+export type UseOpencodeEventsResult = {
   events: OpencodeEvent[];
   status: OpencodeStreamStatus;
   error: string | null;
   reconnect: () => void;
-}
+};
 
 const MAX_EVENTS = 50;
 const BASE_DELAY_MS = 1000;

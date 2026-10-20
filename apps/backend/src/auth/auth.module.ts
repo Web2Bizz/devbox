@@ -1,17 +1,17 @@
 import { Global, Module } from '@nestjs/common';
-import { DbModule } from '../db/db.module.js';
-import { AuthController } from './auth.controller.js';
+import { DbModule } from '../db/db.module';
+import { AuthController } from './auth.controller';
 import {
   GithubAppProviderStub,
   LocalAuthProvider,
   SsoOauthProviderStub,
-} from './auth-provider.js';
-import { IdentityService } from './identity.service.js';
-import { JwtAuthGuard } from './jwt-auth.guard.js';
-import { PasswordService } from './password.service.js';
-import { TokenService } from './token.service.js';
-import { UsersService } from './users.service.js';
-import { UsersController } from './users.controller.js';
+} from './auth-provider';
+import { IdentityService } from './identity.service';
+import { JwtAuthGuard } from './jwt-auth.guard';
+import { PasswordService } from './password.service';
+import { TokenService } from './token.service';
+import { UsersService } from './users.service';
+import { UsersController } from './users.controller';
 
 /**
  * AuthModule — internal accounts (email+password, argon2id + HS256 JWT).

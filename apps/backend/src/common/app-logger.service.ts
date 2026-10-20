@@ -1,5 +1,5 @@
 import { Injectable, Logger, Optional, type LogLevel } from '@nestjs/common';
-import { validateEnv } from '../env.js';
+import { validateEnv } from '../env';
 
 export type AppLogLevel = 'debug' | 'info' | 'warn' | 'error';
 

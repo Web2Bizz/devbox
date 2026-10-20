@@ -8,14 +8,14 @@ import { setSession, signOutAndRedirect } from '../lib/auth-store';
 import type { MockUser } from '../lib/mocks/auth';
 import { useI18n } from '../i18n';
 
-export interface UseLoginResult {
+export type UseLoginResult = {
   user: MockUser | null;
   loading: boolean;
   error: string | null;
   login: (email: string, password: string) => Promise<boolean>;
   logout: () => void;
   retry: () => void;
-}
+};
 
 /**
  * Real login hook — POST /api/v1/auth/login (contract unchanged:

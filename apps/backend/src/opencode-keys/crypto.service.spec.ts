@@ -29,7 +29,7 @@ function setKeyring(active: string, previous?: string): void {
 
 async function main(): Promise<void> {
   setKeyring(KEY_A);
-  const { CryptoService } = await import("./crypto.service.js");
+  const { CryptoService } = await import("./crypto.service");
 
   const codeOf = (fn: () => unknown): string => {
     try {

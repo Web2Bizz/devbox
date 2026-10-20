@@ -1,15 +1,15 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { readdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { AppLogger } from '../common/app-logger.service.js';
+import { AppLogger } from '../common/app-logger.service';
 import {
   storageUnavailable,
   throwStorageNotConfigured,
-} from '../storage/storage-unavailable.js';
-import { userSpaceSchema, type ReposQuery } from './dto.js';
-import { isValidGitRepo } from './repos-git.util.js';
+} from '../storage/storage-unavailable';
+import { userSpaceSchema, type ReposQuery } from './dto';
+import { isValidGitRepo } from './repos-git.util';
 
-export interface RepoEntry {
+export type RepoEntry = {
   /** Scope owner id (user uuid under users/, org uuid under orgs/). */
   userSpace: string;
   /** Project id (uuid). */
@@ -17,15 +17,15 @@ export interface RepoEntry {
   /** Path relative to REPOS_ROOT, e.g. "users/<uuid>/projects/<uuid>/content". */
   path: string;
   updatedAt: string;
-}
+};
 
-interface Candidate {
+type Candidate = {
   scope: 'users' | 'orgs';
   userSpace: string;
   name: string;
   absPath: string;
   updatedAt: string;
-}
+};
 
 const SCOPE_DIR_PATTERN = /^[a-zA-Z0-9_-]+$/;
 

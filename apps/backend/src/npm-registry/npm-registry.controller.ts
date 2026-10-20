@@ -1,9 +1,9 @@
 import { Controller, Get, Headers, Version } from '@nestjs/common';
 import { ApiResponse, ApiTags } from '@nestjs/swagger';
-import { V1Endpoint } from '../api/version.js';
-import { ApiErrorDto } from '../api/dto.js';
-import { NpmRegistryService } from './npm-registry.service.js';
-import { NpmRegistryStatusDto } from './dto.js';
+import { V1Endpoint } from '../api/version';
+import { ApiErrorDto } from '../api/dto';
+import { NpmRegistryService } from './npm-registry.service';
+import { NpmRegistryStatusDto } from './dto';
 
 /**
  * npm registry (Verdaccio) — observe-only read surface (GET only).

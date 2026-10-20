@@ -17,7 +17,7 @@ import { mkdtempSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { WorkspacePathService } from './workspace-path.service.js';
+import { WorkspacePathService } from './workspace-path.service';
 
 const UID = randomUUID();
 const OID = randomUUID();

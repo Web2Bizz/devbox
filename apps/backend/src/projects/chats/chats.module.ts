@@ -1,10 +1,10 @@
 import { Module, forwardRef } from "@nestjs/common";
-import { DbModule } from "../../db/db.module.js";
-import { OrganizationsModule } from "../../organizations/organizations.module.js";
-import { ProjectsModule } from "../projects.module.js";
-import { SessionsModule } from "../sessions/sessions.module.js";
-import { ChatsController } from "./chats.controller.js";
-import { ChatsService } from "./chats.service.js";
+import { DbModule } from "../../db/db.module";
+import { OrganizationsModule } from "../../organizations/organizations.module";
+import { ProjectsModule } from "../projects.module";
+import { SessionsModule } from "../sessions/sessions.module";
+import { ChatsController } from "./chats.controller";
+import { ChatsService } from "./chats.service";
 
 /**
  * Nested module — imported by ProjectsModule, never registered in AppModule directly.

@@ -8,13 +8,13 @@ import { Injectable } from '@nestjs/common';
 export const DEFAULT_MOCK_USER_ID = 'default';
 
 /** Authenticated request identity (JWT user or legacy mock fallback). */
-export interface RequestIdentity {
+export type RequestIdentity = {
   /** User key — real uuid from JWT, or the mock key under legacy fallback. */
   id: string;
   email: string | null;
   /** True only for the x-user-id / ?userId fallback path. */
   mock: boolean;
-}
+};
 
 /**
  * Resolves the MVP mock user key: x-user-id header wins, then ?userId query,

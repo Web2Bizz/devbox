@@ -8,10 +8,10 @@ expand(dotenvResult);
 
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module.js';
-import { AppLogger, nestLogLevels } from './common/app-logger.service.js';
-import { configureApp, setupSwagger } from './app.setup.js';
-import { validateEnvWithWarnings } from './env.js';
+import { AppModule } from './app.module';
+import { AppLogger, nestLogLevels } from './common/app-logger.service';
+import { configureApp, setupSwagger } from './app.setup';
+import { validateEnvWithWarnings } from './env';
 
 function isAbortLike(e: unknown): boolean {
   const v = e as {

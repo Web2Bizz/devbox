@@ -8,13 +8,13 @@ import type { NpmPackageItem } from '../lib/types';
 import { useI18n } from '../i18n';
 import { NPM_QUERY_KEY } from './query-keys';
 
-export interface UseNpmResult {
+export type UseNpmResult = {
   packages: NpmPackageItem[];
   loading: boolean;
   error: string | null;
   isEmpty: boolean;
   reload: () => void;
-}
+};
 
 /**
  * Shared fetch — GET /api/v1/registry/npm/status without a token (public

@@ -1,5 +1,5 @@
 import { api } from '../api/client';
-import type { AuthSession } from '../api/types';
+import type { AuthSession } from '@devbox/contracts';
 import { getActiveQueryClient } from './query-client';
 
 const ACCESS_KEY = 'devbox-access-token';
@@ -211,10 +211,10 @@ export async function logoutEverywhere(): Promise<void> {
   clearSession();
 }
 
-export interface SignOutRouter {
+export type SignOutRouter = {
   replace?: (href: string) => void;
   push?: (href: string) => void;
-}
+};
 
 /**
  * Единый путь sign-out: серверный revoke (best-effort, идемпотентный) →

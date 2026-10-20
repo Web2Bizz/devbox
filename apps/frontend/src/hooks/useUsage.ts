@@ -3,7 +3,7 @@
 import { useCallback, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiClientError, api } from '../api/client';
-import type { OpencodeUsage } from '../api/types';
+import type { OpencodeUsage } from '@devbox/contracts';
 import { getValidAccessToken, refreshAccessToken } from '../lib/auth-store';
 import { USAGE_QUERY_KEY } from './query-keys';
 import { useI18n } from '../i18n';
@@ -15,7 +15,7 @@ import {
   type UsageStatus,
 } from '../features/usage/usage-status';
 
-export interface UseUsageResult {
+export type UseUsageResult = {
   usage: OpencodeUsage | null;
   loading: boolean;
   error: string | null;
@@ -28,7 +28,7 @@ export interface UseUsageResult {
   upstreamDown: boolean;
   upstreamUnavailable: boolean;
   reload: () => void;
-}
+};
 
 async function fetchUsage(): Promise<OpencodeUsage> {
   const token = await getValidAccessToken();

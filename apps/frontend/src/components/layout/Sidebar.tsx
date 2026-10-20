@@ -7,10 +7,10 @@ import { useState, type KeyboardEvent } from 'react';
 import { Button } from '@web2bizz/ui/components';
 import { useI18n } from '../../i18n';
 
-export interface SidebarNavItem {
+export type SidebarNavItem = {
   href: string;
   label: string;
-}
+};
 
 /**
  * Brand row: logo PNG + DevBox wordmark + console subtitle.
@@ -194,11 +194,11 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
-export interface SidebarProps {
+export type SidebarProps = {
   /** Mobile drawer open state (desktop aside is always visible via CSS). */
   open?: boolean;
   onClose?: () => void;
-}
+};
 
 /**
  * Visible vertical sidebar:

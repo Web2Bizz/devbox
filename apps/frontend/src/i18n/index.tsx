@@ -73,11 +73,11 @@ function readStoredLocale(): Locale {
   return DEFAULT_LOCALE;
 }
 
-interface I18nContextValue {
+type I18nContextValue = {
   locale: Locale;
   setLocale: (next: Locale) => void;
   t: Dictionary;
-}
+};
 
 const I18nContext = createContext<I18nContextValue>({
   locale: DEFAULT_LOCALE,

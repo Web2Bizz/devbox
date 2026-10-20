@@ -5,12 +5,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiClientError, api } from '../api/client';
 import { formatApiError } from '../lib/format-error';
 import { getValidAccessToken } from '../lib/auth-store';
-import type { MemberDto, OrgRole } from '../api/types';
+import type { OrganizationMember as MemberDto, OrgRole } from '@devbox/contracts';
 import { useI18n } from '../i18n';
 
 export const orgMembersQueryKey = (orgId: string) => ['organization-members', orgId] as const;
 
-export interface UseOrgMembersResult {
+export type UseOrgMembersResult = {
   members: MemberDto[];
   loading: boolean;
   error: string | null;
@@ -21,7 +21,7 @@ export interface UseOrgMembersResult {
   removeMember: (userId: string) => Promise<void>;
   mutating: boolean;
   mutationError: string | null;
-}
+};
 
 /**
  * Organization members hook (etalon: useProjects mutation pattern).

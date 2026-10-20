@@ -23,7 +23,7 @@ import { useInvite } from '@/hooks/useInvite';
 import { useProfile } from '@/hooks/useProfile';
 import { ApiClientError, api } from '@/api/client';
 import { getValidAccessToken } from '@/lib/auth-store';
-import type { OrgRole } from '@/api/types';
+import type { OrgRole } from '@devbox/contracts';
 import { useI18n } from '@/i18n';
 
 function shortId(id: string): string {

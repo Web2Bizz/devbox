@@ -10,18 +10,18 @@ import {
 import { and, eq } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { rm } from "node:fs/promises";
-import { AppLogger } from "../common/app-logger.service.js";
-import { DbService, dbUnavailable, type DbClient } from "../db/db.service.js";
+import { AppLogger } from "../common/app-logger.service";
+import { DbService, dbUnavailable, type DbClient } from "../db/db.service";
 import {
   organizationMembers,
   organizations,
   projectsAndOrganizations,
   type OrganizationMemberRow,
   type OrganizationRow,
-} from "../db/schema.js";
-import { validateEnv } from "../env.js";
-import { UsersService } from "../auth/users.service.js";
-import { WorkspacePathService } from "../workspaces/workspace-path.service.js";
+} from "../db/schema";
+import { validateEnv } from "../env";
+import { UsersService } from "../auth/users.service";
+import { WorkspacePathService } from "../workspaces/workspace-path.service";
 import type {
   AcceptInviteInput,
   AddMemberInput,
@@ -29,11 +29,11 @@ import type {
   CreateOrganizationInput,
   UpdateMemberRoleInput,
   UpdateOrganizationInput,
-} from "./dto.js";
+} from "./dto";
 
 export type OrgRole = "maintainer" | "user";
 
-export interface Organization {
+export type Organization = {
   id: string;
   name: string;
   description: string | null;
@@ -41,28 +41,28 @@ export interface Organization {
   isPrivate: boolean;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface OrganizationMember {
+export type OrganizationMember = {
   orgId: string;
   userId: string;
   role: OrgRole;
   createdAt: string;
-}
+};
 
-export interface OrganizationInvite {
+export type OrganizationInvite = {
   token: string;
   orgId: string;
   role: OrgRole;
   expiresAt: string;
-}
+};
 
-interface StoredInvite {
+type StoredInvite = {
   orgId: string;
   role: OrgRole;
   expiresAt: number;
   used: boolean;
-}
+};
 
 function toOrganization(row: OrganizationRow): Organization {
   return {

@@ -1,2 +1,2 @@
 export * from "../session-binding"
-export * from "../use-session-screen"
+export * from "../../hooks/use-session-screen"

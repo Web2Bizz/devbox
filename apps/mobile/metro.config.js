@@ -11,7 +11,15 @@ const { getDefaultConfig } = require("expo/metro-config")
 /** @type {import('expo/metro-config').MetroConfig} */
 const config = getDefaultConfig(__dirname)
 
-config.watchFolders = [...(config.watchFolders ?? []), path.resolve(__dirname, "packages")]
+config.watchFolders = [
+  ...(config.watchFolders ?? []),
+  path.resolve(__dirname, "packages"),
+  // @devbox/contracts lives OUTSIDE the mobile root (../../packages/contracts,
+  // file: dep) — watch it so Metro picks up wire-contract changes without a
+  // cache clear. Installed via `npm install --legacy-peer-deps` from
+  // apps/mobile (standalone npm project, not a bun workspace).
+  path.resolve(__dirname, "../../packages/contracts"),
+]
 config.resolver.extraNodeModules = {
   ...config.resolver.extraNodeModules,
   "@web2bizz/ui-native": path.resolve(__dirname, "packages/uikit"),

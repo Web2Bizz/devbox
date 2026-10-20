@@ -7,7 +7,7 @@ Expo 57 + React Native 0.86.3 + React 19.2.3 + Expo Router. Single app, no monor
 ## Commands
 
 ```bash
-npm install --legacy-peer-deps   # required — .npmrc sets legacy-peer-deps=true, peer constraints need it
+npm install --legacy-peer-deps   # required — root .npmrc sets legacy-peer-deps=true (mobile inherits up the tree), peer constraints need it
 npm run typecheck                # tsc --noEmit (strict, sole verification gate)
 npm test                         # node --test 'src/**/*.test.ts' 'scripts/*.test.mjs' — needs Node >= 23.6 for TS type-stripping
 node --test src/lib/auth.test.ts # single test file

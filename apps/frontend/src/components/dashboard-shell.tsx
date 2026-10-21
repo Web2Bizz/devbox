@@ -9,6 +9,7 @@ import { Content, type ContentProps } from './layout/Content';
 import { useI18n } from '../i18n';
 import { LanguageSwitcher } from './language-switcher';
 import { HeaderProfileDropdown } from './profile-dropdown';
+import { OrganizationSwitcher } from './organization-switcher';
 
 export type DashboardHeaderBreadcrumb = {
   label: string;
@@ -40,7 +41,9 @@ type DashboardHeaderInternalProps = DashboardHeaderProps & {
 /**
  * Visible grid-shell header built on the kit Header (@web2bizz/ui 0.25.9,
  * `components` entry, shape=rounded): SidebarBrand (logo + DevBox + Console)
- * + title/breadcrumbs → leadingSlot, actions/user + HeaderProfileDropdown
+ * + OrganizationSwitcher (authenticated-only org dropdown next to the logo
+ * → /organizations/[id], empty → /organizations link) + title/breadcrumbs
+ * → leadingSlot, actions/user + HeaderProfileDropdown
  * (ProfileDropdown from `widgets` entry, useProfile mock, sign-out →/login)
  * + LanguageSwitcher compact + ThemeToggleDefault → trailingSlot, drawer
  * trigger → menuToggleSlot.
@@ -79,6 +82,9 @@ function DashboardHeader({ title, breadcrumbs, user, actions, onMenu }: Dashboar
   const leading = (
     <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
       <SidebarBrand />
+      <div className="ml-2 min-w-0">
+        <OrganizationSwitcher />
+      </div>
       {hasLeading && (
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
           {breadcrumbs && breadcrumbs.length > 0 && (
@@ -144,7 +150,8 @@ function DashboardHeader({ title, breadcrumbs, user, actions, onMenu }: Dashboar
  *   Container export (only ChartContainer in full/widgets), so no kit import
  *   here by design)
  * - inner grid, row 1: kit Header (shape=rounded, NATIVE radius) full-width
- *   across both columns → brand + breadcrumbs/title leading, actions + user +
+ *   across both columns → brand + OrganizationSwitcher + breadcrumbs/title
+ *   leading, actions + user +
  *   HeaderProfileDropdown + LanguageSwitcher + ThemeToggleDefault trailing;
  *   sticky pinning is app-owned in globals.css `.app-header`
  *   (kit 0.25.9 removed the sticky wrapper — no flatten, grid-area only)

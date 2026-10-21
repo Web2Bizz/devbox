@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Progress, Skeleton } from '@web2bizz/ui/components';
+import { Button, Progress, Skeleton } from '@web2bizz/ui/components';
 import { EmptyState, ErrorState } from '../../components/states';
 import type { OpencodeLimitBucket } from '@devbox/contracts';
 import { useI18n } from '../../i18n';
@@ -31,7 +31,7 @@ function toneClass(pct: number): string {
 
 export function UsageSection() {
   const { t } = useI18n();
-  const { usage, loading, status, reload } = useUsage();
+  const { usage, loading, isFetching, status, reload, refetch } = useUsage();
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const openDialog = () => setDialogOpen(true);
@@ -129,6 +129,20 @@ export function UsageSection() {
       </h2>
       <p className="text-muted-foreground text-sm">{t.limits.desc}</p>
       {body}
+      {!loading && (
+        <div className="flex justify-end">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={refetch}
+            disabled={isFetching}
+            aria-label={t.common.refresh}
+            aria-busy={isFetching || undefined}
+          >
+            {isFetching ? t.common.loading : t.common.refresh}
+          </Button>
+        </div>
+      )}
       <ApiKeyDialog open={dialogOpen} onOpenChange={setDialogOpen} onSaved={reload} />
     </section>
   );

@@ -18,6 +18,7 @@ import {
 export type UseUsageResult = {
   usage: OpencodeUsage | null;
   loading: boolean;
+  isFetching: boolean;
   error: string | null;
   status: UsageStatus;
   diagnostic: string | null;
@@ -28,6 +29,7 @@ export type UseUsageResult = {
   upstreamDown: boolean;
   upstreamUnavailable: boolean;
   reload: () => void;
+  refetch: () => void;
 };
 
 async function fetchUsage(): Promise<OpencodeUsage> {
@@ -59,7 +61,7 @@ export function useUsage(): UseUsageResult {
   const { t } = useI18n();
   const queryClient = useQueryClient();
 
-  const { data, isLoading, error: queryError } = useQuery({
+  const { data, isLoading, isFetching, error: queryError, refetch: queryRefetch } = useQuery({
     queryKey: USAGE_QUERY_KEY,
     queryFn: fetchUsage,
     staleTime: 10_000,
@@ -91,11 +93,16 @@ export function useUsage(): UseUsageResult {
     void queryClient.invalidateQueries({ queryKey: USAGE_QUERY_KEY });
   }, [queryClient]);
 
+  const refetch = useCallback(() => {
+    void queryRefetch();
+  }, [queryRefetch]);
+
   const loading = isLoading && !data;
 
   return {
     usage,
     loading,
+    isFetching,
     error,
     status,
     diagnostic,
@@ -106,5 +113,6 @@ export function useUsage(): UseUsageResult {
     upstreamDown,
     upstreamUnavailable: upstreamDown,
     reload,
+    refetch,
   };
 }

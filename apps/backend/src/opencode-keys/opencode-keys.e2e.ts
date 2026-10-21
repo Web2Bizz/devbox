@@ -277,12 +277,23 @@ async function main(): Promise<void> {
     const auth = () => ({ authorization: `Bearer ${access}` });
 
     await check("GET /usage with no key → 404 opencode_key_missing", async () => {
-      const res = await fetch(`${base}/api/v1/usage`, {
-        headers: auth(),
-      });
-      assert.equal(res.status, 404);
-      const body = (await readJson(res)) as { code?: string };
-      assert.equal(body.code, "opencode_key_missing");
+      // No-key fast path must not touch upstream: point the billing target
+      // at a black hole — a missing key still answers 404 (not 503/504),
+      // proving getUsage returns before any upstream fetch.
+      const prevTarget = billingTarget;
+      billingTarget = "http://127.0.0.1:9/usage";
+      lastAuth = null;
+      try {
+        const res = await fetch(`${base}/api/v1/usage`, {
+          headers: auth(),
+        });
+        assert.equal(res.status, 404);
+        const body = (await readJson(res)) as { code?: string };
+        assert.equal(body.code, "opencode_key_missing");
+        assert.equal(lastAuth, null);
+      } finally {
+        billingTarget = prevTarget;
+      }
     });
 
     await check("GET /key with no key → configured:false", async () => {

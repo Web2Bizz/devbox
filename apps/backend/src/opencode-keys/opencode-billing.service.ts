@@ -165,8 +165,13 @@ export class OpencodeBillingService {
   }
 
   async getUsage(userId: string, correlationId?: string): Promise<OpencodeUsage> {
+    // Missing-key fast path: null/empty row → 404 opencode_key_missing
+    // BEFORE any upstream request. Upstream is fetched only when a key
+    // exists. 503 comes solely from a real Postgres outage (throw out of
+    // db.client() funneled via dbUnavailable in findByUserId) — never for
+    // "no key stored".
     const stored = await this.keys.findByUserId(userId, correlationId);
-    if (!stored) {
+    if (!stored || !stored.encryptedKey || !stored.iv) {
       throw new NotFoundException({
         code: "opencode_key_missing",
         message: "No OpenCode API key configured for this user",

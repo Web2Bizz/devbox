@@ -151,20 +151,25 @@ export const s = StyleSheet.create({
     elevation: 0,
   },
   dockDark: { backgroundColor: "transparent" },
-  // Оверлей промптов (permission/question): перекрывает весь док поверх ввода
-  // и квик-действий. Сплошной фон в цвет экрана прячет поле под собой, тапы
-  // ловит сам (контент под ним недоступен, но не размонтирован). maxHeight
-  // задаётся инлайном от высоты окна — длинные вопросы скроллятся внутри
-  // QuestionPrompt, а не разъезжаются на весь экран.
+  // Оверлей промптов (permission/question): прибит к низу дока поверх ввода
+  // и квик-действий (только bottom: 0 — без top, иначе при переполнении
+  // контент уезжает вниз за край; растёт вверх до лимита). Сплошной фон в
+  // цвет экрана прячет поле под собой, тапы ловит сам (контент под ним
+  // недоступен, но не размонтирован). Инсеты — как у поля ввода (задаются
+  // инлайном через COMPOSER_PADDING), maxHeight — 70% окна инлайном через
+  // promptOverlayMaxHeight: длинные списки скроллятся внутри карточек
+  // (QuestionPrompt/PermissionPrompt), а не разъезжаются на весь экран.
   promptOverlay: {
     position: "absolute",
-    top: 0,
     left: 0,
     right: 0,
     bottom: 0,
     zIndex: 5,
     elevation: 5,
     justifyContent: "flex-end",
+    // Карточки без внешних margin (инсеты несёт оверлей) — зазор между
+    // соседними промптами держит gap.
+    gap: COMPOSER_PADDING,
     backgroundColor: "#ffffff",
     borderTopWidth: 1,
     borderColor: "#e5e5e5",

@@ -84,12 +84,17 @@ export function QuestionPrompt({ request, isDark, onReply, onReject }: Props) {
 
   return (
     <View style={[s.card, isDark && s.cardDark]}>
+      {/* Фиксированный заголовок: иконка + тема + текст вопроса. Не скроллится —
+          скроллится только список вариантов ниже, иначе вопрос уезжает вниз
+          вместе с длинным списком ответов. */}
       <View style={s.header}>
         <Ionicons name="chatbubble-ellipses-outline" size={18} color={isDark ? "#888888" : "#666666"} />
         <Text style={[s.title, isDark && s.textWhite]}>{q.header || t("chat.questionPrompt.headerFallback")}</Text>
       </View>
+      <Text style={[s.question, isDark && s.textWhite]}>{q.question}</Text>
+      {/* Скроллится только список вариантов — карточка при этом ужата лимитом
+          оверлея (70% высоты экрана), а не растёт вниз за его пределы. */}
       <ScrollView {...QUESTION_BODY_SCROLL_PROPS} style={s.body} contentContainerStyle={s.options} testID="question-options-scroll">
-        <Text style={[s.question, isDark && s.textWhite]}>{q.question}</Text>
         {q.options.map((opt) => {
           const selected = (answers[current] || []).includes(opt.label)
           return (
@@ -168,7 +173,9 @@ export function QuestionPrompt({ request, isDark, onReply, onReject }: Props) {
 const s = StyleSheet.create({
   card: {
     flexShrink: 1,
-    margin: 12,
+    // Без внешних отступов: инсеты (включая нижний — как у поля ввода) задаёт
+    // оверлей промптов в session/prompt-overlay, иначе низ двоится (padding + margin).
+    margin: 0,
     padding: 16,
     backgroundColor: "#f5f5f5",
     borderRadius: 12,
@@ -180,7 +187,7 @@ const s = StyleSheet.create({
   title: { fontSize: 15, fontWeight: "600", color: "#0a0a0a" },
   textWhite: { color: "#ffffff" },
   body: { flexShrink: 1 },
-  question: { fontSize: 14, lineHeight: 20, color: "#0a0a0a" },
+  question: { fontSize: 14, lineHeight: 20, color: "#0a0a0a", marginBottom: 8 },
   metaDark: { color: "#666666" },
 
   options: { gap: 8, paddingBottom: 1 },

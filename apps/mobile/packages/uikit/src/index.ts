@@ -34,7 +34,7 @@ export { CodeBlock } from "./components/markdown/CodeBlock"
 export { isLandscapeSize, shouldCapSheetContent, sheetContentCap } from "./utils/sheet-layout"
 export { parentOf, nameOf, breadcrumbsOf, stripTrailingSlash } from "./utils/path-utils"
 export { extractGitHubUrls } from "./utils/github-links"
-export { composerMaxHeight, keyboardVerticalOffset, COMPOSER_MIN_HEIGHT } from "./utils/session-layout"
+export { composerMaxHeight, keyboardVerticalOffset, COMPOSER_MIN_HEIGHT, PROMPT_OVERLAY_MAX_HEIGHT_RATIO, promptOverlayMaxHeight } from "./utils/session-layout"
 export type { LanCandidate } from "./utils/lan-discover"
 export type {
   Message,

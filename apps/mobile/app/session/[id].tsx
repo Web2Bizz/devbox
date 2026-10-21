@@ -56,7 +56,7 @@ import { useConnections } from "../../src/stores/connections"
 import { useAuth } from "../../src/stores/auth"
 import { useCatalog } from "../../src/stores/catalog"
 import { useSpeech } from "../../src/lib/speech"
-import { composerMaxHeight, keyboardVerticalOffset, COMPOSER_MIN_HEIGHT } from "@web2bizz/ui-native"
+import { composerMaxHeight, keyboardVerticalOffset, COMPOSER_MIN_HEIGHT, promptOverlayMaxHeight } from "@web2bizz/ui-native"
 
 // --- Builtin slash commands ---
 // Hard input cap, mirrored in the TextInput's maxLength below. Pastes that
@@ -1118,11 +1118,15 @@ export default function SessionScreen() {
           style={s.dockGradient}
           pointerEvents="none"
         />
-        {/* Промпты поверх ввода: absolute-overlay на весь док (zIndex/elevation 5
-            выше поля и кнопок) со сплошным фоном в цвет экрана — поле ввода,
-            квик-действия и поповеры остаются смонтированы под ним, но не видны
-            и недоступны для тапов. После ответа/отклонения оверлей исчезает и
-            ввод «возвращается» сам (драфт цел, размонтирования не было).
+        {/* Промпты поверх ввода: absolute-оверлей, прибит к низу дока
+            (только bottom: 0, без top — растёт вверх, а не уезжает вниз) с теми
+            же инсетами, что и поле ввода (COMPOSER_PADDING со всех сторон,
+            safe-area снизу — absolute-оверлей паддинг дока не ловит, поэтому
+            дублирует его сам). Высота ужата 70% экрана (promptOverlayMaxHeight),
+            переполнение скроллится внутри карточек (список вариантов /
+            паттерны), заголовки зафиксированы. zIndex/elevation 5 выше поля и
+            кнопок. После ответа/отклонения оверлей исчезает и ввод
+            «возвращается» сам (драфт цел, размонтирования не было).
             Absolute-позиция не участвует в замере dockHeight — список не прыгает. */}
         {hasActivePrompt && (
           <View
@@ -1130,8 +1134,10 @@ export default function SessionScreen() {
               s.promptOverlay,
               isDark && s.promptOverlayDark,
               {
-                paddingBottom: Math.max(12, insets.bottom),
-                maxHeight: Math.round(windowHeight * 0.6),
+                paddingTop: COMPOSER_PADDING,
+                paddingHorizontal: COMPOSER_PADDING,
+                paddingBottom: Math.max(COMPOSER_PADDING, insets.bottom),
+                maxHeight: promptOverlayMaxHeight(windowHeight),
               },
             ]}
           >
@@ -1504,20 +1510,25 @@ const s = StyleSheet.create({
     elevation: 0,
   },
   dockDark: { backgroundColor: "transparent" },
-  // Оверлей промптов (permission/question): перекрывает весь док поверх ввода
-  // и квик-действий. Сплошной фон в цвет экрана прячет поле под собой, тапы
-  // ловит сам (контент под ним недоступен, но не размонтирован). maxHeight
-  // задаётся инлайном от высоты окна — длинные вопросы скроллятся внутри
-  // QuestionPrompt, а не разъезжаются на весь экран.
+  // Оверлей промптов (permission/question): прибит к низу дока поверх ввода
+  // и квик-действий (только bottom: 0 — без top, иначе при переполнении
+  // контент уезжает вниз за край; растёт вверх до лимита). Сплошной фон в
+  // цвет экрана прячет поле под собой, тапы ловит сам (контент под ним
+  // недоступен, но не размонтирован). Инсеты — как у поля ввода (задаются
+  // инлайном через COMPOSER_PADDING), maxHeight — 70% окна инлайном через
+  // promptOverlayMaxHeight: длинные списки скроллятся внутри карточек
+  // (QuestionPrompt/PermissionPrompt), а не разъезжаются на весь экран.
   promptOverlay: {
     position: "absolute",
-    top: 0,
     left: 0,
     right: 0,
     bottom: 0,
     zIndex: 5,
     elevation: 5,
     justifyContent: "flex-end",
+    // Карточки без внешних margin (инсеты несёт оверлей) — зазор между
+    // соседними промптами держит gap.
+    gap: COMPOSER_PADDING,
     backgroundColor: "#ffffff",
     borderTopWidth: 1,
     borderColor: "#e5e5e5",

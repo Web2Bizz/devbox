@@ -4,9 +4,11 @@ import {
   COMPOSER_MAX_HEIGHT,
   COMPOSER_MIN_HEIGHT,
   IOS_KEYBOARD_VERTICAL_OFFSET,
+  PROMPT_OVERLAY_MAX_HEIGHT_RATIO,
   QUESTION_BODY_SCROLL_PROPS,
   composerMaxHeight,
   keyboardVerticalOffset,
+  promptOverlayMaxHeight,
 } from "./session-layout.ts"
 
 test("Android keyboard offset reconciles edge-to-edge screen and window coordinates", () => {
@@ -46,4 +48,10 @@ test("question body uses the only vertical overflow owner and retains navigation
     nestedScrollEnabled: true,
     showsVerticalScrollIndicator: true,
   })
+})
+
+test("prompt overlay never exceeds 70% of the window height", () => {
+  assert.equal(PROMPT_OVERLAY_MAX_HEIGHT_RATIO, 0.7)
+  assert.equal(promptOverlayMaxHeight(800), 560)
+  assert.equal(promptOverlayMaxHeight(700), 490)
 })

@@ -1,6 +1,7 @@
-import { View, Text, TouchableOpacity, StyleSheet } from "react-native"
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { useTranslation } from "react-i18next"
+import { QUESTION_BODY_SCROLL_PROPS } from "../../../utils/session-layout"
 import { colors } from "../../../theme"
 
 type Props = {
@@ -17,9 +18,18 @@ export function PermissionPrompt({ permission, isDark, onReply }: Props) {
         <Ionicons name="shield-outline" size={18} color="#f59e0b" />
         <Text style={[s.title, isDark && s.textWhite]}>{t("chat.permissionPrompt.title")}</Text>
       </View>
-      <Text style={[s.type, isDark && s.typeDark]}>
-        {permission.permission}: {permission.patterns.join(", ")}
-      </Text>
+      {/* Длинный список паттернов скроллится внутри карточки — карточка при
+          этом ужата лимитом оверлея (70% высоты экрана), а не растёт вниз. */}
+      <ScrollView
+        {...QUESTION_BODY_SCROLL_PROPS}
+        style={s.body}
+        contentContainerStyle={s.patterns}
+        testID="permission-patterns-scroll"
+      >
+        <Text style={[s.type, isDark && s.typeDark]}>
+          {permission.permission}: {permission.patterns.join(", ")}
+        </Text>
+      </ScrollView>
       <View style={s.actions}>
         <TouchableOpacity style={[s.btn, s.deny]} onPress={() => onReply("reject")}>
           <Text style={s.denyText}>{t("chat.permissionPrompt.deny")}</Text>
@@ -37,7 +47,10 @@ export function PermissionPrompt({ permission, isDark, onReply }: Props) {
 
 const s = StyleSheet.create({
   card: {
-    margin: 12,
+    flexShrink: 1,
+    // Без внешних отступов: инсеты (включая нижний — как у поля ввода) задаёт
+    // оверлей промптов в session/prompt-overlay, иначе низ двоится (padding + margin).
+    margin: 0,
     padding: 16,
     backgroundColor: "#fffbeb",
     borderRadius: 12,
@@ -48,6 +61,8 @@ const s = StyleSheet.create({
   header: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
   title: { fontSize: 15, fontWeight: "600", color: "#92400e" },
   textWhite: { color: "#ffffff" },
+  body: { flexShrink: 1 },
+  patterns: { paddingBottom: 1 },
   type: { fontSize: 13, color: "#78350f", marginBottom: 12 },
   typeDark: { color: colors.warningSoftText },
   actions: { flexDirection: "row", gap: 8 },

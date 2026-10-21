@@ -38,3 +38,13 @@ export const QUESTION_BODY_SCROLL_PROPS = {
   nestedScrollEnabled: true,
   showsVerticalScrollIndicator: true,
 } as const
+
+// Нижний док: промпты (опросы/подтверждения) закреплены снизу с тем же
+// отступом, что и поле ввода (см. COMPOSER_PADDING в app/session/styles.ts),
+// и не занимают больше этой доли высоты экрана — переполнение уходит в скролл
+// списка вариантов внутри карточки, а не растягивает оверлей вниз.
+export const PROMPT_OVERLAY_MAX_HEIGHT_RATIO = 0.7
+
+export function promptOverlayMaxHeight(windowHeight: number): number {
+  return Math.round(windowHeight * PROMPT_OVERLAY_MAX_HEIGHT_RATIO)
+}

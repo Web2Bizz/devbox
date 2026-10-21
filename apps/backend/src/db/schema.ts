@@ -23,6 +23,7 @@ import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  index,
   jsonb,
   pgTable,
   primaryKey,
@@ -221,6 +222,35 @@ export const organizationMembers = pgTable(
       .where(sql`${t.role} = 'maintainer'`),
   ],
 );
+
+/**
+ * Organization invites (durable contract; see drizzle/0007_organization_invites.sql).
+ *
+ * - `token` is the uuidv7 invite id (generated in app, PK — no TTL column,
+ *   links never expire).
+ * - `email` is NULL for open link-invites (any session user can accept) or
+ *   the lowercased bound address for email-invites (only that user accepts;
+ *   mismatch → 404, no enumeration).
+ * - Single-use: the row is DELETED on accept; replay/missing → 404.
+ * - `org_id` CASCADE — deleting the org drops pending invites.
+ */
+export const organizationInvites = pgTable(
+  "organization_invites",
+  {
+    token: uuid("token").primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    email: text("email"),
+    role: text("role").notNull().default("user"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [index("organization_invites_org_idx").on(t.orgId)],
+);
+
+export type OrganizationInviteRow = typeof organizationInvites.$inferSelect;
 
 export const projectsAndOrganizations = pgTable(
   "projects_and_organizations",

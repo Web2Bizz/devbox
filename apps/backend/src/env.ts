@@ -154,12 +154,6 @@ export type AppEnv = {
    * WARN; explicit 'false' disables — JwtAuthGuard then requires Bearer).
    */
   authLegacyMockFallback: boolean;
-  /**
-   * Organization invite-token TTL in seconds (default 86400 = 24h).
-   * Single-use invite tokens expire after this; per-invite override is
-   * intentionally unsupported (one server-wide policy, auditable).
-   */
-  orgInviteTtlSec: number;
 };
 
 // --- zod@4 primitive schemas (Standard Schema compatible) --------------------
@@ -294,7 +288,6 @@ export const envRawSchema = z.object({
   JWT_ACCESS_TTL: z.string().optional(),
   JWT_REFRESH_TTL: z.string().optional(),
   AUTH_LEGACY_MOCK_FALLBACK: z.string().optional(),
-  ORG_INVITE_TTL_SEC: z.string().optional(),
   OPENCODE_KEYS_ENCRYPTION_KEY: z.string().optional(),
   OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS: z.string().optional(),
   OPENCODE_KEYS_ACTIVE_KEY_ID: z.string().optional(),
@@ -323,9 +316,6 @@ export const DEFAULT_NPM_REGISTRY_SCOPE = "@web2bizz";
 /** Default JWT lifetimes (access 15m, refresh 7d, in seconds). */
 export const DEFAULT_JWT_ACCESS_TTL_SEC = 900;
 export const DEFAULT_JWT_REFRESH_TTL_SEC = 604800;
-
-/** Default organization invite-token TTL (24h, in seconds). */
-export const DEFAULT_ORG_INVITE_TTL_SEC = 86400;
 
 /** Minimum OPENCODE_KEYS_ENCRYPTION_KEY length (AES-256 key material, SHA-256 derived). */
 export const MIN_OPENCODE_KEYS_ENCRYPTION_KEY_LENGTH = 32;
@@ -1430,31 +1420,6 @@ export function validateEnvWithWarnings(
     );
   }
 
-  // --- organizations: single-use invite TTL (read-tuning for token expiry;
-  // garbage is ERROR, unset is the 24h dev default + WARN) ------------------
-  const orgInviteTtlRaw = firstNonEmpty(env.ORG_INVITE_TTL_SEC);
-  let orgInviteTtlSec = DEFAULT_ORG_INVITE_TTL_SEC;
-  if (orgInviteTtlRaw) {
-    const parsed = timeoutSchema.safeParse(orgInviteTtlRaw);
-    if (
-      !parsed.success ||
-      !Number.isInteger(parsed.data) ||
-      parsed.data < 60 ||
-      parsed.data > 90 * 86400
-    ) {
-      throw new Error(
-        `[env] ORG_INVITE_TTL_SEC must be seconds 60-7776000, got ${JSON.stringify(orgInviteTtlRaw)}. ` +
-          "Check your .env (see .env.example).",
-      );
-    }
-    orgInviteTtlSec = parsed.data;
-  } else {
-    warn(
-      "[env] WARN ORG_INVITE_TTL_SEC is unset, falling back to " +
-        `${DEFAULT_ORG_INVITE_TTL_SEC} (24h). Set it explicitly (see .env.example).`,
-    );
-  }
-
   // --- unknown keys (likely typos) ---------------------------------------------
   const unknownKeys = findSuspiciousUnknownKeys(source);
   if (unknownKeys.length > 0) {
@@ -1519,7 +1484,6 @@ export function validateEnvWithWarnings(
       jwtAccessTtlSec,
       jwtRefreshTtlSec,
       authLegacyMockFallback,
-      orgInviteTtlSec,
     },
     warnings,
   };

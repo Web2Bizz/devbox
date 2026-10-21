@@ -6,25 +6,29 @@
  *   `bun run build && bun dist/organizations/organizations.service.spec.js`
  * Also executes under `bun test dist` (top-level run, throws on failure).
  *
- * Covers (without a DB — every path below 503s before touching Postgres):
- * - ORG_INVITE_TTL_SEC server-wide policy (DEFAULT_ORG_INVITE_TTL_SEC 86400,
- *   explicit/unset/garbage via validateEnv — full matrix lives in env.spec);
- * - invite accept pre-DB gates: missing/consumed token → 404, expired
- *   token → 410 (and the token is deleted — replay → 404);
- * - missing invite never touches the DB (stub client throws on access).
+ * Covers (without a live DB where noted):
+ * - uuidv7 invite ids (randomUuidV7/isUuidV7: version/variant bits, shape,
+ *   rejects v4/base64/garbage, time-ordered);
+ * - invite accept pre-DB gates: non-v7 token → 404 without touching the DB
+ *   (stub client throws on access);
+ * - valid v7 but unknown token → 404 via a mocked empty select (single-use
+ *   DB rows, no TTL, no 410 — replay is also 404);
+ * - email-bound invite mismatch → 404 (no enumeration).
  *
- * DB-backed rules (single-maintainer 409s, last-maintainer removal/demotion
- * 400s, member accept success) need live Postgres and are covered by the
+ * DB-backed rules (single-maintainer 409s, last-maintainer 400s, member
+ * accept success, link/unlink) need live Postgres and are covered by the
  * live branch of organizations.e2e.ts — this spec stays green without PG.
- * Never logs secrets (tokens only as opaque map keys, never printed).
+ * Never logs secrets (tokens only as opaque values, never printed).
  */
 import assert from 'node:assert/strict';
-import { GoneException, NotFoundException } from '@nestjs/common';
-import { DEFAULT_ORG_INVITE_TTL_SEC, validateEnvWithWarnings } from '../env';
-import { OrganizationsService } from './organizations.service';
+import { NotFoundException } from '@nestjs/common';
+import {
+  OrganizationsService,
+  isUuidV7,
+  randomUuidV7,
+} from './organizations.service';
 
 const SPEC_USER = '123e4567-e89b-12d3-a456-426614174001';
-const SPEC_ORG = '123e4567-e89b-12d3-a456-426614174005';
 
 function silentLogger() {
   return {
@@ -39,7 +43,7 @@ function silentLogger() {
 
 /**
  * DbService stub whose client getter throws when touched — proves the
- * pre-DB invite gates (404/410) never reach Postgres.
+ * pre-DB invite gate (non-v7 → 404) never reaches Postgres.
  */
 function untouchedDb() {
   return {
@@ -47,6 +51,20 @@ function untouchedDb() {
       throw new Error('db-touched');
     },
   } as never;
+}
+
+/** Minimal query-builder stub: select().from().where().limit() → rows. */
+function mockDb(selectRows: unknown[] = []) {
+  const client = {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async () => selectRows,
+        }),
+      }),
+    }),
+  };
+  return { get client() { return client as never; } } as never;
 }
 
 function stubPaths() {
@@ -61,44 +79,38 @@ function stubPaths() {
   } as never;
 }
 
-function stubUsers() {
+function stubUsers(user: { id: string; email: string } | null = null) {
   return {
-    findById: async (): Promise<null> => null,
+    findById: async (): Promise<{ id: string; email: string } | null> => user,
   } as never;
 }
 
-function makeService(): OrganizationsService {
-  return new OrganizationsService(silentLogger(), untouchedDb(), stubPaths(), stubUsers());
+function makeService(db: never, users: never): OrganizationsService {
+  return new OrganizationsService(silentLogger(), db, stubPaths(), users);
 }
+
+const V4 = '123e4567-e89b-12d3-a456-426614174001';
 
 const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
   {
-    name: 'invite TTL policy is a single server-wide 24h default',
+    name: 'randomUuidV7 emits RFC 9562 v7 ids (version 7, variant 8-b, time-ordered)',
     run: () => {
-      assert.equal(DEFAULT_ORG_INVITE_TTL_SEC, 86400);
-      // Unset → 86400 default (full ERROR/WARN matrix in env.spec).
-      const base: NodeJS.ProcessEnv = {
-        APP_BACKEND_PORT: '3000',
-        APP_BACKEND_HOST: '127.0.0.1',
-        OPENCODE_URL: 'http://127.0.0.1:4096',
-        DATABASE_URL: 'postgres://u:p@localhost:5432/db',
-        CORS_ORIGINS: 'http://localhost:3001',
-        JWT_ACCESS_SECRET: 'test-jwt-access-secret-not-real-0123456789',
-        JWT_REFRESH_SECRET: 'test-jwt-refresh-secret-not-real-0123456789',
-        AUTH_LEGACY_MOCK_FALLBACK: 'false',
-      } as NodeJS.ProcessEnv;
-      const unset = validateEnvWithWarnings(base);
-      assert.equal(unset.env.orgInviteTtlSec, 86400);
-      assert.ok(unset.warnings.some((w) => w.includes('ORG_INVITE_TTL_SEC')));
-      const explicit = validateEnvWithWarnings({ ...base, ORG_INVITE_TTL_SEC: '3600' });
-      assert.equal(explicit.env.orgInviteTtlSec, 3600);
-      assert.ok(!explicit.warnings.some((w) => w.includes('ORG_INVITE_TTL_SEC')));
+      const a = randomUuidV7(Date.parse('2026-10-20T00:00:00.000Z'));
+      const b = randomUuidV7(Date.parse('2026-10-20T00:00:01.000Z'));
+      assert.ok(isUuidV7(a), `expected v7, got ${a}`);
+      assert.ok(isUuidV7(b), `expected v7, got ${b}`);
+      assert.match(a, /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+      // Time-ordered: later timestamp sorts later lexicographically.
+      assert.ok(a < b, `expected ${a} < ${b}`);
+      assert.ok(!isUuidV7(V4), 'v4 must not pass as v7');
+      assert.ok(!isUuidV7('no-such-token'), 'garbage must not pass as v7');
+      assert.ok(!isUuidV7('a'.repeat(44)), 'base64url must not pass as v7');
     },
   },
   {
-    name: 'accept with an unknown token → 404 without touching the DB',
+    name: 'accept with a non-v7 token → 404 without touching the DB',
     run: async () => {
-      const svc = makeService();
+      const svc = makeService(untouchedDb(), stubUsers());
       await assert.rejects(
         () => svc.acceptInvite({ token: 'no-such-token' }, SPEC_USER),
         (err: unknown) => {
@@ -112,47 +124,38 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
     },
   },
   {
-    name: 'accept with an expired token → 410, token deleted (replay → 404)',
+    name: 'accept with a valid v7 but unknown token → 404 (no TTL, no 410)',
     run: async () => {
-      const svc = makeService();
-      svc.seedInviteForTests('expired-token', SPEC_ORG, 'user', Date.now() - 1000);
+      const svc = makeService(mockDb([]), stubUsers({ id: SPEC_USER, email: 'a@devbox.local' }));
+      const token = randomUuidV7();
       await assert.rejects(
-        () => svc.acceptInvite({ token: 'expired-token' }, SPEC_USER),
-        (err: unknown) => {
-          assert.ok(err instanceof GoneException);
-          assert.match((err as Error).message, /expired/);
-          return true;
-        },
-      );
-      // Expired tokens are deleted on sight — replay is 404, not 410.
-      await assert.rejects(
-        () => svc.acceptInvite({ token: 'expired-token' }, SPEC_USER),
+        () => svc.acceptInvite({ token }, SPEC_USER),
         (err: unknown) => {
           assert.ok(err instanceof NotFoundException);
+          assert.ok(!(err as Error).constructor.name.includes('Gone'));
+          assert.match((err as Error).message, /already used|not found/);
           return true;
         },
       );
     },
   },
   {
-    name: 'freshly seeded (unexpired) token survives the pre-DB gates',
+    name: 'email-bound invite mismatch → 404 (no enumeration)',
     run: async () => {
-      const svc = makeService();
-      svc.seedInviteForTests('fresh-token', SPEC_ORG, 'user', Date.now() + 3600_000);
-      // The membership insert needs live Postgres (stub users → null user
-      // → 404 after the token gate). What matters here: NOT 410 — the TTL
-      // gate passed and the token was consumed single-use.
-      await assert.rejects(
-        () => svc.acceptInvite({ token: 'fresh-token' }, SPEC_USER),
-        (err: unknown) => {
-          assert.ok(err instanceof NotFoundException);
-          assert.ok(!(err instanceof GoneException));
-          return true;
-        },
+      const token = randomUuidV7();
+      const stored = {
+        token,
+        orgId: '123e4567-e89b-12d3-a456-426614174005',
+        email: 'owner@devbox.local',
+        role: 'user',
+        createdAt: new Date(),
+      };
+      const svc = makeService(
+        mockDb([stored]),
+        stubUsers({ id: SPEC_USER, email: 'other@devbox.local' }),
       );
-      // Single-use: the consumed token never grants membership twice.
       await assert.rejects(
-        () => svc.acceptInvite({ token: 'fresh-token' }, SPEC_USER),
+        () => svc.acceptInvite({ token }, SPEC_USER),
         (err: unknown) => {
           assert.ok(err instanceof NotFoundException);
           return true;

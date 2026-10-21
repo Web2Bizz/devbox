@@ -1000,7 +1000,7 @@ paths:
                 $ref: '#/components/schemas/ApiError'
   /api/v1/organizations/invites/accept:
     post:
-      summary: Accept a single-use invite token (caller joins the org)
+      summary: Accept a persistent single-use invite (uuidv7, no TTL, caller joins the org)
       operationId: acceptOrganizationInviteV1
       security:
         - bearerAuth: []
@@ -1024,19 +1024,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '404':
-          description: invite not found or already used (also unknown org/user)
+          description: invite not found or already used (also unknown org/user, email mismatch)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '409':
           description: already a member, or org already has a maintainer
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '410':
-          description: invite expired (ORG_INVITE_TTL_SEC window passed)
           content:
             application/json:
               schema:
@@ -1413,7 +1407,7 @@ paths:
                 $ref: '#/components/schemas/ApiError'
   /api/v1/organizations/{id}/invites:
     post:
-      summary: Mint a single-use invite token (maintainer only, TTL ORG_INVITE_TTL_SEC)
+      summary: Mint a persistent single-use invite (maintainer only, uuidv7, no TTL)
       operationId: createOrganizationInviteV1
       security:
         - bearerAuth: []
@@ -3181,17 +3175,23 @@ components:
           $ref: '#/components/schemas/OrgRole'
     OrganizationInvite:
       type: object
-      required: [token, orgId, role, expiresAt]
-      description: single-use bearer token (returned ONCE, never logged; TTL ORG_INVITE_TTL_SEC, default 24h)
+      required: [token, orgId, role, createdAt]
+      description: persistent single-use uuidv7 invite (returned ONCE, never logged; no TTL — links never expire)
       properties:
         token:
           type: string
+          format: uuid
+          description: uuidv7 invite token (link material, single-use)
         orgId:
           type: string
           format: uuid
+        email:
+          type: string
+          nullable: true
+          description: bound email (lowercased) or null for open link-invites
         role:
           $ref: '#/components/schemas/OrgRole'
-        expiresAt:
+        createdAt:
           type: string
           format: date-time
     CreateInvite:
@@ -3200,12 +3200,18 @@ components:
         role:
           $ref: '#/components/schemas/OrgRole'
           default: user
+        email:
+          type: string
+          format: email
+          description: bound email for email-invites; absent = open link-invite
     AcceptInvite:
       type: object
       required: [token]
       properties:
         token:
           type: string
+          format: uuid
+          description: uuidv7 invite token
 # Proxy mapping (backend node:http → opencode server):
 #   GET  /api/v1/session       → GET  {OPENCODE_SERVER_URL}/session
 #   GET  /api/v1/messages?s=…  → GET  {OPENCODE_SERVER_URL}/messages?sessionId=…

@@ -57,7 +57,6 @@ function baseEnv(): Source {
     JWT_ACCESS_TTL: '15m',
     JWT_REFRESH_TTL: '7d',
     AUTH_LEGACY_MOCK_FALLBACK: 'false',
-    ORG_INVITE_TTL_SEC: '86400',
     OPENCODE_KEYS_ENCRYPTION_KEY: 'test-opencode-keys-encryption-key-not-real-0123456789',
   } as Source;
 }
@@ -675,25 +674,19 @@ const checks: Array<{ name: string; run: () => void }> = [
     },
   },
   {
-    name: 'ORG_INVITE_TTL_SEC unset → 86400 default + WARN; garbage is ERROR',
+    name: 'legacy ORG_INVITE_TTL_SEC is unknown (invites never expire, no TTL tuning)',
     run: () => {
-      const unset = validateEnvWithWarnings(without(baseEnv(), 'ORG_INVITE_TTL_SEC'));
-      assert.equal(unset.env.orgInviteTtlSec, 86400);
+      const withLegacy = validateEnvWithWarnings({
+        ...baseEnv(),
+        ORG_INVITE_TTL_SEC: '3600',
+      } as Source);
       assert.ok(
-        unset.warnings.some((w) => w.includes('ORG_INVITE_TTL_SEC') && w.includes('WARN')),
-        `expected invite TTL WARN, got: ${JSON.stringify(unset.warnings)}`,
+        withLegacy.warnings.some((w) => w.includes('ORG_INVITE_TTL_SEC')),
+        `expected legacy invite TTL WARN, got: ${JSON.stringify(withLegacy.warnings)}`,
       );
-      const explicit = validateEnv({ ...baseEnv(), ORG_INVITE_TTL_SEC: '3600' } as Source);
-      assert.equal(explicit.orgInviteTtlSec, 3600);
-      expectThrow(
-        () => validateEnv({ ...baseEnv(), ORG_INVITE_TTL_SEC: '10' } as Source),
-        /\[env\] ORG_INVITE_TTL_SEC/,
-        'too-small invite ttl',
-      );
-      expectThrow(
-        () => validateEnv({ ...baseEnv(), ORG_INVITE_TTL_SEC: 'forever' } as Source),
-        /\[env\] ORG_INVITE_TTL_SEC/,
-        'bad invite ttl',
+      assert.equal(
+        (withLegacy.env as Record<string, unknown>)['orgInviteTtlSec'],
+        undefined,
       );
     },
   },

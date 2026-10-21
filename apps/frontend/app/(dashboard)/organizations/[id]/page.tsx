@@ -60,6 +60,7 @@ export default function OrganizationDetailPage() {
 
   const [memberActionError, setMemberActionError] = useState<string | null>(null);
   const [linkProjectId, setLinkProjectId] = useState('');
+  const [inviteEmail, setInviteEmail] = useState('');
   const [linkBusy, setLinkBusy] = useState(false);
   const [linkMessage, setLinkMessage] = useState<string | null>(null);
   const [linkIsError, setLinkIsError] = useState(false);
@@ -116,12 +117,13 @@ export default function OrganizationDetailPage() {
   const handleMint = useCallback(async () => {
     if (!id) return;
     try {
-      await mint(id, 'user');
+      const email = inviteEmail.trim() ? inviteEmail.trim() : undefined;
+      await mint(id, 'user', email);
       setCopied(false);
     } catch {
       // surfaced via mintError from the hook
     }
-  }, [id, mint]);
+  }, [id, inviteEmail, mint]);
 
   const handleCopy = useCallback(async () => {
     if (!inviteLink) return;
@@ -359,6 +361,15 @@ export default function OrganizationDetailPage() {
                   </Alert>
                 )}
                 <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    placeholder={t.orgs.inviteEmailPlaceholder}
+                    disabled={minting}
+                    className="max-w-xs"
+                    type="email"
+                    autoComplete="off"
+                  />
                   <Button variant="primaryBrand" size="sm" onClick={handleMint} disabled={minting}>
                     {minting ? t.orgs.minting : t.orgs.mintInvite}
                   </Button>

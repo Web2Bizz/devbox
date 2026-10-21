@@ -1,10 +1,10 @@
 /**
- * useInvite — mint + accept flow (single-use token, TTL).
+ * useInvite — mint + accept flow (persistent uuidv7, no TTL).
  *
- * Covers: mint success (InviteDto, token carried in body only — never
- * logged), accept 404 (replay/unknown → inviteReplay i18n strings),
- * accept 410 (expired → inviteExpired i18n strings), accept success
- * (membership, cache invalidated).
+ * Covers: mint success (InviteDto with uuidv7 + email null + createdAt,
+ * token carried in body only — never logged), accept 404
+ * (replay/unknown/mismatch → inviteReplay i18n strings), accept success
+ * (membership, cache invalidated). No 410 — links never expire.
  */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { GlobalRegistrator } from '@happy-dom/global-registrator';
@@ -29,11 +29,21 @@ class FakeApiClientError extends Error {
 }
 
 const ORG_ID = '11111111-1111-1111-1111-111111111111';
+const V7_A = '0193a2c1-1111-7aaa-8bbb-111111111111';
+const V7_B = '0193a2c1-2222-7aaa-8bbb-222222222222';
 const INVITE = {
-  token: 'single-use-token-abc',
+  token: V7_A,
   orgId: ORG_ID,
+  email: null,
   role: 'user' as const,
-  expiresAt: '2026-10-05T00:00:00.000Z',
+  createdAt: '2026-10-20T00:00:00.000Z',
+};
+const EMAIL_INVITE = {
+  token: V7_B,
+  orgId: ORG_ID,
+  email: 'mate@devbox.local',
+  role: 'user' as const,
+  createdAt: '2026-10-20T00:00:00.000Z',
 };
 const MEMBERSHIP = {
   orgId: ORG_ID,
@@ -83,7 +93,7 @@ async function settle(rounds = 4) {
 }
 
 describe('useInvite', () => {
-  test('mint: single-use InviteDto lands, token only in body', async () => {
+  test('mint: persistent InviteDto (uuidv7, email null) lands, token only in body', async () => {
     const { result } = renderHook(() => useInvite(), { wrapper });
 
     let minted: unknown = null;
@@ -94,12 +104,29 @@ describe('useInvite', () => {
 
     expect(mintMock).toHaveBeenCalledTimes(1);
     expect(mintMock).toHaveBeenCalledWith('test-token', ORG_ID, { role: 'user' });
-    expect(minted).toMatchObject({ orgId: ORG_ID, role: 'user' });
+    expect(minted).toMatchObject({ orgId: ORG_ID, role: 'user', email: null });
     expect(result.current.minted).toMatchObject({ orgId: ORG_ID });
     expect(result.current.mintError).toBeNull();
   });
 
-  test('accept 404: replay/unknown → inviteReplay strings', async () => {
+  test('mint: email-invite carries the bound address', async () => {
+    mintMock.mockImplementationOnce(async () => ({ ...EMAIL_INVITE }));
+    const { result } = renderHook(() => useInvite(), { wrapper });
+
+    let minted: unknown = null;
+    await act(async () => {
+      minted = await result.current.mint(ORG_ID, 'user', 'mate@devbox.local');
+    });
+    await settle();
+
+    expect(mintMock).toHaveBeenCalledWith('test-token', ORG_ID, {
+      role: 'user',
+      email: 'mate@devbox.local',
+    });
+    expect(minted).toMatchObject({ email: 'mate@devbox.local' });
+  });
+
+  test('accept 404: replay/unknown/mismatch → inviteReplay strings (never expired)', async () => {
     acceptImpl = async () => {
       throw new FakeApiClientError({
         code: 'not_found',
@@ -111,7 +138,7 @@ describe('useInvite', () => {
     const { result } = renderHook(() => useInvite(), { wrapper });
 
     await act(async () => {
-      await result.current.accept('used-token').catch(() => {});
+      await result.current.accept('0193a2c1-9999-7aaa-8bbb-999999999999').catch(() => {});
     });
     await settle();
 
@@ -121,33 +148,12 @@ describe('useInvite', () => {
     expect(result.current.acceptError).toContain('already used');
   });
 
-  test('accept 410: expired → inviteExpired strings', async () => {
-    acceptImpl = async () => {
-      throw new FakeApiClientError({
-        code: 'gone',
-        message: 'invite expired',
-        status: 410,
-        correlationId: 'corr-410',
-      });
-    };
-    const { result } = renderHook(() => useInvite(), { wrapper });
-
-    await act(async () => {
-      await result.current.accept('expired-token').catch(() => {});
-    });
-    await settle();
-
-    expect(result.current.acceptReplay).toBe(false);
-    expect(result.current.acceptExpired).toBe(true);
-    expect(result.current.acceptError).toContain('expired');
-  });
-
   test('accept success: membership granted, no error flags', async () => {
     const { result } = renderHook(() => useInvite(), { wrapper });
 
     let member: unknown = null;
     await act(async () => {
-      member = await result.current.accept('fresh-token');
+      member = await result.current.accept(V7_A);
     });
     await settle();
 

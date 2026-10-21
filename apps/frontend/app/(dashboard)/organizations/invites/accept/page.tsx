@@ -8,8 +8,8 @@ import { useInvite } from '@/hooks/useInvite';
 import { useI18n } from '@/i18n';
 
 /**
- * Route: /organizations/invites/accept?token=… — single-use invite accept.
- * Success → redirect into the org; replay (404) / expired (410) → i18n strings.
+ * Route: /organizations/invites/accept?token=… — persistent single-use invite accept (uuidv7, no TTL).
+ * Success → redirect into the org; replay/unknown/mismatch (404) → i18n strings.
  * The token travels memory only (search param → mutation body) — never logged.
  */
 function AcceptInviteInner() {

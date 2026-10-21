@@ -299,12 +299,15 @@ export type Dictionary = {
     };
     inviteTitle: string;
     inviteDesc: string;
+    inviteEmailPlaceholder: string;
     mintInvite: string;
     minting: string;
     copyLink: string;
     inviteAccepted: string;
     inviteAcceptedDesc: string;
+    /** @deprecated Links never expire — kept one release for callers. */
     inviteExpired: string;
+    /** @deprecated Links never expire — kept one release for callers. */
     inviteExpiredDesc: string;
     inviteReplay: string;
     inviteReplayDesc: string;

@@ -271,6 +271,22 @@ for (const k of [
   if (v) sharedEnv[k] = String(v);
 }
 
+// Per-user OpenCode keys (KEK + rotation ids): forward OPENCODE_KEYS_* from
+// root .env (shell > file) so pm2-spawned backend (cwd apps/backend, dotenv
+// without path) sees the same values as `bun run dev`. Without this, key
+// endpoints answer 500 opencode_keys_unconfigured. Only non-empty values
+// are forwarded (same scheme as GITHUB_*/DOCKER_*/NPM_* above).
+// Secret values are never logged — only passed through to process.env.
+for (const k of [
+  'OPENCODE_KEYS_ENCRYPTION_KEY',
+  'OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS',
+  'OPENCODE_KEYS_ACTIVE_KEY_ID',
+  'OPENCODE_KEYS_PREVIOUS_KEY_ID',
+]) {
+  const v = pick(k, '');
+  if (v) sharedEnv[k] = String(v);
+}
+
 module.exports = {
   apps: [
     {

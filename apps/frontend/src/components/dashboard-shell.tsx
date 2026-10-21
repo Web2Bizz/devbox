@@ -82,7 +82,7 @@ function DashboardHeader({ title, breadcrumbs, user, actions, onMenu }: Dashboar
   const leading = (
     <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
       <SidebarBrand />
-      <div className="ml-2 min-w-0">
+      <div className="ml-4 min-w-0">
         <OrganizationSwitcher />
       </div>
       {hasLeading && (

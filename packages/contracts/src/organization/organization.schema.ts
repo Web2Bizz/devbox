@@ -56,12 +56,21 @@ export type UpdateMemberRoleInput = z.infer<typeof updateMemberRoleSchema>;
 
 export const createInviteSchema = z.object({
   role: orgRoleSchema.optional().default('user'),
+  email: z
+    .string()
+    .trim()
+    .min(1)
+    .max(320)
+    .refine((v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), {
+      error: 'must be a valid email',
+    })
+    .optional(),
 });
 
 export type CreateInviteInput = z.input<typeof createInviteSchema>;
 
 export const acceptInviteSchema = z.object({
-  token: z.string({ error: 'Field "token" is required' }).min(1).max(500),
+  token: z.uuidv7({ error: 'token must be a uuidv7 invite token' }),
 });
 
 export type AcceptInviteInput = z.infer<typeof acceptInviteSchema>;
@@ -87,9 +96,10 @@ export const organizationMemberSchema = z.object({
 }) satisfies z.ZodType<OrganizationMember>;
 
 export const organizationInviteSchema = z.object({
-  token: z.string().min(1),
+  token: z.uuidv7(),
   orgId: z.uuid(),
+  email: z.string().max(320).nullable(),
   role: orgRoleSchema,
   /** ISO-8601 timestamp */
-  expiresAt: z.string().min(1),
+  createdAt: z.string().min(1),
 }) satisfies z.ZodType<OrganizationInvite>;

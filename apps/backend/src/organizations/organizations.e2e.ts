@@ -5,9 +5,10 @@
  * `bun test` on TS sources). Usage: `bun run build && bun dist/organizations/organizations.e2e.js`.
  *
  * Strict Postgres: needs a live PG (TEST_DATABASE_URL wins, DATABASE_URL
- * fallback; drizzle/0001..0004 applied automatically) — runs the full suite
- * (org CRUD, single-maintainer 409/400s, last-maintainer guards, invite
- * accept, project scope for sessions/chats/files, Bearer guards, users/:id
+ * fallback; drizzle/0001..0007 applied automatically) — runs the full suite
+ * (org CRUD, single-maintainer 409/400s, last-maintainer guards, persistent
+ * uuidv7 invites with no TTL — link + email, single-use replay 404,
+ * project scope for sessions/chats/files, Bearer guards, users/:id
  * privacy, X-Robots-Tag noindex). Without a reachable PG it asserts the
  * outage surface instead: org endpoints answer 503 EXTERNAL_UNAVAILABLE
  * (Retry-After 30, envelope { code, message, correlationId }), Bearer-less
@@ -21,6 +22,7 @@ import path from "node:path";
 
 // Deterministic env — BEFORE AppModule import (ConfigModule.validate at import).
 // NOTE: DATABASE_URL is resolved inside main() (TEST_DATABASE_URL seam) —
+// Invites are persistent uuidv7 rows with no TTL (no env tuning).
 process.env.APP_BACKEND_PORT ??= "3000";
 process.env.REQUEST_TIMEOUT_MS = "2000";
 process.env.OPENCODE_URL = "http://127.0.0.1:9";
@@ -29,7 +31,6 @@ process.env.JWT_REFRESH_SECRET = "e2e-refresh-secret-not-real-0123456789";
 process.env.JWT_ACCESS_TTL = "15m";
 process.env.JWT_REFRESH_TTL = "7d";
 process.env.AUTH_LEGACY_MOCK_FALLBACK = "false";
-process.env.ORG_INVITE_TTL_SEC = "86400";
 
 async function main(): Promise<void> {
   const { resolveTestDb, applyTestMigrations } =
@@ -335,7 +336,7 @@ async function main(): Promise<void> {
       });
 
       let inviteToken = "";
-      await check("maintainer mints user invite 201; C accepts 200", async () => {
+      await check("maintainer mints open link-invite 201 (uuidv7, no TTL); C accepts 200", async () => {
         const minted = await fetch(
           `${base}/api/v1/organizations/${orgId}/invites`,
           json({ role: "user" }, "POST", a.token),
@@ -344,9 +345,19 @@ async function main(): Promise<void> {
         const invite = (await readJson(minted)) as {
           token?: string;
           role?: string;
+          email?: string | null;
+          createdAt?: string;
+          expiresAt?: string;
         };
         assert.ok(invite.token);
+        assert.match(
+          invite.token as string,
+          /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+        );
         assert.equal(invite.role, "user");
+        assert.equal(invite.email, null);
+        assert.ok(invite.createdAt);
+        assert.equal(invite.expiresAt, undefined);
         inviteToken = invite.token as string;
         const accepted = await fetch(
           `${base}/api/v1/organizations/invites/accept`,
@@ -359,10 +370,52 @@ async function main(): Promise<void> {
         );
       });
 
-      await check("invite single-use: replay → 404", async () => {
+      await check("invite single-use: replay → 404 (no 410, links never expire)", async () => {
         const replay = await fetch(
           `${base}/api/v1/organizations/invites/accept`,
           json({ token: inviteToken }, "POST", c.token),
+        );
+        assert.equal(replay.status, 404);
+        // Malformed (non-uuidv7) token fails boundary validation → 400.
+        const garbage = await fetch(
+          `${base}/api/v1/organizations/invites/accept`,
+          json({ token: "no-such-token" }, "POST", c.token),
+        );
+        assert.equal(garbage.status, 400);
+        // Well-formed but unknown v7 → 404 (no enumeration).
+        const unknown = await fetch(
+          `${base}/api/v1/organizations/invites/accept`,
+          json({ token: "0193a2c1-ffff-7fff-8fff-ffffffffffff" }, "POST", c.token),
+        );
+        assert.equal(unknown.status, 404);
+      });
+
+      await check("email-invite binds one address (mismatch 404, match 200)", async () => {
+        const d = await register("emailinvitee");
+        const dEmail = `orgs-e2e-emailinvitee@devbox.local`;
+        const minted = await fetch(
+          `${base}/api/v1/organizations/${orgId}/invites`,
+          json({ role: "user", email: dEmail }, "POST", a.token),
+        );
+        assert.equal(minted.status, 201);
+        const invite = (await readJson(minted)) as { token?: string; email?: string | null };
+        assert.equal(invite.email, dEmail);
+        const emailToken = invite.token as string;
+        // Wrong user (C, already a member with another email) cannot steal it.
+        const mismatch = await fetch(
+          `${base}/api/v1/organizations/invites/accept`,
+          json({ token: emailToken }, "POST", c.token),
+        );
+        assert.equal(mismatch.status, 404);
+        const accepted = await fetch(
+          `${base}/api/v1/organizations/invites/accept`,
+          json({ token: emailToken }, "POST", d.token),
+        );
+        assert.equal(accepted.status, 200);
+        assert.equal(((await readJson(accepted)) as { userId?: string }).userId, d.id);
+        const replay = await fetch(
+          `${base}/api/v1/organizations/invites/accept`,
+          json({ token: emailToken }, "POST", d.token),
         );
         assert.equal(replay.status, 404);
       });

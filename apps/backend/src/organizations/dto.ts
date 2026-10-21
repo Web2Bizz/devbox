@@ -97,25 +97,31 @@ export class UpdateMemberRoleDto {
 }
 
 export class OrganizationInviteDto {
-  @ApiProperty({ description: 'Single-use bearer token (never logged)' })
+  @ApiProperty({ description: 'Single-use uuidv7 token (never logged, never expires)', format: 'uuid' })
   token!: string;
 
   @ApiProperty({ format: 'uuid' })
   orgId!: string;
 
+  @ApiProperty({ required: false, nullable: true, description: 'Bound email or null for open link-invites' })
+  email!: string | null;
+
   @ApiProperty({ enum: ['maintainer', 'user'] })
   role!: string;
 
   @ApiProperty({ format: 'date-time' })
-  expiresAt!: string;
+  createdAt!: string;
 }
 
 export class CreateInviteDto {
   @ApiProperty({ required: false, enum: ['maintainer', 'user'], default: 'user' })
   role?: string;
+
+  @ApiProperty({ required: false, description: 'Bound email for email-invites; absent = open link-invite' })
+  email?: string;
 }
 
 export class AcceptInviteDto {
-  @ApiProperty()
+  @ApiProperty({ format: 'uuid', description: 'uuidv7 invite token' })
   token!: string;
 }

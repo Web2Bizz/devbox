@@ -2,7 +2,6 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
-  GoneException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -13,13 +12,14 @@ import { rm } from "node:fs/promises";
 import { AppLogger } from "../common/app-logger.service";
 import { DbService, dbUnavailable, type DbClient } from "../db/db.service";
 import {
+  organizationInvites,
   organizationMembers,
   organizations,
   projectsAndOrganizations,
+  type OrganizationInviteRow,
   type OrganizationMemberRow,
   type OrganizationRow,
 } from "../db/schema";
-import { validateEnv } from "../env";
 import { UsersService } from "../auth/users.service";
 import { WorkspacePathService } from "../workspaces/workspace-path.service";
 import type {
@@ -51,18 +51,43 @@ export type OrganizationMember = {
 };
 
 export type OrganizationInvite = {
+  /** uuidv7 invite token (link material, single-use, never expires) */
   token: string;
   orgId: string;
+  /** bound email (lowercased) or null for open link-invites */
+  email: string | null;
   role: OrgRole;
-  expiresAt: string;
+  createdAt: string;
 };
 
-type StoredInvite = {
-  orgId: string;
-  role: OrgRole;
-  expiresAt: number;
-  used: boolean;
-};
+/**
+ * RFC 9562 uuidv7 (unix_ts_ms + rand_a/rand_b) — time-ordered invite ids
+ * with no extra dependency (Node 22 has no native v7 yet).
+ */
+export function randomUuidV7(nowMs = Date.now()): string {
+  const bytes = randomBytes(16);
+  const now = Math.floor(nowMs);
+  bytes[0] = Math.floor(now / 2 ** 40) & 0xff;
+  bytes[1] = Math.floor(now / 2 ** 32) & 0xff;
+  bytes[2] = Math.floor(now / 2 ** 24) & 0xff;
+  bytes[3] = Math.floor(now / 2 ** 16) & 0xff;
+  bytes[4] = Math.floor(now / 2 ** 8) & 0xff;
+  bytes[5] = now & 0xff;
+  bytes[6] = (bytes[6] & 0x0f) | 0x70;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return (
+    `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-` +
+    `${hex.slice(16, 20)}-${hex.slice(20)}`
+  );
+}
+
+/** uuidv7 shape (version 7 + RFC 4122 variant) — non-v7 never matches a row. */
+export function isUuidV7(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
+}
 
 function toOrganization(row: OrganizationRow): Organization {
   return {
@@ -80,6 +105,16 @@ function toMember(row: OrganizationMemberRow): OrganizationMember {
   return {
     orgId: row.orgId,
     userId: row.userId,
+    role: row.role as OrgRole,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+function toInvite(row: OrganizationInviteRow): OrganizationInvite {
+  return {
+    token: row.token,
+    orgId: row.orgId,
+    email: row.email,
     role: row.role as OrgRole,
     createdAt: row.createdAt.toISOString(),
   };
@@ -125,11 +160,12 @@ function isUuidKey(value: string): boolean {
  * fallback) with disk-backed org homes (orgs/<orgId>/.secrets).
  *
  * Every method hits `organizations` / `organization_members` /
- * `projects_and_organizations` (drizzle/0004_organizations.sql). Postgres
- * outages funnel through `dbUnavailable` → 503 EXTERNAL_UNAVAILABLE
- * (Retry-After 30 via ApiErrorFilter), logged once with the correlationId.
+ * `projects_and_organizations` / `organization_invites`
+ * (drizzle/0004 + 0007). Postgres outages funnel through `dbUnavailable`
+ * → 503 EXTERNAL_UNAVAILABLE (Retry-After 30 via ApiErrorFilter), logged
+ * once with the correlationId.
  *
- * Access policy (defense in depth — HTTP guards in Card 6 repeat it):
+ * Access policy (defense in depth — HTTP guards repeat it):
  * - reads (get/members) are member-only: strangers get 404 (the org's
  *   very existence is not leaked);
  * - mutations (settings/members/invites/links) are maintainer-only:
@@ -139,15 +175,14 @@ function isUuidKey(value: string): boolean {
  *   for friendly 409s and guards the last-maintainer removal/demotion
  *   with 400.
  *
- * Invites are single-use bearer tokens with the server-wide TTL from
- * ORG_INVITE_TTL_SEC (default 24h). MVP store is in-memory (single
- * instance); a consumed or expired token never grants membership twice.
+ * Invites are persistent single-use uuidv7 rows with NO TTL (links never
+ * expire). `email` NULL = open link-invite (any session user can accept);
+ * set = email-invite (only the matching address accepts, mismatch → 404
+ * with no enumeration). The row is DELETED on accept, so replay → 404.
  * Logs carry only ids/reasons — never tokens, emails, or secrets.
  */
 @Injectable()
 export class OrganizationsService {
-  private readonly invites = new Map<string, StoredInvite>();
-
   constructor(
     private readonly logger: AppLogger = new AppLogger("OrganizationsService"),
     private readonly db: DbService,
@@ -160,42 +195,36 @@ export class OrganizationsService {
     return this.db.client;
   }
 
-  private inviteTtlSec(): number {
-    try {
-      return validateEnv(process.env).orgInviteTtlSec;
-    } catch {
-      // validateEnv fails only on broken unrelated config (tests set a bare
-      // env) — fall back to the documented 24h default, never throw here.
-      return 86400;
-    }
-  }
-
-  /** Test/e2e seam — drops all pending invite tokens. */
-  clearInvitesForTests(): void {
-    this.invites.clear();
+  /** Test/e2e seam — DELETE FROM organization_invites (requires live Postgres). */
+  async clearInvitesForTests(): Promise<void> {
+    await this.client().delete(organizationInvites);
   }
 
   /**
-   * Test/e2e seam — plants a single-use invite with caller-controlled
-   * expiry (TTL math under test control: seed `expiresAtMs` in the past
-   * for the 410 path without waiting out ORG_INVITE_TTL_SEC).
+   * Test/e2e seam — plants a single-use invite row (uuidv7, no TTL).
+   * The token must already be uuidv7 (use randomUuidV7()).
    */
-  seedInviteForTests(
+  async seedInviteForTests(
     token: string,
     orgId: string,
     role: OrgRole,
-    expiresAtMs: number,
-  ): void {
-    this.invites.set(token, { orgId, role, expiresAt: expiresAtMs, used: false });
+    email: string | null = null,
+  ): Promise<void> {
+    await this.client().insert(organizationInvites).values({
+      token,
+      orgId,
+      email,
+      role,
+    });
   }
 
   /** Test/e2e seam — DELETE FROM org tables (requires live Postgres). */
   async clearAllForTests(): Promise<void> {
     const c = this.client();
+    await c.delete(organizationInvites);
     await c.delete(projectsAndOrganizations);
     await c.delete(organizationMembers);
     await c.delete(organizations);
-    this.invites.clear();
   }
 
   private async orgRowOrThrow(
@@ -665,9 +694,11 @@ export class OrganizationsService {
   }
 
   /**
-   * Mint a single-use invite (maintainer-only). The token is returned ONCE
-   * (never logged, never stored in plain rows) and dies on first accept or
-   * after ORG_INVITE_TTL_SEC seconds.
+   * Mint a persistent single-use invite (maintainer-only, no TTL).
+   * The uuidv7 token is returned ONCE (never logged) and lives until
+   * accept (row deleted) or org deletion (cascade). `email` binds the
+   * invite to one address (lowercased, mismatch → 404); absent = open
+   * link-invite for any session user.
    */
   async createInvite(
     orgId: string,
@@ -680,22 +711,33 @@ export class OrganizationsService {
     if (role === "maintainer" && (await this.maintainerCount(orgId, correlationId)) > 0) {
       throw new ConflictException("Organization already has a maintainer");
     }
-    const token = randomBytes(32).toString("base64url");
-    const expiresAt = Date.now() + this.inviteTtlSec() * 1000;
-    this.invites.set(token, { orgId, role, expiresAt, used: false });
-    this.logger.info(`[organizations] invite created org=${orgId} role=${role}`, correlationId);
-    return {
-      token,
-      orgId,
-      role,
-      expiresAt: new Date(expiresAt).toISOString(),
-    };
+    const rawEmail =
+      typeof input.email === "string" ? input.email.trim().toLowerCase() : "";
+    const email = rawEmail ? rawEmail : null;
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new BadRequestException("email must be a valid email");
+    }
+    const token = randomUuidV7();
+    try {
+      const rows = await this.client()
+        .insert(organizationInvites)
+        .values({ token, orgId, email, role })
+        .returning();
+      this.logger.info(`[organizations] invite created org=${orgId} role=${role}`, correlationId);
+      return toInvite(rows[0]);
+    } catch (err) {
+      if (isPgForeignKeyViolation(err)) {
+        throw new NotFoundException(`Organization ${orgId} not found`);
+      }
+      dbUnavailable("organizations.createInvite", err, this.logger, correlationId);
+    }
   }
 
   /**
-   * Accept a single-use invite. Missing/consumed → 404, expired → 410.
-   * The token is marked used BEFORE the membership insert, so a raced or
-   * failed accept can never grant membership twice.
+   * Accept a persistent single-use invite. Missing/consumed → 404 (no
+   * enumeration, no expiry — links never expire). The row is DELETED
+   * before the membership insert result returns, so replay → 404 and a
+   * raced accept can never grant membership twice.
    */
   async acceptInvite(
     input: AcceptInviteInput,
@@ -703,16 +745,24 @@ export class OrganizationsService {
     correlationId?: string,
   ): Promise<OrganizationMember> {
     const me = this.paths.checkUuid(userId, "userId");
-    const stored = this.invites.get(input.token);
-    if (!stored || stored.used) {
+    const token = String(input.token ?? "").trim().toLowerCase();
+    if (!isUuidV7(token)) {
       throw new NotFoundException("Invite not found or already used");
     }
-    if (Date.now() > stored.expiresAt) {
-      this.invites.delete(input.token);
-      throw new GoneException("Invite has expired");
+    let stored: OrganizationInviteRow | null = null;
+    try {
+      const rows = await this.client()
+        .select()
+        .from(organizationInvites)
+        .where(eq(organizationInvites.token, token))
+        .limit(1);
+      stored = rows[0] ?? null;
+    } catch (err) {
+      dbUnavailable("organizations.acceptInvite.lookup", err, this.logger, correlationId);
     }
-    stored.used = true;
-    this.invites.set(input.token, stored);
+    if (!stored) {
+      throw new NotFoundException("Invite not found or already used");
+    }
     // Strict-503 (see create()): DB outage propagates, live null → 404.
     let known: Awaited<ReturnType<UsersService["findById"]>>;
     try {
@@ -721,6 +771,9 @@ export class OrganizationsService {
       dbUnavailable("organizations.acceptInvite.userLookup", err, this.logger, correlationId);
     }
     if (!known) throw new NotFoundException(`User ${me} not found`);
+    if (stored.email && known.email.trim().toLowerCase() !== stored.email) {
+      throw new NotFoundException("Invite not found or already used");
+    }
     if (
       stored.role === "maintainer" &&
       (await this.maintainerCount(stored.orgId, correlationId)) > 0
@@ -730,8 +783,12 @@ export class OrganizationsService {
     try {
       const rows = await this.client()
         .insert(organizationMembers)
-        .values({ orgId: stored.orgId, userId: me, role: stored.role })
+        .values({ orgId: stored.orgId, userId: me, role: stored.role as OrgRole })
         .returning();
+      await this.client()
+        .delete(organizationInvites)
+        .where(eq(organizationInvites.token, token))
+        .catch(() => undefined);
       this.logger.info(
         `[organizations] invite accepted org=${stored.orgId} role=${stored.role}`,
         correlationId,

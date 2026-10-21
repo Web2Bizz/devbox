@@ -40,12 +40,13 @@ import {
 import { OrganizationsService } from "./organizations.service";
 
 /**
- * Organizations CRUD + membership + single-use invites + project links.
+ * Organizations CRUD + membership + persistent single-use invites + project links.
  * Global 'api' prefix + URI versioning supply /api/v1 — controller
  * declares only the resource segment. Every route is Bearer-guarded
  * (JwtAuthGuard); the service enforces member-only reads (404 for
  * strangers) and maintainer-only mutations (403 for plain members).
  * Responses are private (`X-Robots-Tag: noindex` via NoIndexInterceptor).
+ * Invites are uuidv7 rows with no TTL (single-use, replay → 404).
  * Swagger annotations mirror contracts/openapi.yaml (organizations section).
  */
 @ApiTags("organizations")
@@ -210,7 +211,7 @@ export class OrganizationsController {
 
   @Post(":id/invites")
   @Version("1")
-  @V1Endpoint("Mint a single-use invite token (maintainer only)")
+  @V1Endpoint("Mint a persistent single-use invite (maintainer only, no TTL)")
   @ApiResponse({ status: 201, type: OrganizationInviteDto })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
   @ApiResponse({ status: 403, description: "member without the maintainer role" })
@@ -228,12 +229,11 @@ export class OrganizationsController {
 
   @Post("invites/accept")
   @Version("1")
-  @V1Endpoint("Accept a single-use invite token")
+  @V1Endpoint("Accept a persistent single-use invite (uuidv7, no TTL)")
   @ApiResponse({ status: 200, type: OrganizationMemberDto })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
   @ApiResponse({ status: 404, description: "invite not found or already used" })
   @ApiResponse({ status: 409, description: "already a member, or org already has a maintainer" })
-  @ApiResponse({ status: 410, description: "invite expired (ORG_INVITE_TTL_SEC window passed)" })
   @ApiResponse({ status: 503, description: "postgres unreachable (EXTERNAL_UNAVAILABLE, Retry-After)" })
   @HttpCode(HttpStatus.OK)
   async acceptInvite(

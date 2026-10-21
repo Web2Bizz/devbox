@@ -5,8 +5,7 @@
  * OrganizationMember, OrganizationInvite, OrgRole (+ CreateOrganization,
  * UpdateOrganization, AddMember, UpdateMemberRole, CreateInvite,
  * AcceptInvite inputs). Request input types live in organization.schema.ts
- * (inferred from the backend-verbatim zod schemas). All contracts here were
- * introduced additively — no existing schema is modified.
+ * (inferred from the backend-verbatim zod schemas).
  */
 
 export type OrgRole = 'maintainer' | 'user';
@@ -32,11 +31,18 @@ export type OrganizationMember = {
   createdAt: string;
 };
 
-/** Single-use bearer token — returned ONCE, never logged, TTL ORG_INVITE_TTL_SEC. */
+/**
+ * Single-use invite — uuidv7 token, no TTL (links never expire).
+ * Returned ONCE, never logged. `email` is null for open link-invites,
+ * or the bound address for email-invites (only that user can accept).
+ */
 export type OrganizationInvite = {
+  /** uuidv7 invite token (link material, single-use) */
   token: string;
   orgId: string;
+  /** bound email (lowercased) or null for open link-invites */
+  email: string | null;
   role: OrgRole;
   /** ISO-8601 timestamp */
-  expiresAt: string;
+  createdAt: string;
 };

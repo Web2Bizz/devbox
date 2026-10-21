@@ -105,6 +105,7 @@ frontend. Новый компонент **не считается зарегис
 - `ChatWindow`
 - `CreateOrganizationDialog`
 - `CreateProjectDialog`
+- `OrganizationSwitcher`
 - `RunningSessionRow`
 - `RunningSessionsTab`
 - `SessionRow`

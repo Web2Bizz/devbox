@@ -7,6 +7,7 @@
   "workspaces": [
     "apps/backend",
     "apps/frontend",
+    "apps/cli",
     "packages/contracts"
   ],
   "scripts": {

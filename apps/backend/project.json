@@ -26,6 +26,14 @@
         "command": "for f in $(find dist -name '*.spec.js' | sort); do bun \"$f\" || exit 1; done",
         "cwd": "{projectRoot}"
       }
+    },
+    "dev": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "bun --bun nest start -b swc --watch",
+        "cwd": "{projectRoot}"
+      },
+      "dependsOn": ["^build"]
     }
   }
 }

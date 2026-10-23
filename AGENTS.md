@@ -37,8 +37,9 @@ package.json, не Nx-проект, вне bun workspaces).
   (`nx run-many -t build`, фронт → `next build --turbopack`). Точечно —
   `bun run lint:affected` / `bun run build:affected` (`nx affected -t …`),
   граф — `bun run graph`. Низкоуровнево — `bun --filter <app> <script>`
-  напрямую; dev-чейны (`dev`, `dev:backend`, `dev:frontend`) остаются на
-  `bun --filter` с prebuild контрактов — PM2 идёт мимо nx.
+  напрямую; dev-чейны (`dev`, `dev:backend`, `dev:frontend`) идут через nx
+  (`run-many -t dev` / `run <project>:dev`, contracts build — `dependsOn:
+  ^build`, `.env` — `scripts/dev/with-env.ts`).
   После правок mobile — гейты из `apps/mobile/AGENTS.md` (npm, не bun).
 
 ## Frontend — слои (apps/frontend)

@@ -44,6 +44,10 @@
         "default"
       ],
       "cache": true
+    },
+    "dev": {
+      "cache": false,
+      "continuous": true
     }
   },
   "analytics": true

@@ -26,6 +26,14 @@
         "command": "bun test --isolate --pass-with-no-tests app src",
         "cwd": "{projectRoot}"
       }
+    },
+    "dev": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "bun run dev:next",
+        "cwd": "{projectRoot}"
+      },
+      "dependsOn": ["^build"]
     }
   }
 }

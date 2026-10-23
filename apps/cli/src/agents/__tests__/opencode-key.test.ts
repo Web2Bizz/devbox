@@ -440,14 +440,22 @@ describe("opencode direct cloud chat (free text, no serve)", () => {
 });
 
 describe("repl startup keeps fail-fast errors after clear", () => {
-  test("start writes clear first, then greeting, prompt stays bottom", () => {
+  test("start writes clear first, then single greeting frame, prompt stays bottom", () => {
     const writes: string[] = [];
     const write = (s: string): void => void writes.push(s);
     clearScreen(write);
     write(greeting("0.1.0"));
     write(PROMPT_LABEL);
     expect([...(writes[0] as string)].map((c) => c.charCodeAt(0))).toEqual([27, 99]);
-    expect(writes[1]).toContain("◆ DEVBOX CLI");
+    expect(writes[1]).toContain("◆ DEVBOX CLI v0.1.0");
+    expect(writes[1]).toContain("prompt >");
+    expect(writes[1]).toContain("@file");
+    expect(writes[1]).toContain("/agent");
+    expect(writes[1]).toContain("/help");
+    expect(writes[1]).toContain("/exit");
+    const startup = writes.join("\n");
+    expect(startup.split("╔").length - 1).toBe(1);
+    expect(startup.split("╚").length - 1).toBe(1);
     expect(writes[writes.length - 1]).toBe("prompt > ");
   });
 

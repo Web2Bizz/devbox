@@ -21,7 +21,7 @@ import { useI18n } from '../i18n';
 /**
  * Header organization switcher — kit DropdownMenu (`components` entry).
  * Thin data adapter (<40 lines of UI): useHeaderProfile() gates rendering
- * (authenticated only — null for guests, middleware already guards the
+ * (authenticated only — null for guests, proxy already guards the
  * route), useOrganizations() supplies list/loading/error (fail-closed via
  * getValidAccessToken, no fallbacks). Active org is derived from the
  * pathname (`/organizations/[id]`), switching is router.push to the detail
@@ -69,7 +69,7 @@ export function OrganizationSwitcher() {
   }
 
   // Authenticated only — reuse the useHeaderProfile authorized branch:
-  // guests render nothing (fail-closed; middleware already guards).
+  // guests render nothing (fail-closed; proxy already guards).
   if (!profile) return null;
 
   if (orgsLoading) {

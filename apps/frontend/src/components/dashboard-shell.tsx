@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { Button, Header } from '@web2bizz/ui/components';
 import { ThemeToggleDefault } from '@web2bizz/ui/features';
@@ -10,6 +10,7 @@ import { useI18n } from '../i18n';
 import { LanguageSwitcher } from './language-switcher';
 import { HeaderProfileDropdown } from './profile-dropdown';
 import { OrganizationSwitcher } from './organization-switcher';
+import { getValidAccessToken, signOutAndRedirect } from '../lib/auth-store';
 
 export type DashboardHeaderBreadcrumb = {
   label: string;
@@ -167,6 +168,26 @@ export function DashboardShell({ children, header, content }: DashboardShellProp
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const openSidebar = useCallback(() => setSidebarOpen(true), []);
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+
+  /**
+   * Client dead-session guard (UX complement to edge `proxy.ts` + the server
+   * group-layout guard — never the sole protection). The marker cookie
+   * outlives the tokens (7d TTL, cleared only on explicit sign-out paths):
+   * a guest holding a stale marker passes edge/server guards and would see
+   * auth pages with "session expired" states. Re-validate once on mount —
+   * healthy sessions resolve synchronously with zero network (valid access
+   * passes through; expiry reuses the single-flight refresh the data hooks
+   * share), dead sessions clear everything and bounce to `/login`.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    void getValidAccessToken().then((token) => {
+      if (!token && !cancelled) void signOutAndRedirect();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className="app-shell-container mx-auto w-full max-w-none px-2">

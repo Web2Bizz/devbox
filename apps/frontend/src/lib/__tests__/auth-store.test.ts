@@ -5,7 +5,7 @@
  * / malformed / non-JWT / exp-less), getValidAccessToken passthrough +
  * single-flight refresh, refresh-failure clearing incl. the `devbox-auth`
  * marker cookie, client-side marker stamping on setSession/successful
- * refresh (middleware.ts guard fallback), logoutEverywhere idempotency
+ * refresh (proxy.ts guard fallback), logoutEverywhere idempotency
  * on 401, signOutAndRedirect (router.replace preferred, push fallback,
  * query-cache clear).
  *
@@ -77,7 +77,7 @@ function makeSession(accessToken: string, refreshToken: string): never {
 
 function seed(accessToken: string, refreshToken: string): void {
   // Маркер `devbox-auth=1` ставит сам setSession (клиентский fallback под
-  // middleware.ts) — ручной document.cookie здесь больше не нужен.
+  // proxy.ts) — ручной document.cookie здесь больше не нужен.
   store.setSession(makeSession(accessToken, refreshToken));
 }
 
@@ -165,7 +165,7 @@ describe('getValidAccessToken', () => {
   });
 });
 
-describe('devbox-auth marker (client fallback под middleware.ts)', () => {
+describe('devbox-auth marker (client fallback под proxy.ts)', () => {
   test('setSession сам ставит маркер без ручного document.cookie', () => {
     store.setSession(makeSession(mintJwt(inAnHour()), mintJwt(inAnHour())));
     expect(document.cookie).toContain('devbox-auth=1');

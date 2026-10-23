@@ -5,13 +5,13 @@ import { getActiveQueryClient } from './query-client';
 const ACCESS_KEY = 'devbox-access-token';
 const REFRESH_KEY = 'devbox-refresh-token';
 /** Readable marker cookie the backend sets on login/register/refresh and
- *  clears on logout — middleware.ts redirects on it alone. */
+ *  clears on logout — proxy.ts redirects on it alone. */
 const AUTH_MARKER = 'devbox-auth';
 /**
  * Дефолтный TTL маркера (7d = 604800s) — зеркалит backend
  * DEFAULT_JWT_REFRESH_TTL_SEC (apps/backend/src/env.ts). AuthSession несёт
  * только access `expiresIn` (~900s); refresh TTL до клиента не доезжает,
- * поэтому маркер живёт дефолтом, а не expiresIn (иначе middleware начал бы
+ * поэтому маркер живёт дефолтом, а не expiresIn (иначе proxy начал бы
  * отбивать /projects → /login через 15 минут при живом refresh).
  */
 const DEFAULT_MARKER_MAX_AGE_SEC = 604_800;
@@ -54,7 +54,7 @@ export function setSession(session: AuthSession): void {
   memoryRefresh = session.refreshToken;
   writeStorage(ACCESS_KEY, session.accessToken);
   writeStorage(REFRESH_KEY, session.refreshToken);
-  // Клиентский дубликат маркера для middleware (см. setAuthMarker):
+  // Клиентский дубликат маркера для proxy (см. setAuthMarker):
   // backend Set-Cookie на кросс-портовом dev к origin'у фронтенда не долетает.
   setAuthMarker();
 }
@@ -82,7 +82,7 @@ export function clearSession(): void {
  * (apps/backend/src/auth/auth.controller.ts: login/register/refresh).
  * Нужен потому что на кросс-портовом dev (фронт :3001 → API :3000) браузер
  * привязывает backend Set-Cookie к origin'у backend'а (SameSite=Lax,
- * domain = хост API, CORS credentials), а middleware.ts читает куки
+ * domain = хост API, CORS credentials), а proxy.ts читает куки
  * origin'а фронтенда — маркера нет, и /projects отбивается в /login даже
  * при успешном login 200. document.cookie ставит маркер на origin фронтенда;
  * когда оба origin'а совпадают (прод за одним доменом) — идемпотентно
@@ -95,7 +95,7 @@ export function setAuthMarker(maxAgeSec: number = DEFAULT_MARKER_MAX_AGE_SEC): v
     const ttl = Number.isFinite(maxAgeSec) && maxAgeSec > 0 ? Math.floor(maxAgeSec) : DEFAULT_MARKER_MAX_AGE_SEC;
     document.cookie = `${AUTH_MARKER}=1; path=/; max-age=${ttl}; SameSite=Lax`;
   } catch {
-    // cookie store unavailable — middleware redirect stays backend-driven
+    // cookie store unavailable — proxy redirect stays backend-driven
   }
 }
 
@@ -103,7 +103,7 @@ export function setAuthMarker(maxAgeSec: number = DEFAULT_MARKER_MAX_AGE_SEC): v
  * Client-side fallback сноc маркера `devbox-auth` (path=/). The backend
  * clears it via Set-Cookie on /auth/logout, but when logout 401s (expired
  * refresh) or the network fails the marker would outlive the session and
- * middleware.ts would bounce /login → /projects forever — so every local
+ * proxy.ts would bounce /login → /projects forever — so every local
  * sign-out path drops it too. Best-effort, never throws.
  */
 export function clearAuthMarker(): void {
@@ -111,7 +111,7 @@ export function clearAuthMarker(): void {
     if (typeof document === 'undefined') return;
     document.cookie = `${AUTH_MARKER}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0`;
   } catch {
-    // cookie store unavailable — middleware redirect stays backend-driven
+    // cookie store unavailable — proxy redirect stays backend-driven
   }
 }
 

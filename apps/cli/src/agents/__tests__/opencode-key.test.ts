@@ -1,4 +1,6 @@
 // opencode key/client tests: missing-key fail-fast, scrub, /agent parse.
+// Direct cloud chat (OpenAI-compatible choices → text, no serve by default).
+// Key source: auth.json ONLY — env key vars are never read.
 // Run: bun test --isolate src (apps/cli).
 
 import { describe, expect, test } from "bun:test";
@@ -6,17 +8,28 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
-  chatLocal,
-  chatOpencode,
-  getOpencodeKey,
-  hasOpencodeKey,
-  OPENCODE_API_BASE_URL,
-  OPENCODE_CHAT_PATH,
-  OPENCODE_DEFAULT_MODEL,
+  OPENCODE_CAUSE_MAX,
+  OPENCODE_CAUSE_PREVIEW,
+  OPENCODE_CLOUD_MODEL,
+  OPENCODE_CLOUD_URL,
   OPENCODE_LOCAL_URL,
+  OPENCODE_SDK_VERSION,
+  chatCloud,
+  chatLocal,
+  classify400Cause,
+  formatKeySource,
+  getOpencodeKey,
+  getOpencodeKeyInfo,
+  hasOpencodeKey,
+  isServeFallbackEnabled,
+  opencodeAuthPath,
+  parseModelRef,
   resetLocalSessionForTests,
-  resolveChatEndpoint,
+  resolveChatModel,
+  resolveCloudModel,
+  resolveCloudUrl,
   resolveLocalBaseUrl,
+  resolveServeToken,
   scrubOpencodeText,
 } from "../opencode.js";
 import {
@@ -28,18 +41,91 @@ import {
 } from "../../prompt/repl.js";
 import { errorBox, greeting } from "../../ui/box.js";
 
-describe("opencode key", () => {
-  const NO_KEY_ENV = { XDG_DATA_HOME: "/tmp/devbox-cli-no-key-test" } as NodeJS.ProcessEnv;
+function makeAuthDir(payload: unknown): { dir: string; env: NodeJS.ProcessEnv } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "devbox-cli-auth-"));
+  fs.mkdirSync(path.join(dir, "opencode"), { recursive: true });
+  const body = typeof payload === "string" ? payload : JSON.stringify(payload);
+  fs.writeFileSync(path.join(dir, "opencode", "auth.json"), body);
+  return { dir, env: { XDG_DATA_HOME: dir } as NodeJS.ProcessEnv };
+}
 
-  test("missing key fails fast with env/auth hint", () => {
-    expect(() => getOpencodeKey(NO_KEY_ENV)).toThrow("missing OPENCODE_API_KEY");
-    expect(() => getOpencodeKey(NO_KEY_ENV)).toThrow("auth.json");
-    expect(hasOpencodeKey(NO_KEY_ENV)).toBe(false);
-    expect(hasOpencodeKey({ ...NO_KEY_ENV, OPENCODE_API_KEY: "k" })).toBe(true);
+function makeMissingEnv(): { dir: string; env: NodeJS.ProcessEnv } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "devbox-cli-no-key-"));
+  // No auth.json inside → ENOENT path.
+  return { dir, env: { XDG_DATA_HOME: dir } as NodeJS.ProcessEnv };
+}
+
+function cleanup(dir: string): void {
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+describe("opencode key (auth.json only)", () => {
+  test("missing file fails fast with path, no secret", () => {
+    const { dir, env } = makeMissingEnv();
+    try {
+      const expectedPath = opencodeAuthPath(env);
+      expect(() => getOpencodeKey(env)).toThrow("auth.json");
+      expect(() => getOpencodeKey(env)).toThrow(expectedPath);
+      expect(() => getOpencodeKey(env)).toThrow("missing opencode key");
+      expect(hasOpencodeKey(env)).toBe(false);
+    } finally {
+      cleanup(dir);
+    }
   });
 
-  test("env key wins over missing auth.json", () => {
-    expect(getOpencodeKey({ ...NO_KEY_ENV, OPENCODE_API_KEY: "  live-key " })).toBe("live-key");
+  test("broken JSON fails fast with path", () => {
+    const { dir, env } = makeAuthDir("{not-json");
+    try {
+      const expectedPath = opencodeAuthPath(env);
+      expect(() => getOpencodeKey(env)).toThrow(expectedPath);
+      expect(hasOpencodeKey(env)).toBe(false);
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("empty/non-string key fails fast with path", () => {
+    const cases: unknown[] = [
+      { "opencode-go": { key: "   " }, opencode: { key: "x" } },
+      { "opencode-go": { key: 123 } },
+      {},
+    ];
+    for (const payload of cases) {
+      const { dir, env } = makeAuthDir(payload);
+      try {
+        expect(() => getOpencodeKey(env)).toThrow(opencodeAuthPath(env));
+      } finally {
+        cleanup(dir);
+      }
+    }
+  });
+
+  test("env key vars are ignored even when set (file wins)", () => {
+    const { dir, env } = makeAuthDir({ "opencode-go": { key: "  file-key\n" }, opencode: { key: "other" } });
+    try {
+      expect(getOpencodeKey(env)).toBe("file-key");
+      expect(getOpencodeKey({ ...env, OPENCODE_API_KEY: " env-key " })).toBe("file-key");
+      expect(getOpencodeKey({ ...env, JEV_API_KEY: "jev-key" })).toBe("file-key");
+      expect(hasOpencodeKey({ ...env, OPENCODE_API_KEY: "env-key" })).toBe(true);
+      expect(hasOpencodeKey(makeMissingEnv().env)).toBe(false);
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("trims value, opencode-go has priority over opencode", () => {
+    const a = makeAuthDir({ "opencode-go": { key: "  file-key\n" }, opencode: { key: "other" } });
+    try {
+      expect(getOpencodeKey(a.env)).toBe("file-key");
+    } finally {
+      cleanup(a.dir);
+    }
+    const b = makeAuthDir({ opencode: { key: "  legacy-key  " } });
+    try {
+      expect(getOpencodeKey(b.env)).toBe("legacy-key");
+    } finally {
+      cleanup(b.dir);
+    }
   });
 
   test("scrub hides Bearer and URL creds (no secret in output)", () => {
@@ -51,28 +137,116 @@ describe("opencode key", () => {
   });
 
   test("chat error cause is scrubbed and capped", async () => {
-    const failingFetch = (async () => {
-      throw new TypeError("fetch failed for Bearer abcdef");
-    }) as unknown as typeof fetch;
-    await expect(
-      chatOpencode("hello", {
-        env: { ...NO_KEY_ENV, OPENCODE_API_KEY: "k" } as NodeJS.ProcessEnv,
-        fetchImpl: failingFetch,
-        timeoutMs: 1000,
-      }),
-    ).rejects.toThrow("[redacted]");
+    const { dir, env } = makeAuthDir({ "opencode-go": { key: "k" } });
+    try {
+      resetLocalSessionForTests();
+      const failingFetch = (async () => {
+        throw new TypeError("fetch failed for Bearer abcdef");
+      }) as unknown as typeof fetch;
+      await expect(
+        chatLocal("hello", {
+          env,
+          fetchImpl: failingFetch,
+          timeoutMs: 1000,
+        }),
+      ).rejects.toThrow("[redacted]");
+      resetLocalSessionForTests();
+    } finally {
+      cleanup(dir);
+    }
   });
 
-  test("chat echo returns reply in box-ready text", async () => {
-    const echoFetch = (async () =>
-      new Response(JSON.stringify({ text: "echo: hello world" }), { status: 200 })
-    ) as unknown as typeof fetch;
-    const reply = await chatOpencode("hello world", {
-      env: { ...NO_KEY_ENV, OPENCODE_API_KEY: "k" } as NodeJS.ProcessEnv,
-      fetchImpl: echoFetch,
-    });
-    expect(reply).toContain("hello world");
-    expect(reply).not.toContain("Bearer");
+  test("missing key fails fast before any fetch (no localhost required)", async () => {
+    const { dir, env } = makeMissingEnv();
+    try {
+      let called = 0;
+      const neverFetch = (async () => {
+        called += 1;
+        return new Response("{}", { status: 200 });
+      }) as unknown as typeof fetch;
+      await expect(chatLocal("hello", { env, fetchImpl: neverFetch })).rejects.toThrow(
+        "auth.json",
+      );
+      expect(called).toBe(0);
+      resetLocalSessionForTests();
+    } finally {
+      cleanup(dir);
+    }
+  });
+});
+
+describe("opencode cloud endpoint (Zen composition)", () => {
+  test("sdk version pins the serve-fallback contract", () => {
+    expect(OPENCODE_SDK_VERSION).toBe("1.18.33");
+  });
+
+  test("cloud url/model defaults + explicit override", () => {
+    const { dir, env } = makeAuthDir({ "opencode-go": { key: "k" } });
+    try {
+      expect(OPENCODE_CLOUD_URL).toBe("https://opencode.ai/inference/openai/v1/chat/completions");
+      expect(OPENCODE_CLOUD_MODEL).toBe("deepseek-v4.1-flash");
+      expect(resolveCloudUrl(env)).toBe(OPENCODE_CLOUD_URL);
+      expect(resolveCloudModel(env)).toBe(OPENCODE_CLOUD_MODEL);
+      expect(resolveCloudUrl({ ...env, OPENCODE_CLOUD_URL: "https://stage.example.com/x/" })).toBe(
+        "https://stage.example.com/x",
+      );
+      expect(resolveCloudModel({ ...env, OPENCODE_MODEL: "custom-model" })).toBe("custom-model");
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("serve fallback is OFF by default, ON only with explicit flag", () => {
+    const { dir, env } = makeAuthDir({ "opencode-go": { key: "k" } });
+    try {
+      expect(isServeFallbackEnabled(env)).toBe(false);
+      expect(isServeFallbackEnabled({ ...env, OPENCODE_USE_SERVE: "1" })).toBe(true);
+      expect(isServeFallbackEnabled({ ...env, OPENCODE_USE_SERVE: "true" })).toBe(true);
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("local base default + dial remap (fallback only)", () => {
+    const { dir, env } = makeAuthDir({ "opencode-go": { key: "k" } });
+    try {
+      expect(OPENCODE_LOCAL_URL).toBe("http://127.0.0.1:4096");
+      expect(resolveLocalBaseUrl(env)).toBe("http://127.0.0.1:4096");
+      expect(resolveLocalBaseUrl({ ...env, OPENCODE_URL: "http://localhost:4096/" })).toBe(
+        "http://localhost:4096",
+      );
+      expect(resolveLocalBaseUrl({ ...env, OPENCODE_SERVER_URL: "http://0.0.0.0:4096" })).toBe(
+        "http://127.0.0.1:4096",
+      );
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("serve token: OPENCODE_TOKEN wins, SERVER_PASSWORD alias, empty omits", () => {
+    const { dir, env } = makeAuthDir({ "opencode-go": { key: "k" } });
+    try {
+      expect(resolveServeToken(env)).toBe("");
+      expect(resolveServeToken({ ...env, OPENCODE_TOKEN: " x " })).toBe("x");
+      expect(resolveServeToken({ ...env, OPENCODE_SERVER_PASSWORD: "pw" })).toBe("pw");
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("model: jev rejected for serve fallback (choice-only)", () => {
+    const { dir, env } = makeAuthDir({ "opencode-go": { key: "k" } });
+    try {
+      expect(resolveChatModel(env)).toBeUndefined();
+      expect(parseModelRef("deepseek/deepseek-chat")).toEqual({
+        providerID: "deepseek",
+        modelID: "deepseek-chat",
+      });
+      expect(parseModelRef("no-slash")).toBeNull();
+      expect(resolveChatModel({ ...env, OPENCODE_MODEL: "jev/jev-1.13-free" })).toBeUndefined();
+    } finally {
+      cleanup(dir);
+    }
   });
 
   test("parse /agent keeps name/prompt/--apply", () => {
@@ -91,348 +265,181 @@ describe("opencode key", () => {
   });
 });
 
-describe("opencode cloud base url", () => {
-  const NO_KEY_ENV = { XDG_DATA_HOME: "/tmp/devbox-cli-no-key-test" } as NodeJS.ProcessEnv;
-
-  test("base URL is hard-coded to the real Cloud host (not the catch-all)", () => {
-    expect(OPENCODE_API_BASE_URL.startsWith("https://")).toBe(true);
-    expect(OPENCODE_API_BASE_URL).toBe("https://opencode.ai");
-    expect(OPENCODE_API_BASE_URL).not.toContain("api.opencode.ai");
-  });
-
-  test("chat endpoint is built from base via new URL (never relative)", () => {
-    expect(resolveChatEndpoint(NO_KEY_ENV)).toBe(
-      new URL(OPENCODE_CHAT_PATH, OPENCODE_API_BASE_URL).toString(),
-    );
-    expect(OPENCODE_CHAT_PATH).toBe("/inference/systemone/v1/systemone");
-    expect(resolveChatEndpoint(NO_KEY_ENV)).toBe(
-      "https://opencode.ai/inference/systemone/v1/systemone",
-    );
-  });
-
-  test("fetch goes to the hard-coded base chat endpoint", async () => {
-    let seenUrl = "";
-    const captureFetch = (async (url: string | URL | Request) => {
-      seenUrl = String(url);
-      return new Response(JSON.stringify({ text: "ok" }), { status: 200 });
-    }) as unknown as typeof fetch;
-    await chatOpencode("hello", {
-      env: { ...NO_KEY_ENV, OPENCODE_API_KEY: "k" } as NodeJS.ProcessEnv,
-      fetchImpl: captureFetch,
-    });
-    expect(seenUrl).toBe(`${OPENCODE_API_BASE_URL}${OPENCODE_CHAT_PATH}`);
-  });
-
-  test("OPENCODE_API_BASE_URL env overrides just the base", async () => {
-    expect(
-      resolveChatEndpoint({
-        ...NO_KEY_ENV,
-        OPENCODE_API_BASE_URL: "https://stage.example.com",
-      } as NodeJS.ProcessEnv),
-    ).toBe("https://stage.example.com/inference/systemone/v1/systemone");
-    let seenUrl = "";
-    const captureFetch = (async (url: string | URL | Request) => {
-      seenUrl = String(url);
-      return new Response(JSON.stringify({ text: "ok" }), { status: 200 });
-    }) as unknown as typeof fetch;
-    await chatOpencode("hello", {
-      env: {
-        ...NO_KEY_ENV,
-        OPENCODE_API_KEY: "k",
-        OPENCODE_API_BASE_URL: "https://stage.example.com ",
-      } as NodeJS.ProcessEnv,
-      fetchImpl: captureFetch,
-    });
-    expect(seenUrl).toBe("https://stage.example.com/inference/systemone/v1/systemone");
-  });
-
-  test("fetch sends the v2 systemone contract (model/state/questions + Bearer)", async () => {
-    let seenUrl = "";
-    let seenInit: RequestInit = {};
-    const captureFetch = (async (url: string | URL | Request, init?: RequestInit) => {
-      seenUrl = String(url);
-      seenInit = init ?? {};
-      return new Response(JSON.stringify({ text: "ok" }), { status: 200 });
-    }) as unknown as typeof fetch;
-    await chatOpencode("hello", {
-      env: { ...NO_KEY_ENV, OPENCODE_API_KEY: "k" } as NodeJS.ProcessEnv,
-      fetchImpl: captureFetch,
-    });
-    expect(seenUrl).toBe(`${OPENCODE_API_BASE_URL}${OPENCODE_CHAT_PATH}`);
-    const headers = seenInit.headers as Record<string, string>;
-    expect(headers.Authorization).toBe("Bearer k");
-    const body = JSON.parse(String(seenInit.body)) as Record<string, unknown>;
-    expect(body.model).toBe(OPENCODE_DEFAULT_MODEL);
-    expect(body.state).toBe("hello");
-    expect(body.questions).toMatchObject({
-      reply: { type: "choice", instructions: expect.any(String), criteria: expect.anything() },
-    });
-  });
-
-  test("systemone answers shape resolves to choice text", async () => {
-    const answersFetch = (async () =>
-      new Response(
-        JSON.stringify({ answers: { reply: { choice: "v2 answer", confidence: 0.9 } } }),
-        { status: 200 },
-      )) as unknown as typeof fetch;
-    const reply = await chatOpencode("hello", {
-      env: { ...NO_KEY_ENV, OPENCODE_API_KEY: "k" } as NodeJS.ProcessEnv,
-      fetchImpl: answersFetch,
-    });
-    expect(reply).toBe("v2 answer");
-  });
-
-  test("answers.reply.choice returns the value, never the key name", async () => {
-    const replyFetch = (async () =>
-      new Response(JSON.stringify({ answers: { reply: { choice: "hello world" } } }), {
-        status: 200,
-      })) as unknown as typeof fetch;
-    const reply = await chatOpencode("hello", {
-      env: { ...NO_KEY_ENV, OPENCODE_API_KEY: "k" } as NodeJS.ProcessEnv,
-      fetchImpl: replyFetch,
-    });
-    expect(reply).toBe("hello world");
-    expect(reply).not.toBe("reply");
-    expect(reply).not.toBe("answer");
-  });
-
-  test("answers.answer.choice shape also resolves to its value", async () => {
-    const answerFetch = (async () =>
-      new Response(JSON.stringify({ answers: { answer: { choice: "hello world" } } }), {
-        status: 200,
-      })) as unknown as typeof fetch;
-    const reply = await chatOpencode("hello", {
-      env: { ...NO_KEY_ENV, OPENCODE_API_KEY: "k" } as NodeJS.ProcessEnv,
-      fetchImpl: answerFetch,
-    });
-    expect(reply).toBe("hello world");
-    expect(reply).not.toBe("answer");
-  });
-
-  test("answers string fallback returns the value (not the key)", async () => {
-    const stringFetch = (async () =>
-      new Response(JSON.stringify({ answers: { reply: "hello world string" } }), {
-        status: 200,
-      })) as unknown as typeof fetch;
-    const reply = await chatOpencode("hello", {
-      env: { ...NO_KEY_ENV, OPENCODE_API_KEY: "k" } as NodeJS.ProcessEnv,
-      fetchImpl: stringFetch,
-    });
-    expect(reply).toBe("hello world string");
-  });
-
-  test("answers choice is scrubbed and capped", async () => {
-    const dirtyFetch = (async () =>
-      new Response(
-        JSON.stringify({ answers: { reply: { choice: "hi Bearer super-secret-123" } } }),
-        { status: 200 },
-      )) as unknown as typeof fetch;
-    const reply = await chatOpencode("hello", {
-      env: { ...NO_KEY_ENV, OPENCODE_API_KEY: "k" } as NodeJS.ProcessEnv,
-      fetchImpl: dirtyFetch,
-    });
-    expect(reply).toContain("Bearer [redacted]");
-    expect(reply).not.toContain("super-secret-123");
-  });
-
-  test("choices/delta shapes join to text", async () => {
-    const choicesFetch = (async () =>
-      new Response(
-        JSON.stringify({
-          choices: [{ message: { content: "part one" } }, { delta: { content: "part two" } }],
-        }),
-        { status: 200 },
-      )) as unknown as typeof fetch;
-    const reply = await chatOpencode("hello", {
-      env: { ...NO_KEY_ENV, OPENCODE_API_KEY: "k" } as NodeJS.ProcessEnv,
-      fetchImpl: choicesFetch,
-    });
-    expect(reply).toContain("part one");
-    expect(reply).toContain("part two");
-  });
-
-  test("401 JSON is a scrubbed failure (no 404 HTML expected)", async () => {
-    const deniedFetch = (async () =>
-      new Response(JSON.stringify({ type: "error", error: { type: "AuthError" } }), {
-        status: 401,
-      })) as unknown as typeof fetch;
-    await expect(
-      chatOpencode("hello", {
-        env: { ...NO_KEY_ENV, OPENCODE_API_KEY: "k" } as NodeJS.ProcessEnv,
-        fetchImpl: deniedFetch,
-      }),
-    ).rejects.toThrow("status=401");
-  });
-
-  test("env key wins over auth.json file key (order: env → file)", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "devbox-cli-auth-"));
-    fs.mkdirSync(path.join(dir, "opencode"), { recursive: true });
-    fs.writeFileSync(
-      path.join(dir, "opencode", "auth.json"),
-      JSON.stringify({ "opencode-go": { key: "  file-key\n" }, opencode: { key: "other" } }),
-    );
-    const fileEnv = { XDG_DATA_HOME: dir } as NodeJS.ProcessEnv;
-    expect(getOpencodeKey(fileEnv)).toBe("file-key");
-    expect(getOpencodeKey({ ...fileEnv, OPENCODE_API_KEY: " env-key " })).toBe("env-key");
-    expect(getOpencodeKey({ ...fileEnv, JEV_API_KEY: "jev-key" })).toBe("jev-key");
-    fs.rmSync(dir, { recursive: true, force: true });
-  });
-});
-
-describe("opencode local serve chat (Go subscription, free text)", () => {
-  const NO_KEY_ENV = { XDG_DATA_HOME: "/tmp/devbox-cli-no-key-test" } as NodeJS.ProcessEnv;
-
-  // Local serve mock: POST /session → {id}, POST /session/<id>/message → {parts}.
-  function localFetch(seen: { urls: string[]; auth?: string; bodies: string[] }) {
+describe("opencode direct cloud chat (free text, no serve)", () => {
+  // Cloud mock: POST {model, messages} → {choices:[{message:{content}}]}.
+  function cloudFetch(seen: { urls: string[]; auth?: string; bodies: string[] }, text = "hello world") {
     return (async (url: string | URL | Request, init?: RequestInit) => {
       const u = String(url);
       seen.urls.push(u);
       const headers = (init?.headers ?? {}) as Record<string, string>;
-      if (headers.Authorization) seen.auth = headers.Authorization;
+      if (headers.Authorization) seen.auth = `redacted:${typeof headers.Authorization === "string" ? headers.Authorization.length : 0}`;
+      // Record only that a Bearer header was sent + its redacted length —
+      // never the raw key value.
       seen.bodies.push(String(init?.body ?? ""));
-      if (u.endsWith("/session")) {
-        return new Response(JSON.stringify({ id: "ses_local_1" }), { status: 200 });
-      }
-      return new Response(JSON.stringify({ parts: [{ type: "text", text: "hello world" }] }), {
+      return new Response(JSON.stringify({ choices: [{ message: { content: text } }] }), {
         status: 200,
       });
     }) as unknown as typeof fetch;
   }
 
-  test("creates session once, posts message parts, shows text (not 'answer')", async () => {
-    resetLocalSessionForTests();
-    const seen = { urls: [] as string[], auth: undefined as string | undefined, bodies: [] as string[] };
-    const reply = await chatLocal("hello world", {
-      env: NO_KEY_ENV,
-      fetchImpl: localFetch(seen),
-    });
-    expect(seen.urls[0]).toBe(`${OPENCODE_LOCAL_URL}/session`);
-    expect(seen.urls[1]).toBe(`${OPENCODE_LOCAL_URL}/session/ses_local_1/message`);
-    const msgBody = JSON.parse(seen.bodies[1]) as Record<string, unknown>;
-    expect(msgBody).toMatchObject({ parts: [{ type: "text", text: "hello world" }] });
-    expect(reply).toBe("hello world");
-    expect(reply).not.toBe("answer");
-    // Second call reuses the cached session (no new POST /session).
-    const reply2 = await chatLocal("again", {
-      env: NO_KEY_ENV,
-      fetchImpl: localFetch(seen),
-    });
-    expect(reply2).toBe("hello world");
-    expect(seen.urls.filter((u) => u.endsWith("/session"))).toHaveLength(1);
-    expect(seen.auth).toBeUndefined();
-    resetLocalSessionForTests();
-  });
-
-  test("OPENCODE_TOKEN=x sends Authorization Bearer x on /session and /message", async () => {
-    resetLocalSessionForTests();
-    const auths: Array<string | undefined> = [];
-    const tokenFetch = (async (url: string | URL | Request, init?: RequestInit) => {
-      const headers = (init?.headers ?? {}) as Record<string, string>;
-      auths.push(headers.Authorization);
-      if (String(url).endsWith("/session")) {
-        return new Response(JSON.stringify({ id: "ses_token_1" }), { status: 200 });
-      }
-      return new Response(JSON.stringify({ parts: [{ type: "text", text: "ok" }] }), {
-        status: 200,
+  test("posts cloud model/messages with Bearer, shows text (never empty/answer)", async () => {
+    const { dir, env } = makeAuthDir({ "opencode-go": { key: "k" } });
+    try {
+      resetLocalSessionForTests();
+      const seen = { urls: [] as string[], auth: undefined as string | undefined, bodies: [] as string[] };
+      const reply = await chatLocal("hello world", {
+        env,
+        fetchImpl: cloudFetch(seen),
       });
-    }) as unknown as typeof fetch;
-    const reply = await chatLocal("hello", {
-      env: { ...NO_KEY_ENV, OPENCODE_TOKEN: "x" } as NodeJS.ProcessEnv,
-      fetchImpl: tokenFetch,
-    });
-    expect(reply).toBe("ok");
-    expect(auths).toHaveLength(2);
-    expect(auths[0]).toBe("Bearer x");
-    expect(auths[1]).toBe("Bearer x");
-    resetLocalSessionForTests();
-  });
-
-  test("empty OPENCODE_TOKEN sends no Authorization header", async () => {
-    resetLocalSessionForTests();
-    const auths: Array<string | undefined> = [];
-    const noAuthFetch = (async (url: string | URL | Request, init?: RequestInit) => {
-      const headers = (init?.headers ?? {}) as Record<string, string>;
-      auths.push(headers.Authorization);
-      if (String(url).endsWith("/session")) {
-        return new Response(JSON.stringify({ id: "ses_noauth_1" }), { status: 200 });
-      }
-      return new Response(JSON.stringify({ parts: [{ type: "text", text: "ok" }] }), {
-        status: 200,
+      expect(seen.urls).toHaveLength(1);
+      expect(seen.urls[0]).toBe(OPENCODE_CLOUD_URL);
+      expect(seen.urls[0]).not.toContain("127.0.0.1");
+      expect(seen.urls[0]).not.toContain("localhost");
+      const body = JSON.parse(seen.bodies[0]) as Record<string, unknown>;
+      expect(body).toMatchObject({
+        model: OPENCODE_CLOUD_MODEL,
+        messages: [{ role: "user", content: "hello world" }],
       });
-    }) as unknown as typeof fetch;
-    await chatLocal("hello", {
-      env: { ...NO_KEY_ENV, OPENCODE_TOKEN: "  " } as NodeJS.ProcessEnv,
-      fetchImpl: noAuthFetch,
-    });
-    expect(auths).toHaveLength(2);
-    expect(auths[0]).toBeUndefined();
-    expect(auths[1]).toBeUndefined();
-    resetLocalSessionForTests();
+      expect(reply).toBe("hello world");
+      expect(reply.trim()).not.toBe("");
+      expect(reply.trim().toLowerCase()).not.toBe("answer");
+      expect(seen.auth).toMatch(/^redacted:/);
+      resetLocalSessionForTests();
+    } finally {
+      cleanup(dir);
+    }
   });
 
-  test("local base default + OPENCODE_URL/OPENCODE_SERVER_URL override", () => {
-    expect(OPENCODE_LOCAL_URL).toBe("http://127.0.0.1:4096");
-    expect(resolveLocalBaseUrl(NO_KEY_ENV)).toBe("http://127.0.0.1:4096");
-    expect(
-      resolveLocalBaseUrl({ ...NO_KEY_ENV, OPENCODE_URL: "http://localhost:4096/" }),
-    ).toBe("http://localhost:4096");
-    expect(
-      resolveLocalBaseUrl({ ...NO_KEY_ENV, OPENCODE_SERVER_URL: "http://0.0.0.0:4096" }),
-    ).toBe("http://0.0.0.0:4096");
+  test("chatCloud sends OPENCODE_MODEL override + Bearer from file", async () => {
+    const { dir, env } = makeAuthDir({ "opencode-go": { key: "file-live-key" } });
+    try {
+      const seen = { urls: [] as string[], auth: undefined as string | undefined, bodies: [] as string[] };
+      let rawAuth = "";
+      const capture = (async (url: string | URL | Request, init?: RequestInit) => {
+        rawAuth = String((init?.headers as Record<string, string>)?.Authorization ?? "");
+        seen.urls.push(String(url));
+        seen.bodies.push(String(init?.body ?? ""));
+        return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), {
+          status: 200,
+        });
+      }) as unknown as typeof fetch;
+      const reply = await chatCloud("hi", {
+        env: { ...env, OPENCODE_MODEL: "custom-model", OPENCODE_API_KEY: "ignored-env-key" } as NodeJS.ProcessEnv,
+        fetchImpl: capture,
+      });
+      expect(reply).toBe("ok");
+      expect(rawAuth).toBe("Bearer file-live-key");
+      expect(JSON.parse(seen.bodies[0])).toMatchObject({ model: "custom-model" });
+      resetLocalSessionForTests();
+    } finally {
+      cleanup(dir);
+    }
   });
 
-  test("parts[] text joined, scrubbed and capped; empty → shape mismatch", async () => {
-    resetLocalSessionForTests();
-    const multiFetch = (async (url: string | URL | Request) => {
-      if (String(url).endsWith("/session")) {
-        return new Response(JSON.stringify({ id: "ses_multi" }), { status: 200 });
-      }
-      return new Response(
-        JSON.stringify({ parts: [{ type: "text", text: "part one" }, { type: "text", text: "Bearer abc" }] }),
-        { status: 200 },
+  test("choices[] text joined, scrubbed; empty/answer → shape mismatch", async () => {
+    const { dir, env } = makeAuthDir({ "opencode-go": { key: "k" } });
+    try {
+      const multiFetch = (async () =>
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "part one" } }, { delta: { content: "Bearer abc" } }],
+          }),
+          { status: 200 },
+        )) as unknown as typeof fetch;
+      const reply = await chatLocal("hi", { env, fetchImpl: multiFetch });
+      expect(reply).toContain("part one");
+      expect(reply).toContain("Bearer [redacted]");
+      expect(reply).not.toContain("abc");
+      resetLocalSessionForTests();
+      const emptyFetch = (async () =>
+        new Response(JSON.stringify({ choices: [] }), { status: 200 })) as unknown as typeof fetch;
+      await expect(chatLocal("hi", { env, fetchImpl: emptyFetch })).rejects.toThrow("empty reply");
+      resetLocalSessionForTests();
+      const answerFetch = (async () =>
+        new Response(JSON.stringify({ choices: [{ message: { content: "answer" } }] }), {
+          status: 200,
+        })) as unknown as typeof fetch;
+      await expect(chatLocal("hi", { env, fetchImpl: answerFetch })).rejects.toThrow("empty reply");
+      resetLocalSessionForTests();
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("401 maps to /connect hint (never the secret)", async () => {
+    const { dir, env } = makeAuthDir({ "opencode-go": { key: "k" } });
+    try {
+      const deniedFetch = (async () =>
+        new Response(JSON.stringify({ type: "error" }), { status: 401 })) as unknown as typeof fetch;
+      await expect(chatLocal("hi", { env, fetchImpl: deniedFetch })).rejects.toThrow("status=401");
+      await expect(chatLocal("hi", { env, fetchImpl: deniedFetch })).rejects.toThrow("/connect");
+      resetLocalSessionForTests();
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("404 maps to endpoint hint (documented inference endpoint)", async () => {
+    const { dir, env } = makeAuthDir({ "opencode-go": { key: "k" } });
+    try {
+      const missingFetch = (async () => new Response("nope", { status: 404 })) as unknown as typeof fetch;
+      await expect(chatLocal("hi", { env, fetchImpl: missingFetch })).rejects.toThrow("documented inference");
+      resetLocalSessionForTests();
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("serve fallback stays optional: cloud failure without flag never dials localhost", async () => {
+    const { dir, env } = makeAuthDir({ "opencode-go": { key: "k" } });
+    try {
+      const urls: string[] = [];
+      const failingCloud = (async (url: string | URL | Request) => {
+        urls.push(String(url));
+        return new Response("busy", { status: 503 });
+      }) as unknown as typeof fetch;
+      await expect(chatLocal("hi", { env, fetchImpl: failingCloud, timeoutMs: 1000 })).rejects.toThrow(
+        "cloud",
       );
-    }) as unknown as typeof fetch;
-    const reply = await chatLocal("hi", { env: NO_KEY_ENV, fetchImpl: multiFetch });
-    expect(reply).toContain("part one");
-    expect(reply).toContain("Bearer [redacted]");
-    expect(reply).not.toContain("abc");
-    resetLocalSessionForTests();
-    const emptyFetch = (async (url: string | URL | Request) => {
-      if (String(url).endsWith("/session")) {
-        return new Response(JSON.stringify({ id: "ses_empty" }), { status: 200 });
-      }
-      return new Response(JSON.stringify({ parts: [] }), { status: 200 });
-    }) as unknown as typeof fetch;
-    await expect(chatLocal("hi", { env: NO_KEY_ENV, fetchImpl: emptyFetch })).rejects.toThrow(
-      "empty reply",
-    );
-    resetLocalSessionForTests();
+      expect(urls).toHaveLength(2);
+      expect(urls.every((u) => !u.includes("127.0.0.1") && !u.includes("localhost"))).toBe(true);
+      resetLocalSessionForTests();
+    } finally {
+      cleanup(dir);
+    }
   });
 
-  test("serve down → unreachable with opencode serve hint (never empty)", async () => {
-    resetLocalSessionForTests();
-    const downFetch = (async () => {
-      throw new TypeError("fetch failed");
-    }) as unknown as typeof fetch;
-    await expect(
-      chatLocal("hi", { env: NO_KEY_ENV, fetchImpl: downFetch, timeoutMs: 1000 }),
-    ).rejects.toThrow("opencode serve --port 4096");
-    const down503 = (async (url: string | URL | Request) => {
-      if (String(url).endsWith("/session")) {
-        return new Response("unavailable", { status: 503 });
-      }
-      return new Response("unavailable", { status: 503 });
-    }) as unknown as typeof fetch;
-    await expect(chatLocal("hi", { env: NO_KEY_ENV, fetchImpl: down503 })).rejects.toThrow(
-      "opencode serve --port 4096",
-    );
-    resetLocalSessionForTests();
+  test("serve fallback runs only with OPENCODE_USE_SERVE=1 (cloud down → serve text)", async () => {
+    const { dir, env } = makeAuthDir({ "opencode-go": { key: "k" } });
+    try {
+      resetLocalSessionForTests();
+      let calls = 0;
+      const mixedFetch = (async (url: string | URL | Request) => {
+        calls += 1;
+        const u = String(url);
+        // First two calls are cloud (fail), then serve session + message (ok).
+        if (u === OPENCODE_CLOUD_URL) return new Response("busy", { status: 503 });
+        if (u.endsWith("/session")) {
+          return new Response(JSON.stringify({ id: "ses_fallback_1" }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ parts: [{ type: "text", text: "via serve" }] }), {
+          status: 200,
+        });
+      }) as unknown as typeof fetch;
+      const reply = await chatLocal("hi", {
+        env: { ...env, OPENCODE_USE_SERVE: "1" } as NodeJS.ProcessEnv,
+        fetchImpl: mixedFetch,
+      });
+      expect(reply).toBe("via serve");
+      expect(calls).toBeGreaterThanOrEqual(3);
+      resetLocalSessionForTests();
+    } finally {
+      cleanup(dir);
+    }
   });
 });
 
 describe("repl startup keeps fail-fast errors after clear", () => {
-  const NO_KEY_ENV = { XDG_DATA_HOME: "/tmp/devbox-cli-no-key-test" } as NodeJS.ProcessEnv;
-
   test("start writes clear first, then greeting, prompt stays bottom", () => {
     const writes: string[] = [];
     const write = (s: string): void => void writes.push(s);
@@ -445,25 +452,124 @@ describe("repl startup keeps fail-fast errors after clear", () => {
   });
 
   test("missing-key error surfaces after clear in ✗-box (nothing lost)", () => {
-    const writes: string[] = [];
-    writes.push(CLEAR_SEQUENCE);
-    let message = "";
+    const { dir, env } = makeMissingEnv();
     try {
-      getOpencodeKey(NO_KEY_ENV);
-    } catch (err) {
-      message = err instanceof Error ? err.message : String(err);
+      const writes: string[] = [];
+      writes.push(CLEAR_SEQUENCE);
+      let message = "";
+      try {
+        getOpencodeKey(env);
+      } catch (err) {
+        message = err instanceof Error ? err.message : String(err);
+      }
+      expect(message).toContain("auth.json");
+      expect(message).toContain(opencodeAuthPath(env));
+      writes.push(errorBox(message, "Вставь ключ через /connect в TUI (см. apps/cli/.env.example)."));
+      expect(writes[0]).toBe(CLEAR_SEQUENCE);
+      expect(writes[1]).toContain("✗");
+      expect(writes[1]).toContain("auth.json");
+      expect(writes.join("\n")).not.toContain("Bearer super-secret");
+    } finally {
+      cleanup(dir);
     }
-    expect(message).toContain("missing OPENCODE_API_KEY");
-    writes.push(errorBox(message, "Set OPENCODE_API_KEY in env or auth.json (see .env.example)."));
-    expect(writes[0]).toBe(CLEAR_SEQUENCE);
-    expect(writes[1]).toContain("✗");
-    expect(writes[1]).toContain("auth.json");
-    expect(writes.join("\n")).not.toContain("Bearer super-secret");
   });
 
   test("non-TTY help route never clears", () => {
     expect(shouldClearForRepl([], false)).toBe(false);
     expect(shouldClearForRepl(["--help"], true)).toBe(false);
     expect(shouldClearForRepl([], true)).toBe(true);
+  });
+});
+
+describe("400 diagnostics (no value, full scrubbed cause, no serv… cut)", () => {
+  test("key info exposes len/perms/uid, never the value", () => {
+    const { dir, env } = makeAuthDir({ "opencode-go": { key: "live-secret-123" } });
+    try {
+      const info = getOpencodeKeyInfo(env);
+      expect(info.exists).toBe(true);
+      expect(info.keyLen).toBe("live-secret-123".length);
+      expect(info.path).toBe(opencodeAuthPath(env));
+      expect(info.modeOct).toMatch(/^[0-7]+$/);
+      const src = formatKeySource(info);
+      expect(src).toContain("key_len=");
+      expect(src).toContain("perms=");
+      expect(src).toContain("uid_match=");
+      expect(src).toContain(info.path);
+      expect(src).not.toContain("live-secret-123");
+      expect(JSON.stringify(info)).not.toContain("live-secret-123");
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("missing/unreadable file → exists=false with path + reason", () => {
+    const { dir, env } = makeMissingEnv();
+    try {
+      const info = getOpencodeKeyInfo(env);
+      expect(info.exists).toBe(false);
+      expect(info.keyLen).toBe(0);
+      expect(info.path).toBe(opencodeAuthPath(env));
+      expect(info.reason).toBeTruthy();
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("400 carries endpoint/model/key_len/body-shape + scrubbed preview", async () => {
+    const { dir, env } = makeAuthDir({ "opencode-go": { key: "k123" } });
+    try {
+      resetLocalSessionForTests();
+      const badFetch = (async () =>
+        new Response(JSON.stringify({ error: { type: "service_unavailable", message: "bad model" } }), {
+          status: 400,
+        })) as unknown as typeof fetch;
+      const err = await chatLocal("hello", { env, fetchImpl: badFetch }).catch((e: unknown) =>
+        e instanceof Error ? e : new Error(String(e)),
+      );
+      expect(err.message).toContain("status=400");
+      expect(err.message).toContain("endpoint=");
+      expect(err.message).toContain(OPENCODE_CLOUD_URL);
+      expect(err.message).toContain(`model=${OPENCODE_CLOUD_MODEL}`);
+      expect(err.message).toContain("key_len=");
+      expect(err.message).toContain("key_source=");
+      expect(err.message).toContain("body-shape={model,messages:1}");
+      expect(err.message).toContain("cause=");
+      // Full cause present (no {"error":{"type":"serv… cut): wrap shows all.
+      expect(err.message).toContain("service_unavailable");
+      expect(err.message).not.toContain("k123");
+      expect(classify400Cause(err.message)).toBe("service");
+      resetLocalSessionForTests();
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("400 invalid-key vs service hints differ; Bearer scrubbed, capped", async () => {
+    expect(classify400Cause("Invalid API key provided")).toBe("invalid-key");
+    expect(classify400Cause("model does not exist")).toBe("service");
+    expect(classify400Cause("something odd")).toBe("generic");
+    const { dir, env } = makeAuthDir({ "opencode-go": { key: "k" } });
+    try {
+      resetLocalSessionForTests();
+      const secretBody = `Bearer super-secret-xyz ${"z".repeat(OPENCODE_CAUSE_MAX + 100)}`;
+      const leakFetch = (async () => new Response(secretBody, { status: 400 })) as unknown as typeof fetch;
+      const err = await chatLocal("hi", { env, fetchImpl: leakFetch }).catch((e: unknown) =>
+        e instanceof Error ? e : new Error(String(e)),
+      );
+      expect(err.message).toContain("Bearer [redacted]");
+      expect(err.message).not.toContain("super-secret-xyz");
+      expect(err.message.length).toBeLessThanOrEqual(OPENCODE_CAUSE_MAX + 600);
+      expect(OPENCODE_CAUSE_PREVIEW).toBe(500);
+      const boxed = errorBox(err.message, "hint line");
+      // errorBox wraps instead of …-cutting the cause.
+      expect(boxed).toContain("service");
+      expect(boxed).not.toMatch(/serv…/);
+      for (const line of boxed.split("\n")) {
+        expect([...line].length).toBeLessThanOrEqual(80);
+      }
+      resetLocalSessionForTests();
+    } finally {
+      cleanup(dir);
+    }
   });
 });

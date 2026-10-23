@@ -135,14 +135,16 @@ export function table(headers: TableRow, rows: TableRow[], width: number = BOX_W
   return [top, renderRow(headers), divider, ...rows.map(renderRow), bottom].join("\n");
 }
 
-/** Greeting banner (double-line outer frame per spec). */
+/** Greeting banner (single double-line frame: title + prompt + hints). */
 export function greeting(version: string): string {
   const inner = 38;
   const row = (content: string): string => "║" + padEndAscii(truncateAscii(content, inner), inner) + "║";
   return [
     "╔" + "═".repeat(inner) + "╗",
-    row(`  ◆ DEVBOX CLI  v${version}`),
+    row(`  ◆ DEVBOX CLI v${version}`),
     row("  prompt > _  [@file] [/agent]"),
+    row("  /help /exit  type /help, /exit"),
+    row("  refs: @path/to/file (.. denied)"),
     "╚" + "═".repeat(inner) + "╝",
   ].join("\n");
 }

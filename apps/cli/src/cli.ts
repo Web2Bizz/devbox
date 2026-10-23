@@ -4,16 +4,27 @@
 // other route (--help, non-TTY, CI) keeps the stdout fallback below.
 
 import { createInterface } from "node:readline";
+import { createRequire } from "node:module";
 import { box, errorBox, greeting, header, okBox, separator, statusLine, table } from "./ui/box.js";
 import { spinnerLine } from "./ui/spinner.js";
-import { shouldUseTui, startTuiRepl, type TuiSession } from "./ui/tui.js";
-import { clearScreen, helpText, parseLine, PROMPT_LABEL, startupHintLines } from "./prompt/repl.js";
+import {
+  formatAgentMessage,
+  formatAgentPlain,
+  formatUserMessage,
+  formatUserPlain,
+  terminalWidth,
+} from "./ui/chat.js";
+import { shouldUseTui, startTuiHome, startTuiRepl, type TuiSession } from "./ui/tui.js";
+import { clearScreen, helpText, parseLine, PROMPT_LABEL } from "./prompt/repl.js";
 import { getReposRoot, resolveRef } from "./refs/resolve.js";
+import { listProjects, resolveCustomDir, resolveProjectDir } from "./refs/projects.js";
+import { HOME_OPTIONS, parseHomeInput, renderHomeScreen } from "./ui/home.js";
 import { listAgents } from "./agents/allowlist.js";
 import { runAgent } from "./agents/runner.js";
 import { chatLocal } from "./agents/opencode.js";
 
-const VERSION = "0.1.0";
+const pkgRequire = createRequire(import.meta.url);
+const VERSION: string = (pkgRequire("../package.json") as { version: string }).version;
 
 function out(text: string): void {
   process.stdout.write(text + "\n");
@@ -22,12 +33,18 @@ function out(text: string): void {
 /** Output sink: stdout REPL writes directly, TUI REPL appends to history. */
 type LineSink = {
   emit: (text: string) => void;
+  /** User prompt echo (cyan fg, plain wrap, full terminal width, no boxes). */
+  user: (text: string) => void;
+  /** Agent reply (green fg, plain wrap, full terminal width, no boxes). */
+  agent: (text: string) => void;
   /** Animated in TUI; a static one-shot line on stdout. Returns a stop fn. */
   spin: (label: string) => () => void;
 };
 
 const stdoutSink: LineSink = {
   emit: out,
+  user: (text: string) => out(formatUserMessage(text, terminalWidth())),
+  agent: (text: string) => out(formatAgentMessage(text, terminalWidth())),
   spin: (label: string) => {
     out(spinnerLine(0, label));
     return () => {};
@@ -37,6 +54,9 @@ const stdoutSink: LineSink = {
 function tuiSink(session: TuiSession): LineSink {
   return {
     emit: (text: string) => session.print(text),
+    // TUI colors via TextRenderable fg (no ANSI in content); width from renderer.
+    user: (text: string) => session.printUser(formatUserPlain(text, session.width())),
+    agent: (text: string) => session.printAgent(formatAgentPlain(text, session.width())),
     spin: (label: string) => session.spin(label),
   };
 }
@@ -75,24 +95,19 @@ async function cmdAgentRun(sink: LineSink, name: string, prompt: string, apply: 
   try {
     const run = runAgent(name, prompt, apply);
     if (run.dryRun) {
-      sink.emit(header(`agent @${run.agent} (dry-run)`));
-      sink.emit(
-        box([
-          statusLine("run", run.message),
-          `prompt: ${run.prompt}`,
-          "hint: без --apply ответа нет — re-run with --apply (cloud: нужен ключ в auth.json).",
-        ]),
-      );
+      // Chat echo: user prompt cyan + dry-run notice green, plain full-width.
+      sink.user(run.prompt);
+      sink.agent(`dry-run @${run.agent}: ${run.message} — re-run with --apply (cloud: нужен ключ в auth.json).`);
       return;
     }
-    sink.emit(header(`agent @${run.agent} (--apply)`));
+    sink.user(run.prompt);
     const stop = sink.spin(`asking opencode @${run.agent} …`);
     try {
       const reply = await chatLocal(run.prompt);
       if (!reply.trim() || /^(answer|reply)$/i.test(reply.trim())) {
         throw new Error("[cli] opencode cloud returned an empty reply (shape mismatch).");
       }
-      sink.emit(box([statusLine("ok", `reply from @${run.agent}`), separator(76), ...reply.split("\n").slice(0, 30)]));
+      sink.agent(reply.split("\n").slice(0, 30).join("\n"));
     } catch (err) {
       sink.emit(errorBox(err instanceof Error ? err.message : String(err), "Вставь ключ через /connect в TUI (см. apps/cli/.env.example, OPENCODE_CLOUD_URL)."));
     } finally {
@@ -105,14 +120,14 @@ async function cmdAgentRun(sink: LineSink, name: string, prompt: string, apply: 
 
 async function handlePromptLine(sink: LineSink, text: string, refs: string[]): Promise<void> {
   if (refs.length === 0) {
+    sink.user(text);
     const stop = sink.spin("asking opencode …");
     try {
       const reply = await chatLocal(text);
       if (!reply.trim() || /^(answer|reply)$/i.test(reply.trim())) {
         throw new Error("[cli] opencode cloud returned an empty reply (shape mismatch).");
       }
-      sink.emit(header("opencode — reply"));
-      sink.emit(box([statusLine("ok", "reply"), separator(76), ...reply.split("\n").slice(0, 30)]));
+      sink.agent(reply.split("\n").slice(0, 30).join("\n"));
     } catch (err) {
       sink.emit(errorBox(err instanceof Error ? err.message : String(err), "Вставь ключ через /connect в TUI (см. apps/cli/.env.example, OPENCODE_CLOUD_URL)."));
     } finally {
@@ -139,14 +154,14 @@ async function handlePromptLine(sink: LineSink, text: string, refs: string[]): P
     }
   }
   const enriched = previews.length > 0 ? `${text}\n\n${previews.join("\n\n")}` : text;
+  sink.user(text);
   const stop = sink.spin("asking opencode …");
   try {
     const reply = await chatLocal(enriched);
     if (!reply.trim() || /^(answer|reply)$/i.test(reply.trim())) {
       throw new Error("[cli] opencode cloud returned an empty reply (shape mismatch).");
     }
-    sink.emit(header("opencode — reply"));
-    sink.emit(box([statusLine("ok", "reply"), separator(76), ...reply.split("\n").slice(0, 30)]));
+    sink.agent(reply.split("\n").slice(0, 30).join("\n"));
   } catch (err) {
     sink.emit(errorBox(err instanceof Error ? err.message : String(err), "Вставь ключ через /connect в TUI (см. apps/cli/.env.example, OPENCODE_CLOUD_URL)."));
   } finally {
@@ -185,13 +200,13 @@ async function dispatchLine(sink: LineSink, raw: string): Promise<boolean> {
   }
 }
 
-function startReadlineRepl(): void {
+function startReadlineRepl(sessionLabel?: string): void {
   // Clear first (TTY only — caller gates on isTTY; never --help/CI paths),
-  // then greeting + history on top, prompt stays the last line.
+  // then single greeting frame on top, prompt stays the last line.
   // Fail-fast REPOS_ROOT/serve errors surface after clear in ✗-boxes.
   clearScreen((s) => void process.stdout.write(s));
   out(greeting(VERSION));
-  out(box(startupHintLines()));
+  if (sessionLabel) out(header(sessionLabel));
   const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: PROMPT_LABEL });
   rl.prompt();
   rl.on("line", (raw: string) => {
@@ -211,10 +226,10 @@ function startReadlineRepl(): void {
   });
 }
 
-async function startTuiReplCli(): Promise<void> {
+async function startTuiReplCli(sessionLabel?: string): Promise<void> {
+  const greetingFrame = sessionLabel ? `${greeting(VERSION)}\n${header(sessionLabel)}` : greeting(VERSION);
   await startTuiRepl({
-    greeting: greeting(VERSION),
-    hints: box(startupHintLines()),
+    greeting: greetingFrame,
     clear: clearScreen,
     onLine: async (line: string, session: TuiSession) => ({ exit: await dispatchLine(tuiSink(session), line) }),
   });
@@ -222,20 +237,123 @@ async function startTuiReplCli(): Promise<void> {
   process.exit(0);
 }
 
-function startRepl(): void {
-  // Transparent OpenTUI layer on TTY; stdout fallback when the native
-  // bindings fail to load (CI-safe: the REPL still works line by line).
-  if (shouldUseTui(process.argv.slice(2), process.stdin.isTTY ?? false)) {
-    void (async () => {
-      try {
-        await startTuiReplCli();
-      } catch {
-        startReadlineRepl();
-      }
-    })();
-    return;
+/** RUSH CODE home: title + 3 centered options. Returns session dir or null (exit). */
+function homeWidth(): number {
+  const cols = typeof process.stdout?.columns === "number" ? process.stdout.columns : 80;
+  return Number.isFinite(cols) && (cols as number) > 0 ? (cols as number) : 80;
+}
+
+function questionLine(query: string): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question(query, (answer: string) => {
+      rl.close();
+      resolve(answer);
+    });
+  });
+}
+
+/** Stdout fallback home selector (DEVBOX_NO_TUI=1 / piped): digits 1-3. */
+async function selectHomeFallback(): Promise<number> {
+  out(renderHomeScreen(homeWidth(), 0));
+  for (;;) {
+    const answer = await questionLine("выбор [1-3] › ");
+    const parsed = parseHomeInput(answer);
+    if (parsed.kind === "select") return parsed.index;
+    if (parsed.kind === "move") {
+      // Line mode has no highlight: map arrows to a direct move hint.
+      out(box([`стрелки в line-режиме: введи 1-3 (${HOME_OPTIONS.join(" / ")}).`]));
+      continue;
+    }
+    out(errorBox(`[cli] выбери 1-3: 1 ${HOME_OPTIONS[0]}, 2 ${HOME_OPTIONS[1]}, 3 ${HOME_OPTIONS[2]}.`, "Введи цифру и Enter."));
   }
-  startReadlineRepl();
+}
+
+async function chooseProjectDir(): Promise<string | null> {
+  let projects: string[];
+  try {
+    projects = await listProjects();
+  } catch (err) {
+    out(errorBox(err instanceof Error ? err.message : String(err), "Положи каталог проекта внутрь REPOS_ROOT или проверь путь в .env."));
+    return null;
+  }
+  out(header("проекты — выбери из списка"));
+  out(box(projects.map((p, i) => `${i + 1}. ${p}`)));
+  const answer = await questionLine("проект [номер/имя] › ");
+  const trimmed = answer.trim();
+  const byNumber = /^\d+$/.test(trimmed) ? projects[Number(trimmed) - 1] : undefined;
+  const name = byNumber ?? trimmed;
+  if (!name) {
+    out(errorBox("[cli] пустой выбор — введи номер или имя из списка.", "Список выше: номер + Enter."));
+    return null;
+  }
+  try {
+    return await resolveProjectDir(name);
+  } catch (err) {
+    out(errorBox(err instanceof Error ? err.message : String(err), "Выбери имя из списка выше."));
+    return null;
+  }
+}
+
+async function chooseCustomDir(): Promise<string | null> {
+  const answer = await questionLine("директория [путь внутри REPOS_ROOT] › ");
+  if (!answer.trim()) {
+    out(errorBox("[cli] пустой путь — введи путь внутри REPOS_ROOT.", "Пример: my-app (\"..\" запрещён)."));
+    return null;
+  }
+  try {
+    return await resolveCustomDir(answer.trim());
+  } catch (err) {
+    out(errorBox(err instanceof Error ? err.message : String(err), "Путь остаётся внутри REPOS_ROOT; \"..\" запрещён."));
+    return null;
+  }
+}
+
+function sessionLabelFor(dir: string): string {
+  const short = dir.split("/").filter(Boolean).pop() ?? dir;
+  return `RUSH CODE — Сессия: ${short} (${dir})`;
+}
+
+function startRepl(): void {
+  // RUSH CODE home first (Главная): OpenTUI selector on TTY (art drawn
+  // once, arrows ↑↓ repaint only the option rows — no flicker),
+  // stdout fallback digits 1-3. Then Сессия (chat) for the chosen dir.
+  // Transparent OpenTUI layer on TTY chat; stdout fallback when the native
+  // bindings fail to load (CI-safe: the REPL still works line by line).
+  void (async () => {
+    const useTui = shouldUseTui(process.argv.slice(2), process.stdin.isTTY ?? false);
+    let homeIndex: number;
+    if (useTui) {
+      try {
+        homeIndex = await startTuiHome();
+      } catch {
+        homeIndex = await selectHomeFallback();
+      }
+    } else {
+      homeIndex = await selectHomeFallback();
+    }
+    if (homeIndex === 2) {
+      out(statusLine("ok", "bye ✓"));
+      process.exit(0);
+      return;
+    }
+    const dir = homeIndex === 0 ? await chooseProjectDir() : await chooseCustomDir();
+    if (!dir) {
+      // Fail-fast choice error already shown in an ✗-box; back to home.
+      startRepl();
+      return;
+    }
+    const label = sessionLabelFor(dir);
+    if (useTui) {
+      try {
+        await startTuiReplCli(label);
+      } catch {
+        startReadlineRepl(label);
+      }
+      return;
+    }
+    startReadlineRepl(label);
+  })();
 }
 
 // Note: non-REPL routes (help/version/agent/resolve/unknown) and the

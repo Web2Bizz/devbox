@@ -1,7 +1,9 @@
 # @devbox/cli — DevBox CLI (opencode style)
 
 Interactive REPL with `@file` refs (REPOS_ROOT jail) and `/agent` allowlist
-(dry-run by default). All output is ASCII boxes (width 80).
+(dry-run by default). System output is ASCII boxes (width 80); chat
+messages (user prompt + agent reply) are plain full-width text (no boxes,
+fg-only color, see § TUI).
 
 ## Run
 
@@ -28,11 +30,27 @@ animated spinner are OpenTUI renderables, the input stays pinned to the
 bottom (`space-between` column + sticky-bottom history + focused
 `InputRenderable`, submit on `ENTER`).
 
-Transparency: the root never paints its own color — no backdrop props
-anywhere in the render code, the terminal shows through. The pure-ASCII
-`box.ts` renderer (width 80) is untouched and stays the visible content
-inside OpenTUI text nodes; history is capped (`TUI_HISTORY_CAP`) so the
-input never scrolls off.
+Transparency: the root never paints its own color — no backdrop/bg props
+anywhere in the render code (fg-only), the terminal shows through. Chat
+history + every message line is `width: "100%"` (full terminal width:
+renderer → `stdout.columns` → `80`, never fixed 80). The pure-ASCII
+`box.ts` renderer stays for system content (greeting, help, ref previews,
+`errorBox`) inside OpenTUI text nodes; history is capped
+(`TUI_HISTORY_CAP`) so the input never scrolls off.
+
+Chat style (`src/ui/chat.ts`, single source of truth): user prompt is
+cyan (`USER_FG="cyan"`, stdout `ESC[36m`), agent reply is green
+(`AGENT_FG="green"`, stdout `ESC[32m`) — readable pair on a dark
+transparent background. Both reset with fg-only `ESC[39m` (no `ESC[0m`,
+no `40-47`/`100-107` bg codes anywhere). Messages are plain wrapped
+text at terminal width (`terminalWidth()` / `resolveTerminalWidth()`,
+word-wrap `wrapMessage()`), never `box()`/`header()`/`separator()`
+frames; TUI history gets the same plain lines with `fg` via
+`TextRenderable` (`session.printUser` / `session.printAgent`,
+`formatUserPlain` / `formatAgentPlain`). `Greeting` and `errorBox` boxes
+stay as-is. `hasBgCodes()` + `stripAnsi()` guard the contract in tests
+(`src/ui/__tests__/chat.test.ts`: user cyan / agent green, no bg codes,
+width = terminal, no box frames).
 
 Paste: `InputRenderable` handles bracketed paste natively; `tui.ts`
 normalizes it (`normalizePastedText`: strips `ESC[200~`/`ESC[201~`,
@@ -158,6 +176,32 @@ and must not be set back without re-verification.
 - REPL: `/help` `/exit` `/agent list` `/agent <name> <prompt> [--apply]`
   plus free text with `@refs` — free text goes to the cloud
   (reply box) or fails with a cloud-key ✗-box; serve is never required
+
+## Экраны
+
+Главная (RUSH CODE): заголовок `RUSH CODE` + 3 пункта по середине экрана —
+`1. Выбрать проект` / `2. Открыть директорию` / `3. Выйти` (см.
+`src/ui/home.ts`: `HOME_TITLE` + `HOME_OPTIONS`, `renderHomeScreen()` центрит
+горизонтально, отступ сверху центрит вертикально). Навигация TTY: стрелки
+`↑↓` + `Enter` (raw-mode селектор в `cli.ts`); фолбэк везде одинаковый —
+цифры `1-3` (`parseHomeInput()`, `DEVBOX_NO_TUI=1` / non-TTY / CI держат
+stdout-путь, прозрачность без bg не ломается).
+
+- `Выбрать проект` — список из сканирования `REPOS_ROOT`
+  (`src/refs/projects.ts`: `listProjects()`; только директории без точки,
+  сортировка; пустой корень — fail-fast `нет проектов`, не молчаливый `[]`).
+  Выбор номером/именем → `resolveProjectDir()` (jail как в `resolve.ts`).
+- `Открыть директорию` — ввод пути + `resolveCustomDir()` (jail `REPOS_ROOT`,
+  `..` denied, только директории).
+- `Выйти` — чистый выход (`bye ✓`, `exit 0`).
+
+Сессия (чат с агентом): после выбора проекта/директории — экран чата
+(`RUSH CODE — Сессия: <имя> (<путь>)` + переиспользуемый cloud-чат
+`chatLocal()` → `chatCloud()` из `src/agents/opencode.ts`: ключ строго
+`auth.json`, `OPENCODE_*` env для ключа не читаются, scrub `Bearer`/userinfo,
+`cause ≤2000`, fail-fast `missing opencode key in auth.json`). История
+full-width plain: user cyan (`USER_FG`), agent green (`AGENT_FG`) — см. § TUI,
+не ломать (тесты `chat.test.ts` + `tui.test.ts`).
 
 ## Layers
 

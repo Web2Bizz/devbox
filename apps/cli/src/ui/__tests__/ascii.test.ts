@@ -48,7 +48,12 @@ describe("ascii snapshot (width 80)", () => {
     expect(rendered).toContain("┌");
     expect(rendered).toContain("┘");
     const greet = greeting("0.1.0");
-    expect(greet).toContain("◆ DEVBOX CLI");
+    expect(greet).toContain("◆ DEVBOX CLI v0.1.0");
+    expect(greet).toContain("prompt >");
+    expect(greet).toContain("@file");
+    expect(greet).toContain("/agent");
+    expect(greet).toContain("/help");
+    expect(greet).toContain("/exit");
     expect(greet).toContain("╔");
     expect(greet).toContain("╚");
   });
@@ -123,19 +128,25 @@ describe("repl startup (clear first, prompt bottom)", () => {
     expect(cleared).toBe(false);
   });
 
-  test("startup order: clear first, then greeting + history, prompt last", () => {
-    // Mirrors cli.ts startRepl: clear → greeting → hint box → prompt.
+  test("startup order: clear first, then single greeting frame, prompt last", () => {
+    // Mirrors cli.ts startRepl: clear → single greeting frame → prompt.
     const writes: string[] = [];
     writes.push(CLEAR_SEQUENCE);
     writes.push(greeting("0.1.0"));
-    writes.push(box(startupHintLines(), 80));
     writes.push(PROMPT_LABEL);
     expect(writes[0]).toBe(CLEAR_SEQUENCE);
-    expect(writes[1]).toContain("◆ DEVBOX CLI");
-    expect(writes[2]).toContain("type /help for commands");
-    for (const line of (writes[2] as string).split("\n")) {
-      expect(widthOf(line)).toBe(80);
-    }
+    expect(writes[1]).toContain("◆ DEVBOX CLI v0.1.0");
+    expect(writes[1]).toContain("prompt >");
+    expect(writes[1]).toContain("@file");
+    expect(writes[1]).toContain("/agent");
+    expect(writes[1]).toContain("/help");
+    expect(writes[1]).toContain("/exit");
+    // Exactly one frame at startup: single ╔…╚, no second ┌…┘ hint box.
+    const startup = writes.join("\n");
+    expect(startup.split("╔").length - 1).toBe(1);
+    expect(startup.split("╚").length - 1).toBe(1);
+    expect(startup).not.toContain("┌");
+    expect(startup).not.toContain("┘");
     expect(writes[writes.length - 1]).toBe("prompt > ");
   });
 
@@ -151,11 +162,27 @@ describe("repl startup (clear first, prompt bottom)", () => {
     expect(shouldClearForRepl(["--help"], true)).toBe(false);
   });
 
-  test("startup hint box stays width-80 (prompt above, input below)", () => {
+  test("startup hint helper stays width-80 for /help (not rendered at start)", () => {
     const rendered = box(startupHintLines(), 80);
     for (const line of rendered.split("\n")) {
       expect(widthOf(line)).toBe(80);
     }
     expect(PROMPT_LABEL).toBe("prompt > ");
+  });
+});
+
+describe("chat messages (plain full-width, no boxes)", () => {
+  test("cli chat paths emit plain user/agent lines (greeting + errorBox stay boxed)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join, dirname } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const here = dirname(fileURLToPath(import.meta.url));
+    const cliSource = readFileSync(join(here, "..", "..", "cli.ts"), "utf8");
+    // Chat replies go through sink.user/sink.agent (plain, fg-only).
+    expect(cliSource).toContain("sink.user(");
+    expect(cliSource).toContain("sink.agent(");
+    // Greeting + errorBox boxes are kept.
+    expect(cliSource).toContain("greeting(");
+    expect(cliSource).toContain("errorBox(");
   });
 });

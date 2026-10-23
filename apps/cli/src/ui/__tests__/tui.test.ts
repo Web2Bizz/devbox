@@ -6,6 +6,8 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  homeArtLines,
+  homeOptionLine,
   normalizePastedText,
   shouldUseTui,
   TUI_HISTORY_CAP,
@@ -22,6 +24,22 @@ describe("tui transparency (terminal shows through)", () => {
     expect(TUI_SOURCE).not.toMatch(/\bfill\b/i);
     expect(TUI_SOURCE).not.toMatch(/\bRect\b/);
     expect(TUI_SOURCE).not.toMatch(/[{,\s]bg\s*:/);
+  });
+
+  test("chat history is full terminal width (100%, renderer → stdout.columns)", () => {
+    expect(TUI_SOURCE).toContain('width: "100%"');
+    expect(TUI_SOURCE).toContain("resolveTerminalWidth");
+    expect(TUI_SOURCE).toContain("session.width");
+    expect(TUI_SOURCE).not.toContain("BOX_WIDTH");
+  });
+
+  test("chat messages carry fg-only color (user cyan, agent green, no bg)", () => {
+    expect(TUI_SOURCE).toContain("USER_FG");
+    expect(TUI_SOURCE).toContain("AGENT_FG");
+    expect(TUI_SOURCE).toContain("printUser");
+    expect(TUI_SOURCE).toContain("printAgent");
+    expect(TUI_SOURCE).toContain("fg: USER_FG");
+    expect(TUI_SOURCE).toContain("fg: AGENT_FG");
   });
 
   test("content flows through OpenTUI text nodes (box.ts stays the content)", () => {
@@ -47,6 +65,11 @@ describe("tui transparency (terminal shows through)", () => {
 describe("tui startup order (clear first, prompt last)", () => {
   test("order is clear → greeting → history → prompt", () => {
     expect(tuiStartupOrder()).toEqual(["clear", "greeting", "history", "prompt"]);
+  });
+
+  test("startup prints a single greeting frame (no second hint box)", () => {
+    expect(TUI_SOURCE).toContain("session.print(options.greeting)");
+    expect(TUI_SOURCE).not.toContain("options.hints");
   });
 });
 
@@ -107,5 +130,79 @@ describe("tui paste (Ctrl+V / Shift+Ins / bracketed / multiline)", () => {
     expect(refocusHits).toBeGreaterThanOrEqual(3);
     expect(TUI_SOURCE).toContain("input.focus()");
     expect(TUI_SOURCE).toContain("input.value = \"\"");
+  });
+});
+
+describe("tui title (verbatim block-art, no space collapse)", () => {
+  test("title has a dedicated verbatim path (printTitle + titleTextOptions)", () => {
+    expect(TUI_SOURCE).toContain("printTitle");
+    expect(TUI_SOURCE).toContain("titleTextOptions");
+    expect(TUI_SOURCE).toContain("wrapMode");
+    expect(TUI_SOURCE).toContain("truncate");
+    // Title path never word-splits: chat wrap helper stays out of tui.ts.
+    expect(TUI_SOURCE).not.toContain("wrapMessage");
+    expect(TUI_SOURCE).not.toContain("printUserPlain");
+    expect(TUI_SOURCE).not.toContain("printAgentPlain");
+  });
+
+  test("verbatim opts are wrapMode none + truncate false (right-clip, no mid wrap)", () => {
+    const homeSource = readFileSync(join(import.meta.dir, "..", "home.ts"), "utf8");
+    expect(homeSource).toContain('wrapMode: "none"');
+    expect(homeSource).toContain("truncate: false");
+  });
+});
+
+describe("tui home (Главная без мигания: арт статичен, маркер инкрементален)", () => {
+  test("startTuiHome exported; art drawn once via the title path, options are separate nodes", () => {
+    expect(TUI_SOURCE).toContain("startTuiHome");
+    expect(TUI_SOURCE).toContain("HOME_TITLE_ART");
+    expect(TUI_SOURCE).toContain("titleTextOptions");
+    expect(TUI_SOURCE).toContain("artNodes");
+    expect(TUI_SOURCE).toContain("optionNodes");
+  });
+
+  test("arrows repaint only the option rows (marker › moves, art nodes untouched, no clear)", () => {
+    expect(TUI_SOURCE).toContain("moveHomeSelection");
+    expect(TUI_SOURCE).toContain("paintOptions");
+    expect(TUI_SOURCE).toContain("node.content = homeOptionLine");
+    // Home selector never clears the screen per keypress (old flicker path).
+    const homeFn = TUI_SOURCE.slice(TUI_SOURCE.indexOf("startTuiHome"));
+    expect(homeFn).not.toContain("clearScreen");
+    expect(homeFn).not.toContain("renderHomeScreen");
+    // Only option nodes are mutated; art nodes are created once and never reassigned.
+    expect(homeFn).not.toMatch(/artNodes\[[^\]]*\]\s*\.content\s*=/);
+    expect(homeFn).not.toContain("artNodes.forEach");
+  });
+
+  test("selector changes only the marker: same width, same labels, › moves", () => {
+    const a0 = homeOptionLine(0, 0, 80);
+    const a1 = homeOptionLine(0, 1, 80);
+    expect(a0).toContain("› 1. Выбрать проект");
+    expect(a1).not.toContain("›");
+    expect(a1).toContain("1. Выбрать проект");
+    expect(homeOptionLine(1, 1, 80)).toContain("› 2. Открыть директорию");
+    expect(homeOptionLine(2, 2, 80)).toContain("› 3. Выйти");
+    // Marker-only diff: stripping the marker prefix equalizes the rows.
+    const strip = (s: string): string => s.replace("›", " ").trim();
+    expect(strip(a0)).toBe(strip(a1));
+    expect(strip(homeOptionLine(1, 1, 80))).toBe(strip(homeOptionLine(1, 0, 80)));
+  });
+
+  test("art block is stable across selection (no reprint on arrows)", () => {
+    expect(homeArtLines(80)).toEqual(homeArtLines(80));
+    for (const line of homeArtLines(80)) {
+      expect(line).not.toContain("›");
+    }
+    // Options never leak into the art block.
+    const art = homeArtLines(80).join("\n");
+    expect(art).not.toContain("Выбрать проект");
+    expect(art).not.toContain("Открыть директорию");
+    expect(art).not.toContain("Выйти");
+  });
+
+  test("home keeps transparency (fg-only, no bg/backdrop)", () => {
+    const homeFn = TUI_SOURCE.slice(TUI_SOURCE.indexOf("startTuiHome"));
+    expect(homeFn).not.toMatch(/backgroundColor|setBackgroundColor/);
+    expect(homeFn).not.toMatch(/[{,\s]bg\s*:/);
   });
 });

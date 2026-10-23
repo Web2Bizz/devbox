@@ -365,7 +365,7 @@ export const DEFAULT_NPM_REGISTRY_RETRY_MAX_DELAY_MS = 2000;
 /**
  * Normalizes a GitHub App private key from env.
  * Accepts raw PEM (possibly with literal `\n` escapes or surrounding quotes
- * from compose/pm2 interpolation) or base64-encoded PEM. Never throws on
+ * from compose/shell interpolation) or base64-encoded PEM. Never throws on
  * content — validation of the key shape happens at JWT-sign time.
  */
 export function normalizeGithubPrivateKey(raw: string): string {
@@ -413,8 +413,7 @@ export function isNpmRegistryConfigured(env: AppEnv): boolean {
  *
  * Relative paths are probed against several bases because the backend cwd
  * depends on the launcher: `bun run dev` from the repo root uses the root,
- * while pm2 (`ecosystem.config.cjs`, `cwd: ./apps/backend`) uses
- * `apps/backend`. Probing order: absolute path as-is (when absolute),
+ * while nx (`cwd: {projectRoot}`) uses `apps/backend`. Probing order: absolute path as-is (when absolute),
  * then `process.cwd()`, then its parents up to the repo root and above
  * (covers both `./keys/x.pem` from root and from `apps/backend`), then
  * module-dir derived bases (`__dirname`-relative, covers compiled `dist/`

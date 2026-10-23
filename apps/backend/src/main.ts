@@ -1,8 +1,8 @@
 import * as dotenv from 'dotenv';
 import { expand } from 'dotenv-expand';
 
-// Expand ${VAR} / ${VAR:-default} from the root .env (single source).
-// Never overrides existing process.env (shell/pm2 wins); never logs secrets.
+// Expand ${VAR} / ${VAR:-default} from the local .env (single source).
+// Never overrides existing process.env (shell/nx with-env wins); never logs secrets.
 const dotenvResult = dotenv.config();
 expand(dotenvResult);
 
@@ -92,8 +92,8 @@ async function bootstrap(): Promise<void> {
     // Single-line boot failure: AppLogger.fatal() sanitizes (URL credentials
     // masked, live secrets scrubbed) like every other log; stack is dropped
     // (message only, truncated) so [env]-errors don't double-spam via
-    // process.on('unhandledRejection'). exit(1) lets pm2 restart cleanly
-    // instead of hanging with no open port.
+    // process.on('unhandledRejection'). exit(1) lets the supervisor (nx/compose
+    // restart policy) restart cleanly instead of hanging with no open port.
     const text = err instanceof Error ? err.message : String(err);
     logger.fatal(String(text).slice(0, 500));
     process.exit(1);

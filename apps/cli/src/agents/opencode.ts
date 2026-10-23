@@ -44,6 +44,168 @@ export const OPENCODE_CHAT_PATH = "/inference/systemone/v1/systemone";
 /** Default model for the v2 systemone contract (free, same key as /connect). */
 export const OPENCODE_DEFAULT_MODEL = "jev-1.13-free";
 
+/**
+ * Local `opencode serve` base URL — free text with the paid Go subscription
+ * goes ONLY through the local serve. Auth: optional
+ * `Authorization: Bearer <OPENCODE_TOKEN>` (serve password from the serve
+ * log, same as backend OPENCODE_TOKEN env; '' = unauthenticated serve
+ * without a password — header omitted). Serve still reads the Go key itself
+ * from ~/.local/share/opencode/auth.json (written by /connect). Env
+ * override: OPENCODE_URL || OPENCODE_SERVER_URL (dial 0.0.0.0 → 127.0.0.1
+ * fallback is handled by the caller via URL). Cloud systemone (chatOpencode)
+ * stays ONLY for choice classification.
+ */
+export const OPENCODE_LOCAL_URL = "http://127.0.0.1:4096";
+
+/** Resolve local serve base (explicit env override only, never silent). */
+export function resolveLocalBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
+  const custom =
+    (env.OPENCODE_URL ?? "").trim() || (env.OPENCODE_SERVER_URL ?? "").trim();
+  if (custom) return custom.replace(/\/+$/, "");
+  return OPENCODE_LOCAL_URL;
+}
+
+/** In-memory local session id (per process, created lazily via POST /session). */
+let localSessionId = "";
+
+/** Reset cached local session id (tests only). */
+export function resetLocalSessionForTests(): void {
+  localSessionId = "";
+}
+
+export type ChatLocalOptions = {
+  timeoutMs?: number;
+  fetchImpl?: typeof fetch;
+  env?: NodeJS.ProcessEnv;
+};
+
+function extractLocalPartsText(payload: unknown): string {
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) return "";
+  const record = payload as Record<string, unknown>;
+  const parts = record["parts"];
+  if (!Array.isArray(parts)) return "";
+  const chunks: string[] = [];
+  for (const entry of parts) {
+    if (entry !== null && typeof entry === "object" && !Array.isArray(entry)) {
+      const text = (entry as Record<string, unknown>)["text"];
+      if (typeof text === "string" && text.trim()) chunks.push(text.trim());
+    }
+  }
+  if (chunks.length === 0) return "";
+  return scrubOpencodeText(chunks.join("\n")).slice(0, OPENCODE_CAUSE_MAX);
+}
+
+/**
+ * Free-text chat with the paid OpenCode Go subscription via local serve
+ * (POST /session {title} → {id}, then POST /session/{id}/message
+ * {parts:[{type:"text",text}]} → {parts:[...]}). Session id is cached in
+ * process memory. Auth: optional `Authorization: Bearer <OPENCODE_TOKEN>`
+ * (serve password from `opencode serve` log, '' = serve without password —
+ * header omitted, as before). The token value is never logged (only its
+ * presence could be traced as auth=yes|no). Throws scrubbed errors
+ * (cause ≤2000 chars); serve down → hint `opencode serve --port 4096`.
+ * No console.*.
+ */
+export async function chatLocal(prompt: string, opts: ChatLocalOptions = {}): Promise<string> {
+  const clean = prompt.trim();
+  if (!clean) {
+    throw new Error("[cli] /agent needs a prompt — usage: /agent <name> <prompt>.");
+  }
+  const env = opts.env ?? process.env;
+  const base = resolveLocalBaseUrl(env);
+  const timeoutMs = opts.timeoutMs ?? OPENCODE_TIMEOUT_MS;
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  // Serve password (printed by `opencode serve` on boot, same as backend
+  // OPENCODE_TOKEN env): '' = serve without password → no header (as before).
+  // Value is never logged — only its presence (auth=yes|no) may be traced.
+  const serveToken = (env.OPENCODE_TOKEN ?? "").trim();
+
+  const postJson = async (url: string, body: string): Promise<Response> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetchImpl(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(serveToken ? { Authorization: `Bearer ${serveToken}` } : {}),
+        },
+        body,
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(timer);
+      const message = err instanceof Error ? err.message : String(err);
+      const aborted =
+        (err instanceof Error && err.name === "AbortError") || /aborted|timeout/i.test(message);
+      if (aborted) {
+        throw new Error(`[cli] opencode serve timed out after ${timeoutMs}ms cause=${scrubCause(message)}`);
+      }
+      throw new Error(
+        `[cli] opencode serve unreachable at ${base} cause=${scrubCause(message)} (hint: opencode serve --port 4096)`,
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  if (!localSessionId) {
+    const res = await postJson(
+      `${base}/session`,
+      JSON.stringify({ title: clean.slice(0, 80) }),
+    );
+    if (res.status === 503 || !res.ok) {
+      const rawBody = scrubCause(await readBodyText(res));
+      throw new Error(
+        `[cli] opencode serve unreachable at ${base} status=${res.status} cause=${rawBody || "no body"} (hint: opencode serve --port 4096)`,
+      );
+    }
+    const rawText = await readBodyText(res);
+    let payload: unknown = rawText;
+    try {
+      payload = rawText ? (JSON.parse(rawText) as unknown) : "";
+    } catch {
+      payload = rawText;
+    }
+    const id =
+      payload !== null && typeof payload === "object" && !Array.isArray(payload)
+        ? (payload as Record<string, unknown>)["id"]
+        : null;
+    if (typeof id !== "string" || !id.trim()) {
+      throw new Error("[cli] opencode serve returned a session without id (shape mismatch).");
+    }
+    localSessionId = id.trim();
+  }
+
+  const res = await postJson(
+    `${base}/session/${encodeURIComponent(localSessionId)}/message`,
+    JSON.stringify({ parts: [{ type: "text", text: clean }] }),
+  );
+  if (res.status === 404) {
+    // Stale cached session (serve restarted) — recreate once and retry.
+    localSessionId = "";
+    return chatLocal(clean, opts);
+  }
+  if (res.status === 503 || !res.ok) {
+    const rawBody = scrubCause(await readBodyText(res));
+    throw new Error(
+      `[cli] opencode serve request failed status=${res.status} cause=${rawBody || "no body"} (hint: opencode serve --port 4096)`,
+    );
+  }
+  const rawText = await readBodyText(res);
+  let payload: unknown = rawText;
+  try {
+    payload = rawText ? (JSON.parse(rawText) as unknown) : "";
+  } catch {
+    payload = rawText;
+  }
+  const reply = extractLocalPartsText(payload).trim() || scrubOpencodeText(rawText).slice(0, OPENCODE_CAUSE_MAX).trim();
+  if (!reply) {
+    throw new Error("[cli] opencode serve returned an empty reply (shape mismatch).");
+  }
+  return scrubOpencodeText(reply);
+}
+
 export const MISSING_KEY_MESSAGE =
   "[cli] missing OPENCODE_API_KEY → задай env или auth.json " +
   "(export OPENCODE_API_KEY=<ключ из консоли> либо /connect в TUI, см. apps/cli/.env.example).";
@@ -121,28 +283,100 @@ async function readBodyText(res: Response): Promise<string> {
 }
 
 function extractReplyText(payload: unknown, fallbackText: string): string {
-  if (typeof payload === "string") return payload;
+  const pick = (value: unknown): string | null => {
+    if (typeof value === "string" && value.trim())
+      return scrubOpencodeText(value).slice(0, OPENCODE_CAUSE_MAX);
+    return null;
+  };
+  if (typeof payload === "string" && payload.trim())
+    return scrubOpencodeText(payload).slice(0, OPENCODE_CAUSE_MAX);
+  if (Array.isArray(payload)) {
+    const parts = payload
+      .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      .map((item) => item.trim());
+    if (parts.length > 0)
+      return scrubOpencodeText(parts.join("\n")).slice(0, OPENCODE_CAUSE_MAX);
+  }
   if (payload !== null && typeof payload === "object") {
     const record = payload as Record<string, unknown>;
     // v2 systemone shape: {answers: {<name>: {choice, confidence, ...}}} —
-    // return the first non-empty choice (see classify_build.ts).
+    // priority: answers.reply.choice → answers.*.choice → answers.* (string).
+    // Never return the key name (reply/answer) — only the .choice/string value.
     const answers = record["answers"];
-    if (answers !== null && typeof answers === "object") {
+    if (typeof answers === "string") {
+      const hit = pick(answers);
+      if (hit) return hit;
+    }
+    if (answers !== null && typeof answers === "object" && !Array.isArray(answers)) {
       const entries = answers as Record<string, unknown>;
+      const replyEntry = entries["reply"];
+      if (replyEntry !== null && typeof replyEntry === "object" && !Array.isArray(replyEntry)) {
+        const hit = pick((replyEntry as Record<string, unknown>)["choice"]);
+        if (hit) return hit;
+      }
       for (const key of Object.keys(entries)) {
+        if (key === "reply") continue;
         const entry = entries[key];
-        if (entry !== null && typeof entry === "object") {
-          const choice = (entry as Record<string, unknown>)["choice"];
-          if (typeof choice === "string" && choice.trim()) return choice;
+        if (entry !== null && typeof entry === "object" && !Array.isArray(entry)) {
+          const hit = pick((entry as Record<string, unknown>)["choice"]);
+          if (hit) return hit;
+        }
+      }
+      for (const key of Object.keys(entries)) {
+        const hit = pick(entries[key]);
+        if (hit) return hit;
+      }
+      if (replyEntry !== null && typeof replyEntry === "object" && !Array.isArray(replyEntry)) {
+        const nested = replyEntry as Record<string, unknown>;
+        for (const key of ["text", "message", "content"]) {
+          const hit = pick(nested[key]);
+          if (hit) return hit;
         }
       }
     }
     for (const key of ["text", "message", "content", "reply"]) {
-      const value = record[key];
-      if (typeof value === "string" && value.trim()) return value;
+      const hit = pick(record[key]);
+      if (hit) return hit;
     }
+    // OpenAI-style shapes: content[] / choices[] / delta → join text parts.
+    // (noul is usually a number — only a string noul carries text.)
+    const chunks: string[] = [];
+    const pushText = (value: unknown): void => {
+      if (typeof value === "string" && value.trim()) chunks.push(value.trim());
+    };
+    const pushEntry = (entry: unknown): void => {
+      if (typeof entry === "string") {
+        pushText(entry);
+        return;
+      }
+      if (entry !== null && typeof entry === "object" && !Array.isArray(entry)) {
+        const item = entry as Record<string, unknown>;
+        if (typeof item["text"] === "string") pushText(item["text"]);
+        else if (typeof item["content"] === "string") pushText(item["content"]);
+        else if (item["message"] !== null && typeof item["message"] === "object") {
+          const message = item["message"] as Record<string, unknown>;
+          if (typeof message["content"] === "string") pushText(message["content"]);
+          else if (typeof message["text"] === "string") pushText(message["text"]);
+        }
+        if (item["delta"] !== null && typeof item["delta"] === "object" && !Array.isArray(item["delta"])) {
+          const delta = item["delta"] as Record<string, unknown>;
+          if (typeof delta["content"] === "string") pushText(delta["content"]);
+          else if (typeof delta["text"] === "string") pushText(delta["text"]);
+        }
+      }
+    };
+    if (typeof record["noul"] === "string") pushText(record["noul"]);
+    if (Array.isArray(record["content"])) record["content"].forEach(pushEntry);
+    if (Array.isArray(record["choices"])) record["choices"].forEach(pushEntry);
+    if (record["delta"] !== null && typeof record["delta"] === "object" && !Array.isArray(record["delta"])) {
+      const delta = record["delta"] as Record<string, unknown>;
+      if (typeof delta["content"] === "string") pushText(delta["content"]);
+      else if (typeof delta["text"] === "string") pushText(delta["text"]);
+    }
+    if (chunks.length > 0)
+      return scrubOpencodeText(chunks.join("\n")).slice(0, OPENCODE_CAUSE_MAX);
   }
-  return fallbackText;
+  return scrubOpencodeText(fallbackText).slice(0, OPENCODE_CAUSE_MAX);
 }
 
 /**

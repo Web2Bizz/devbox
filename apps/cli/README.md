@@ -164,6 +164,27 @@ and must not be set back without re-verification.
   `OPENCODE_SDK_VERSION` 1.18.33); `404` on message → session recreated
   once.
 
+## Chat
+
+Free-text answers with the paid OpenCode Go subscription go ONLY through
+the local serve (`opencode serve --port 4096`): the CLI creates a session
+once per process (`POST /session {title} → {id}`, id cached in memory) and
+sends prompts via `POST /session/{id}/message {parts:[{type:"text",text}]}`
+(`chatLocal` in `src/agents/opencode.ts`, base `OPENCODE_LOCAL_URL`
+`http://127.0.0.1:4096`, override `OPENCODE_URL`/`OPENCODE_SERVER_URL`).
+The Go key itself is read by serve from
+`~/.local/share/opencode/auth.json` (written by `/connect`), but new serve
+versions print a password on boot and require it as
+`Authorization: Bearer <OPENCODE_TOKEN>` (otherwise `401`). Pass it via
+`export OPENCODE_TOKEN=<пароль из лога opencode serve>` (or inline
+`OPENCODE_TOKEN=... bun src/cli.ts`); the password itself is shown by
+`pm2 logs opencode` / the `opencode serve` output. Empty = serve without
+a password → header omitted (as before); the value is never logged.
+Serve down → `✗`-box with the `opencode serve --port 4096` hint (503),
+reply never empty.
+Cloud systemone (`chatOpencode`, `{model:"jev-1.13-free", state, questions}` +
+Bearer) stays ONLY for `choice` classification, never for user replies.
+
 ## Commands
 
 - `cli --help` / `cli --version`

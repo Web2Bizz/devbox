@@ -3,7 +3,7 @@
   "configVersion": 0,
   "workspaces": {
     "": {
-      "name": "devbox-backend",
+      "name": "rush-code",
       "devDependencies": {
         "@biomejs/biome": "^2.5.15",
         "@web2bizz/scaffold": "^0.1.7",
@@ -14,7 +14,7 @@
       "name": "backend",
       "version": "0.1.0",
       "dependencies": {
-        "@devbox/contracts": "workspace:*",
+        "@rush-code/contracts": "workspace:*",
         "@nestjs/common": "^12.1.0",
         "@nestjs/config": "^12.0.1",
         "@nestjs/core": "^12.1.0",
@@ -43,7 +43,7 @@
       },
     },
     "apps/cli": {
-      "name": "@devbox/cli",
+      "name": "@rush-code/cli",
       "version": "0.1.0",
       "dependencies": {
         "@opentui/core": "0.6.8",
@@ -61,7 +61,7 @@
       "name": "frontend",
       "version": "0.1.0",
       "dependencies": {
-        "@devbox/contracts": "workspace:*",
+        "@rush-code/contracts": "workspace:*",
         "@hookform/resolvers": "5.9.1",
         "@opencode-ai/sdk": "1.18.33",
         "@tanstack/react-query": "^5.104.1",
@@ -88,7 +88,7 @@
       },
     },
     "packages/contracts": {
-      "name": "@devbox/contracts",
+      "name": "@rush-code/contracts",
       "version": "0.1.0",
       "dependencies": {
         "zod": "^4.6.5",
@@ -145,9 +145,9 @@
 
     "@date-fns/tz": ["@date-fns/tz@1.5.0", "", {}, "sha512-lwYN/vDPeNRULcepoE/LO2Pgx+7/RV+S9ARfbc9lr2DtGkOD7pAiruHvbR1RX3Qyf6ja47EWJDMsNK5vK08DJg=="],
 
-    "@devbox/cli": ["@devbox/cli@workspace:apps/cli"],
+    "@rush-code/cli": ["@rush-code/cli@workspace:apps/cli"],
 
-    "@devbox/contracts": ["@devbox/contracts@workspace:packages/contracts"],
+    "@rush-code/contracts": ["@rush-code/contracts@workspace:packages/contracts"],
 
     "@drizzle-team/brocli": ["@drizzle-team/brocli@0.10.2", "", {}, "sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w=="],
 

@@ -105,7 +105,7 @@ Repo facts today:
   `TODO REAL-API: api.login`, `useProfile` (mock timer + `MOCK_PROFILE`)
   with `TODO REAL-API: GET/PUT /api/v1/profile`; `api/client.ts` is
   `fetch ${BASE_URL}/api/v1/*` with `x-correlation-id`, no auth header yet;
-  only cookie in the codebase is `devbox-locale` (`SameSite=Lax`).
+  only cookie in the codebase is `rush-code-locale` (`SameSite=Lax`).
 - No `POST /api/survey` exists in `contracts/openapi.yaml` (searched
   `survey|Survey` — zero hits), so there is no frozen survey contract to
   preserve; new auth endpoints must still go through `contracts/openapi.yaml`

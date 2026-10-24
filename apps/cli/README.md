@@ -170,7 +170,7 @@ Free-text answers with the paid OpenCode Go subscription go ONLY through
 the local serve (`opencode serve --port 4096`): the CLI creates a session
 once per process (`POST /session {title} → {id}`, id cached in memory) and
 sends prompts via `POST /session/{id}/message {parts:[{type:"text",text}]}`
-(`chatLocal` in `src/agents/opencode.ts`, base `OPENCODE_LOCAL_URL`
+(`chatLocal` in `src/agents/opencode/index.ts`, base `OPENCODE_LOCAL_URL`
 `http://127.0.0.1:4096`, override `OPENCODE_URL`/`OPENCODE_SERVER_URL`).
 The Go key itself is read by serve from
 `~/.local/share/opencode/auth.json` (written by `/connect`), but new serve

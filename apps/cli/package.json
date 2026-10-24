@@ -1,8 +1,8 @@
 {
-  "name": "@devbox/cli",
+  "name": "@rush-code/cli",
   "version": "0.1.0",
   "private": true,
-  "description": "DevBox CLI in opencode style — interactive REPL with @file refs and /agent allowlist (dry-run by default)",
+  "description": "Rush Code CLI in opencode style — interactive REPL with @file refs and /agent allowlist (dry-run by default)",
   "type": "module",
   "scripts": {
     "cli": "bun src/cli.ts",

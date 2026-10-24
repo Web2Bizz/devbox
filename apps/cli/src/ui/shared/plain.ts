@@ -73,7 +73,7 @@ export function tableText(headers: TableRow, rows: TableRow[], width = 80): stri
 /** Greeting lines (no frame). */
 export function greetingLines(version: string): string[] {
   return [
-    `  ◆ DEVBOX CLI v${version}`,
+    `  ◆ RUSH CODE CLI v${version}`,
     "  prompt > _  [@file] [/agent]",
     "  /help /exit  type /help, /exit",
     "  refs: @path/to/file (.. denied)",

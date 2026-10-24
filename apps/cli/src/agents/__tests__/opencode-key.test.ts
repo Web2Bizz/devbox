@@ -42,7 +42,7 @@ import {
 import { errorText, greetingLines } from "../../ui/shared/plain.js";
 
 function makeAuthDir(payload: unknown): { dir: string; env: NodeJS.ProcessEnv } {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "devbox-cli-auth-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rush-code-cli-auth-"));
   fs.mkdirSync(path.join(dir, "opencode"), { recursive: true });
   const body = typeof payload === "string" ? payload : JSON.stringify(payload);
   fs.writeFileSync(path.join(dir, "opencode", "auth.json"), body);
@@ -50,7 +50,7 @@ function makeAuthDir(payload: unknown): { dir: string; env: NodeJS.ProcessEnv } 
 }
 
 function makeMissingEnv(): { dir: string; env: NodeJS.ProcessEnv } {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "devbox-cli-no-key-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rush-code-cli-no-key-"));
   // No auth.json inside → ENOENT path.
   return { dir, env: { XDG_DATA_HOME: dir } as NodeJS.ProcessEnv };
 }
@@ -447,7 +447,7 @@ describe("repl startup keeps fail-fast errors after clear", () => {
     write(greetingLines("0.1.0").join("\n"));
     write(PROMPT_LABEL);
     expect([...(writes[0] as string)].map((c) => c.charCodeAt(0))).toEqual([27, 99]);
-    expect(writes[1]).toContain("◆ DEVBOX CLI v0.1.0");
+    expect(writes[1]).toContain("◆ RUSH CODE CLI v0.1.0");
     expect(writes[1]).toContain("prompt >");
     expect(writes[1]).toContain("@file");
     expect(writes[1]).toContain("/agent");

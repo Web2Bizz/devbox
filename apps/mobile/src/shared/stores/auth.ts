@@ -86,7 +86,7 @@ export const useAuth = create<AuthState>((set, get) => ({
 
     try {
       const result = await LocalAuthentication.authenticateAsync({
-        promptMessage: "Authenticate to access DevBox",
+        promptMessage: "Authenticate to access Rush Code",
         fallbackLabel: "Use passcode",
         disableDeviceFallback: false,
       })

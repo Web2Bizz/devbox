@@ -26,7 +26,7 @@ export function isModelAvailable(
  * Chooses a model selection for the session.
  *
  * Returns `null` when there is no prior user-explicit choice. A null model
- * means the server's configured default (devbox.json `"model"` field) will
+ * means the server's configured default (rush-code.json `"model"` field) will
  * be used — which is the correct behavior for first-launch and CI where the
  * provider registry's "default" model may not be deployed on the user's
  * resource.

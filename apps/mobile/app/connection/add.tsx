@@ -370,7 +370,7 @@ export default function AddConnectionScreen() {
           </Text>
         </View>
 
-        {/* DevBox Connect — Coming Soon */}
+        {/* Rush Code Connect — Coming Soon */}
         <View style={[styles.connectCard, isDark && styles.connectCardDark]}>
           <View style={styles.connectCardHeader}>
             <Ionicons name="cloud-done-outline" size={28} color={colors.accent} />

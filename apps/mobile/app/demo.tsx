@@ -12,7 +12,7 @@ import { colors } from "@web2bizz/ui-native"
 type DemoPermissionReply = "once" | "always" | "reject"
 
 // Fully offline, scripted walkthrough for installers with no self-hosted
-// devbox server. ISOLATION: every message/part below is hardcoded local
+// rush-code server. ISOLATION: every message/part below is hardcoded local
 // data built once with useMemo — this screen never calls useSessions,
 // useConnections, useEvents, or any sdk.ts client method, so it cannot
 // create a real session, touch the network, or corrupt real app state. The

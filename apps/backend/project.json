@@ -18,7 +18,8 @@
       "options": {
         "command": "tsc --noEmit -p tsconfig.json && biome lint .",
         "cwd": "{projectRoot}"
-      }
+      },
+      "dependsOn": ["^build"]
     },
     "test": {
       "executor": "nx:run-commands",

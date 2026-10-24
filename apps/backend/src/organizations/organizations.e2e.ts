@@ -56,7 +56,7 @@ async function main(): Promise<void> {
   // suite never touches the developer's real jail. Set before app boot
   // (WorkspacePathService reads process.env per call; env validation runs
   // at NestFactory.create).
-  const reposRoot = await mkdtemp(path.join(tmpdir(), "devbox-orgs-e2e-"));
+  const reposRoot = await mkdtemp(path.join(tmpdir(), "rush-code-orgs-e2e-"));
   process.env.REPOS_ROOT = reposRoot;
   console.log(`[organizations e2e] REPOS_ROOT: ${reposRoot}`);
 
@@ -116,7 +116,7 @@ async function main(): Promise<void> {
       const probe = tokens.sign(
         {
           sub: "123e4567-e89b-12d3-a456-426614174001",
-          email: "probe@devbox.local",
+          email: "probe@rush-code.local",
           typ: "access",
         },
         process.env.JWT_ACCESS_SECRET as string,
@@ -214,7 +214,7 @@ async function main(): Promise<void> {
           json({
             firstName: "E2e",
             lastName: tag,
-            email: `orgs-e2e-${tag}@devbox.local`,
+            email: `orgs-e2e-${tag}@rush-code.local`,
             password: "s3cret-p4ss",
           }),
         );
@@ -392,7 +392,7 @@ async function main(): Promise<void> {
 
       await check("email-invite binds one address (mismatch 404, match 200)", async () => {
         const d = await register("emailinvitee");
-        const dEmail = `orgs-e2e-emailinvitee@devbox.local`;
+        const dEmail = `orgs-e2e-emailinvitee@rush-code.local`;
         const minted = await fetch(
           `${base}/api/v1/organizations/${orgId}/invites`,
           json({ role: "user", email: dEmail }, "POST", a.token),
@@ -557,7 +557,7 @@ async function main(): Promise<void> {
     // Best-effort cleanup of the isolated tmp jail (never masks results).
     try {
       const root = process.env.REPOS_ROOT ?? "";
-      if (root.includes("devbox-orgs-e2e-")) {
+      if (root.includes("rush-code-orgs-e2e-")) {
         await rm(root, { recursive: true, force: true });
       }
     } catch {

@@ -11,7 +11,7 @@ export class AuthUserDto {
   @ApiProperty({ example: 'Lovelace' })
   lastName!: string;
 
-  @ApiProperty({ example: 'ada@devbox.local' })
+  @ApiProperty({ example: 'ada@rush-code.local' })
   email!: string;
 
   @ApiProperty({ example: 'local', enum: ['local', 'sso-oauth', 'github-app'] })
@@ -49,7 +49,7 @@ export class RegisterBodyDto {
   @ApiProperty({ example: 'Lovelace' })
   lastName!: string;
 
-  @ApiProperty({ example: 'ada@devbox.local' })
+  @ApiProperty({ example: 'ada@rush-code.local' })
   email!: string;
 
   @ApiProperty({ example: 's3cret-p4ss', minLength: 8 })
@@ -57,7 +57,7 @@ export class RegisterBodyDto {
 }
 
 export class LoginBodyDto {
-  @ApiProperty({ example: 'ada@devbox.local' })
+  @ApiProperty({ example: 'ada@rush-code.local' })
   email!: string;
 
   @ApiProperty({ example: 's3cret-p4ss', minLength: 8 })

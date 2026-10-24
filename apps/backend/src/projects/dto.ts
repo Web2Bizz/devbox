@@ -14,13 +14,13 @@ export {
   type CreateProjectInput,
   type GithubLinkInput,
   type UpdateProjectInput,
-} from '@devbox/contracts';
+} from '@rush-code/contracts';
 
 export class CreateProjectDto {
   @ApiProperty({ example: 'my-app' })
   name!: string;
 
-  @ApiProperty({ required: false, example: 'Devbox backend service' })
+  @ApiProperty({ required: false, example: 'Rush Code backend service' })
   description?: string;
 
   @ApiProperty({ required: false, example: 'acme' })

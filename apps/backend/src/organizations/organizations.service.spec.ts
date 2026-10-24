@@ -126,7 +126,7 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
   {
     name: 'accept with a valid v7 but unknown token → 404 (no TTL, no 410)',
     run: async () => {
-      const svc = makeService(mockDb([]), stubUsers({ id: SPEC_USER, email: 'a@devbox.local' }));
+      const svc = makeService(mockDb([]), stubUsers({ id: SPEC_USER, email: 'a@rush-code.local' }));
       const token = randomUuidV7();
       await assert.rejects(
         () => svc.acceptInvite({ token }, SPEC_USER),
@@ -146,13 +146,13 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
       const stored = {
         token,
         orgId: '123e4567-e89b-12d3-a456-426614174005',
-        email: 'owner@devbox.local',
+        email: 'owner@rush-code.local',
         role: 'user',
         createdAt: new Date(),
       };
       const svc = makeService(
         mockDb([stored]),
-        stubUsers({ id: SPEC_USER, email: 'other@devbox.local' }),
+        stubUsers({ id: SPEC_USER, email: 'other@rush-code.local' }),
       );
       await assert.rejects(
         () => svc.acceptInvite({ token }, SPEC_USER),

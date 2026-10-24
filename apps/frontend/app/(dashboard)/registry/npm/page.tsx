@@ -83,7 +83,7 @@ export default function NpmPage() {
                 <div className="min-w-0">
                   <h2 className="text-base font-medium">{p.name}</h2>
                   {p.url && (
-                    <p className="text-muted-foreground mono break-all text-sm">{p.url}</p>
+                    <p className="text-muted-foreground font-mono text-[0.85em] break-all text-sm">{p.url}</p>
                   )}
                   {p.scope && (
                     <p className="text-muted-foreground text-sm">

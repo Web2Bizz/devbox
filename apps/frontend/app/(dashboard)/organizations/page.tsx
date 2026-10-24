@@ -87,7 +87,7 @@ export default function OrganizationsPage() {
       {isEmpty && <EmptyState title={t.orgs.emptyTitle} description={t.orgs.emptyDesc} />}
 
       {!loading && !error && !isEmpty && (
-        <div className="status-grid">
+        <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(18rem,1fr))] items-stretch mb-6">
           {organizations.map((o) => (
             <Link
               key={o.id}

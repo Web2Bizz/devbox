@@ -55,7 +55,7 @@ function RunningSessionRow({
           <p className="truncate text-sm font-medium">
             {s.title || s.id.slice(0, 8)}
           </p>
-          <code className="mono text-muted-foreground text-xs">{s.id}</code>
+          <code className="font-mono text-[0.85em] break-all text-muted-foreground text-xs">{s.id}</code>
         </div>
         <Badge color="success" variant="soft">
           {t.opencode.live}
@@ -152,7 +152,7 @@ export function RunningSessionsTab({
   return (
     <div className="grid gap-4">
       <div className="grid gap-3">
-        <code className="mono text-muted-foreground text-xs">projectId: {projectId}</code>
+        <code className="font-mono text-[0.85em] break-all text-muted-foreground text-xs">projectId: {projectId}</code>
         <div className="flex flex-wrap items-center gap-2">
           <Badge color={streamColor(status)} variant="soft">
             {statusLabel}

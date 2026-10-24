@@ -88,7 +88,7 @@ export default function AiProvidersPage() {
       )}
 
       {!loading && !error && !isEmpty && (
-        <div className="status-grid">
+        <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(18rem,1fr))] items-stretch mb-6">
           {providers.map((p) => (
             <Card key={p.id} variant={p.enabled ? 'brand' : 'default'}>
               <CardHeader>

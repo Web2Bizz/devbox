@@ -182,8 +182,8 @@ export default function ProjectSessionChatPage() {
       </div>
 
       <div className="mb-3 grid gap-1">
-        <code className="mono text-muted-foreground text-xs">projectId: {project.id}</code>
-        <code className="mono text-muted-foreground text-xs">
+        <code className="font-mono text-[0.85em] break-all text-muted-foreground text-xs">projectId: {project.id}</code>
+        <code className="font-mono text-[0.85em] break-all text-muted-foreground text-xs">
           sessionId: {sessionIdParam}
         </code>
       </div>

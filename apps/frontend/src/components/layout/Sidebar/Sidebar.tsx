@@ -22,7 +22,7 @@ export function SidebarBrand() {
   const { t } = useI18n();
 
   return (
-    <div className="brand-row">
+    <div className="flex items-center gap-3.5">
       <Image
         src="/logo.png"
         alt="Rush Code"
@@ -111,7 +111,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   };
 
   return (
-    <nav aria-label={t.nav.sections} className="app-sidebar-nav">
+      <nav aria-label={t.nav.sections} className="flex flex-col gap-1 w-full">
       {NAV.map((item) => {
         const active = isActive(item.href);
         return (
@@ -121,7 +121,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
             aria-current={active ? 'page' : undefined}
             data-active={active ? 'true' : undefined}
             onClick={onNavigate}
-            className="app-sidebar-link w-full justify-start"
+            className="flex items-center w-full justify-start gap-2 px-3 py-2 rounded-[var(--radius-md)] text-sm font-medium leading-5 text-muted-foreground no-underline border border-transparent transition-colors duration-150 hover:text-foreground hover:bg-[var(--sidebar-accent,var(--muted))] aria-[current=page]:text-foreground aria-[current=page]:bg-[var(--sidebar-accent,var(--muted))] aria-[current=page]:border-[var(--sidebar-border,var(--border))] focus-visible:outline-2 focus-visible:outline-[var(--sidebar-ring,var(--ring))] focus-visible:outline-offset-2"
           >
             {item.label}
           </Link>
@@ -131,7 +131,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
         const isOpen = expanded[item.id] ?? false;
         const sublistId = `sidebar-sublist-${item.id}`;
         return (
-          <div key={item.id} className="app-sidebar-group">
+          <div key={item.id} className="flex flex-col w-full">
             <button
               type="button"
               aria-expanded={isOpen}
@@ -140,17 +140,17 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
                 setExpanded((prev) => ({ ...prev, [item.id]: !isOpen }));
               }}
               onKeyDown={(event) => handleGroupKeyDown(event, item.id)}
-              className="app-sidebar-link w-full justify-start"
+              className="flex items-center w-full justify-start gap-2 px-3 py-2 rounded-[var(--radius-md)] text-sm font-medium leading-5 text-muted-foreground no-underline border border-transparent transition-colors duration-150 hover:text-foreground hover:bg-[var(--sidebar-accent,var(--muted))] aria-[expanded=true]:text-foreground aria-[expanded=true]:bg-[var(--sidebar-accent,var(--muted))] aria-[expanded=true]:border-[var(--sidebar-border,var(--border))] focus-visible:outline-2 focus-visible:outline-[var(--sidebar-ring,var(--ring))] focus-visible:outline-offset-2"
             >
-              <span className="app-sidebar-label">{item.label}</span>
-              <span aria-hidden="true" className="app-sidebar-chevron">
+              <span className="flex-1 min-w-0">{item.label}</span>
+              <span aria-hidden="true" className={`shrink-0 text-muted-foreground transition-transform duration-150 ${isOpen ? 'rotate-0' : '-rotate-90'}`}>
                 ▾
               </span>
             </button>
             <ul
               id={sublistId}
               hidden={!isOpen}
-              className="app-sidebar-sublist"
+              className="flex flex-col gap-1 w-full m-0 pl-4 list-none [&[hidden]]:hidden"
             >
               {item.items
                 ? item.items.map((sub) => {
@@ -162,7 +162,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
                           aria-current={subActive ? 'page' : undefined}
                           data-active={subActive ? 'true' : undefined}
                           onClick={onNavigate}
-                          className="app-sidebar-link w-full justify-start"
+                          className="flex items-center w-full justify-start gap-2 px-3 py-2 rounded-[var(--radius-md)] text-sm font-medium leading-5 text-muted-foreground no-underline border border-transparent transition-colors duration-150 hover:text-foreground hover:bg-[var(--sidebar-accent,var(--muted))] aria-[current=page]:text-foreground aria-[current=page]:bg-[var(--sidebar-accent,var(--muted))] aria-[current=page]:border-[var(--sidebar-border,var(--border))] focus-visible:outline-2 focus-visible:outline-[var(--sidebar-ring,var(--ring))] focus-visible:outline-offset-2"
                         >
                           {sub.label}
                         </Link>
@@ -184,7 +184,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
             aria-current={active ? 'page' : undefined}
             data-active={active ? 'true' : undefined}
             onClick={onNavigate}
-            className="app-sidebar-link w-full justify-start"
+            className="flex items-center w-full justify-start gap-2 px-3 py-2 rounded-[var(--radius-md)] text-sm font-medium leading-5 text-muted-foreground no-underline border border-transparent transition-colors duration-150 hover:text-foreground hover:bg-[var(--sidebar-accent,var(--muted))] aria-[current=page]:text-foreground aria-[current=page]:bg-[var(--sidebar-accent,var(--muted))] aria-[current=page]:border-[var(--sidebar-border,var(--border))] focus-visible:outline-2 focus-visible:outline-[var(--sidebar-ring,var(--ring))] focus-visible:outline-offset-2"
           >
             {item.label}
           </Link>
@@ -212,18 +212,18 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
 
   return (
     <>
-      <aside aria-label={t.nav.sections} className="app-sidebar hidden md:flex">
+      <aside aria-label={t.nav.sections} className="hidden md:flex grid-area-[sidebar] w-[300px] h-full min-h-0 flex-col gap-6 p-6 px-4 border border-border rounded-[var(--radius-lg)] bg-[var(--sidebar,var(--card))] overflow-y-auto">
         <SidebarNav />
       </aside>
 
       {open && (
         <div className="md:hidden">
           <div
-            className="app-sidebar-overlay"
+            className="fixed inset-0 z-40 bg-[var(--overlay-scrim)]"
             aria-hidden="true"
             onClick={onClose}
           />
-          <aside aria-label={t.nav.sections} className="app-sidebar-drawer">
+          <aside aria-label={t.nav.sections} className="fixed top-0 left-0 bottom-0 w-68 z-50 flex flex-col gap-6 p-6 px-4 bg-background border-r border-border overflow-y-auto">
             <div className="flex items-start justify-between gap-2">
               <SidebarBrand />
               <Button

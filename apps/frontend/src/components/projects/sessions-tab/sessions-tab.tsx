@@ -57,7 +57,7 @@ function SessionRow({
           <p className="truncate text-sm font-medium">
             {s.title || s.id.slice(0, 8)}
           </p>
-          <code className="mono text-muted-foreground text-xs">{s.id}</code>
+          <code className="font-mono text-[0.85em] break-all text-muted-foreground text-xs">{s.id}</code>
         </div>
         <Badge color="info" variant="soft">
           {new Date(s.time.updated).toLocaleString()}
@@ -65,10 +65,10 @@ function SessionRow({
       </div>
       {opened && (
         <div className="grid gap-1">
-          <code className="mono text-muted-foreground text-xs">
+          <code className="font-mono text-[0.85em] break-all text-muted-foreground text-xs">
             projectID: {s.projectID}
           </code>
-          <code className="mono text-muted-foreground text-xs">
+          <code className="font-mono text-[0.85em] break-all text-muted-foreground text-xs">
             directory: {s.directory}
           </code>
         </div>
@@ -152,7 +152,7 @@ export function SessionsTab({
   return (
     <div className="grid gap-4">
       <div className="grid gap-3">
-        <code className="mono text-muted-foreground text-xs">projectId: {projectId}</code>
+        <code className="font-mono text-[0.85em] break-all text-muted-foreground text-xs">projectId: {projectId}</code>
         <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"

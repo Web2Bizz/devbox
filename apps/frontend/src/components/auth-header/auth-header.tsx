@@ -18,10 +18,10 @@ export function AuthHeader() {
   return (
     <Header
       shape="rounded"
-      className="app-header"
+      className="[grid-area:header] min-w-0 sticky top-[var(--header-sticky-top)] z-30"
       leadingSlot={<SidebarBrand />}
       trailingSlot={
-        <div className="app-header-controls">
+        <div className="flex items-center gap-2 ml-auto shrink-0">
           <LanguageSwitcher compact />
           <ThemeToggleDefault />
         </div>

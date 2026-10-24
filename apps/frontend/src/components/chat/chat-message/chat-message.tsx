@@ -63,10 +63,10 @@ export function ChatMessageRow({ message }: { message: ChatMessage }) {
                 b.kind === 'code' ? (
                   <pre
                     key={i}
-                    className="mono text-muted-foreground overflow-x-auto rounded-[var(--radius-md)] border p-3 text-xs"
+                    className="font-mono text-[0.85em] break-all text-muted-foreground overflow-x-auto rounded-[var(--radius-md)] border p-3 text-xs"
                   >
                     {b.lang && (
-                      <code className="mono text-muted-foreground mb-1 block text-[11px] uppercase">
+                      <code className="font-mono text-[0.85em] break-all text-muted-foreground mb-1 block text-[11px] uppercase">
                         {b.lang}
                       </code>
                     )}

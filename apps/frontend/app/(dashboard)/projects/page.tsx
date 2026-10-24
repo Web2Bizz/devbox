@@ -96,7 +96,7 @@ export default function ProjectsPage() {
       {isEmpty && <EmptyState title={t.projects.emptyTitle} description={t.projects.emptyDesc} />}
 
       {!loading && !error && !isEmpty && (
-        <div className="status-grid">
+        <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(18rem,1fr))] items-stretch mb-6">
           {projects.map((p) => (
             <Link
               key={p.id}
@@ -119,7 +119,7 @@ export default function ProjectsPage() {
                     </Badge>
                   )}
                   {p.repo && (
-                    <code className="mono text-muted-foreground text-xs">{p.repo}</code>
+                    <code className="font-mono text-[0.85em] break-all text-muted-foreground text-xs">{p.repo}</code>
                   )}
                 </CardContent>
                 <CardFooter>

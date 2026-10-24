@@ -18,7 +18,7 @@ import {
 } from '@web2bizz/ui/components';
 import { useI18n } from '../../i18n';
 
-/** Grid card skeleton — matches status-grid Card layout. */
+/** Grid card skeleton — matches the loading grid layout. */
 export function ProjectCardSkeleton() {
   return (
     <Card>
@@ -60,11 +60,11 @@ export function ProjectDetailSkeleton() {
   );
 }
 
-/** Grid skeleton — matches status-grid. */
+/** Grid skeleton — matches the loading grid layout. */
 export function LoadingState({ rows = 3 }: { rows?: number }) {
   const { t } = useI18n();
   return (
-    <div className="status-grid" aria-busy="true" aria-label={t.common.loadingPage}>
+    <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(18rem,1fr))] items-stretch mb-6" aria-busy="true" aria-label={t.common.loadingPage}>
       {Array.from({ length: rows }).map((_, i) => (
         <ProjectCardSkeleton key={i} />
       ))}

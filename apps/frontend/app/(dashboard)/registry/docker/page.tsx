@@ -87,7 +87,7 @@ export default function RegistriesPage() {
                   <div className="min-w-0">
                     <h2 className="text-base font-medium">{r.name}</h2>
                     {r.url && (
-                      <p className="text-muted-foreground mono break-all text-sm">{r.url}</p>
+                      <p className="text-muted-foreground font-mono text-[0.85em] break-all text-sm">{r.url}</p>
                     )}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -108,7 +108,7 @@ export default function RegistriesPage() {
                   ) : (
                     <ul className="flex flex-col gap-1">
                       {repos.map((repo) => (
-                        <li key={repo} className="mono text-muted-foreground break-all text-sm">
+                        <li key={repo} className="font-mono text-[0.85em] break-all text-muted-foreground break-all text-sm">
                           {repo}
                         </li>
                       ))}

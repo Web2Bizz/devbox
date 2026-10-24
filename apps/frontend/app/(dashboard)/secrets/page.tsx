@@ -82,14 +82,14 @@ export default function SecretsPage() {
       )}
 
       {!loading && !error && filtered.length > 0 && (
-        <div className="status-grid">
+        <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(18rem,1fr))] items-stretch mb-6">
           {filtered.map((s) => {
             const value = revealed[s.id];
             const isRevealed = Boolean(value);
             return (
               <Card key={s.id} variant={isRevealed ? 'brand' : 'default'}>
                 <CardHeader>
-                  <CardTitle className="mono text-base">{s.name}</CardTitle>
+                  <CardTitle className="font-mono text-[0.85em] break-all text-base">{s.name}</CardTitle>
                   <CardDescription>
                     <Badge color="info" variant="soft">
                       {s.projectId}
@@ -97,7 +97,7 @@ export default function SecretsPage() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="grid gap-3">
-                  <code className="mono text-muted-foreground break-all text-sm">
+                  <code className="font-mono text-[0.85em] break-all text-muted-foreground break-all text-sm">
                     {isRevealed ? value : s.maskedPreview}
                   </code>
                   {isRevealed && (

@@ -23,13 +23,15 @@ export default async function AuthGroupLayout({ children }: { children: ReactNod
   const store = await cookies();
   if (store.get(AUTH_MARKER)?.value === AUTH_MARKER_VALUE) redirect('/projects');
   return (
-    <div className="auth-shell">
+    <div className="w-full max-w-none mx-auto box-border min-h-dvh px-2 pb-4 flex flex-col gap-4 bg-background text-foreground" data-shell="auth">
       <a href="#main-content" className="sr-only focus:not-sr-only">
         Skip to content
       </a>
       <AuthHeader />
-      <main id="main-content">
-        <div className="auth-shell-inner">{children}</div>
+      <main id="main-content" className="flex-1 flex flex-col min-w-0 min-h-0">
+        <div className="w-full max-w-[28rem] mx-auto box-border p-6 px-4 flex-1 flex flex-col justify-center min-h-[calc(100dvh-var(--header-height)-2rem)]">
+          {children}
+        </div>
       </main>
     </div>
   );

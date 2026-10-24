@@ -116,7 +116,7 @@ export default function ProjectDetailPage() {
                 {project.corruptedReason && (
                   <span className="mt-1 block">
                     {t.projects.brokenReasonLabel}:{' '}
-                    <code className="mono text-xs">{project.corruptedReason}</code>
+                    <code className="font-mono text-[0.85em] break-all text-xs">{project.corruptedReason}</code>
                   </span>
                 )}
               </AlertDescription>
@@ -149,7 +149,7 @@ export default function ProjectDetailPage() {
               </div>
               <p className="text-sm">{project.description}</p>
               {project.repo && (
-                <code className="mono text-muted-foreground text-xs">{project.repo}</code>
+                <code className="font-mono text-[0.85em] break-all text-muted-foreground text-xs">{project.repo}</code>
               )}
               <p className="text-muted-foreground text-xs">
                 {t.projects.updatedPrefix} {new Date(project.updatedAt).toLocaleDateString()}
@@ -163,7 +163,7 @@ export default function ProjectDetailPage() {
                   <h2 className="text-lg font-semibold">{t.projects.secretsTitle}</h2>
                   <p className="text-muted-foreground text-sm">{t.projects.secretsDesc}</p>
                 </div>
-                <code className="mono text-muted-foreground text-xs">
+                <code className="font-mono text-[0.85em] break-all text-muted-foreground text-xs">
                   projectId: {project.id}
                 </code>
                 <div>
@@ -192,7 +192,7 @@ export default function ProjectDetailPage() {
                   <h2 className="text-lg font-semibold">{t.projects.aiTitle}</h2>
                   <p className="text-muted-foreground text-sm">{t.projects.aiDesc}</p>
                 </div>
-                <code className="mono text-muted-foreground text-xs">
+                <code className="font-mono text-[0.85em] break-all text-muted-foreground text-xs">
                   projectId: {project.id}
                 </code>
                 <div>

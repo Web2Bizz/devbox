@@ -314,7 +314,7 @@ export default function OrganizationDetailPage() {
                     key={m.userId}
                     className="flex flex-wrap items-center gap-2 rounded-[var(--radius-sm)] py-2"
                   >
-                    <code className="mono text-muted-foreground text-xs">
+                    <code className="font-mono text-[0.85em] break-all text-muted-foreground text-xs">
                       {shortId(m.userId)}
                     </code>
                     <Badge color={m.role === 'maintainer' ? 'warning' : 'muted'} variant="soft">
@@ -380,7 +380,7 @@ export default function OrganizationDetailPage() {
                   )}
                 </div>
                 {inviteLink && (
-                  <code className="mono text-muted-foreground text-xs break-all">
+                  <code className="font-mono text-[0.85em] break-all text-muted-foreground text-xs break-all">
                     {inviteLink}
                   </code>
                 )}

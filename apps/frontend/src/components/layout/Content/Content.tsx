@@ -43,8 +43,8 @@ export function Content({
   empty,
 }: ContentProps) {
   return (
-    <main id="main-content" className="app-content">
-      <div className="page-inner">
+    <main id="main-content" data-content="" className="grid-area-[content] w-full h-full min-w-0 min-h-0 overflow-x-clip overflow-y-auto overscroll-contain border border-border rounded-[var(--radius-lg)] bg-background">
+      <div className="w-full max-w-none m-0 p-6 px-4 box-border">
         {isLoading ? (
           <LoadingState rows={loadingRows} />
         ) : error ? (

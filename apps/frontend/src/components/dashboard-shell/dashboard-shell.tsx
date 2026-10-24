@@ -67,7 +67,7 @@ function DashboardHeader({ title, breadcrumbs, user, actions, onMenu }: Dashboar
       size="sm"
       onClick={onMenu}
       aria-label={t.nav.sections}
-      className="app-menu-trigger"
+      className="inline-flex md:hidden"
     >
       <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
         <path
@@ -123,7 +123,7 @@ function DashboardHeader({ title, breadcrumbs, user, actions, onMenu }: Dashboar
   );
 
   const trailing = (
-    <div className="app-header-controls">
+    <div className="flex items-center gap-2 ml-auto shrink-0">
       {actions}
       {user}
       <HeaderProfileDropdown />
@@ -135,7 +135,7 @@ function DashboardHeader({ title, breadcrumbs, user, actions, onMenu }: Dashboar
   return (
     <Header
       shape="rounded"
-      className="app-header"
+      className="[grid-area:header] min-w-0 sticky top-[var(--header-sticky-top)] z-30"
       menuToggleSlot={menuToggle}
       leadingSlot={leading}
       trailingSlot={trailing}
@@ -190,8 +190,8 @@ export function DashboardShell({ children, header, content }: DashboardShellProp
   }, []);
 
   return (
-    <div className="app-shell-container mx-auto w-full max-w-none px-2">
-      <div className="app-shell">
+    <div className="mx-auto w-full max-w-none px-2 h-dvh overflow-hidden pb-4 box-border" data-shell="dashboard">
+      <div className="grid grid-rows-[auto_minmax(0,1fr)] grid-cols-[300px_minmax(0,1fr)] [grid-template-areas:'header_header'_'sidebar_content'] gap-y-4 gap-x-2 h-full max-w-full box-border overflow-hidden bg-background text-foreground">
         <a href="#main-content" className="sr-only focus:not-sr-only">
           Skip to content
         </a>

@@ -23,7 +23,7 @@ export type RegistryHubItem = {
  */
 export function RegistryHub({ items }: { items: readonly RegistryHubItem[] }) {
   return (
-    <div className="status-grid">
+    <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(18rem,1fr))] items-stretch mb-6">
       {items.map((item) => (
         <Card key={item.href}>
           <CardHeader>

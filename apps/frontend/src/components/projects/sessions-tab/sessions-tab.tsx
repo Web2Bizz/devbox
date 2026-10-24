@@ -9,9 +9,9 @@ import {
   Separator,
 } from '@web2bizz/ui/components';
 import type { Session } from '@opencode-ai/sdk/client';
-import { EmptyState, ErrorState, LoadingState } from '../states';
-import { useOpencodeSessions } from '../../hooks/useOpencodeSessions';
-import { useI18n } from '../../i18n';
+import { EmptyState, ErrorState, LoadingState } from '../../states';
+import { useOpencodeSessions } from '../../../hooks/useOpencodeSessions';
+import { useI18n } from '../../../i18n';
 
 /**
  * Sessions tab for /projects/[id] — full session list scoped to a project.

@@ -8,11 +8,11 @@ import {
   Separator,
 } from '@web2bizz/ui/components';
 import type { Session, SessionStatus } from '@opencode-ai/sdk/client';
-import { opencode, toErrorMessage } from '../../api/opencode-client';
-import { EmptyState, ErrorState, LoadingState } from '../states';
-import { useOpencodeEvents } from '../../hooks/useOpencodeEvents';
-import { useOpencodeSessions } from '../../hooks/useOpencodeSessions';
-import { useI18n } from '../../i18n';
+import { opencode, toErrorMessage } from '../../../api/opencode-client';
+import { EmptyState, ErrorState, LoadingState } from '../../states';
+import { useOpencodeEvents } from '../../../hooks/useOpencodeEvents';
+import { useOpencodeSessions } from '../../../hooks/useOpencodeSessions';
+import { useI18n } from '../../../i18n';
 
 function streamColor(status: string) {
   if (status === 'live') return 'success' as const;

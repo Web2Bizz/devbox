@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent, type KeyboardEvent } from 'react';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@web2bizz/ui/components';
-import { useI18n } from '../../i18n';
+import { useI18n } from '../../../i18n';
 
 export type ChatInputProps = {
   onSend: (text: string) => void | Promise<void>;

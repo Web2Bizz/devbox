@@ -16,7 +16,7 @@ import {
   EmptyTitle,
   Skeleton,
 } from '@web2bizz/ui/components';
-import { useI18n } from '../i18n';
+import { useI18n } from '../../i18n';
 
 /** Grid card skeleton — matches status-grid Card layout. */
 export function ProjectCardSkeleton() {

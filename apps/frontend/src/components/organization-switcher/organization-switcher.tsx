@@ -14,9 +14,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@web2bizz/ui/components';
-import { useHeaderProfile } from '../hooks/useProfile';
-import { useOrganizations } from '../hooks/useOrganizations';
-import { useI18n } from '../i18n';
+import { useHeaderProfile } from '../../hooks/useProfile';
+import { useOrganizations } from '../../hooks/useOrganizations';
+import { useI18n } from '../../i18n';
 
 /**
  * Header organization switcher — kit DropdownMenu (`components` entry).

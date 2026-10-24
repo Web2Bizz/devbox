@@ -3,12 +3,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AuthorizedUserProfile, UnauthorizedUserProfile } from '@web2bizz/ui/widgets';
-import { signOutAndRedirect } from '../lib/auth-store';
-import { useHeaderProfile } from '../hooks/useProfile';
-import { LOCALE_COOKIE, isLocale } from '../i18n';
-import { en } from '../i18n/dictionaries/en';
-import { ru } from '../i18n/dictionaries/ru';
-import type { Dictionary } from '../i18n/dictionaries/types';
+import { signOutAndRedirect } from '../../lib/auth-store';
+import { useHeaderProfile } from '../../hooks/useProfile';
+import { LOCALE_COOKIE, isLocale } from '../../i18n';
+import { en } from '../../i18n/dictionaries/en';
+import { ru } from '../../i18n/dictionaries/ru';
+import type { Dictionary } from '../../i18n/dictionaries/types';
 
 /**
  * Header user menu — pure kit (@web2bizz/ui 0.26.0 `widgets` entry).

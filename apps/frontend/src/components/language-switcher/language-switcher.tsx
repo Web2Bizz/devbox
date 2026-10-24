@@ -8,7 +8,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from '@web2bizz/ui/components';
-import { isLocale, useI18n } from '../i18n';
+import { isLocale, useI18n } from '../../i18n';
 
 /**
  * Language switcher: locale dropdown next to ThemeToggleDefault.

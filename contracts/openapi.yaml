@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: Devbox opencode proxy API
+  title: Rush Code opencode proxy API
   version: 0.1.0
   description: >-
     Thin proxy layer between frontend clients and the live opencode server.
@@ -2707,7 +2707,7 @@ components:
           example: Lovelace
         email:
           type: string
-          example: ada@devbox.local
+          example: ada@rush-code.local
         provider:
           type: string
           enum: [local, sso-oauth, github-app]
@@ -2820,7 +2820,7 @@ components:
           example: Lovelace
         email:
           type: string
-          example: ada@devbox.local
+          example: ada@rush-code.local
         password:
           type: string
           minLength: 8
@@ -2830,7 +2830,7 @@ components:
       properties:
         email:
           type: string
-          example: ada@devbox.local
+          example: ada@rush-code.local
         password:
           type: string
           minLength: 8
@@ -3007,10 +3007,10 @@ components:
           example: acme
         name:
           type: string
-          example: devbox-backend
+          example: rush-code-backend
         fullName:
           type: string
-          example: acme/devbox-backend
+          example: acme/rush-code-backend
         private:
           type: boolean
         defaultBranch:
@@ -3018,14 +3018,14 @@ components:
           example: main
         url:
           type: string
-          example: https://github.com/acme/devbox-backend
+          example: https://github.com/acme/rush-code-backend
     GithubInstallUrl:
       type: object
       required: [url]
       properties:
         url:
           type: string
-          example: https://github.com/apps/devbox/installations/new
+          example: https://github.com/apps/rush-code/installations/new
     GithubCallbackResult:
       type: object
       required: [ok, installationId]

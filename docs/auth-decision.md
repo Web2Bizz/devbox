@@ -38,10 +38,10 @@ Verified on the dev runtime (`bun -e`, bun 1.4.0):
 ## 3. Frontend token storage + route guard
 
 - Access token: in-memory singleton (`lib/auth-store.ts`) mirrored to
-  `localStorage` (`devbox-access-token`) so reload survives; refresh token:
-  httpOnly cookie `devbox-refresh` set by the backend (`credentials: 'include'`
+  `localStorage` (`rush-code-access-token`) so reload survives; refresh token:
+  httpOnly cookie `rush-code-refresh` set by the backend (`credentials: 'include'`
   on refresh/logout only) + JSON copy in the login response (kept in memory).
-- Marker cookie `devbox-auth=1` (readable) lets Next `middleware.ts` redirect
+- Marker cookie `rush-code-auth=1` (readable) lets Next `middleware.ts` redirect
   unauthenticated `/projects|/profile|/secrets|…` → `/login` without ever
   seeing a secret. Real authorization stays server-side (`JwtAuthGuard`).
 - Refresh flow: `auth-store.getValidAccessToken()` → `POST /auth/refresh`

@@ -1,4 +1,4 @@
-# DevBox — monorepo
+# Rush Code — monorepo
 
 Bun workspaces monorepo: NestJS 12 (backend) + Next.js 16.3 + Turbopack
 (frontend) + Expo 57 / React Native 0.86 (mobile, `@web2bizz/ui-native`) +
@@ -65,7 +65,7 @@ paths-gated (`apps/mobile/app/**`, `src/**`, `packages/**`).
 Образ `opencode` (`Dockerfile` + `entrypoint.sh` + `reload-secrets.sh`
 внутри `apps/opencode-server/`). Входит в корневой
 `docker-compose.yml` как сервис `opencode` (registry-образ
-`docker.registry.web2bizz.team/web2bizz/devbox/opencode:${TAG:-latest}`, сеть `back`, `expose 4096` без публикации наружу —
+`docker.registry.web2bizz.team/web2bizz/rush-code/opencode:${TAG:-latest}`, сеть `back`, `expose 4096` без публикации наружу —
 порт виден только внутри сети) и публикуется через CI
 (`docker.yml`, job `opencode`, вне affected-матрицы — у него нет package.json,
 не Nx-проект) в self-hosted registry
@@ -95,7 +95,7 @@ never by hand-editing the version). Mobile uses the sibling package
   with HTTP 400). Details: `docs/npm-registry.md`.
 - Wiring (App Router): `@web2bizz/ui/styles.css` imported once in
   `app/layout.tsx`, `<ThemeProvider defaultTheme="system"
-  storageKey="devbox-frontend-theme">` via `src/providers.tsx`
+  storageKey="rush-code-frontend-theme">` via `src/providers.tsx`
   (mount-guarded — the kit reads `localStorage` in its initializer, which
   throws during SSR prerender). Page UI uses modular imports
   (`@web2bizz/ui/components`, `@web2bizz/ui/features`) and semantic tokens —
@@ -109,8 +109,8 @@ never by hand-editing the version). Mobile uses the sibling package
   `leadingSlot`, actions/user + `LanguageSwitcher compact` +
   `ThemeToggleDefault` → `trailingSlot`, drawer trigger → `menuToggleSlot`.
   Shell stays `div.app-shell` + `div.app-main` + drawer (`Sidebar open/onClose`);
-  i18n `en/ru` cookie-only (`devbox-locale`), brand tokens + `light/dark` via
-  `globals.css` + `ThemeProvider` (`devbox-frontend-theme`), flat URLs
+  i18n `en/ru` cookie-only (`rush-code-locale`), brand tokens + `light/dark` via
+  `globals.css` + `ThemeProvider` (`rush-code-frontend-theme`), flat URLs
   `/login /projects /secrets /profile /ai-providers`, Next `16.3.6` +
   Turbopack + React `19.3.0`.
 
@@ -144,7 +144,7 @@ docker compose up -d
 
 ## Nx dev (local, one command)
 
-Nx runs the persistent `dev` targets of `@devbox/contracts` (`tsc --watch`),
+Nx runs the persistent `dev` targets of `@rush-code/contracts` (`tsc --watch`),
 backend (`nest start --watch`) and frontend (`next dev --turbopack`) in
 parallel with prefixed streaming logs. The repo-root `.env` is injected into
 every target by `scripts/dev/with-env.ts` (shell wins > file; missing `.env`
@@ -184,12 +184,12 @@ Single source: `.env.example` → скопируй в `.env` (gitignored, сек
 | `APP_BACKEND_SOCKET` | публичный URL backend (браузер + compose default API) | `http://localhost:3100` | `https://api.example.com` | да (prod) |
 | `OPENCODE_URL` | адрес OpenCode stand (`0.0.0.0` маппится на `127.0.0.1` в коде; в compose дефолт — `http://opencode:4096` внутри сети) | `http://127.0.0.1:4096` | `http://opencode:4096` | нет |
 | `OPENCODE_SERVER_PASSWORD` | пароль `opencode serve` (compose fail-fast без него; в секреты, не в git) | задай | задай | да (compose) |
-| `POSTGRES_USER` | пользователь Postgres | `devbox` | `devbox` | нет |
+| `POSTGRES_USER` | пользователь Postgres | `rushcode` | `rushcode` | нет |
 | `POSTGRES_PASSWORD` | пароль Postgres (замени в prod) | `changeme` | замени | да (prod) |
-| `POSTGRES_DB` | имя базы | `devbox` | `devbox` | нет |
+| `POSTGRES_DB` | имя базы | `rushcode` | `rushcode` | нет |
 | `POSTGRES_PORT` | хост-порт Postgres | `5432` | `5432` | нет |
 | `POSTGRES_HOST` | хост внешней PG (сервиса postgres в compose нет) | `pg.db.web2bizzz.store` | свой хост | нет (код) |
-| `DATABASE_URL` | строка подключения к внешней PG (в compose обязательна — fail-fast) | `postgres://devbox:changeme@pg.db.web2bizzz.store:5432/devbox` | та же схема, свой пароль | да (compose) |
+| `DATABASE_URL` | строка подключения к внешней PG (в compose обязательна — fail-fast) | `postgres://rushcode:changeme@pg.db.web2bizzz.store:5432/rushcode` | та же схема, свой пароль | да (compose) |
 | `CORS_ORIGINS` | разрешённые origins фронтенда | `http://localhost:3001,http://localhost:8080` | `https://app.example.com` | да (prod) |
 | `REQUEST_TIMEOUT_MS` | таймаут upstream-запросов backend | `10000` | `10000` | нет |
 | `LOG_LEVEL` | уровень логов | `debug` | `info` | нет |

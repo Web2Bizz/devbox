@@ -4,7 +4,7 @@
 
 Whole monorepo — `packages/contracts/src/**`, `apps/backend/src/**`,
 `apps/frontend/src/**`, `apps/frontend/app/**`, `apps/mobile/src/**`.
-Mandatory in `@devbox/contracts` (the wire-contract etalon).
+Mandatory in `@rush-code/contracts` (the wire-contract etalon).
 
 ## Rule
 

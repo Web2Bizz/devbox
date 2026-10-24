@@ -14,6 +14,7 @@ import {
   TUI_INPUT_MAX_LENGTH,
   tuiStartupOrder,
 } from "../tui.js";
+import { homeArtSegments } from "../home.js";
 
 const TUI_SOURCE = readFileSync(join(import.meta.dir, "..", "tui.ts"), "utf8");
 
@@ -204,5 +205,32 @@ describe("tui home (Главная без мигания: арт статиче�
     const homeFn = TUI_SOURCE.slice(TUI_SOURCE.indexOf("startTuiHome"));
     expect(homeFn).not.toMatch(/backgroundColor|setBackgroundColor/);
     expect(homeFn).not.toMatch(/[{,\s]bg\s*:/);
+  });
+
+  test("title gradient is OpenTUI-native (row chunks with hex fg, no ANSI in content)", () => {
+    const homeFn = TUI_SOURCE.slice(TUI_SOURCE.indexOf("startTuiHome"));
+    // TextRenderable carries a single fg per node: one "row" box per art
+    // line, plain chunks with interpolated hex fg (ANSI would render literally).
+    expect(TUI_SOURCE).toContain("homeArtSegments");
+    expect(homeFn).toContain("homeArtSegments");
+    expect(homeFn).toContain('flexDirection: "row"');
+    expect(homeFn).toContain("seg.fg");
+  });
+
+  test("art segments cover the same block as homeArtLines (plain text, no ANSI)", () => {
+    const noEsc = (s: string): boolean => !s.includes(String.fromCharCode(27));
+    for (const w of [80, 40, 20]) {
+      const segs = homeArtSegments(w);
+      const lines = homeArtLines(w);
+      expect(segs.length).toBe(lines.length);
+      segs.forEach((chunks, i) => {
+        const line = lines[i] ?? "";
+        expect(chunks.map((c) => c.text).join("")).toBe(line === "" ? " " : line);
+        for (const c of chunks) {
+          expect(noEsc(c.text)).toBe(true);
+          if (c.fg) expect(c.fg).toMatch(/^#[0-9A-F]{6}$/);
+        }
+      });
+    }
   });
 });

@@ -15,6 +15,7 @@ import {
   HOME_SIGNATURE,
   HOME_TITLE_ART,
   centerLines,
+  homeArtSegments,
   moveHomeSelection,
   titleTextOptions,
   type HomeOptionIndex,
@@ -277,8 +278,9 @@ export function homeArtLines(width = 80): string[] {
 
 /**
  * OpenTUI home menu (Главная): block-art title is drawn once as static
- * nodes (title path — verbatim, no wrap/trim, right-clip when narrow),
- * then the signature on the same left edge, then the 3 options as
+ * row-nodes (title path — verbatim, no wrap/trim, right-clip when narrow;
+ * logo gradient via per-chunk hex fg, no ANSI in content), then the
+ * signature on the same left edge, then the 3 options as
  * separate nodes in the same left-aligned block whose `content` is
  * updated in place.
  * Arrows ↑↓ only repaint the option rows (marker `›` moves) — no clear,
@@ -298,17 +300,30 @@ export async function startTuiHome(options?: { initialSelected?: HomeOptionIndex
   });
   renderer.root.add(root);
   // Static art: drawn once, never mutated afterwards (no flicker).
+  // Logo gradient is OpenTUI-native: TextRenderable carries a single fg per
+  // node and does not parse raw ANSI in content, so each art row is a "row"
+  // box of plain chunks with an interpolated hex fg (homeArtSegments shares
+  // the stdout gradient column mapping, fg-only, never bg backdrop).
   const verbatim = titleTextOptions();
-  const artNodes: TuiTextNode[] = homeArtLines(width).map(
-    (line) =>
-      new core.TextRenderable(renderer, {
-        content: line === "" ? " " : line,
-        width: verbatim.width,
+  const artNodes: TuiTextNode[] = [];
+  for (const segments of homeArtSegments(width)) {
+    const row = new core.BoxRenderable(renderer, {
+      flexDirection: "row",
+      width: verbatim.width,
+    });
+    for (const seg of segments) {
+      if (seg.text === "") continue;
+      const node = new core.TextRenderable(renderer, {
+        content: seg.text,
         wrapMode: verbatim.wrapMode,
         truncate: verbatim.truncate,
-      }),
-  );
-  for (const node of artNodes) root.add(node);
+        ...(seg.fg ? { fg: seg.fg } : {}),
+      });
+      row.add(node);
+      artNodes.push(node);
+    }
+    root.add(row);
+  }
   const signatureNode = new core.TextRenderable(renderer, {
     content: homeSignatureLine(width),
     width: "100%",

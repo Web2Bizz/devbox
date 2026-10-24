@@ -113,7 +113,7 @@ export async function probeConnection(url: string, auth?: { username: string; pa
 
 export function formatReport(report: DiagnosticReport): string {
   const lines: string[] = []
-  lines.push("=== DevBox — Connection Diagnostic ===")
+  lines.push("=== Rush Code — Connection Diagnostic ===")
   lines.push(`Time:        ${report.timestamp}`)
   lines.push(`Result:      ${report.classification.toUpperCase()}`)
   lines.push(`Summary:     ${report.summary}`)
@@ -178,7 +178,7 @@ export async function shareReport(report: DiagnosticReport): Promise<void> {
     // clipboard optional
   }
   try {
-    await Share.share({ title: "DevBox connection diagnostic", message: text })
+    await Share.share({ title: "Rush Code connection diagnostic", message: text })
   } catch (e) {
     log.warn("diag", "share failed", String(e))
   }

@@ -1,12 +1,12 @@
-// DevBox Connect waitlist signup: pure payload/fallback logic.
+// Rush Code Connect waitlist signup: pure payload/fallback logic.
 //
 // Kept free of react-native imports (Linking, Alert) so it's unit-testable
 // with plain `node --test`, the same split used for buildAuth() in auth.ts
 // and shouldRequestReview() in store-review-policy.ts. The screen injects
 // nothing in production (global fetch is used); tests inject a fake fetch.
 //
-// Backend: the DevBoxSite beta-signup route (VibeBrowserProductPage
-// repo, DevBoxSite/app/api/beta-signup/route.ts) validates `email`
+// Backend: the Rush CodeSite beta-signup route (VibeBrowserProductPage
+// repo, Rush CodeSite/app/api/beta-signup/route.ts) validates `email`
 // and adds it to a Brevo list. It ignores unknown body fields today, so the
 // `source` tag we send is forward-compatible: harmless now, attributable as
 // soon as the route starts reading it.
@@ -45,10 +45,10 @@ export function buildWaitlistPayload(email: string): { email: string; source: st
  * which would be a live defect. Absence of the line means "pre-v0.4.13 build".
  */
 export function buildWaitlistMailtoUrl(email: string, appVersion?: string): string {
-  const subject = encodeURIComponent("DevBox Connect Waitlist")
+  const subject = encodeURIComponent("Rush Code Connect Waitlist")
   const lines = ["Sign me up!"]
   if (email) lines.push("", `Email: ${email}`)
-  if (appVersion) lines.push("", `App: DevBox v${appVersion}`)
+  if (appVersion) lines.push("", `App: Rush Code v${appVersion}`)
   const body = encodeURIComponent(lines.join("\n"))
   return `mailto:${WAITLIST_FALLBACK_EMAIL}?subject=${subject}&body=${body}`
 }

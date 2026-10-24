@@ -27,7 +27,7 @@ test("normalize rejects what the server would 400 on", () => {
 
 // --- payload: the source tag is the whole point of #87 ---
 
-test("payload tags the signup with the devbox-connect source", () => {
+test("payload tags the signup with the rush-code-connect source", () => {
   assert.deepEqual(buildWaitlistPayload("dev@example.com"), {
     email: "dev@example.com",
     source: WAITLIST_SOURCE,
@@ -39,7 +39,7 @@ test("payload tags the signup with the devbox-connect source", () => {
 test("mailto escape hatch preserves subject and embeds the email", () => {
   const url = buildWaitlistMailtoUrl("dev@example.com")
   assert.ok(url.startsWith("mailto:support@web2bizz.team?"))
-  assert.ok(url.includes("subject=DevBox%20Connect%20Waitlist"))
+  assert.ok(url.includes("subject=Rush%20Code%20Connect%20Waitlist"))
   assert.ok(url.includes(encodeURIComponent("Email: dev@example.com")))
 })
 
@@ -55,7 +55,7 @@ test("mailto escape hatch works without an email", () => {
 // and that is a new defect, not the known stale cohort.
 test("mailto escape hatch stamps the app version when given one", () => {
   const url = buildWaitlistMailtoUrl("dev@example.com", "0.4.13")
-  assert.ok(url.includes(encodeURIComponent("App: DevBox v0.4.13")))
+  assert.ok(url.includes(encodeURIComponent("App: Rush Code v0.4.13")))
   assert.ok(url.includes(encodeURIComponent("Email: dev@example.com")))
 })
 

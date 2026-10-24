@@ -1,4 +1,4 @@
-# DevBox Mobile — DESIGN
+# Rush Code Mobile — DESIGN
 
 Дизайн-договорённости `apps/mobile` (Expo 57 / React Native 0.86 + React 19 +
 `@web2bizz/ui-native` = `apps/mobile/packages/uikit`). Общие правила монорепо —

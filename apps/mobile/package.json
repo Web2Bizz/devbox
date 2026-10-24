@@ -20,7 +20,7 @@
     "test": "node --test 'src/**/*.test.ts' 'packages/uikit/src/**/*.test.ts' 'scripts/*.test.mjs'"
   },
   "dependencies": {
-    "@devbox/contracts": "file:../../packages/contracts",
+    "@rush-code/contracts": "file:../../packages/contracts",
     "@expo/vector-icons": "^15.0.3",
     "@gorhom/bottom-sheet": "^5.2.14",
     "@react-native-async-storage/async-storage": "2.2.0",

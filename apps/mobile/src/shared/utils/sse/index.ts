@@ -1,4 +1,4 @@
-// Pure, transport-agnostic Server-Sent Events framing for the devbox event stream.
+// Pure, transport-agnostic Server-Sent Events framing for the rush-code event stream.
 // Extracted from sdk.ts so the chunk-buffering rules — which are easy to get wrong when
 // a single event is split across two network reads — are unit-testable without a socket.
 

@@ -18,6 +18,8 @@
       "@app/*": ["./app/*"],
       "@web2bizz/ui-native": ["./packages/uikit/src/index.ts"],
       "@web2bizz/ui-native/*": ["./packages/uikit/src/*"],
+      "@rush-code/contracts": ["../../packages/contracts/src/index.ts"],
+      "@rush-code/contracts/*": ["../../packages/contracts/src/*"],
       // TODO: deprecated alias @opencode-ai/uikit — удалить через 1 релиз (rename → @web2bizz/ui-native).
       "@opencode-ai/uikit": ["./packages/uikit/src/index.ts"],
       "@opencode-ai/uikit/*": ["./packages/uikit/src/*"]

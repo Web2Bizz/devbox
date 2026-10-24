@@ -1,4 +1,4 @@
-// Pure request-header construction for the devbox client.
+// Pure request-header construction for the rush-code client.
 // Extracted from sdk.ts so the auth + directory-encoding rules are unit-testable
 // without pulling in expo/fetch (which has no resolver outside Metro).
 //

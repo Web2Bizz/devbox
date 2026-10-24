@@ -1,11 +1,11 @@
 // SDK client wrapper for React Native
-// We create our own lightweight client that mirrors the devbox SDK patterns
+// We create our own lightweight client that mirrors the rush-code SDK patterns
 // but works in React Native environment
 // expo/fetch provides WinterCG-compliant fetch with ReadableStream support for SSE
 //
 // NOTE (card 4/5, wire freeze): the types below are UPSTREAM opencode shapes
 // (`/global/health`, `/session`, `/project`, … on the opencode server itself),
-// NOT backend `/api/v1/*` wire from `@devbox/contracts`. In particular
+// NOT backend `/api/v1/*` wire from `@rush-code/contracts`. In particular
 // `HealthResponse` ({ healthy, version }) mirrors openapi `OpencodeHealth`,
 // `Session`/`Project` mirror the upstream session/project objects, and the
 // `ApiError` class below is a transport error (HTTP status + body) — not the
@@ -345,7 +345,7 @@ export function createClient(config: ClientConfig) {
     },
 
     // Server-side filesystem browsing, scoped to this client's directory
-    // (see ClientConfig.directory / x-devbox-directory header). Use
+    // (see ClientConfig.directory / x-rush-code-directory header). Use
     // clientForDirectory(dir) to get a client rooted at a specific folder,
     // then list("." ) to enumerate its immediate children.
     file: {
@@ -363,7 +363,7 @@ export function createClient(config: ClientConfig) {
       // Enumerate the server's filesystem roots (mounted drives, home dir)
       // to seed the directory browser's pinned top-level entries. Resolves
       // to null on servers that don't yet expose GET /file/roots (older
-      // devbox builds) so callers fall back to manual path entry instead
+      // rush-code builds) so callers fall back to manual path entry instead
       // of crashing; other errors propagate like any other request.
       roots: async (): Promise<FileRoot[] | null> => {
         try {

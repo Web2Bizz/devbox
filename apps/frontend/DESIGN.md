@@ -181,8 +181,8 @@ Header. Только `var()`-ссылки; hex — только в `:root` / `.d
 
 ## 4.1 Запреты декора
 
-- **Градиенты в блоках запрещены.** `linear-gradient`/`radial-gradient`/`conic-gradient` не использовать для `background` блоков, карточек, панелей, секций. Единственное исключение — **кнопки** (`Button variant="primaryBrand"` и аналогичные бренд-кнопки) — им градиент разрешён. Текстовый градиент `.text-gradient-brand` для логотипа/вордмарка — тоже ок (это текст, не блок).
-- **Тени запрещены.** `box-shadow`/`drop-shadow`/`filter: drop-shadow` не использовать для блоков и карточек. Исключение — фокус-ринги/доступность (`:focus-visible`) и бренд-кнопки если того требует кит; декоративные `shadow-*`/`shadow-brand-glow` на блоках — нельзя.
+- **Градиенты — минимальное использование.** `linear-gradient`/`radial-gradient`/`conic-gradient` использовать по минимуму: только там, где оправдано (бренд-кнопки `Button variant="primaryBrand"`, текстовый градиент `.text-gradient-brand` для логотипа/вордмарка). В `background` блоков, карточек, панелей, секций — не применять.
+- **Тени запрещены.** `box-shadow`/`drop-shadow`/`filter: drop-shadow` не использовать в дизайне вообще — ни для блоков, ни для карточек, ни для любых других элементов. Исключений нет.
 - **CSS-трансформации запрещены.** `transform`/`translate`/`scale`/`rotate`/`skew` и `transition: transform` не применять к блокам/карточкам для декора (hover-подъёмы, наклоны и т.п. — нельзя). Разрешены только трансформации, требуемые доступностью/китом (Radix `DropdownMenu`/`Drawer` анимации, `Sidebar` chevron — уже в `globals.css`).
 
 ## 5. Структура шелла
@@ -214,7 +214,7 @@ Header. Только `var()`-ссылки; hex — только в `:root` / `.d
   `top: var(--header-sticky-top)`) задаёт шелл в `globals.css`
   (`.app-shell > .app-header`), ширина — шеллом, flatten-селекторы
   запрещены (см. правило радиусов ниже).
-- Grid: `row1: header header / row2: sidebar content`, `gap: 1rem`
+- Grid: `row1: header header / row2: sidebar content`, `row-gap: 1rem`, `column-gap: 0.5rem`
   (гаттеры, чтобы скругления были видны), `300px + 1fr`.
 - Content full-width: `.app-content { width: 100%; min-width: 0 }` (grid-area
   content, скролл только здесь) + `.page-inner { width: 100%; max-width: none;

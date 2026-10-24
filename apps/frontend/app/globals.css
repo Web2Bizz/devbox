@@ -1,3 +1,5 @@
+@import "tailwindcss";
+
 /* App-level styles. Design tokens, fonts and base reset come from
  * `@web2bizz/ui/styles.css` (imported in app/layout.tsx before this file).
  * Only semantic tokens / CSS vars here — no hardcoded hex colors
@@ -164,7 +166,8 @@ body:has(.app-shell) {
   grid-template-areas:
     'header header'
     'sidebar content';
-  gap: 1rem;
+  row-gap: 1rem;
+  column-gap: 0.5rem;
   height: 100%;
   max-width: 100%;
   box-sizing: border-box;

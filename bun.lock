@@ -14,7 +14,6 @@
       "name": "backend",
       "version": "0.1.0",
       "dependencies": {
-        "@devbox/contracts": "workspace:*",
         "@nestjs/common": "^12.1.0",
         "@nestjs/config": "^12.0.1",
         "@nestjs/core": "^12.1.0",
@@ -22,6 +21,7 @@
         "@nestjs/swagger": "^12.0.2",
         "@octokit/auth-app": "^8.3.1",
         "@opencode-ai/sdk": "1.18.33",
+        "@rush-code/contracts": "workspace:*",
         "dotenv": "^16.4.5",
         "dotenv-expand": "^11.0.6",
         "drizzle-orm": "^0.45.3",
@@ -43,7 +43,7 @@
       },
     },
     "apps/cli": {
-      "name": "@devbox/cli",
+      "name": "@rush-code/cli",
       "version": "0.1.0",
       "dependencies": {
         "@opentui/core": "0.6.8",
@@ -61,9 +61,9 @@
       "name": "frontend",
       "version": "0.1.0",
       "dependencies": {
-        "@devbox/contracts": "workspace:*",
         "@hookform/resolvers": "5.9.1",
         "@opencode-ai/sdk": "1.18.33",
+        "@rush-code/contracts": "workspace:*",
         "@tanstack/react-query": "^5.104.1",
         "@tanstack/react-virtual": "3.14.13",
         "@web2bizz/ui": "0.26.0",
@@ -88,7 +88,7 @@
       },
     },
     "packages/contracts": {
-      "name": "@devbox/contracts",
+      "name": "@rush-code/contracts",
       "version": "0.1.0",
       "dependencies": {
         "zod": "^4.6.5",
@@ -144,10 +144,6 @@
     "@corvu/utils": ["@corvu/utils@0.4.2", "", { "dependencies": { "@floating-ui/dom": "^1.6.11" }, "peerDependencies": { "solid-js": "^1.8" } }, "sha512-Ox2kYyxy7NoXdKWdHeDEjZxClwzO4SKM8plAaVwmAJPxHMqA0rLOoAsa+hBDwRLpctf+ZRnAd/ykguuJidnaTA=="],
 
     "@date-fns/tz": ["@date-fns/tz@1.5.0", "", {}, "sha512-lwYN/vDPeNRULcepoE/LO2Pgx+7/RV+S9ARfbc9lr2DtGkOD7pAiruHvbR1RX3Qyf6ja47EWJDMsNK5vK08DJg=="],
-
-    "@devbox/cli": ["@devbox/cli@workspace:apps/cli"],
-
-    "@devbox/contracts": ["@devbox/contracts@workspace:packages/contracts"],
 
     "@drizzle-team/brocli": ["@drizzle-team/brocli@0.10.2", "", {}, "sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w=="],
 
@@ -610,6 +606,10 @@
     "@radix-ui/react-visually-hidden": ["@radix-ui/react-visually-hidden@1.2.11", "", { "dependencies": { "@radix-ui/react-primitive": "2.1.10" }, "peerDependencies": { "@types/react": "*", "@types/react-dom": "*", "react": "^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc", "react-dom": "^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc" }, "optionalPeers": ["@types/react", "@types/react-dom"] }, "sha512-NFS86RYYZb4/exihaESBGOpMJFz8MGLAfu3mOBSGByVnVPC9JPASfYubxd/8KbkQK0sYAv8lVQDEQukDX/qXvQ=="],
 
     "@radix-ui/rect": ["@radix-ui/rect@1.1.3", "", {}, "sha512-JtyZR+mqgBibTo8xea3B6ZRmzZiM/YeVBtUkas6zMuXjAlfIFIW2FgqeM9eLyvEaYX66vr6DJMK+4U6LV0KhNw=="],
+
+    "@rush-code/cli": ["@rush-code/cli@workspace:apps/cli"],
+
+    "@rush-code/contracts": ["@rush-code/contracts@workspace:packages/contracts"],
 
     "@scarf/scarf": ["@scarf/scarf@1.4.0", "", {}, "sha512-xxeapPiUXdZAE3che6f3xogoJPeZgig6omHEy1rIY5WVsB3H2BHNnZH+gHG6x91SCWyQCzWGsuL2Hh3ClO5/qQ=="],
 

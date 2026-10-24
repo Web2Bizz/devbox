@@ -7,68 +7,80 @@
  * values may appear. Everything else references these vars semantically. */
 
 /* ---- Rush Code logo palette (light = default) ----
- * Logo: linear-gradient(135deg, #FF2A7A 0%, #FF5E62 50%, #FF9966 100%),
- * glow: feDropShadow 0 8px 12px #FF2A7A @ 25%.
+ * Logo: linear-gradient(90deg, #FFB02E 0%, #FF4A2D 25%, #E93A6B 50%, #8B3DFF 75%, #2E9BFF 100%),
+ * glow: feDropShadow 0 8px 12px #E93A6B @ 25%.
+ * 5-stop CLI brand scale (apps/cli/src/ui/screens/home/constants.ts HOME_TITLE_STOPS,
+ * horizontal 90deg like the CLI title). --accent points at the middle pink stop
+ * (#E93A6B): the only saturated stop with usable white-text contrast on both
+ * themes (yellow #FFB02E and sky #2E9BFF fail as text accents on light/dark).
  * This file loads AFTER `@web2bizz/ui/styles.css`, so these `:root`/`.dark`
  * rules win over the library defaults by source order (same specificity).
  * `--primary` / `--ring` / `--sidebar-primary` in the library are defined as
  * `var(--accent)` aliases, so re-pointing `--accent` re-themes
  * `border-primary`, `Card variant=brand` accents, focus rings, etc. */
 :root {
-  --brand-1: #ff2a7a;
-  --brand-2: #ff5e62;
-  --brand-3: #ff9966;
+  --brand-1: #ffb02e;
+  --brand-2: #ff4a2d;
+  --brand-3: #e93a6b;
+  --brand-4: #8b3dff;
+  --brand-5: #2e9bff;
 
-  --accent: var(--brand-1);
+  --accent: var(--brand-3);
   --accent-secondary: var(--brand-2);
   --on-accent: #ffffff;
 
   --gradient-brand: linear-gradient(
-    135deg,
+    90deg,
     var(--brand-1) 0%,
-    var(--brand-2) 50%,
-    var(--brand-3) 100%
+    var(--brand-2) 25%,
+    var(--brand-3) 50%,
+    var(--brand-4) 75%,
+    var(--brand-5) 100%
   );
   --gradient-brand-primary: var(--gradient-brand);
-  --gradient-accent-soft-start: rgb(255 42 122 / 0.14);
-  --gradient-accent-soft-end: rgb(255 153 102 / 0.2);
+  --gradient-accent-soft-start: rgb(233 58 107 / 0.14);
+  --gradient-accent-soft-end: rgb(46 155 255 / 0.2);
 
-  --shadow-glow-line-color-accent: rgb(255 42 122 / 0.3);
-  --shadow-glow-blur-color-accent: rgb(255 42 122 / 0.2);
-  --glow-accent-16: rgb(255 42 122 / 0.16);
+  --shadow-glow-line-color-accent: rgb(233 58 107 / 0.3);
+  --shadow-glow-blur-color-accent: rgb(233 58 107 / 0.2);
+  --glow-accent-16: rgb(233 58 107 / 0.16);
 
   /* Затемнение под мобильным drawer (`.app-sidebar-overlay`) — scrim. */
   --overlay-scrim: rgb(0 0 0 / 0.5);
 
-  --shadow-brand-glow: 0 8px 12px rgb(255 42 122 / 0.25);
-  --filter-logo-glow: drop-shadow(0 8px 12px rgb(255 42 122 / 0.25));
+  --shadow-brand-glow: 0 8px 12px rgb(233 58 107 / 0.25);
+  --filter-logo-glow: drop-shadow(0 8px 12px rgb(233 58 107 / 0.25));
 }
 
 .dark {
-  --brand-1: #ff2a7a;
-  --brand-2: #ff5e62;
-  --brand-3: #ff9966;
+  --brand-1: #ffb02e;
+  --brand-2: #ff4a2d;
+  --brand-3: #e93a6b;
+  --brand-4: #8b3dff;
+  --brand-5: #2e9bff;
 
-  --accent: var(--brand-1);
+  --accent: var(--brand-3);
   --accent-secondary: var(--brand-2);
   --on-accent: #ffffff;
 
   --gradient-brand: linear-gradient(
-    135deg,
+    90deg,
     var(--brand-1) 0%,
-    var(--brand-2) 50%,
-    var(--brand-3) 100%
+    var(--brand-2) 25%,
+    var(--brand-3) 50%,
+    var(--brand-4) 75%,
+    var(--brand-5) 100%
   );
   --gradient-brand-primary: var(--gradient-brand);
-  --gradient-accent-soft-start: rgb(255 42 122 / 0.22);
-  --gradient-accent-soft-end: rgb(255 153 102 / 0.28);
+  --gradient-accent-soft-start: rgb(233 58 107 / 0.22);
+  --gradient-accent-soft-end: rgb(46 155 255 / 0.28);
 
-  --shadow-glow-line-color-accent: rgb(255 42 122 / 0.45);
-  --shadow-glow-blur-color-accent: rgb(255 42 122 / 0.3);
-  --glow-accent-16: rgb(255 42 122 / 0.24);
+  --shadow-glow-line-color-accent: rgb(233 58 107 / 0.45);
+  --shadow-glow-blur-color-accent: rgb(233 58 107 / 0.3);
+  --glow-accent-16: rgb(233 58 107 / 0.24);
 
-  --shadow-brand-glow: 0 8px 24px rgb(255 42 122 / 0.45);
-  --filter-logo-glow: drop-shadow(0 8px 16px rgb(255 42 122 / 0.45));
+  --shadow-brand-glow: 0 8px 24px rgb(233 58 107 / 0.45);
+  --filter-logo-glow: drop-shadow(0 8px 16px rgb(233 58 107 / 0.45));
 }
 
 /* ---- Brand utilities (semantic refs only, no hex) ---- */

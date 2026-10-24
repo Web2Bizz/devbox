@@ -1,19 +1,19 @@
 import { Injectable, OnModuleInit, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { validateEnv, type AppEnv } from '../env.js';
-import { AppLogger } from '../common/app-logger.service.js';
-import { ExternalClient } from '../common/external/external-client.js';
+import { validateEnv, type AppEnv } from '../env';
+import { AppLogger } from '../common/app-logger.service';
+import { ExternalClient } from '../common/external/external-client';
 import {
   ExternalServiceError,
   fromStatus,
   fromUnknown,
-} from '../common/external/external-error.js';
-import { withRetry } from '../common/external/retry.js';
+} from '../common/external/external-error';
+import { withRetry } from '../common/external/retry';
 import {
   dockerRegistryAuthHeaders,
   resolveDockerRegistryConfig,
   type DockerRegistryConfig,
-} from './docker-registry.config.js';
+} from './docker-registry.config';
 
 export type DockerRegistryStatus = 'up' | 'down' | 'skipped';
 

@@ -24,7 +24,7 @@ process.env.OPENCODE_URL = "http://127.0.0.1:9";
 
 async function main(): Promise<void> {
   const { resolveTestDb, applyTestMigrations } =
-    await import("../db/e2e-db.js");
+    await import("../db/e2e-db");
   const testDb = await resolveTestDb(
     process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL ?? "",
   );
@@ -46,13 +46,13 @@ async function main(): Promise<void> {
   // suite never touches the developer's real jail. Set before app boot
   // (WorkspacePathService reads process.env per call; env validation runs
   // at NestFactory.create).
-  const reposRoot = await mkdtemp(path.join(tmpdir(), "devbox-repos-e2e-"));
+  const reposRoot = await mkdtemp(path.join(tmpdir(), "rush-code-repos-e2e-"));
   process.env.REPOS_ROOT = reposRoot;
   console.log(`[projects e2e] REPOS_ROOT: ${reposRoot}`);
 
   const { NestFactory } = await import("@nestjs/core");
-  const { AppModule } = await import("../app.module.js");
-  const { configureApp } = await import("../app.setup.js");
+  const { AppModule } = await import("../app.module");
+  const { configureApp } = await import("../app.setup");
 
   const app = await NestFactory.create(AppModule, { logger: false });
   configureApp(app);
@@ -130,7 +130,7 @@ async function main(): Promise<void> {
       });
     } else {
       // Live PG — full CRUD suite (tables migrated + cleared above).
-      const { ProjectsService } = await import("./projects.service.js");
+      const { ProjectsService } = await import("./projects.service");
       const registry = app.get(ProjectsService, { strict: false }) as {
         clearAllForTests: () => Promise<void>;
       };
@@ -159,9 +159,9 @@ async function main(): Promise<void> {
 
       await check("POST initializes a valid git repo on disk", async () => {
         const { WorkspacePathService } =
-          await import("../workspaces/workspace-path.service.js");
-        const { SYSTEM_OWNER_UUID } = await import("./projects.service.js");
-        const { isValidGitRepo } = await import("../repos/repos-git.util.js");
+          await import("../workspaces/workspace-path.service");
+        const { SYSTEM_OWNER_UUID } = await import("./projects.service");
+        const { isValidGitRepo } = await import("../repos/repos-git.util");
         const paths = new WorkspacePathService();
         // No ownerId → SYSTEM_OWNER_UUID home (same mapping as ProjectsService).
         const resolved = await paths.resolveUser(SYSTEM_OWNER_UUID, projectId);
@@ -192,8 +192,8 @@ async function main(): Promise<void> {
 
       await check("missing repo dir → GET/list report corrupted:true", async () => {
         const { WorkspacePathService } =
-          await import("../workspaces/workspace-path.service.js");
-        const { SYSTEM_OWNER_UUID } = await import("./projects.service.js");
+          await import("../workspaces/workspace-path.service");
+        const { SYSTEM_OWNER_UUID } = await import("./projects.service");
         const paths = new WorkspacePathService();
         const resolved = await paths.resolveUser(SYSTEM_OWNER_UUID, projectId);
         await rm(resolved.absRepo, { recursive: true, force: true });
@@ -356,8 +356,8 @@ async function main(): Promise<void> {
         const probe = (await readJson(res)) as { id?: string };
         const probeId = probe.id as string;
         const { WorkspacePathService } =
-          await import("../workspaces/workspace-path.service.js");
-        const { SYSTEM_OWNER_UUID } = await import("./projects.service.js");
+          await import("../workspaces/workspace-path.service");
+        const { SYSTEM_OWNER_UUID } = await import("./projects.service");
         const paths = new WorkspacePathService();
         const resolved = await paths.resolveUser(SYSTEM_OWNER_UUID, probeId);
         assert.equal((await stat(resolved.absRepo)).isDirectory(), true);
@@ -382,7 +382,7 @@ async function main(): Promise<void> {
     // Best-effort cleanup of the isolated tmp jail (never masks results).
     try {
       const root = process.env.REPOS_ROOT ?? "";
-      if (root.includes("devbox-repos-e2e-")) {
+      if (root.includes("rush-code-repos-e2e-")) {
         await rm(root, { recursive: true, force: true });
       }
     } catch {

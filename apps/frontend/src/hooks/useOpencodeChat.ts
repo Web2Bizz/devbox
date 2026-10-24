@@ -9,7 +9,7 @@ type MessagesData = NonNullable<
 >;
 export type OpencodeChatMessage = MessagesData[number];
 
-export interface UseOpencodeChatResult {
+export type UseOpencodeChatResult = {
   messages: OpencodeChatMessage[];
   loading: boolean;
   sending: boolean;
@@ -17,7 +17,7 @@ export interface UseOpencodeChatResult {
   isEmpty: boolean;
   send: (text: string) => Promise<void>;
   reload: () => void;
-}
+};
 
 /**
  * Session messages + send through the backend reverse-proxy (same sdk).

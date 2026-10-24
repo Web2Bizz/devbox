@@ -3,7 +3,7 @@
  * Cookie-only approach: flat URLs (/login, /projects, …) stay untouched,
  * no `[locale]` segment, no middleware rewrite. Default locale `en`.
  */
-export interface Dictionary {
+export type Dictionary = {
   metadata: {
     title: string;
     description: string;
@@ -143,13 +143,40 @@ export interface Dictionary {
     subtitle: string;
     savedTitle: string;
     savedDesc: string;
+    overviewTitle: string;
+    overviewDesc: string;
+    editTitle: string;
+    editDesc: string;
     nameLabel: string;
     emailLabel: string;
+    emailReadOnlyHint: string;
     namePlaceholder: string;
     saveChanges: string;
     saving: string;
     reset: string;
     sincePrefix: string;
+  };
+  limits: {
+    title: string;
+    desc: string;
+    rolling: string;
+    daily: string;
+    weekly: string;
+    monthly: string;
+    empty: string;
+    hint: string;
+    invalidTitle: string;
+    invalidDesc: string;
+    addKey: string;
+    dialogTitle: string;
+    dialogDesc: string;
+    keyLabel: string;
+    keyPlaceholder: string;
+    keyHint: string;
+    save: string;
+    saving: string;
+    required: string;
+    tooShort: string;
   };
   aiProviders: {
     titleA: string;
@@ -272,12 +299,15 @@ export interface Dictionary {
     };
     inviteTitle: string;
     inviteDesc: string;
+    inviteEmailPlaceholder: string;
     mintInvite: string;
     minting: string;
     copyLink: string;
     inviteAccepted: string;
     inviteAcceptedDesc: string;
+    /** @deprecated Links never expire — kept one release for callers. */
     inviteExpired: string;
+    /** @deprecated Links never expire — kept one release for callers. */
     inviteExpiredDesc: string;
     inviteReplay: string;
     inviteReplayDesc: string;
@@ -322,4 +352,4 @@ export interface Dictionary {
     notFoundDesc: string;
     back: string;
   };
-}
+};

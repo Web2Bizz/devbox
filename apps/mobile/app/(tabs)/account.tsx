@@ -2,7 +2,7 @@ import { View, Text, TouchableOpacity, ScrollView, StyleSheet, useColorScheme, A
 import { Ionicons } from "@expo/vector-icons"
 import { useTranslation } from "react-i18next"
 import { router } from "expo-router"
-import { useConnections } from "../../src/stores/connections"
+import { useConnections } from "@/stores/connections"
 import { layout } from "@web2bizz/ui-native"
 
 export default function AccountScreen() {

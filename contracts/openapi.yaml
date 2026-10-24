@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: Devbox opencode proxy API
+  title: Rush Code opencode proxy API
   version: 0.1.0
   description: >-
     Thin proxy layer between frontend clients and the live opencode server.
@@ -821,18 +821,48 @@ paths:
                 $ref: '#/components/schemas/ApiError'
         '429':
           description: upstream rate limit (code EXTERNAL_RATE_LIMITED, retry later)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '502':
+          description: upstream server error passthrough (code EXTERNAL_UPSTREAM_5XX, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '503':
           description: upstream unavailable or shape mismatch (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '504':
-          description: upstream timeout (code EXTERNAL_TIMEOUT)
+          description: upstream timeout (code EXTERNAL_TIMEOUT, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
           content:
             application/json:
               schema:
@@ -970,7 +1000,7 @@ paths:
                 $ref: '#/components/schemas/ApiError'
   /api/v1/organizations/invites/accept:
     post:
-      summary: Accept a single-use invite token (caller joins the org)
+      summary: Accept a persistent single-use invite (uuidv7, no TTL, caller joins the org)
       operationId: acceptOrganizationInviteV1
       security:
         - bearerAuth: []
@@ -994,19 +1024,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '404':
-          description: invite not found or already used (also unknown org/user)
+          description: invite not found or already used (also unknown org/user, email mismatch)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '409':
           description: already a member, or org already has a maintainer
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '410':
-          description: invite expired (ORG_INVITE_TTL_SEC window passed)
           content:
             application/json:
               schema:
@@ -1383,7 +1407,7 @@ paths:
                 $ref: '#/components/schemas/ApiError'
   /api/v1/organizations/{id}/invites:
     post:
-      summary: Mint a single-use invite token (maintainer only, TTL ORG_INVITE_TTL_SEC)
+      summary: Mint a persistent single-use invite (maintainer only, uuidv7, no TTL)
       operationId: createOrganizationInviteV1
       security:
         - bearerAuth: []
@@ -2420,6 +2444,7 @@ components:
       properties:
         status:
           type: string
+          enum: [ok]
           example: ok
         db:
           type: string
@@ -2682,7 +2707,7 @@ components:
           example: Lovelace
         email:
           type: string
-          example: ada@devbox.local
+          example: ada@rush-code.local
         provider:
           type: string
           enum: [local, sso-oauth, github-app]
@@ -2752,8 +2777,8 @@ components:
           format: date-time
     OpencodeUsage:
       type: object
-      required: [balance, usage, updatedAt]
-      description: Live upstream balance+usage (updatedAt = upstream response time, no cache).
+      required: [updatedAt]
+      description: Live Zen Go usage (https://opencode.ai/zen/go/v1/usage — percent windows mapped to used/limit 100; rolling is the 5h window). Legacy balance/usage are optional (old payloads only). Optional rolling/daily/weekly/monthly pass through only when upstream carries finite numbers — never derived.
       properties:
         balance:
           type: number
@@ -2764,6 +2789,25 @@ components:
         updatedAt:
           type: string
           format: date-time
+        rolling:
+          $ref: '#/components/schemas/OpencodeLimitBucket'
+        daily:
+          $ref: '#/components/schemas/OpencodeLimitBucket'
+        weekly:
+          $ref: '#/components/schemas/OpencodeLimitBucket'
+        monthly:
+          $ref: '#/components/schemas/OpencodeLimitBucket'
+    OpencodeLimitBucket:
+      type: object
+      required: [used, limit]
+      description: Real used/limit pair from upstream (no derivation from totals).
+      properties:
+        used:
+          type: number
+          example: 12.5
+        limit:
+          type: number
+          example: 100
     AuthRegister:
       type: object
       required: [firstName, lastName, email, password]
@@ -2776,7 +2820,7 @@ components:
           example: Lovelace
         email:
           type: string
-          example: ada@devbox.local
+          example: ada@rush-code.local
         password:
           type: string
           minLength: 8
@@ -2786,7 +2830,7 @@ components:
       properties:
         email:
           type: string
-          example: ada@devbox.local
+          example: ada@rush-code.local
         password:
           type: string
           minLength: 8
@@ -2843,6 +2887,8 @@ components:
           type: string
           nullable: true
           description: "Machine reason when corrupted (missing-dir, no-git, rev-parse-failed, fsck-failed, timeout, storage-unconfigured, …). storage-unconfigured = REPOS_ROOT empty (required for project writes; fallback chain is readonly-registry only)"
+        scope:
+          $ref: '#/components/schemas/ProjectScope'
     CreateProject:
       type: object
       required: [name]
@@ -2961,10 +3007,10 @@ components:
           example: acme
         name:
           type: string
-          example: devbox-backend
+          example: rush-code-backend
         fullName:
           type: string
-          example: acme/devbox-backend
+          example: acme/rush-code-backend
         private:
           type: boolean
         defaultBranch:
@@ -2972,14 +3018,14 @@ components:
           example: main
         url:
           type: string
-          example: https://github.com/acme/devbox-backend
+          example: https://github.com/acme/rush-code-backend
     GithubInstallUrl:
       type: object
       required: [url]
       properties:
         url:
           type: string
-          example: https://github.com/apps/devbox/installations/new
+          example: https://github.com/apps/rush-code/installations/new
     GithubCallbackResult:
       type: object
       required: [ok, installationId]
@@ -3129,17 +3175,23 @@ components:
           $ref: '#/components/schemas/OrgRole'
     OrganizationInvite:
       type: object
-      required: [token, orgId, role, expiresAt]
-      description: single-use bearer token (returned ONCE, never logged; TTL ORG_INVITE_TTL_SEC, default 24h)
+      required: [token, orgId, role, createdAt]
+      description: persistent single-use uuidv7 invite (returned ONCE, never logged; no TTL — links never expire)
       properties:
         token:
           type: string
+          format: uuid
+          description: uuidv7 invite token (link material, single-use)
         orgId:
           type: string
           format: uuid
+        email:
+          type: string
+          nullable: true
+          description: bound email (lowercased) or null for open link-invites
         role:
           $ref: '#/components/schemas/OrgRole'
-        expiresAt:
+        createdAt:
           type: string
           format: date-time
     CreateInvite:
@@ -3148,12 +3200,18 @@ components:
         role:
           $ref: '#/components/schemas/OrgRole'
           default: user
+        email:
+          type: string
+          format: email
+          description: bound email for email-invites; absent = open link-invite
     AcceptInvite:
       type: object
       required: [token]
       properties:
         token:
           type: string
+          format: uuid
+          description: uuidv7 invite token
 # Proxy mapping (backend node:http → opencode server):
 #   GET  /api/v1/session       → GET  {OPENCODE_SERVER_URL}/session
 #   GET  /api/v1/messages?s=…  → GET  {OPENCODE_SERVER_URL}/messages?sessionId=…

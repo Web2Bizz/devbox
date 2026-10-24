@@ -21,12 +21,12 @@ import {
   FieldLabel,
   Input,
 } from '@web2bizz/ui/components';
-import { ApiClientError, api } from '../../../src/api/client';
-import { parseRegisterFieldErrors } from '../../../src/lib/register-field-errors';
-import { loginSchema, registerSchema, type LoginInput, type RegisterInput } from '../../../src/lib/auth-schemas';
-import { setSession } from '../../../src/lib/auth-store';
-import { formatApiError } from '../../../src/lib/format-error';
-import { useI18n } from '../../../src/i18n';
+import { ApiClientError, api } from '@/api/client';
+import { parseRegisterFieldErrors } from '@/lib/register-field-errors';
+import { loginSchema, registerSchema, type LoginInput, type RegisterInput } from '@/lib/auth-schemas';
+import { setSession } from '@/lib/auth-store';
+import { formatApiError } from '@/lib/format-error';
+import { useI18n } from '@/i18n';
 
 function LoginForm({ onSuccess }: { onSuccess: () => void }) {
   const { t } = useI18n();
@@ -169,11 +169,11 @@ export default function LoginPage() {
   const { t } = useI18n();
   const [mode, setMode] = useState<'login' | 'register'>('login');
   // Единый onSuccess для LoginForm и RegisterForm: setSession уже синхронно
-  // проштамповал клиентский `devbox-auth` (см. setAuthMarker), поэтому guard
-  // middleware.ts (`devbox-auth=1`) пропустит /projects без bounce в /login.
+  // проштамповал клиентский `rush-code-auth` (см. setAuthMarker), поэтому guard
+  // proxy.ts (`rush-code-auth=1`) пропустит /projects без bounce в /login.
   // Раньше был голый router.push: маркер ставил только backend Set-Cookie,
   // который на кросс-портовом dev (:3001 → :3000, SameSite=Lax) остаётся на
-  // origin'е API — middleware маркера не видел и отбивал /projects → /login.
+  // origin'е API — proxy маркера не видел и отбивал /projects → /login.
   // replace (без записи /login в history) + refresh (перепрогон guard'а со
   // свежей кукой); если router кинул — полный переход через location.
   const onSuccess = () => {

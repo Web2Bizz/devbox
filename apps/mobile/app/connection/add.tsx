@@ -14,17 +14,17 @@ import {
 import { router } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
 import { useTranslation } from "react-i18next"
-import { useConnections } from "../../src/stores/connections"
-import type { ConnectionType } from "../../src/lib/types"
-import { probeConnection, shareReport } from "../../src/lib/diagnostics"
-import { parseUrl } from "../../src/lib/diagnostics-classify"
-import { buildAuth } from "../../src/lib/auth"
-import { submitWaitlistSignup, buildWaitlistMailtoUrl, needsManualEscapeHatch, type QueuedSignup } from "../../src/lib/waitlist"
-import { flushPendingSignups, queuePendingSignup, readPendingSignups, dropPendingSignup } from "../../src/lib/waitlist-queue-storage"
-import { HARDCODED_SERVER_URL } from "../../src/lib/server-config"
-import { buildManualLanUrl } from "../../src/lib/lan-manual"
+import { useConnections } from "@/stores/connections"
+import type { ConnectionType } from "@/utils/types"
+import { probeConnection, shareReport } from "@/utils/diagnostics"
+import { parseUrl } from "@/utils/diagnostics-classify"
+import { buildAuth } from "@/utils/auth"
+import { submitWaitlistSignup, buildWaitlistMailtoUrl, needsManualEscapeHatch, type QueuedSignup } from "@/utils/waitlist"
+import { flushPendingSignups, queuePendingSignup, readPendingSignups, dropPendingSignup } from "@/utils/waitlist-queue-storage"
+import { HARDCODED_SERVER_URL } from "@/utils/server-config"
+import { buildManualLanUrl } from "@/utils/lan-manual"
 import { colors } from "@web2bizz/ui-native"
-import { APP_VERSION } from "../../src/lib/app-version"
+import { APP_VERSION } from "@/utils/app-version"
 
 export default function AddConnectionScreen() {
   const colorScheme = useColorScheme()
@@ -370,7 +370,7 @@ export default function AddConnectionScreen() {
           </Text>
         </View>
 
-        {/* DevBox Connect — Coming Soon */}
+        {/* Rush Code Connect — Coming Soon */}
         <View style={[styles.connectCard, isDark && styles.connectCardDark]}>
           <View style={styles.connectCardHeader}>
             <Ionicons name="cloud-done-outline" size={28} color={colors.accent} />

@@ -30,10 +30,10 @@ import type {
   SessionShellData,
   SessionUpdateData,
 } from '@opencode-ai/sdk';
-import { OpencodeSdkClient } from './opencode-client.js';
-import { OpencodeService } from './opencode.service.js';
-import { AppLogger } from '../common/app-logger.service.js';
-import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
+import { OpencodeSdkClient } from './opencode-client';
+import { OpencodeService } from './opencode.service';
+import { AppLogger } from '../common/app-logger.service';
+import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import {
   ApiErrorDto,
   opencodeCommandSchema,
@@ -46,8 +46,8 @@ import {
   type OpencodePromptInput,
   type OpencodeSessionUpdateInput,
   type OpencodeShellInput,
-} from '../api/dto.js';
-import { fromUnknown } from '../common/external/external-error.js';
+} from '../api/dto';
+import { fromUnknown } from '../common/external/external-error';
 
 /** Upstream cursor headers passed through on GET message lists (when present). */
 const CURSOR_PASSTHROUGH_HEADERS = ['x-next-cursor', 'link'] as const;

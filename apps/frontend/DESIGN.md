@@ -1,4 +1,4 @@
-# DevBox Frontend — DESIGN
+# Rush Code Frontend — DESIGN
 
 Дизайн-договорённости `apps/frontend` (Next 16.3 Turbopack + `@web2bizz/ui`
 0.26.0). Подробности у кита: `node_modules/@web2bizz/ui/AGENTS.md`,
@@ -13,7 +13,7 @@
 
 `globals.css` грузится ПОЗЖЕ, поэтому его `:root` / `.dark` выигрывают
 у дефолтов кита при равной специфичности (source order). Порядок менять
-нельзя: бренд-токены (`--accent` → `--brand-1`) зависят от него.
+нельзя: бренд-токены (`--accent` → `--brand-3`) зависят от него.
 
 ## 2. Токены
 
@@ -42,10 +42,39 @@ Header кита (`shape=rounded`, default `sharp`!) несёт `sm:rounded-xl` �
 
 ### Бренд (единственное место с hex — `:root` / `.dark` в `globals.css`)
 
-Лого-палитра `#FF2A7A → #FF5E62 → #FF9966` живёт только в
-`--brand-1/2/3`. Всё остальное ссылается семантически:
-`--accent: var(--brand-1)`, `--gradient-brand`, `--filter-logo-glow`,
+Бренд-шкала CLI (5 стопов, horizontal 90deg — как заголовок CLI,
+`apps/cli/src/ui/screens/home/constants.ts` `HOME_TITLE_STOPS`)
+живёт только в `--brand-1..5`. Всё остальное ссылается семантически:
+`--accent: var(--brand-3)`, `--gradient-brand`, `--filter-logo-glow`,
 утилиты `.text-gradient-brand` / `.logo-glow` / `.shadow-brand-glow`.
+
+| Токен                | Значение              | Роль                                                        |
+| -------------------- | --------------------- | ----------------------------------------------------------- |
+| `--brand-1`          | `#FFB02E`             | градиент, стоп 0% (жёлто-оранжевый)                         |
+| `--brand-2`          | `#FF4A2D`             | градиент, стоп 25% (красно-оранжевый) + `--accent-secondary`|
+| `--brand-3`          | `#E93A6B`             | градиент, стоп 50% (розовый) + `--accent` (primary)         |
+| `--brand-4`          | `#8B3DFF`             | градиент, стоп 75% (фиолетовый)                             |
+| `--brand-5`          | `#2E9BFF`             | градиент, стоп 100% (сине-голубой)                          |
+| `--gradient-brand`   | `linear-gradient(90deg, 5 стопов)` | бренд-градиент (текст, кнопки `primaryBrand`)   |
+| `--filter-logo-glow` | `drop-shadow(... rgb(233 58 107 / 0.25))` | свечение логотипа (dark: `/ 0.45`)     |
+
+Primary = `--brand-3` `#E93A6B` (средний розовый стоп): единственный
+насыщенный стоп шкалы с пригодным контрастом белого текста и на светлом,
+и на тёмном (жёлтый `#FFB02E` на белом и голубой `#2E9BFF` на тёмном как
+текстовые акценты проваливаются; розовый — прямой наследник старого
+`#FF2A7A` по hue, узнаваемость бренда сохраняется).
+
+### Маппинг терминальных имён CLI → веб-hex
+
+CLI красит роли именами терминала (fg-only, фонов нет), веб — hex из
+бренд-шкалы / семантики. Таблица единственного соответствия:
+
+| CLI имя             | CLI код            | Веб-hex   | Источник веб-hex                          |
+| ------------------- | ------------------ | --------- | ----------------------------------------- |
+| `cyan` (user)       | `ESC[36m`          | `#2E9BFF`| `--brand-5` (голубой конец шкалы)         |
+| `green` (agent)     | `ESC[32m`          | `#22c55e`| semantic success (смысл сохранён, не бренд)|
+| `yellow` (header)   | `ESC[33m`          | `#FFB02E`| `--brand-1` (жёлтое начало шкалы)         |
+| `red` (error)       | `ESC[31m`          | `#ef4444`| semantic error (смысл сохранён, не бренд) |
 
 ### Оверлей / scrim
 
@@ -105,6 +134,7 @@ frontend. Новый компонент **не считается зарегис
 - `ChatWindow`
 - `CreateOrganizationDialog`
 - `CreateProjectDialog`
+- `OrganizationSwitcher`
 - `RunningSessionRow`
 - `RunningSessionsTab`
 - `SessionRow`
@@ -113,7 +143,12 @@ frontend. Новый компонент **не считается зарегис
 - `ProjectDetailSkeleton`
 - `ProjectsHeaderSkeleton`
 
-### 3.3 Инфраструктура (`src/i18n`, `src/providers`)
+### 3.3 Фичи (`src/features/`)
+
+- `ApiKeyDialog`
+- `UsageSection`
+
+### 3.4 Инфраструктура (`src/i18n`, `src/providers`)
 
 - `I18nProvider`
 - `Providers`
@@ -200,7 +235,7 @@ Header. Только `var()`-ссылки; hex — только в `:root` / `.d
 ## 6. Бренд
 
 `SidebarBrand` (`src/components/layout/Sidebar.tsx`: `Image`
-`/devbox-logo.png` 36 `priority` + `.logo-glow`, `DevBox` в
+`/rush-code-logo.png` 36 `priority` + `.logo-glow`, `Rush Code` в
 `.text-gradient-brand`, `t.nav.console`) — единый источник.
 
 - Header `leadingSlot`: `<SidebarBrand />` + (title/breadcrumbs, если есть).
@@ -228,7 +263,7 @@ Header. Только `var()`-ссылки; hex — только в `:root` / `.d
   `profile-dropdown.test.tsx`, ждёт патча кита).
 - Desktop `aside`: только `<SidebarNav />`, бренда нет.
 - Mobile drawer: свой `<SidebarBrand />`-фолбэк + кнопка закрытия.
-- i18n `en`/`ru` через `useI18n`, URL плоские (кука `devbox-locale`).
+- i18n `en`/`ru` через `useI18n`, URL плоские (кука `rush-code-locale`).
 
 ## 7. Плоский Content, без вложенных обводок
 
@@ -284,3 +319,4 @@ h2-строки + `Separator` + `Badge`).
 | 2026-10-11 | Из-за вставки реестра перенумерованы секции: правило радиусов §3 → §4 (запреты декора §3.1 → §4.1), структура шелла §4 → §5, бренд §5 → §6, плоский Content §6 → §7; внутренняя ссылка «§6 без исключений» → «§7» | Guard ожидает реестр в §3; нумерация держится сплошной без разрывов |
 | 2026-10-11 | Зафиксирован токен `--overlay-scrim: rgb(0 0 0 / 0.5)` (затемнение под мобильным drawer, `.app-sidebar-overlay`) в §2; объявление в `:root`/`globals.css` и замена литерала в коде — отдельная задача | Единственный оставшийся magic-color в `app/globals.css:355`; hex/rgba законны только внутри блока палитры `:root` / `.dark` |
 | 2026-10-11 | `I18nContext` НЕ внесён в реестр: это объект `createContext`, а не компонент; срабатывание guard на нём — известный false positive | Реестр описывает объявления компонентов; мусорные сущности в дизайн-документ не вносятся |
+| 2026-10-20 | usage переехал `src/components/usage/` → `src/features/usage/` без смены логики: `ApiKeyDialog` + `UsageSection` перенесены из §3.2 в новый §3.3 «Фичи», инфраструктура §3.3 → §3.4 | Первый фича-модуль; page `/profile` остаётся тонкой композицией `<UsageSection />` |

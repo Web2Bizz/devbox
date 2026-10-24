@@ -1,5 +1,5 @@
 import { Injectable, Logger, Optional, type LogLevel } from '@nestjs/common';
-import { validateEnv } from '../env.js';
+import { validateEnv } from '../env';
 
 export type AppLogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -56,11 +56,14 @@ const SECRET_KEYS = new Set([
   'jwtttl',
   'passwordhash',
   'password_hash',
-  // Per-user OpenCode keys: the server-side encryption secret plus the
-  // per-user API key field (PUT /api/v1/key body) must never reach
-  // logs (values scrubbed, keys redacted).
+  // Per-user OpenCode keys: the server-side encryption secret (+ the previous
+  // KEK while a rotation window is open) plus the per-user API key field
+  // (PUT /api/v1/key body) must never reach logs (values scrubbed, keys
+  // redacted). KEK version ids (key_id) are plaintext by design — not secrets.
   'opencodekeysencryptionkey',
   'opencode_keys_encryption_key',
+  'opencodekeysencryptionkeyprevious',
+  'opencode_keys_encryption_key_previous',
   'opencodekey',
   'opencode_key',
 ]);
@@ -96,6 +99,7 @@ function liveSecrets(): string[] {
     process.env.JWT_ACCESS_SECRET,
     process.env.JWT_REFRESH_SECRET,
     process.env.OPENCODE_KEYS_ENCRYPTION_KEY,
+    process.env.OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS,
   ]) {
     if (v && v.length >= 4) out.push(v);
   }
@@ -173,8 +177,12 @@ export function nestLogLevels(level: AppLogLevel = currentLevel()): LogLevel[] {
  *   default-param); the `[domain] event key=value` message prefix stays
  *   greppable and carries structured fields, never secrets.
  * - errors: `error(message, stack?, correlationId?)` — Nest-compatible
- *   `(message, stack, context)` shape; stacks are sanitized (URL credentials
- *   masked, live secrets scrubbed) before reaching the underlying Logger.
+ *   `(message, stack, context)` shape, but stacks NEVER reach the error
+ *   level: normal-path warn/error stay one-liners (`[module] op status code`,
+ *   no `\n at `, no URL/body/Bearer). When a stack-looking second/third arg
+ *   is passed it is sanitized (URL credentials masked, live secrets
+ *   scrubbed, truncated) and emitted at debug only, so diagnostics stay
+ *   available without spamming normal logs.
  * - requests: pass `correlationId` (or `withCorrelationId(cid)` for a bound
  *   logger) so every line of one request shares `[cid]`.
  * - secrets: known secret keys redacted, URL credentials masked,
@@ -221,11 +229,20 @@ export class AppLogger extends Logger {
     const stack = secondLooksLikeStack ? stackOrCorrelationId : undefined;
     const cid = secondLooksLikeStack ? correlationId : stackOrCorrelationId;
     const base = formatMessage(message, cid);
-    if (stack === undefined) {
-      super.error(base);
-      return;
+    if (stack !== undefined) {
+      // Normal path stays a one-liner without `\n at `: the stack is
+      // sanitized + truncated and emitted at debug only (never at error,
+      // never with URL/body/Bearer — sanitizeString masks credentials and
+      // scrubs live secrets the same way as the message path).
+      try {
+        if (isEnabled('debug')) {
+          super.debug(`${base} stack=${sanitizeString(String(stack)).slice(0, 2000)}`);
+        }
+      } catch {
+        // Diagnostics must never break the error line.
+      }
     }
-    super.error(base, sanitizeString(String(stack)).slice(0, 2000));
+    super.error(base);
   }
 
   /** Lowest-volume diagnostics (per-attempt traces, payloads summaries). */

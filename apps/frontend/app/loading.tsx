@@ -1,7 +1,7 @@
 'use client';
 
 import { Skeleton } from '@web2bizz/ui/components';
-import { useI18n } from '../src/i18n';
+import { useI18n } from '@/i18n';
 
 export default function RootLoading() {
   const { t } = useI18n();

@@ -1,7 +1,15 @@
 import { z } from 'zod';
 
 /**
- * Organization-name validation — mirrors backend (name required) + UX trim.
+ * Organization-name validation — UX-strict superset of the wire contract.
+ *
+ * Wire source of truth is `@rush-code/contracts` (`createOrganizationSchema`:
+ * backend-verbatim 1..200, no trim). This local schema stays intentionally
+ * STRICTER (trim + 2..100 + i18n codes `org_name_*` mapped in
+ * CreateOrganizationDialog) — replacing it with the package schema would
+ * LOOSEN form validation and break the dialog error mapping. Wire shape is
+ * frozen, so the local form schema must remain a subset of what the wire
+ * accepts.
  * Org names are free-form (any visible chars), only length-checked 2..100.
  */
 export const createOrganizationSchema = z.object({

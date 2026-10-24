@@ -4,14 +4,14 @@
 declare module "@expo/vector-icons" {
   import type { TextProps } from "react-native"
 
-  interface IconProps extends TextProps {
+  type IconProps = TextProps & {
     name: string
     size?: number
     color?: string
     style?: any
   }
 
-  interface IconComponent extends React.FC<IconProps> {
+  type IconComponent = React.FC<IconProps> & {
     glyphMap: Record<string, number>
   }
 

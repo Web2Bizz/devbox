@@ -1,51 +1,26 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { z } from 'zod';
 
 /**
- * Projects DTO — zod@4 source of truth, swagger DTOs for parity
- * with contracts/openapi.yaml. Runtime validation via ZodValidationPipe.
+ * Projects DTO — single source of truth is @rush-code/contracts (verbatim
+ * regexes, min/max + error strings, partial-update derivation, link
+ * default). Swagger DTO classes below stay as thin @nestjs/swagger
+ * wrappers for contracts/openapi.yaml parity.
+ * Runtime validation via ZodValidationPipe.
  */
-
-const ownerSchema = z
-  .string()
-  .regex(/^[A-Za-z0-9_.-]+$/, { error: 'githubOwner has invalid format' })
-  .max(100);
-const repoSchema = z
-  .string()
-  .regex(/^[A-Za-z0-9_.-]+$/, { error: 'githubRepo has invalid format' })
-  .max(100);
-const branchSchema = z
-  .string()
-  .regex(/^[A-Za-z0-9_./-]+$/, { error: 'githubBranch has invalid format' })
-  .max(100);
-
-export const createProjectSchema = z.object({
-  name: z.string({ error: 'Field "name" is required' }).min(1).max(200),
-  description: z.string().max(2000).optional(),
-  githubOwner: ownerSchema.optional(),
-  githubRepo: repoSchema.optional(),
-  githubBranch: branchSchema.optional(),
-  githubUrl: z.string().max(500).optional(),
-  ownerId: z.string().max(200).optional(),
-});
-
-export const updateProjectSchema = createProjectSchema.partial();
-
-export const githubLinkSchema = z.object({
-  owner: ownerSchema,
-  repo: repoSchema,
-  branch: branchSchema.optional().default('main'),
-});
-
-export type CreateProjectInput = z.infer<typeof createProjectSchema>;
-export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
-export type GithubLinkInput = z.infer<typeof githubLinkSchema>;
+export {
+  createProjectSchema,
+  githubLinkSchema,
+  updateProjectSchema,
+  type CreateProjectInput,
+  type GithubLinkInput,
+  type UpdateProjectInput,
+} from '@rush-code/contracts';
 
 export class CreateProjectDto {
   @ApiProperty({ example: 'my-app' })
   name!: string;
 
-  @ApiProperty({ required: false, example: 'Devbox backend service' })
+  @ApiProperty({ required: false, example: 'Rush Code backend service' })
   description?: string;
 
   @ApiProperty({ required: false, example: 'acme' })

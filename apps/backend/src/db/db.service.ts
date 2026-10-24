@@ -3,9 +3,9 @@ import { ConfigService } from "@nestjs/config";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { sql } from "drizzle-orm";
 import { Pool } from "pg";
-import { validateEnv } from "../env.js";
-import { AppLogger } from "../common/app-logger.service.js";
-import { ExternalServiceError } from "../common/external/external-error.js";
+import { validateEnv } from "../env";
+import { AppLogger } from "../common/app-logger.service";
+import { ExternalServiceError } from "../common/external/external-error";
 
 export type DbClient = ReturnType<typeof drizzle>;
 

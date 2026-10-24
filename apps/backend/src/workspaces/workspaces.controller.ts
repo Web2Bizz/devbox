@@ -15,17 +15,17 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiHeader, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Inject, Optional, forwardRef } from '@nestjs/common';
-import { V1Endpoint } from '../api/version.js';
+import { V1Endpoint } from '../api/version';
 import {
   DEFAULT_MOCK_USER_ID as DEFAULT_WORKSPACE_USER_ID,
   resolveIdentityUserId as resolveUserId,
-} from '../auth/identity.service.js';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
-import { ReqUser } from '../auth/req-user.decorator.js';
-import type { RequestIdentity } from '../auth/identity.service.js';
-import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
-import { GithubInstallationsService } from '../projects/github/github-installations.service.js';
-import { CloneJobsRepository } from './clone-jobs.repository.js';
+} from '../auth/identity.service';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { ReqUser } from '../auth/req-user.decorator';
+import type { RequestIdentity } from '../auth/identity.service';
+import { ZodValidationPipe } from '../common/zod-validation.pipe';
+import { GithubInstallationsService } from '../projects/github/github-installations.service';
+import { CloneJobsRepository } from './clone-jobs.repository';
 import {
   CloneWorkspaceDto,
   WorkspaceCloneJobDto,
@@ -36,9 +36,9 @@ import {
   workspaceTreeQuerySchema,
   type CloneWorkspaceInput,
   type WorkspaceTreeQuery,
-} from './dto.js';
-import { WorkspaceCloneService } from './workspace-clone.service.js';
-import { WorkspacesService } from './workspaces.service.js';
+} from './dto';
+import { WorkspaceCloneService } from './workspace-clone.service';
+import { WorkspacesService } from './workspaces.service';
 
 /** MVP mock user key (single copy lives in auth/identity.service.ts). */
 export { DEFAULT_WORKSPACE_USER_ID };

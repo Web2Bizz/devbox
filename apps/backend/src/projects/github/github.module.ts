@@ -1,10 +1,10 @@
 import { Module, forwardRef } from "@nestjs/common";
-import { DbModule } from "../../db/db.module.js";
-import { ProjectsModule } from "../projects.module.js";
-import { GithubAppService } from "./github-app.service.js";
-import { GithubInstallationsService } from "./github-installations.service.js";
-import { GithubController } from "./github.controller.js";
-import { GithubService } from "./github.service.js";
+import { DbModule } from "../../db/db.module";
+import { ProjectsModule } from "../projects.module";
+import { GithubAppService } from "./github-app.service";
+import { GithubInstallationsService } from "./github-installations.service";
+import { GithubController } from "./github.controller";
+import { GithubService } from "./github.service";
 
 /**
  * Nested module — imported by ProjectsModule, never registered in AppModule directly.

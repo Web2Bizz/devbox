@@ -1,3 +1,3 @@
-export { Markdown } from "./Markdown"
-export { CodeBlock } from "./CodeBlock"
-export { CopyLink } from "./CopyLink"
+export * from "./code-block"
+export * from "./copy-link"
+export * from "./markdown"

@@ -4,21 +4,21 @@ import {
   DEFAULT_NPM_REGISTRY_SCOPE,
   validateEnv,
   type AppEnv,
-} from '../env.js';
-import { AppLogger } from '../common/app-logger.service.js';
-import { ExternalClient } from '../common/external/external-client.js';
+} from '../env';
+import { AppLogger } from '../common/app-logger.service';
+import { ExternalClient } from '../common/external/external-client';
 import {
   ExternalServiceError,
   fromStatus,
   fromUnknown,
-} from '../common/external/external-error.js';
-import { withRetry } from '../common/external/retry.js';
+} from '../common/external/external-error';
+import { withRetry } from '../common/external/retry';
 import {
   npmRegistryAuthHeaders,
   npmRegistryAuthMode,
   resolveNpmRegistryConfig,
   type NpmRegistryConfig,
-} from './npm-registry.config.js';
+} from './npm-registry.config';
 
 export type NpmRegistryStatus = 'up' | 'down' | 'skipped';
 

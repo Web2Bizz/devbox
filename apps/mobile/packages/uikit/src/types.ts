@@ -8,7 +8,7 @@
  * directly.
  */
 
-export interface Message {
+export type Message = {
   id: string
   sessionID: string
   role: "user" | "assistant"
@@ -34,7 +34,7 @@ export interface Message {
   finish?: string
 }
 
-export interface Part {
+export type Part = {
   id: string
   sessionID?: string
   messageID: string
@@ -77,13 +77,13 @@ export interface Part {
 // Message/Part above: values from the app store stay structurally
 // assignable, but uikit components never import ../../lib/*).
 
-export interface SessionSummary {
+export type SessionSummary = {
   additions: number
   deletions: number
   files: number
 }
 
-export interface Session {
+export type Session = {
   id: string
   title: string
   summary?: SessionSummary
@@ -94,12 +94,12 @@ export interface Session {
   }
 }
 
-export interface ProviderModel {
+export type ProviderModel = {
   id: string
   limit?: { context: number; output: number }
 }
 
-export interface Provider {
+export type Provider = {
   id: string
   models: ProviderModel[]
 }
@@ -107,7 +107,7 @@ export interface Provider {
 // --- Filesystem domain (mirrors src/lib/sdk.ts FileEntry and the FileRoot
 // shape for the fields the directory explorer reads).
 
-export interface FileEntry {
+export type FileEntry = {
   name: string
   path: string
   absolute: string
@@ -115,14 +115,14 @@ export interface FileEntry {
   ignored: boolean
 }
 
-export interface FileRoot {
+export type FileRoot = {
   path: string
   label: string
 }
 
 // Minimal structural client for the directory explorer: only the calls
 // DirectoryBrowserSheet makes. The app's full Client stays assignable.
-export interface DirectoryClient {
+export type DirectoryClient = {
   file: {
     list: (params: { path?: string }) => Promise<FileEntry[]>
     roots: () => Promise<FileRoot[] | null>

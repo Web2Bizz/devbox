@@ -18,19 +18,19 @@
  */
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
-import { AppLogger } from '../common/app-logger.service.js';
-import { ApiErrorFilter } from '../common/api-error.filter.js';
-import { ExternalClient } from '../common/external/external-client.js';
-import { ExternalServiceError } from '../common/external/external-error.js';
-import { computeBackoffDelay, withRetry } from '../common/external/retry.js';
+import { AppLogger } from '../common/app-logger.service';
+import { ApiErrorFilter } from '../common/api-error.filter';
+import { ExternalClient } from '../common/external/external-client';
+import { ExternalServiceError } from '../common/external/external-error';
+import { computeBackoffDelay, withRetry } from '../common/external/retry';
 import {
   hasNpmBasicPair,
   npmRegistryAuthHeaders,
   npmRegistryAuthMode,
   resolveNpmRegistryConfig,
-} from './npm-registry.config.js';
-import { NpmRegistryService } from './npm-registry.service.js';
-import { validateEnv } from '../env.js';
+} from './npm-registry.config';
+import { NpmRegistryService } from './npm-registry.service';
+import { validateEnv } from '../env';
 
 const SECRET_TOKEN = 'super-secret-npm-token-xyz-never-log';
 const SECRET_USER = 'super-secret-npm-user-never-log';

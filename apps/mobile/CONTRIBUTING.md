@@ -110,8 +110,8 @@ There is no auto-formatter enforced by CI yet (Prettier is configured but option
 
 Key conventions:
 - Components: functional, with typed props via TypeScript `interface`
-- State: Zustand stores in `src/stores/`
-- API calls: through the SDK client in `src/lib/`
+- State: Zustand stores in `src/shared/stores/`
+- API calls: through the SDK client in `src/shared/utils/`
 - Screens: file-based routing via Expo Router under `app/`
 
 ---

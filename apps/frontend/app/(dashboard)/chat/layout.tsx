@@ -1,11 +1,11 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { cookies } from 'next/headers';
-import { en } from '../../../src/i18n/dictionaries/en';
-import { ru } from '../../../src/i18n/dictionaries/ru';
+import { en } from '@/i18n/dictionaries/en';
+import { ru } from '@/i18n/dictionaries/ru';
 
 /**
- * Segment metadata for /chat: localized via the `devbox-locale` cookie
+ * Segment metadata for /chat: localized via the `rush-code-locale` cookie
  * (same cookie-only approach as the root layout — flat URL stays `/chat`
  * in both languages, default `en`).
  */
@@ -13,7 +13,7 @@ export async function generateMetadata(): Promise<Metadata> {
   let locale: string | undefined;
   try {
     const store = await cookies();
-    locale = store.get('devbox-locale')?.value;
+    locale = store.get('rush-code-locale')?.value;
   } catch {
     locale = undefined;
   }

@@ -66,7 +66,7 @@ describe('Sidebar npm sub-link', () => {
   });
 
   test('ru locale renders Npm-пакеты link', async () => {
-    document.cookie = 'devbox-locale=ru; path=/';
+    document.cookie = 'rush-code-locale=ru; path=/';
     try {
       setup();
 
@@ -80,9 +80,9 @@ describe('Sidebar npm sub-link', () => {
       });
       expect(link.getAttribute('href')).toBe('/registry/npm');
     } finally {
-      document.cookie = 'devbox-locale=; path=/; max-age=0';
+      document.cookie = 'rush-code-locale=; path=/; max-age=0';
       try {
-        window.localStorage.removeItem('devbox-locale');
+        window.localStorage.removeItem('rush-code-locale');
       } catch {
         // private mode / blocked storage — ignore
       }

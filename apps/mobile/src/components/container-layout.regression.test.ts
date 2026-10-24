@@ -50,7 +50,7 @@ test("theme exposes tablet breakpoints and max-width layout tokens", () => {
 })
 
 test("Container accepts an optional centered maxWidth", () => {
-  const src = readPackageSource("Container.tsx")
+  const src = readPackageSource("components/container/index.tsx")
   assert.match(src, /maxWidth\?:\s*number/, "Container must accept maxWidth?: number")
   assert.match(src, /alignSelf:\s*"center"/, "maxWidth container must center via alignSelf")
   assert.doesNotMatch(src, /Не навязывает maxWidth/, "old maxWidth ban docstring must be gone")

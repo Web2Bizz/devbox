@@ -2,7 +2,7 @@
   "name": "frontend",
   "version": "0.1.0",
   "private": true,
-  "description": "Devbox frontend (Next.js App Router + React + TypeScript, migrated from Vite)",
+  "description": "Rush Code frontend (Next.js App Router + React + TypeScript, migrated from Vite)",
   "type": "module",
   "scripts": {
     "dev": "next dev --turbopack -p ${NEXT_PUBLIC_PORT:-3001}",
@@ -15,6 +15,7 @@
     "test": "bun test --isolate --pass-with-no-tests app src"
   },
   "dependencies": {
+    "@rush-code/contracts": "workspace:*",
     "@hookform/resolvers": "5.9.1",
     "@opencode-ai/sdk": "1.18.33",
     "@tanstack/react-query": "^5.104.1",

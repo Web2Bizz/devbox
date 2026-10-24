@@ -5,22 +5,22 @@ import { opencode, toErrorMessage } from '../api/opencode-client';
 import type { OpencodeEvent } from '../api/opencode-client';
 import { useI18n } from '../i18n';
 
-export interface ChatMessage {
+export type ChatMessage = {
   id: string;
   role: 'user' | 'assistant';
   text: string;
-}
+};
 
-export interface UseChatOptions {
+export type UseChatOptions = {
   /** Existing opencode session to scope the chat to (session = chat). */
   sessionId?: string;
   /** Opencode working directory, forwarded as `?directory=`. */
   directory?: string;
-  /** DevBox project id (prj-*) — UI-only until backend maps project → directory. */
+  /** Rush Code project id (prj-*) — UI-only until backend maps project → directory. */
   projectId?: string;
-}
+};
 
-export interface UseChatResult {
+export type UseChatResult = {
   messages: ChatMessage[];
   streamingText: string;
   loading: boolean;
@@ -32,7 +32,7 @@ export interface UseChatResult {
   send: (text: string) => Promise<void>;
   stop: () => void;
   reload: () => void;
-}
+};
 
 const BASE_DELAY_MS = 1000;
 const MAX_DELAY_MS = 15000;

@@ -69,7 +69,7 @@ function signWebhook(raw: string, secret: string): string {
 
 async function main(): Promise<void> {
   const { resolveTestDb, applyTestMigrations } =
-    await import("../../db/e2e-db.js");
+    await import("../../db/e2e-db");
   const testDb = await resolveTestDb(
     process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL ?? "",
   );
@@ -88,12 +88,12 @@ async function main(): Promise<void> {
   console.log(`[github e2e] db mode: ${testDb.mode}`);
 
   const { NestFactory } = await import("@nestjs/core");
-  const { AppModule } = await import("../../app.module.js");
-  const { configureApp } = await import("../../app.setup.js");
-  const { GithubAppService } = await import("./github-app.service.js");
+  const { AppModule } = await import("../../app.module");
+  const { configureApp } = await import("../../app.setup");
+  const { GithubAppService } = await import("./github-app.service");
   const { GithubInstallationsService } =
-    await import("./github-installations.service.js");
-  const { __setGithubFetchForTests } = await import("./github.service.js");
+    await import("./github-installations.service");
+  const { __setGithubFetchForTests } = await import("./github.service");
 
   let passed = 0;
   let failed = 0;
@@ -255,7 +255,7 @@ async function main(): Promise<void> {
   // --- Phase B: multi-tenant, no legacy fallback -----------------------------
   process.env.GITHUB_APP_ID = "123456";
   process.env.GITHUB_APP_PRIVATE_KEY = "test-key-not-real-never-logged";
-  process.env.GITHUB_APP_SLUG = "devbox-test-app";
+  process.env.GITHUB_APP_SLUG = "rush-code-test-app";
   const WEBHOOK_SECRET = "whsec_e2e_not_real";
   process.env.GITHUB_WEBHOOK_SECRET = WEBHOOK_SECRET;
 
@@ -317,7 +317,7 @@ async function main(): Promise<void> {
         const body = (await readJson(res)) as { url?: string };
         assert.equal(
           body.url,
-          "https://github.com/apps/devbox-test-app/installations/new",
+          "https://github.com/apps/rush-code-test-app/installations/new",
         );
       });
 

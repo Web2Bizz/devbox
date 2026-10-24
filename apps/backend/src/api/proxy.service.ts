@@ -4,11 +4,11 @@ import type {
   MessagesResponse,
   SendChatResponse,
   Session,
-} from '../contracts.js';
-import { OpencodeService } from '../opencode/opencode.service.js';
-import { AppLogger } from '../common/app-logger.service.js';
-import { ExternalClient } from '../common/external/external-client.js';
-import { fromStatus, fromUnknown } from '../common/external/external-error.js';
+} from '@rush-code/contracts';
+import { OpencodeService } from '../opencode/opencode.service';
+import { AppLogger } from '../common/app-logger.service';
+import { ExternalClient } from '../common/external/external-client';
+import { fromStatus, fromUnknown } from '../common/external/external-error';
 
 /**
  * ProxyService — forwards /api/v1/* to the opencode server.

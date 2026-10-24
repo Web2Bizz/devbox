@@ -1,13 +1,13 @@
 import { Controller, Get, Headers, Param, Query, UseGuards, UseInterceptors, Version } from '@nestjs/common';
 import { ApiBearerAuth, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../../auth/jwt-auth.guard.js';
-import { ReqUser } from '../../auth/req-user.decorator.js';
-import type { RequestIdentity } from '../../auth/identity.service.js';
-import { NoIndexInterceptor } from '../../common/noindex.interceptor.js';
-import { ZodValidationPipe } from '../../common/zod-validation.pipe.js';
-import { V1Endpoint } from '../../api/version.js';
-import { FileNodeDto, filesQuerySchema, type FilesQuery } from './dto.js';
-import { ProjectFilesService, type FileNode } from './project-files.service.js';
+import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
+import { ReqUser } from '../../auth/req-user.decorator';
+import type { RequestIdentity } from '../../auth/identity.service';
+import { NoIndexInterceptor } from '../../common/noindex.interceptor';
+import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { V1Endpoint } from '../../api/version';
+import { FileNodeDto, filesQuerySchema, type FilesQuery } from './dto';
+import { ProjectFilesService, type FileNode } from './project-files.service';
 
 /**
  * Readonly project file listing — Bearer-guarded (JwtAuthGuard, legacy

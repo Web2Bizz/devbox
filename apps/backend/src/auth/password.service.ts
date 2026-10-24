@@ -1,11 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { AppLogger } from '../common/app-logger.service.js';
+import { AppLogger } from '../common/app-logger.service';
 
 /** Minimal Bun.password shape (bun-native argon2id; no npm dependency). */
-interface BunPassword {
+type BunPassword = {
   hash: (password: string, options?: Record<string, unknown>) => Promise<string>;
   verify: (password: string, hash: string) => Promise<boolean>;
-}
+};
 
 function bunPassword(): BunPassword {
   const bun = (globalThis as unknown as { Bun?: { password?: BunPassword } }).Bun;

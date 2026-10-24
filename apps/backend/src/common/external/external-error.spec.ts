@@ -16,7 +16,7 @@ import {
   isRetryableStatus,
   isTimeoutError,
   timeoutError,
-} from './external-error.js';
+} from './external-error';
 
 const checks: Array<{ name: string; run: () => void }> = [
   {

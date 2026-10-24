@@ -10,14 +10,14 @@ export const GIT_PROBE_TIMEOUT_MS = 5000;
 
 export type GitInvalidReason = 'no-git' | 'rev-parse-failed' | 'fsck-failed' | 'timeout';
 
-export interface GitCheck {
+export type GitCheck = {
   ok: boolean;
   reason?: GitInvalidReason;
-}
+};
 
-interface WarnLogger {
+type WarnLogger = {
   warn(message: unknown): void;
-}
+};
 
 function isTimeout(err: unknown): boolean {
   const e = err as { killed?: boolean; signal?: string; code?: string | number };

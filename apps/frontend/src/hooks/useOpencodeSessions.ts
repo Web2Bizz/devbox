@@ -5,7 +5,7 @@ import { opencode, toErrorMessage } from '../api/opencode-client';
 import type { Session } from '@opencode-ai/sdk/client';
 import { useI18n } from '../i18n';
 
-export interface UseOpencodeSessionsResult {
+export type UseOpencodeSessionsResult = {
   sessions: Session[];
   loading: boolean;
   error: string | null;
@@ -15,7 +15,7 @@ export interface UseOpencodeSessionsResult {
   creating: boolean;
   abort: (id: string) => Promise<void>;
   abortingId: string | null;
-}
+};
 
 /**
  * Live session list through the backend reverse-proxy
@@ -24,7 +24,7 @@ export interface UseOpencodeSessionsResult {
  *
  * Scoping: pass `directory` (opencode working directory) to forward
  * `?directory=` on list/create/abort — the backend mirrors it 1:1 to the
- * upstream sdk query. DevBox `projectId` (prj-*) is UI-only here; the
+ * upstream sdk query. Rush Code `projectId` (prj-*) is UI-only here; the
  * server-side projectId → directory mapping lands later, so callers pass
  * `directory` explicitly when known (tabs) and omit it for the full list.
  */

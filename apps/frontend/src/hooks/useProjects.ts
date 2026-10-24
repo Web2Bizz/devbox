@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { formatApiError } from '../lib/format-error';
 import type { Project } from '../lib/types';
-import type { ProjectApiDto } from '../api/types';
+import type { Project as ProjectApiDto } from '@rush-code/contracts';
 import { useI18n } from '../i18n';
 
 export const PROJECTS_QUERY_KEY = ['projects'] as const;
@@ -28,7 +28,7 @@ export function mapApiToProject(dto: ProjectApiDto): Project {
   };
 }
 
-export interface UseProjectsResult {
+export type UseProjectsResult = {
   projects: Project[];
   loading: boolean;
   error: string | null;
@@ -37,7 +37,7 @@ export interface UseProjectsResult {
   createProject: (name: string) => Promise<Project>;
   creating: boolean;
   createError: string | null;
-}
+};
 
 /**
  * Production-ready list hook backed by TanStack Query.

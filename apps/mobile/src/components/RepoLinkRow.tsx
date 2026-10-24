@@ -1,6 +1,6 @@
 import { View, Text, TouchableOpacity, StyleSheet, Linking } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
-import type { RepoLink, GitProvider } from "../lib/git-remotes"
+import type { RepoLink, GitProvider } from "@/utils/git-remotes"
 import { colors } from "@web2bizz/ui-native"
 
 // Ionicons brand glyph per git host; self-hosted/unknown fall back to a

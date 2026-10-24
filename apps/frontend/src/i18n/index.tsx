@@ -14,7 +14,7 @@
  *   `usePathname() === href` active-state in DashboardShell, and all
  *   deep links. Cookie-only keeps URLs byte-identical in EN and RU.
  * - No new dependency (task lists 5 deps already; dictionaries are ~2 files).
- * - `generateMetadata` stays per-request: it reads the `devbox-locale`
+ * - `generateMetadata` stays per-request: it reads the `rush-code-locale`
  *   cookie server-side, so title/description localize without URL change.
  *
  * Compatibility with ThemeProvider mount-guard (src/providers.tsx):
@@ -25,7 +25,7 @@
  *   always have `useI18n`, theme context arrives after hydration.
  * - `document.documentElement.lang` syncs in `useEffect` (no SSR DOM access).
  *
- * Persistence: `devbox-locale` cookie (1y, SameSite=Lax, path=/) — readable
+ * Persistence: `rush-code-locale` cookie (1y, SameSite=Lax, path=/) — readable
  * by `generateMetadata` — mirrored to `localStorage` for instant client boot.
  * Default locale: `en`.
  */
@@ -46,8 +46,8 @@ import type { Dictionary } from './dictionaries/types';
 export const LOCALES = ['en', 'ru'] as const;
 export type Locale = (typeof LOCALES)[number];
 export const DEFAULT_LOCALE: Locale = 'en';
-export const LOCALE_COOKIE = 'devbox-locale';
-export const LOCALE_STORAGE_KEY = 'devbox-locale';
+export const LOCALE_COOKIE = 'rush-code-locale';
+export const LOCALE_STORAGE_KEY = 'rush-code-locale';
 
 const dictionaries: Record<Locale, Dictionary> = { en, ru };
 
@@ -57,7 +57,7 @@ export function isLocale(value: unknown): value is Locale {
 
 function readStoredLocale(): Locale {
   if (typeof document !== 'undefined') {
-    const match = document.cookie.match(/(?:^|;\s*)devbox-locale=([^;]*)/);
+    const match = document.cookie.match(/(?:^|;\s*)rush-code-locale=([^;]*)/);
     if (match && isLocale(decodeURIComponent(match[1]))) {
       return decodeURIComponent(match[1]) as Locale;
     }
@@ -73,11 +73,11 @@ function readStoredLocale(): Locale {
   return DEFAULT_LOCALE;
 }
 
-interface I18nContextValue {
+type I18nContextValue = {
   locale: Locale;
   setLocale: (next: Locale) => void;
   t: Dictionary;
-}
+};
 
 const I18nContext = createContext<I18nContextValue>({
   locale: DEFAULT_LOCALE,

@@ -5,10 +5,10 @@ import {
 } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { json } from 'express';
-import { ApiErrorFilter } from './common/api-error.filter.js';
-import { CorrelationInterceptor } from './common/correlation.interceptor.js';
-import { validateEnv } from './env.js';
-import { DEFAULT_API_VERSION } from './api/version.js';
+import { ApiErrorFilter } from './common/api-error.filter';
+import { CorrelationInterceptor } from './common/correlation.interceptor';
+import { validateEnv } from './env';
+import { DEFAULT_API_VERSION } from './api/version';
 
 /**
  * Shared Nest application wiring — used by main.ts AND the versioning e2e
@@ -75,7 +75,7 @@ export function configureApp(app: INestApplication): void {
       'authorization',
     ],
     exposedHeaders: ['x-correlation-id', 'api-version'],
-    // true: the auth refresh httpOnly cookie (devbox-refresh) + marker must
+    // true: the auth refresh httpOnly cookie (rush-code-refresh) + marker must
     // travel cross-origin (frontend :3001 → backend :3100). Origins stay
     // allowlisted above — no wildcard with credentials.
     credentials: true,
@@ -100,7 +100,7 @@ type SwaggerSetupOptions = Parameters<typeof SwaggerModule.setup>[3];
  */
 export function setupSwagger(app: INestApplication): void {
   const v1Config = new DocumentBuilder()
-    .setTitle('Devbox opencode proxy API')
+    .setTitle('Rush Code opencode proxy API')
     .setDescription(
       'Thin proxy layer between frontend clients and the live opencode server. ' +
         'Backend (NestJS 12) forwards /api/v1/* to OPENCODE_URL with ' +
@@ -136,7 +136,7 @@ export function setupSwagger(app: INestApplication): void {
   SwaggerModule.setup('/swagger', app, v1Document, legacyUi);
 
   const v2Config = new DocumentBuilder()
-    .setTitle('Devbox opencode proxy API (v2 — reserved)')
+    .setTitle('Rush Code opencode proxy API (v2 — reserved)')
     .setDescription(
       'v2 is reserved for future use and intentionally exposes NO endpoints yet. ' +
         'Every /api/v2/* request returns 404 { code: "not_found", … }. ' +

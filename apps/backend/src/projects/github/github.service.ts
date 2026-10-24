@@ -5,17 +5,17 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Octokit } from 'octokit';
-import { AppLogger } from '../../common/app-logger.service.js';
-import { validateEnv } from '../../env.js';
+import { AppLogger } from '../../common/app-logger.service';
+import { validateEnv } from '../../env';
 import {
   ExternalServiceError,
   fromUnknown,
-} from '../../common/external/external-error.js';
-import { withRetry } from '../../common/external/retry.js';
-import { GithubAppService } from './github-app.service.js';
-import type { ListReposQueryInput } from './dto.js';
+} from '../../common/external/external-error';
+import { withRetry } from '../../common/external/retry';
+import { GithubAppService } from './github-app.service';
+import type { ListReposQueryInput } from './dto';
 
-export interface GithubRepo {
+export type GithubRepo = {
   id: number;
   owner: string;
   name: string;
@@ -23,7 +23,7 @@ export interface GithubRepo {
   private: boolean;
   defaultBranch: string;
   url: string;
-}
+};
 
 /**
  * E2e seam: stub fetch used by Octokit (no network in tests).
@@ -36,7 +36,7 @@ export function __setGithubFetchForTests(fn: typeof fetch | null): void {
   fetchImplForTests = fn;
 }
 
-interface InstallationReposResponse {
+type InstallationReposResponse = {
   total_count?: number;
   repositories?: Array<{
     id?: number;
@@ -47,7 +47,7 @@ interface InstallationReposResponse {
     html_url?: string;
     owner?: { login?: string };
   }>;
-}
+};
 
 /**
  * GithubService — lists repositories accessible to one GitHub App

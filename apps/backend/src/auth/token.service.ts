@@ -1,25 +1,25 @@
 import { Injectable } from '@nestjs/common';
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { AppLogger } from '../common/app-logger.service.js';
+import { AppLogger } from '../common/app-logger.service';
 
 export type TokenType = 'access' | 'refresh';
 
-export interface AccessClaims {
+export type AccessClaims = {
   sub: string;
   email: string;
   typ: 'access';
   jti: string;
   iat: number;
   exp: number;
-}
+};
 
-export interface RefreshClaims {
+export type RefreshClaims = {
   sub: string;
   typ: 'refresh';
   jti: string;
   iat: number;
   exp: number;
-}
+};
 
 /** Ephemeral dev fallback secrets (unset JWT_*_SECRET → WARN + random per boot). Never logged. */
 const devSecrets = new Map<string, string>();

@@ -20,8 +20,8 @@
  * - PROJECTS_ROOT с NUL-байтом → throw (невалидный путь записи).
  */
 import assert from 'node:assert/strict';
-import { validateEnv } from './env.js';
-import { WorkspacePathService } from './workspaces/workspace-path.service.js';
+import { validateEnv } from './env';
+import { WorkspacePathService } from './workspaces/workspace-path.service';
 
 type Source = NodeJS.ProcessEnv;
 

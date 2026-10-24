@@ -5,7 +5,7 @@
  * scope (old caches) leaves scope undefined — old imports never break.
  */
 import { describe, expect, test } from 'bun:test';
-import type { ProjectApiDto } from '../../api/types';
+import type { Project as ProjectApiDto } from '@rush-code/contracts';
 import { mapApiToProject as mapFromList } from '../useProjects';
 import { mapApiToProject as mapFromDetail } from '../useProject';
 

@@ -26,7 +26,7 @@ process.env.AUTH_LEGACY_MOCK_FALLBACK = "false";
 
 async function main(): Promise<void> {
   const { resolveTestDb, applyTestMigrations } =
-    await import("../db/e2e-db.js");
+    await import("../db/e2e-db");
   const testDb = await resolveTestDb(
     process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL ?? "",
   );
@@ -45,10 +45,10 @@ async function main(): Promise<void> {
   console.log(`[auth e2e] db mode: ${testDb.mode}`);
 
   const { NestFactory } = await import("@nestjs/core");
-  const { AppModule } = await import("../app.module.js");
-  const { configureApp } = await import("../app.setup.js");
-  const { UsersService } = await import("./users.service.js");
-  const { TokenService } = await import("./token.service.js");
+  const { AppModule } = await import("../app.module");
+  const { configureApp } = await import("../app.setup");
+  const { UsersService } = await import("./users.service");
+  const { TokenService } = await import("./token.service");
 
   let passed = 0;
   let failed = 0;
@@ -103,7 +103,7 @@ async function main(): Promise<void> {
             body: JSON.stringify({
               firstName: "Ada",
               lastName: "Lovelace",
-              email: "ada@devbox.local",
+              email: "ada@rush-code.local",
               password: "s3cret-p4ss",
             }),
           });
@@ -127,7 +127,7 @@ async function main(): Promise<void> {
       await check("POST login without PG → 503", async () => {
         const res = await fetch(
           `${base}/api/v1/auth/login`,
-          json({ email: "ada@devbox.local", password: "s3cret-p4ss" }),
+          json({ email: "ada@rush-code.local", password: "s3cret-p4ss" }),
         );
         assert.equal(res.status, 503);
         assert.equal(
@@ -163,7 +163,7 @@ async function main(): Promise<void> {
         json({
           firstName: "Ada",
           lastName: "Lovelace",
-          email: "ada@devbox.local",
+          email: "ada@rush-code.local",
           password: "s3cret-p4ss",
         }),
       );
@@ -176,12 +176,12 @@ async function main(): Promise<void> {
         expiresIn?: number;
       };
       assert.ok(body.user?.id);
-      assert.equal(body.user?.email, "ada@devbox.local");
+      assert.equal(body.user?.email, "ada@rush-code.local");
       assert.ok(body.accessToken);
       assert.ok(body.refreshToken);
       assert.equal(body.tokenType, "bearer");
       assert.equal(body.expiresIn, 900);
-      assert.match(res.headers.get("set-cookie") ?? "", /devbox-refresh/);
+      assert.match(res.headers.get("set-cookie") ?? "", /rush-code-refresh/);
       access = body.accessToken as string;
       refresh = body.refreshToken as string;
     });
@@ -192,7 +192,7 @@ async function main(): Promise<void> {
         json({
           firstName: "Ada",
           lastName: "Other",
-          email: "ADA@devbox.local",
+          email: "ADA@rush-code.local",
           password: "s3cret-p4ss",
         }),
       );
@@ -214,7 +214,7 @@ async function main(): Promise<void> {
           body: JSON.stringify({
             firstName: "Ada",
             lastName: "Other",
-            email: "ada@devbox.local",
+            email: "ada@rush-code.local",
             password: "s3cret-p4ss",
           }),
         });
@@ -232,7 +232,7 @@ async function main(): Promise<void> {
     await check(
       "register duplicate logs warn with correlationId (no secrets)",
       async () => {
-        const { AppLogger } = await import("../common/app-logger.service.js");
+        const { AppLogger } = await import("../common/app-logger.service");
         const seen: Array<{ msg: unknown; cid?: string }> = [];
         const origWarn = AppLogger.prototype.warn;
         (
@@ -254,7 +254,7 @@ async function main(): Promise<void> {
             body: JSON.stringify({
               firstName: "Ada",
               lastName: "Other",
-              email: "ada@devbox.local",
+              email: "ada@rush-code.local",
               password: "s3cret-p4ss",
             }),
           });
@@ -302,7 +302,7 @@ async function main(): Promise<void> {
     await check("POST login → 200 pair", async () => {
       const res = await fetch(
         `${base}/api/v1/auth/login`,
-        json({ email: "ada@devbox.local", password: "s3cret-p4ss" }),
+        json({ email: "ada@rush-code.local", password: "s3cret-p4ss" }),
       );
       assert.equal(res.status, 200);
       const body = (await readJson(res)) as {
@@ -320,7 +320,7 @@ async function main(): Promise<void> {
       async () => {
         const res = await fetch(
           `${base}/api/v1/auth/login`,
-          json({ email: "ada@devbox.local", password: "wrong-pass-1" }),
+          json({ email: "ada@rush-code.local", password: "wrong-pass-1" }),
         );
         assert.equal(res.status, 401);
         const body = (await readJson(res)) as { code?: string };
@@ -333,7 +333,7 @@ async function main(): Promise<void> {
       async () => {
         const res = await fetch(
           `${base}/api/v1/auth/login`,
-          json({ email: "nobody@devbox.local", password: "s3cret-p4ss" }),
+          json({ email: "nobody@rush-code.local", password: "s3cret-p4ss" }),
         );
         assert.equal(res.status, 401);
         const body = (await readJson(res)) as { code?: string };
@@ -350,7 +350,7 @@ async function main(): Promise<void> {
         email?: string;
         firstName?: string;
       };
-      assert.equal(body.email, "ada@devbox.local");
+      assert.equal(body.email, "ada@rush-code.local");
       assert.equal(body.firstName, "Ada");
     });
 
@@ -395,7 +395,7 @@ async function main(): Promise<void> {
       const login = (await readJson(
         await fetch(
           `${base}/api/v1/auth/login`,
-          json({ email: "ada@devbox.local", password: "s3cret-p4ss" }),
+          json({ email: "ada@rush-code.local", password: "s3cret-p4ss" }),
         ),
       )) as { refreshToken?: string };
       const first = login.refreshToken as string;

@@ -9,16 +9,16 @@ import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, rm, stat } from "node:fs/promises";
 import { promisify } from "node:util";
-import { AppLogger } from "../common/app-logger.service.js";
-import { DbService, dbUnavailable, type DbClient } from "../db/db.service.js";
-import { projects, type ProjectRow } from "../db/schema.js";
-import { isValidGitRepo } from "../repos/repos-git.util.js";
-import { WorkspacePathService } from "../workspaces/workspace-path.service.js";
+import { AppLogger } from "../common/app-logger.service";
+import { DbService, dbUnavailable, type DbClient } from "../db/db.service";
+import { projects, type ProjectRow } from "../db/schema";
+import { isValidGitRepo } from "../repos/repos-git.util";
+import { WorkspacePathService } from "../workspaces/workspace-path.service";
 import type {
   CreateProjectInput,
   GithubLinkInput,
   UpdateProjectInput,
-} from "./dto.js";
+} from "./dto";
 
 const execFileAsync = promisify(execFile);
 
@@ -48,7 +48,7 @@ export function ownerKeyOrThrow(ownerId: string | null): string {
   return raw;
 }
 
-export interface Project {
+export type Project = {
   id: string;
   name: string;
   description: string | null;
@@ -71,7 +71,7 @@ export interface Project {
    * the row outlives usable storage config (additive, no migration).
    */
   corruptedReason?: string | null;
-}
+};
 
 function toProject(row: ProjectRow): Project {
   return {
@@ -326,8 +326,8 @@ export class ProjectsService {
       await execFileAsync("git", ["init", "-b", "main"], opts);
       // Local identity so the empty commit never fails on machines without
       // a global git identity (repo-scoped, does not touch global config).
-      await execFileAsync("git", ["config", "user.email", "devbox@localhost"], opts);
-      await execFileAsync("git", ["config", "user.name", "devbox"], opts);
+      await execFileAsync("git", ["config", "user.email", "rush-code@localhost"], opts);
+      await execFileAsync("git", ["config", "user.name", "rush-code"], opts);
       await execFileAsync("git", ["commit", "--allow-empty", "-m", "init"], opts);
     } catch (err) {
       this.logger.error(

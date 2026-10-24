@@ -41,8 +41,8 @@ for (const key of ['POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB', 'POSTGRE
 
 async function main(): Promise<void> {
   const { NestFactory } = await import('@nestjs/core');
-  const { AppModule } = await import('../app.module.js');
-  const { configureApp } = await import('../app.setup.js');
+  const { AppModule } = await import('../app.module');
+  const { configureApp } = await import('../app.setup');
 
   const app = await NestFactory.create(AppModule, { logger: false });
   configureApp(app);

@@ -6,7 +6,7 @@ declare module "react-native-marked" {
   import type { FlatListProps, ImageStyle, TextStyle, ViewStyle } from "react-native"
   import type { Hooks, Tokenizer } from "marked"
 
-  export interface RendererInterface {
+  export type RendererInterface = {
     paragraph(children: ReactNode[], styles?: ViewStyle): ReactNode
     blockquote(children: ReactNode[], styles?: ViewStyle): ReactNode
     heading(text: string | ReactNode[], styles?: TextStyle, depth?: number): ReactNode
@@ -75,16 +75,16 @@ declare module "react-native-marked" {
     getKey(): string
   }
 
-  export interface UserTheme {
+  export type UserTheme = {
     colors?: Record<string, string>
     spacing?: Record<string, number>
   }
 
-  export interface MarkedStyles {
+  export type MarkedStyles = {
     [key: string]: ViewStyle | TextStyle | ImageStyle | undefined
   }
 
-  export interface MarkdownProps {
+  export type MarkdownProps = {
     value: string
     flatListProps?: Omit<FlatListProps<ReactNode>, "data" | "renderItem" | "horizontal">
     theme?: UserTheme
@@ -97,7 +97,7 @@ declare module "react-native-marked" {
 
   // Used by packages/uikit/src/components/markdown/Markdown.tsx to render parsed blocks
   // directly (bypassing the FlatList-based default export) — see issue #104.
-  export interface useMarkdownHookOptions {
+  export type useMarkdownHookOptions = {
     colorScheme?: "light" | "dark" | null
     renderer?: RendererInterface
     theme?: UserTheme

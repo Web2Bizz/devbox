@@ -1,17 +1,8 @@
-import { z } from "zod";
-
 /**
- * PUT /api/v1/key — the caller's own OpenCode API key.
- * Min 20 chars (real keys are long opaque tokens; short strings are almost
- * certainly a paste mistake), max 1024, trimmed. The value is encrypted with
- * CryptoService before storage and is never returned or logged.
+ * PUT /api/v1/key — single source of truth is @rush-code/contracts
+ * (verbatim trim/min/max + error strings: short strings are almost
+ * certainly a paste mistake, so min 20 fails fast). Controllers keep
+ * importing from './dto' — the runtime object is the package schema.
+ * Swagger DTOs live in ./opencode-keys.dto.ts.
  */
-export const opencodeKeySchema = z.object({
-  apiKey: z
-    .string()
-    .trim()
-    .min(20, { error: "must be at least 20 characters" })
-    .max(1024, { error: "must be ≤ 1024 chars" }),
-});
-
-export type OpencodeKeyInput = z.infer<typeof opencodeKeySchema>;
+export { opencodeKeySchema, type OpencodeKeyInput } from '@rush-code/contracts';

@@ -10,13 +10,13 @@ import {
   Version,
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiResponse, ApiTags } from "@nestjs/swagger";
-import { V1Endpoint } from "../api/version.js";
-import { NoIndexInterceptor } from "../common/noindex.interceptor.js";
-import { AuthUserDto } from "./auth.dto.js";
-import { ReqUser } from "./req-user.decorator.js";
-import type { RequestIdentity } from "./identity.service.js";
-import { JwtAuthGuard } from "./jwt-auth.guard.js";
-import { UsersService, toPublicUser } from "./users.service.js";
+import { V1Endpoint } from "../api/version";
+import { NoIndexInterceptor } from "../common/noindex.interceptor";
+import { AuthUserDto } from "./auth.dto";
+import { ReqUser } from "./req-user.decorator";
+import type { RequestIdentity } from "./identity.service";
+import { JwtAuthGuard } from "./jwt-auth.guard";
+import { UsersService, toPublicUser } from "./users.service";
 
 /**
  * UsersController — minimal private profile read (Card 6 privacy).

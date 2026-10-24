@@ -1,17 +1,17 @@
 import { Controller, Get, Optional, Version, VERSION_NEUTRAL } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { DbService } from '../db/db.service.js';
-import { OpencodeService } from '../opencode/opencode.service.js';
+import { DbService } from '../db/db.service';
+import { OpencodeService } from '../opencode/opencode.service';
 import {
   DockerRegistryService,
   type DockerRegistryStatus,
-} from '../docker-registry/docker-registry.service.js';
+} from '../docker-registry/docker-registry.service';
 import {
   NpmRegistryService,
   type NpmRegistryStatus,
-} from '../npm-registry/npm-registry.service.js';
-import { HealthDto } from '../api/dto.js';
-import type { HealthResponse } from '../contracts.js';
+} from '../npm-registry/npm-registry.service';
+import { HealthDto } from '../api/dto';
+import type { HealthResponse } from '@rush-code/contracts';
 
 /**
  * Liveness probe — deliberately VERSION_NEUTRAL and excluded from the global

@@ -1,6 +1,6 @@
 import { Global, Module } from '@nestjs/common';
-import { NpmRegistryService } from './npm-registry.service.js';
-import { NpmRegistryController } from './npm-registry.controller.js';
+import { NpmRegistryService } from './npm-registry.service';
+import { NpmRegistryController } from './npm-registry.controller';
 
 /**
  * Global npm-registry module (mirrors DockerRegistryModule/OpencodeModule) —

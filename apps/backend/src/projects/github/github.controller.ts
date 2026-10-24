@@ -20,16 +20,16 @@ import {
   ApiResponse,
   ApiTags,
 } from "@nestjs/swagger";
-import { V1Endpoint } from "../../api/version.js";
+import { V1Endpoint } from "../../api/version";
 import {
   DEFAULT_MOCK_USER_ID,
   resolveIdentityUserId,
-} from "../../auth/identity.service.js";
-import { JwtAuthGuard } from "../../auth/jwt-auth.guard.js";
-import { ReqUser } from "../../auth/req-user.decorator.js";
-import type { RequestIdentity } from "../../auth/identity.service.js";
-import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
-import { validateEnv } from "../../env.js";
+} from "../../auth/identity.service";
+import { JwtAuthGuard } from "../../auth/jwt-auth.guard";
+import { ReqUser } from "../../auth/req-user.decorator";
+import type { RequestIdentity } from "../../auth/identity.service";
+import { ZodValidationPipe } from "../../common/zod-validation.pipe";
+import { validateEnv } from "../../env";
 import {
   GithubCallbackResultDto,
   GithubInstallUrlDto,
@@ -41,16 +41,16 @@ import {
   listReposQuerySchema,
   type InstallCallbackQueryInput,
   type ListReposQueryInput,
-} from "./dto.js";
-import { GithubInstallationsService } from "./github-installations.service.js";
+} from "./dto";
+import { GithubInstallationsService } from "./github-installations.service";
 import {
   INSTALLATION_ACTIONS,
   getRawBody,
   verifyWebhookSignature,
   type InstallationWebhookPayload,
-} from "./github-webhook.util.js";
-import { GithubAppService } from "./github-app.service.js";
-import { GithubService } from "./github.service.js";
+} from "./github-webhook.util";
+import { GithubAppService } from "./github-app.service";
+import { GithubService } from "./github.service";
 
 /** MVP mock user key when no identity is supplied (dev single-user). */
 export { DEFAULT_MOCK_USER_ID };

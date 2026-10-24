@@ -15,12 +15,12 @@ import {
   isRetryableError,
   resolveRetryOptions,
   withRetry,
-} from './retry.js';
+} from './retry';
 import {
   ExternalServiceError,
   fromStatus,
   timeoutError,
-} from './external-error.js';
+} from './external-error';
 
 const noSleep = () => Promise.resolve();
 const checks: Array<{ name: string; run: () => Promise<void> | void }> = [

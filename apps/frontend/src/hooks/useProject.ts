@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiClientError, api } from '../api/client';
 import { formatApiError } from '../lib/format-error';
 import type { Project } from '../lib/types';
-import type { ProjectApiDto } from '../api/types';
+import type { Project as ProjectApiDto } from '@rush-code/contracts';
 import { useI18n } from '../i18n';
 
 export function mapApiToProject(dto: ProjectApiDto): Project {
@@ -28,13 +28,13 @@ export function mapApiToProject(dto: ProjectApiDto): Project {
 
 export const projectQueryKey = (id: string) => ['project', id] as const;
 
-export interface UseProjectResult {
+export type UseProjectResult = {
   project: Project | null;
   loading: boolean;
   error: string | null;
   notFound: boolean;
   reload: () => void;
-}
+};
 
 /**
  * Production-ready single-project hook backed by TanStack Query.

@@ -1,1 +1,1 @@
-DevBox: AI Coding Agent
+Rush Code: AI Coding Agent

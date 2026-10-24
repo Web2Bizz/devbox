@@ -1,29 +1,28 @@
 {
-  "name": "devbox",
+  "name": "rush-code",
   "version": "0.1.0",
   "private": true,
-  "description": "DevBox — monorepo (apps/backend NestJS API + apps/frontend Next.js + apps/mobile Expo + postgres)",
+  "description": "Rush Code — monorepo (apps/backend NestJS API + apps/frontend Next.js + apps/mobile Expo + postgres)",
   "packageManager": "bun@1.4.2",
   "workspaces": [
     "apps/backend",
-    "apps/frontend"
+    "apps/frontend",
+    "apps/cli",
+    "packages/contracts"
   ],
   "scripts": {
-    "dev": "pm2 start ecosystem.config.cjs --update-env || pm2 restart ecosystem.config.cjs --update-env",
-    "dev:shutdown": "pm2 delete ecosystem.config.cjs || true; pm2 kill || true",
-    "dev:restart": "pm2 restart ecosystem.config.cjs --update-env",
-    "dev:logs": "pm2 logs",
-    "dev:backend": "bun --filter backend dev",
-    "dev:frontend": "bun --filter frontend dev",
-    "dev:pm2": "pm2 start ecosystem.config.cjs",
-    "dev:pm2:logs": "pm2 logs",
-    "dev:pm2:stop": "pm2 delete ecosystem.config.cjs",
-    "dev:pm2:restart": "pm2 restart ecosystem.config.cjs",
-    "build": "bun --filter backend build && bun --filter frontend build",
-    "build:backend": "bun --filter backend build",
-    "build:frontend": "bun --filter frontend build",
-    "lint": "bun --filter backend lint && bun --filter frontend lint",
-    "test": "bun --filter backend test && bun --filter frontend test"
+    "dev": "bun scripts/dev/with-env.ts bunx nx run-many -t dev --parallel --output-style=stream",
+    "dev:backend": "bun scripts/dev/with-env.ts bunx nx run backend:dev --output-style=stream",
+    "dev:frontend": "bun scripts/dev/with-env.ts bunx nx run frontend:dev --output-style=stream",
+    "build": "bunx nx run-many -t build",
+    "build:backend": "bunx nx run backend:build",
+    "build:frontend": "bunx nx run frontend:build",
+    "build:affected": "bunx nx affected -t build",
+    "lint": "bunx nx run-many -t lint",
+    "lint:affected": "bunx nx affected -t lint",
+    "test": "bunx nx run-many -t test",
+    "test:affected": "bunx nx affected -t test",
+    "graph": "bunx nx graph"
   },
   "engines": {
     "node": ">=22",
@@ -32,7 +31,6 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
     "@web2bizz/scaffold": "^0.1.7",
-    "nx": "^23.3.0",
-    "pm2": "^6.0.14"
+    "nx": "^23.3.0"
   }
 }

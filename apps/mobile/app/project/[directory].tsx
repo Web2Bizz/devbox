@@ -3,10 +3,10 @@ import { View, Text, FlatList, TouchableOpacity, StyleSheet, useColorScheme, Act
 import { Stack, useLocalSearchParams, router } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
 import { useTranslation } from "react-i18next"
-import { useSessionsList, useCreateSession, useDeleteSession } from "../../src/queries/sessions"
-import { useProjectRemotes } from "../../src/queries/project"
-import { useConnections } from "../../src/stores/connections"
-import { RepoLinkRow } from "../../src/components/RepoLinkRow"
+import { useSessionsList, useCreateSession, useDeleteSession } from "@/api/sessions"
+import { useProjectRemotes } from "@/api/project"
+import { useConnections } from "@/stores/connections"
+import { RepoLinkRow } from "@/components/RepoLinkRow"
 import { colors } from "@web2bizz/ui-native"
 
 // How many remotes the header card shows before collapsing the rest behind

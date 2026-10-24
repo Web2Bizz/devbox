@@ -31,9 +31,9 @@ class FakeApiClientError extends Error {
 
 const ME_USER = {
   id: 'mock-user-1',
-  firstName: 'Devbox',
+  firstName: 'Rush Code',
   lastName: 'Developer',
-  email: 'dev@devbox.local',
+  email: 'dev@rush-code.local',
   provider: 'local' as const,
   createdAt: '2026-01-15T09:00:00.000Z',
 };
@@ -103,8 +103,8 @@ describe('useProfile', () => {
     expect(result.current.error).toBeNull();
     expect(result.current.profile).toEqual({
       id: 'mock-user-1',
-      name: 'Devbox Developer',
-      email: 'dev@devbox.local',
+      name: 'Rush Code Developer',
+      email: 'dev@rush-code.local',
       createdAt: '2026-01-15T09:00:00.000Z',
     });
     expect(result.current.saved).toBe(false);
@@ -123,7 +123,7 @@ describe('useProfile', () => {
     // Two observers, one cache entry, one network request.
     expect(meMock).toHaveBeenCalledTimes(1);
     expect(page.result.current.profile).toEqual(header.result.current.profile);
-    expect(header.result.current.profile?.name).toBe('Devbox Developer');
+    expect(header.result.current.profile?.name).toBe('Rush Code Developer');
     expect(header.result.current.loading).toBe(false);
     page.unmount();
     header.unmount();
@@ -188,7 +188,7 @@ describe('useProfile', () => {
 
     expect(refreshAccessTokenMock).toHaveBeenCalled();
     expect(meMock).toHaveBeenCalledTimes(2);
-    expect(result.current.profile?.name).toBe('Devbox Developer');
+    expect(result.current.profile?.name).toBe('Rush Code Developer');
     expect(result.current.error).toBeNull();
   });
 
@@ -285,7 +285,7 @@ describe('useProfile', () => {
   test('reload keeps data (no skeleton flash, background refetch)', async () => {
     const { result } = renderHook(() => useProfile(), { wrapper });
     await settle();
-    expect(result.current.profile?.name).toBe('Devbox Developer');
+    expect(result.current.profile?.name).toBe('Rush Code Developer');
     expect(result.current.loading).toBe(false);
 
     act(() => {
@@ -293,7 +293,7 @@ describe('useProfile', () => {
     });
     // placeholderData keeps previous data — no skeleton flash.
     expect(result.current.loading).toBe(false);
-    expect(result.current.profile?.name).toBe('Devbox Developer');
+    expect(result.current.profile?.name).toBe('Rush Code Developer');
     await settle();
 
     expect(meMock).toHaveBeenCalledTimes(2);

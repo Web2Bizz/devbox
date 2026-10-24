@@ -125,7 +125,7 @@ export function RunningSessionsTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events.length]);
 
-  // Busy/retry filter from the status map (DevBox projectId → opencode
+  // Busy/retry filter from the status map (Rush Code projectId → opencode
   // directory mapping lands server-side later; `directory` scopes both).
   const running = sessions.filter((s) => {
     const st = statusMap[s.id];

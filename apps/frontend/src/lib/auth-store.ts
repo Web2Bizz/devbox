@@ -2,11 +2,11 @@ import { api } from '../api/client';
 import type { AuthSession } from '@rush-code/contracts';
 import { getActiveQueryClient } from './query-client';
 
-const ACCESS_KEY = 'devbox-access-token';
-const REFRESH_KEY = 'devbox-refresh-token';
+const ACCESS_KEY = 'rush-code-access-token';
+const REFRESH_KEY = 'rush-code-refresh-token';
 /** Readable marker cookie the backend sets on login/register/refresh and
  *  clears on logout — proxy.ts redirects on it alone. */
-const AUTH_MARKER = 'devbox-auth';
+const AUTH_MARKER = 'rush-code-auth';
 /**
  * Дефолтный TTL маркера (7d = 604800s) — зеркалит backend
  * DEFAULT_JWT_REFRESH_TTL_SEC (apps/backend/src/env.ts). AuthSession несёт
@@ -20,7 +20,7 @@ const EXP_SKEW_MS = 5_000;
 
 /**
  * Token store — access in memory (mirrored to localStorage so reloads
- * survive), refresh via the httpOnly `devbox-refresh` cookie (backend-set,
+ * survive), refresh via the httpOnly `rush-code-refresh` cookie (backend-set,
  * sent with `credentials: 'include'`) + a localStorage fallback copy for
  * the JSON-body refresh path. Carries no secrets into logs — values stay
  * in storage/fetch bodies only.
@@ -77,7 +77,7 @@ export function clearSession(): void {
 }
 
 /**
- * Client-side установка маркера `devbox-auth=1` (path=/, SameSite=Lax) —
+ * Client-side установка маркера `rush-code-auth=1` (path=/, SameSite=Lax) —
  * fallback-дубликат backend Set-Cookie из setSessionCookies
  * (apps/backend/src/auth/auth.controller.ts: login/register/refresh).
  * Нужен потому что на кросс-портовом dev (фронт :3001 → API :3000) браузер
@@ -100,7 +100,7 @@ export function setAuthMarker(maxAgeSec: number = DEFAULT_MARKER_MAX_AGE_SEC): v
 }
 
 /**
- * Client-side fallback сноc маркера `devbox-auth` (path=/). The backend
+ * Client-side fallback сноc маркера `rush-code-auth` (path=/). The backend
  * clears it via Set-Cookie on /auth/logout, but when logout 401s (expired
  * refresh) or the network fails the marker would outlive the session and
  * proxy.ts would bounce /login → /projects forever — so every local

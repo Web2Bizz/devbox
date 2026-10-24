@@ -169,8 +169,8 @@ export default function LoginPage() {
   const { t } = useI18n();
   const [mode, setMode] = useState<'login' | 'register'>('login');
   // Единый onSuccess для LoginForm и RegisterForm: setSession уже синхронно
-  // проштамповал клиентский `devbox-auth` (см. setAuthMarker), поэтому guard
-  // proxy.ts (`devbox-auth=1`) пропустит /projects без bounce в /login.
+  // проштамповал клиентский `rush-code-auth` (см. setAuthMarker), поэтому guard
+  // proxy.ts (`rush-code-auth=1`) пропустит /projects без bounce в /login.
   // Раньше был голый router.push: маркер ставил только backend Set-Cookie,
   // который на кросс-портовом dev (:3001 → :3000, SameSite=Lax) остаётся на
   // origin'е API — proxy маркера не видел и отбивал /projects → /login.

@@ -25,7 +25,7 @@ export default function App() {
 
   return (
     <main style={{ fontFamily: 'system-ui', padding: 32 }}>
-      <h1>Devbox MVP</h1>
+      <h1>Rush Code MVP</h1>
       <p>
         API: <code>{api.baseUrl}</code>
       </p>

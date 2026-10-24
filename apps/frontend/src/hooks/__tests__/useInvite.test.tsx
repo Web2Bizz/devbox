@@ -41,7 +41,7 @@ const INVITE = {
 const EMAIL_INVITE = {
   token: V7_B,
   orgId: ORG_ID,
-  email: 'mate@devbox.local',
+  email: 'mate@rush-code.local',
   role: 'user' as const,
   createdAt: '2026-10-20T00:00:00.000Z',
 };
@@ -115,15 +115,15 @@ describe('useInvite', () => {
 
     let minted: unknown = null;
     await act(async () => {
-      minted = await result.current.mint(ORG_ID, 'user', 'mate@devbox.local');
+      minted = await result.current.mint(ORG_ID, 'user', 'mate@rush-code.local');
     });
     await settle();
 
     expect(mintMock).toHaveBeenCalledWith('test-token', ORG_ID, {
       role: 'user',
-      email: 'mate@devbox.local',
+      email: 'mate@rush-code.local',
     });
-    expect(minted).toMatchObject({ email: 'mate@devbox.local' });
+    expect(minted).toMatchObject({ email: 'mate@rush-code.local' });
   });
 
   test('accept 404: replay/unknown/mismatch → inviteReplay strings (never expired)', async () => {

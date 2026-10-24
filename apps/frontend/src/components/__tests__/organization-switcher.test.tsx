@@ -82,9 +82,9 @@ const ORG_2 = {
 };
 const ME_USER = {
   id: 'mock-user-1',
-  firstName: 'Devbox',
+  firstName: 'Rush Code',
   lastName: 'Developer',
-  email: 'dev@devbox.local',
+  email: 'dev@rush-code.local',
   provider: 'local' as const,
   createdAt: '2026-01-15T09:00:00.000Z',
 };

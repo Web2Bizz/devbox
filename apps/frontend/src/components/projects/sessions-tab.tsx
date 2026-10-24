@@ -19,7 +19,7 @@ import { useI18n } from '../../i18n';
  * Data: useOpencodeSessions list/create/abort through the backend
  * reverse-proxy (`/api/opencode`, sdk 1.18.33). `directory` (opencode
  * working directory) is forwarded as `?directory=`; omit it for the full
- * list. DevBox `projectId` (prj-*) stays UI-only until the backend maps
+ * list. Rush Code `projectId` (prj-*) stays UI-only until the backend maps
  * project id → directory server-side, but it scopes navigation:
  * Open (and post-create) routes to the session chat at
  * `/projects/[id]/sessions/[sessionId]` (session = chat).

@@ -45,7 +45,7 @@ describe("plain snapshot (no frames)", () => {
     expect(rendered).not.toContain("┘");
     expect(rendered).not.toContain("─");
     const greet = greetingLines("0.1.0").join("\n");
-    expect(greet).toContain("◆ DEVBOX CLI v0.1.0");
+    expect(greet).toContain("◆ RUSH CODE CLI v0.1.0");
     expect(greet).toContain("prompt >");
     expect(greet).toContain("@file");
     expect(greet).toContain("/agent");
@@ -136,7 +136,7 @@ describe("repl startup (clear first, prompt bottom)", () => {
     writes.push(greetingLines("0.1.0").join("\n"));
     writes.push(PROMPT_LABEL);
     expect(writes[0]).toBe(CLEAR_SEQUENCE);
-    expect(writes[1]).toContain("◆ DEVBOX CLI v0.1.0");
+    expect(writes[1]).toContain("◆ RUSH CODE CLI v0.1.0");
     expect(writes[1]).toContain("prompt >");
     expect(writes[1]).toContain("@file");
     expect(writes[1]).toContain("/agent");

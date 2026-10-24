@@ -1,4 +1,4 @@
-# @devbox/cli — DevBox CLI (opencode style)
+# @rush-code/cli — Rush Code CLI (opencode style)
 
 Interactive REPL with `@file` refs (REPOS_ROOT jail) and `/agent` allowlist
 (dry-run by default). System output is plain text; chat
@@ -9,15 +9,15 @@ fg-only color, see § TUI).
 
 ```sh
 # from repo root
-bun --filter @devbox/cli cli -- --help
-bun --filter @devbox/cli cli -- agent list
-bun --filter @devbox/cli cli -- resolve @apps/backend/package.json
+bun --filter @rush-code/cli cli -- --help
+bun --filter @rush-code/cli cli -- agent list
+bun --filter @rush-code/cli cli -- resolve @apps/backend/package.json
 
 # from apps/cli
 bun run cli -- --help
 
 # REPL
-bun --filter @devbox/cli cli
+bun --filter @rush-code/cli cli
 ```
 
 Non-TTY stdin prints help instead of hanging (CI-safe).
@@ -63,7 +63,7 @@ Ctrl+V / Shift+Ins / bracketed paste keep flowing after alt-tab or spinner.
 One-shot routes (`--help` / `--version` / `agent` / `resolve`) and
 non-TTY keep the stdout path (same plain text, static spinner line) and never
 load the native bindings. Interactive flows (home, project open, chat)
-are always TUI — `DEVBOX_NO_TUI` is legacy and ignored. If the TUI
+are always TUI — `RUSH_CODE_NO_TUI` is legacy and ignored. If the TUI
 fails to start, the REPL reports `[cli] TUI failed to start` on stderr
 (`exitCode 1`, no `readline` fallback).
 
@@ -187,7 +187,7 @@ and must not be set back without re-verification.
 горизонтально, отступ сверху центрит вертикально). Навигация всегда TUI:
 стрелки `↑↓` + `Enter` + цифры `1-3` (селектор `HomeApp` в
 `src/ui/screens/index.ts` через `useKeyboard`). Интерактив (home, открытие
-проекта, чат) — всегда TUI, `DEVBOX_NO_TUI` больше не действует (legacy,
+проекта, чат) — всегда TUI, `RUSH_CODE_NO_TUI` больше не действует (legacy,
 игнорируется); stdout остаётся только для one-shot
 (`--help`/`--version`/`agent`/`resolve`) и non-TTY.
 

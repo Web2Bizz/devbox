@@ -13,12 +13,12 @@ const pkgRequire = createRequire(import.meta.url);
 export const VERSION: string = (pkgRequire("../package.json") as { version: string }).version;
 
 export function showHelp(): void {
-  out(headerText("DEVBOX CLI — help"));
+  out(headerText("RUSH CODE CLI — help"));
   out(["usage: cli [--help] [--version] [agent list] [resolve @ref]", "repl: /help /exit /agent list /agent <name> <prompt> [@ref]", ...helpText().split("\n")].join("\n"));
 }
 
 export function showVersion(): void {
-  out(`✓ devbox cli v${VERSION}`);
+  out(`✓ rush-code cli v${VERSION}`);
 }
 
 // Note: non-REPL routes (help/version/agent/resolve/unknown) and the

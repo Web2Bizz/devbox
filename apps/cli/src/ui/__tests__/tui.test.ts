@@ -122,9 +122,9 @@ describe("tui startup order (clear first, prompt last)", () => {
 });
 
 describe("tui gate (interactive is TUI-only)", () => {
-  test("interactive is TUI-only: no DEVBOX_NO_TUI branching", () => {
+  test("interactive is TUI-only: no RUSH_CODE_NO_TUI branching", () => {
     const interactiveSource = readFileSync(join(UI_DIR, "..", "commands", "interactive.ts"), "utf8");
-    expect(interactiveSource).not.toContain("DEVBOX_NO_TUI");
+    expect(interactiveSource).not.toContain("RUSH_CODE_NO_TUI");
   });
 });
 

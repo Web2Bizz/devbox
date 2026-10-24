@@ -118,7 +118,7 @@ export async function dispatchLine(sink: LineSink, raw: string): Promise<boolean
     case "empty":
       return false;
     case "help":
-      emitHeader(sink, "DEVBOX CLI — help");
+      emitHeader(sink, "RUSH CODE CLI — help");
       emitBox(sink, helpText().split("\n"));
       return false;
     case "exit":

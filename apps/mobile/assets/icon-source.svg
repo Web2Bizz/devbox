@@ -1,15 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
   <defs>
-    <!-- Яркий современный градиент Pink -> Orange -->
-    <linearGradient id="rushcodeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#FF2A7A" />
-      <stop offset="50%" stop-color="#FF5E62" />
-      <stop offset="100%" stop-color="#FF9966" />
+    <!-- RUSH CODE brand gradient: CLI 5-stop scale, horizontal (90deg) -->
+    <linearGradient id="rushcodeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FFB02E" />
+      <stop offset="25%" stop-color="#FF4A2D" />
+      <stop offset="50%" stop-color="#E93A6B" />
+      <stop offset="75%" stop-color="#8B3DFF" />
+      <stop offset="100%" stop-color="#2E9BFF" />
     </linearGradient>
 
     <!-- Мягкая свечение-тень для глубины на темном/светлом фоне -->
     <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#FF2A7A" flood-opacity="0.25"/>
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#E93A6B" flood-opacity="0.25"/>
     </filter>
   </defs>
 

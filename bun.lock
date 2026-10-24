@@ -3,7 +3,7 @@
   "configVersion": 0,
   "workspaces": {
     "": {
-      "name": "devbox-backend",
+      "name": "rush-code",
       "devDependencies": {
         "@biomejs/biome": "^2.5.15",
         "@web2bizz/scaffold": "^0.1.7",

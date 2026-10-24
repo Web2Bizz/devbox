@@ -1,4 +1,4 @@
-# AGENTS.md — DevBox (monorepo)
+# AGENTS.md — Rush Code (monorepo)
 
 Монорепо: `apps/backend` (NestJS API), `apps/frontend` (Next.js 16.3
 Turbopack + `@web2bizz/ui` 0.26.0), `apps/mobile` (Expo 57 / RN 0.86 +
@@ -12,7 +12,7 @@ package.json, не Nx-проект, вне bun workspaces).
 
 ## Общий пакет контрактов
 
-- `@devbox/contracts` (`packages/contracts`, 0.1.0) — единый wire-контракт бэкенд↔фронт. 8 пар `entity.ts` + `entity.schema.ts` (health, session, repo-entry, api-error, auth, project, organization, opencode-key): типы + zod v4 boundary-схемы (Standard Schema, backend-verbatim ограничения), без рантайм-логики.
+- `@rush-code/contracts` (`packages/contracts`, 0.1.0) — единый wire-контракт бэкенд↔фронт. 8 пар `entity.ts` + `entity.schema.ts` (health, session, repo-entry, api-error, auth, project, organization, opencode-key): типы + zod v4 boundary-схемы (Standard Schema, backend-verbatim ограничения), без рантайм-логики.
 - `contracts/openapi.yaml` — источник правды wire-контракта: пакет зеркалит `components/schemas` поле-в-поле (Health.status enum `[ok]`, Project.scope optional и т.д.). Расхождение YAML ↔ пакет — баг пакета, не фича.
 - backend/frontend — bun workspaces (`workspace:*`, уже в `workspaces` корня + `tsconfig.base.json` paths). mobile — standalone npm: `file:../../packages/contracts` + `npm install --legacy-peer-deps` (см. `apps/mobile/AGENTS.md`) + резолв `metro.config.js` watchFolders/extraNodeModules + `tsconfig.json` paths.
 - `apps/backend/src/contracts.ts` и `apps/frontend/src/api/types.ts` — deprecated-реэкспорты (Forward-Only, на один релиз, новых экспортов не добавлять). `apps/frontend/src/lib/auth-schemas.ts` — такой же алиас; `apps/mobile/src/shared/api/backend-contracts.ts` — тонкий шим + `parseBackend*` fail-fast хелперы.
@@ -61,7 +61,7 @@ package.json, не Nx-проект, вне bun workspaces).
 | Фичи | `src/features/<имя>/` | фича-модуль целиком: UI-секция + диалоги + локальный статус (`usage/`: `usage-section.tsx`, `api-key-dialog.tsx`, `usage-status.ts`, `__tests__/`) | `@/features/*` | `@/features/usage/usage-section` (из `app/(dashboard)/profile/page.tsx`) |
 | Компоненты | `src/components/` | общие презентационные компоненты (`states`, `layout/`, `profile/`, `projects/`, …) | `@/components/*` | `../../components/states` (из `src/features/usage/`) |
 | Хуки | `src/hooks/` | data-хуки (`useUsage`, `useProfile`, …) + `query-keys.ts` | `@/hooks/*` | `../../hooks/useUsage` (из `src/features/usage/`) |
-| API | `src/api/` | HTTP-клиент (`client.ts`) + реэкспорт контрактов (`types.ts` — deprecated-реэкспорт `@devbox/contracts`, своих типов не заводить) | `@/api/*` | `../../api/types` (из `src/features/usage/`) |
+| API | `src/api/` | HTTP-клиент (`client.ts`) + реэкспорт контрактов (`types.ts` — deprecated-реэкспорт `@rush-code/contracts`, своих типов не заводить) | `@/api/*` | `../../api/types` (из `src/features/usage/`) |
 | Lib | `src/lib/` | утилиты, сторы (`auth-store`, `format-error`) + алиасы схем (`auth-schemas` — реэкспорт пакета); `project/org-schemas` локально строже wire (UX trim/min/max/charset/i18n-коды, subset wire) с комментом-обоснованием | `@/lib/*` | `../../lib/auth-store` (из `src/features/usage/`) |
 | i18n | `src/i18n/` | словарь en/ru, провайдер | `@/i18n/*` | `../../i18n` (из `src/features/usage/`) |
 

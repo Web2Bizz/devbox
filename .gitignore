@@ -52,7 +52,7 @@ npm-debug.log*
 # Docker / misc
 .docker/
 
-# Devbox workspace
+# Rush Code workspace
 workspace/**
 !workspace/.gitkeep
 

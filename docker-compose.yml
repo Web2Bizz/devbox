@@ -36,7 +36,7 @@
 #         see README)
 services:
   backend:
-    image: docker.registry.web2bizz.team/web2bizz/devbox/backend:${TAG:-latest}
+    image: docker.registry.web2bizz.team/web2bizz/rush-code/backend:${TAG:-latest}
     restart: unless-stopped
     deploy:
       resources:
@@ -98,7 +98,7 @@ services:
     # NEXT_PUBLIC_API_URL is baked into the registry image at CI build time
     # (docker.yml passes it as build-arg); a different browser-facing API URL
     # needs a rebuilt image, runtime env cannot change the bundle.
-    image: docker.registry.web2bizz.team/web2bizz/devbox/frontend:${TAG:-latest}
+    image: docker.registry.web2bizz.team/web2bizz/rush-code/frontend:${TAG:-latest}
     restart: unless-stopped
     environment:
       HOSTNAME: "0.0.0.0"
@@ -126,7 +126,7 @@ services:
   # No depends_on from backend: the backend tolerates an unreachable opencode
   # (mock fallback, never throws at boot), so startup order is not enforced.
   opencode:
-    image: docker.registry.web2bizz.team/web2bizz/devbox/opencode:${TAG:-latest}
+    image: docker.registry.web2bizz.team/web2bizz/rush-code/opencode:${TAG:-latest}
     restart: unless-stopped
     deploy:
       resources:

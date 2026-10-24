@@ -23,9 +23,8 @@ export function SidebarBrand() {
 
   return (
     <div className="brand-row">
-      {/* TODO(design): regenerate public/rush-code-logo.png (currently only public/devbox-logo.png exists — binary, needs designer export). */}
       <Image
-        src="/rush-code-logo.png"
+        src="/logo.png"
         alt="Rush Code"
         width={36}
         height={36}

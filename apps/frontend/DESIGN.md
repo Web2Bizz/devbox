@@ -234,8 +234,8 @@ Header. Только `var()`-ссылки; hex — только в `:root` / `.d
 
 ## 6. Бренд
 
-`SidebarBrand` (`src/components/layout/Sidebar.tsx`: `Image`
-`/rush-code-logo.png` 36 `priority` + `.logo-glow`, `Rush Code` в
+`SidebarBrand` (`src/components/layout/Sidebar/Sidebar.tsx`: `Image`
+`/logo.png` 36 `priority` + `.logo-glow`, `Rush Code` в
 `.text-gradient-brand`, `t.nav.console`) — единый источник.
 
 - Header `leadingSlot`: `<SidebarBrand />` + (title/breadcrumbs, если есть).

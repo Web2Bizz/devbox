@@ -31,6 +31,17 @@
 
 ### 2.1 Акцент (бренд-шкала CLI, 5 стопов horizontal — `assets/icon-source.svg`)
 
+Марка: R-градиент, канонический исходник — `logo.png` в корне репо
+(2200×2200, прозрачный фон; НЕ трогать, только читать). Сгенерированный сет
+в `assets/` (ресайз из корневого `logo.png`, имена заморожены `app.json`):
+`icon.png` 1024, `adaptive-icon.png` 1024 foreground на прозрачном фоне
+(подложка `#1F1016` задана `app.json`: adaptive + splash, дрейфа нет),
+`icon-appstore.png` 1024, `notification-icon.png` 512.
+`assets/icon-source.svg` — только эталон градиентной шкалы, не марка;
+`full_logo_gradient_white.svg` удалён (орфан со stale-зелёно-синим
+градиентом, zero refs). Отдельного `favicon` в mobile нет как принято:
+`app.json` `web` без favicon-поля, только `assets/favicon.json`-заглушка.
+
 CLI-эталон: `apps/cli/src/ui/screens/home/constants.ts` `HOME_TITLE_STOPS`
 (`#FFB02E → #FF4A2D → #E93A6B → #8B3DFF → #2E9BFF`, 90deg). Primary —
 средний розовый стоп `#E93A6B`: единственный насыщенный стоп шкалы с

@@ -22,17 +22,16 @@ export async function generateMetadata(): Promise<Metadata> {
     locale = undefined;
   }
   const dict = locale === 'ru' ? ru : en;
-  // TODO(design): public/rush-code-logo.png needs designer export (currently only public/devbox-logo.png exists).
   return {
     title: dict.metadata.title,
     description: dict.metadata.description,
     icons: {
       icon: [
         { url: '/icon.png', type: 'image/png' },
-        { url: '/rush-code-logo.png', type: 'image/png' },
+        { url: '/logo.png', type: 'image/png' },
       ],
-      shortcut: '/rush-code-logo.png',
-      apple: '/rush-code-logo.png',
+      shortcut: '/logo.png',
+      apple: '/logo.png',
     },
   };
 }

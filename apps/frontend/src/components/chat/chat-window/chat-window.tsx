@@ -3,10 +3,10 @@
 import { useEffect, useRef } from 'react';
 import { Badge, Separator, Skeleton } from '@web2bizz/ui/components';
 import { Bubble, BubbleContent, Marker, MarkerContent, Message, MessageContent, MessageHeader } from '@web2bizz/ui/widgets';
-import { EmptyState, ErrorState } from '../states';
-import type { ChatMessage } from '../../hooks/useChat';
-import { useI18n } from '../../i18n';
-import { ChatMessageRow } from './chat-message';
+import { EmptyState, ErrorState } from '../../states';
+import type { ChatMessage } from '../../../hooks/useChat';
+import { useI18n } from '../../../i18n';
+import { ChatMessageRow } from '../chat-message';
 
 export type ChatWindowProps = {
   messages: ChatMessage[];

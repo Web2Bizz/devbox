@@ -4,13 +4,13 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { Button, Header } from '@web2bizz/ui/components';
 import { ThemeToggleDefault } from '@web2bizz/ui/features';
-import { Sidebar, SidebarBrand } from './layout/Sidebar';
-import { Content, type ContentProps } from './layout/Content';
-import { useI18n } from '../i18n';
-import { LanguageSwitcher } from './language-switcher';
-import { HeaderProfileDropdown } from './profile-dropdown';
-import { OrganizationSwitcher } from './organization-switcher';
-import { getValidAccessToken, signOutAndRedirect } from '../lib/auth-store';
+import { Sidebar, SidebarBrand } from '../layout/Sidebar';
+import { Content, type ContentProps } from '../layout/Content';
+import { useI18n } from '../../i18n';
+import { LanguageSwitcher } from '../language-switcher';
+import { HeaderProfileDropdown } from '../profile-dropdown';
+import { OrganizationSwitcher } from '../organization-switcher';
+import { getValidAccessToken, signOutAndRedirect } from '../../lib/auth-store';
 
 export type DashboardHeaderBreadcrumb = {
   label: string;

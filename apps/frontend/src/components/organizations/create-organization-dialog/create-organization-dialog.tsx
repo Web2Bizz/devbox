@@ -18,10 +18,10 @@ import {
   FieldLabel,
   Input,
 } from '@web2bizz/ui/components';
-import { createProjectSchema, type CreateProjectInput } from '../../lib/project-schemas';
-import { useI18n } from '../../i18n';
+import { createOrganizationSchema, type CreateOrganizationInput } from '../../../lib/organization-schemas';
+import { useI18n } from '../../../i18n';
 
-export type CreateProjectDialogProps = {
+export type CreateOrganizationDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreate: (name: string) => Promise<void>;
@@ -31,34 +31,30 @@ export type CreateProjectDialogProps = {
 
 function getZodErrorMessage(code: string, t: ReturnType<typeof useI18n>['t']): string {
   switch (code) {
-    case 'project_name_required':
-      return t.projects.create.validation.required;
-    case 'project_name_too_short':
-      return t.projects.create.validation.tooShort;
-    case 'project_name_too_long':
-      return t.projects.create.validation.tooLong;
-    case 'project_name_invalid_chars':
-      return t.projects.create.validation.invalidChars;
+    case 'org_name_required':
+      return t.orgs.create.validation.required;
+    case 'org_name_too_short':
+      return t.orgs.create.validation.tooShort;
+    case 'org_name_too_long':
+      return t.orgs.create.validation.tooLong;
     default:
-      return t.projects.create.validation.invalidChars;
+      return t.orgs.create.validation.required;
   }
 }
 
 /**
- * Popup для создания проекта — Dialog из @web2bizz/ui + react-hook-form + zod.
- * Поведение:
+ * Popup для создания организации — Dialog из @web2bizz/ui + react-hook-form + zod.
+ * Поведение (эталон: CreateProjectDialog):
  * - валидация на каждом изменении (mode: onChange) и при сабмите
- * - allowed-charset: A-Za-z А-Яа-я 0-9 _ - . и пробел (см. project-schemas.ts)
- * - autoFocus на инпут при открытии
- * - сброс формы при закрытии/успехе
+ * - autoFocus на инпут при открытии, сброс формы при закрытии/успехе
  */
-export function CreateProjectDialog({
+export function CreateOrganizationDialog({
   open,
   onOpenChange,
   onCreate,
   creating = false,
   trigger,
-}: CreateProjectDialogProps) {
+}: CreateOrganizationDialogProps) {
   const { t } = useI18n();
 
   const {
@@ -66,19 +62,18 @@ export function CreateProjectDialog({
     handleSubmit,
     reset,
     formState: { errors, isValid, isSubmitting },
-  } = useForm<CreateProjectInput>({
-    resolver: zodResolver(createProjectSchema),
+  } = useForm<CreateOrganizationInput>({
+    resolver: zodResolver(createOrganizationSchema),
     mode: 'onChange',
     defaultValues: { name: '' },
   });
 
-  // sync reset on open/close — clean state each time popup opens
   useEffect(() => {
     if (open) reset({ name: '' });
   }, [open, reset]);
 
   const onSubmit = useCallback(
-    async (data: CreateProjectInput) => {
+    async (data: CreateOrganizationInput) => {
       await onCreate(data.name.trim());
       reset({ name: '' });
       onOpenChange(false);
@@ -97,46 +92,39 @@ export function CreateProjectDialog({
       {trigger ? <DialogTrigger asChild>{trigger}</DialogTrigger> : null}
       <DialogContent showCloseButton={!busy}>
         <DialogHeader>
-          <DialogTitle>{t.projects.create.title}</DialogTitle>
-          <DialogDescription>{t.projects.create.description}</DialogDescription>
+          <DialogTitle>{t.orgs.create.title}</DialogTitle>
+          <DialogDescription>{t.orgs.create.description}</DialogDescription>
         </DialogHeader>
 
-        <form id="create-project-form" onSubmit={handleSubmit(onSubmit)} className="grid gap-4">
+        <form id="create-org-form" onSubmit={handleSubmit(onSubmit)} className="grid gap-4">
           <Field>
-            <FieldLabel htmlFor="project-name">{t.projects.create.nameLabel}</FieldLabel>
+            <FieldLabel htmlFor="org-name">{t.orgs.create.nameLabel}</FieldLabel>
             <Input
-              id="project-name"
+              id="org-name"
               autoComplete="off"
               autoFocus
-              placeholder={t.projects.create.namePlaceholder}
+              placeholder={t.orgs.create.namePlaceholder}
               aria-invalid={!!errors.name}
-              aria-describedby={fieldError ? 'project-name-error' : 'project-name-hint'}
+              aria-describedby={fieldError ? 'org-name-error' : 'org-name-hint'}
               disabled={busy}
               {...register('name')}
             />
-            <FieldDescription id="project-name-hint">{t.projects.create.hint}</FieldDescription>
-            {fieldError && (
-              <FieldError id="project-name-error">{fieldError}</FieldError>
-            )}
+            <FieldDescription id="org-name-hint">{t.orgs.create.hint}</FieldDescription>
+            {fieldError && <FieldError id="org-name-error">{fieldError}</FieldError>}
           </Field>
         </form>
 
         <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={busy}
-          >
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             {t.common.cancel}
           </Button>
           <Button
             type="submit"
-            form="create-project-form"
+            form="create-org-form"
             variant="primaryBrand"
             disabled={busy || !isValid}
           >
-            {busy ? t.projects.create.creating : t.projects.create.submit}
+            {busy ? t.orgs.create.creating : t.orgs.create.submit}
           </Button>
         </DialogFooter>
       </DialogContent>

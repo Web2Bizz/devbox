@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useState, type KeyboardEvent } from 'react';
 import { Button } from '@web2bizz/ui/components';
-import { useI18n } from '../../i18n';
+import { useI18n } from '../../../i18n';
 
 export type SidebarNavItem = {
   href: string;

@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { EmptyState, ErrorState, LoadingState } from '../states';
+import { EmptyState, ErrorState, LoadingState } from '../../states';
 
 export type ContentEmpty = {
   title: string;

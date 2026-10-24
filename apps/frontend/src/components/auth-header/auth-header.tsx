@@ -2,8 +2,8 @@
 
 import { Header } from '@web2bizz/ui/components';
 import { ThemeToggleDefault } from '@web2bizz/ui/features';
-import { SidebarBrand } from './layout/Sidebar';
-import { LanguageSwitcher } from './language-switcher';
+import { SidebarBrand } from '../layout/Sidebar';
+import { LanguageSwitcher } from '../language-switcher';
 
 /**
  * Guest header for the (auth) group: same kit Header bar as the dashboard

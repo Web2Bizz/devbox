@@ -2,8 +2,8 @@
 
 import { Badge } from '@web2bizz/ui/components';
 import { Bubble, BubbleContent, Message, MessageContent, MessageHeader } from '@web2bizz/ui/widgets';
-import type { ChatMessage } from '../../hooks/useChat';
-import { useI18n } from '../../i18n';
+import type { ChatMessage } from '../../../hooks/useChat';
+import { useI18n } from '../../../i18n';
 
 type TextBlock = {
   kind: 'text' | 'code';

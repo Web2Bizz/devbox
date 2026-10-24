@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiClientError, api } from '../api/client';
 import { formatApiError } from '../lib/format-error';
 import { getValidAccessToken } from '../lib/auth-store';
-import type { Organization as OrganizationDto, UpdateOrganizationInput as UpdateOrganizationRequest } from '@devbox/contracts';
+import type { Organization as OrganizationDto, UpdateOrganizationInput as UpdateOrganizationRequest } from '@rush-code/contracts';
 import { useI18n } from '../i18n';
 import { ORGANIZATIONS_QUERY_KEY } from './useOrganizations';
 

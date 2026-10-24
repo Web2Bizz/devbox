@@ -3,7 +3,7 @@ import { z } from 'zod';
 /**
  * Organization-name validation — UX-strict superset of the wire contract.
  *
- * Wire source of truth is `@devbox/contracts` (`createOrganizationSchema`:
+ * Wire source of truth is `@rush-code/contracts` (`createOrganizationSchema`:
  * backend-verbatim 1..200, no trim). This local schema stays intentionally
  * STRICTER (trim + 2..100 + i18n codes `org_name_*` mapped in
  * CreateOrganizationDialog) — replacing it with the package schema would

@@ -58,7 +58,7 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <I18nProvider>
-        <ThemeProvider defaultTheme="system" storageKey="devbox-frontend-theme">
+        <ThemeProvider defaultTheme="system" storageKey="rush-code-frontend-theme">
           {children}
         </ThemeProvider>
       </I18nProvider>

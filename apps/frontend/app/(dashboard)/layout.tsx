@@ -11,7 +11,7 @@ import { AUTH_MARKER, AUTH_MARKER_VALUE } from '@/lib/route-guard';
  *
  * Server guard (defense-in-depth behind edge `proxy.ts`): no readable
  * session marker → direct hits / RSC renders bounce to `/login` instead of
- * rendering the shell. Same `devbox-auth=1` contract, no token access.
+ * rendering the shell. Same `rush-code-auth=1` contract, no token access.
  */
 export const dynamic = 'force-dynamic';
 

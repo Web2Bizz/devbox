@@ -41,7 +41,7 @@ type DashboardHeaderInternalProps = DashboardHeaderProps & {
 
 /**
  * Visible grid-shell header built on the kit Header (@web2bizz/ui 0.25.9,
- * `components` entry, shape=rounded): SidebarBrand (logo + DevBox + Console)
+ * `components` entry, shape=rounded): SidebarBrand (logo + Rush Code + Console)
  * + OrganizationSwitcher (authenticated-only org dropdown next to the logo
  * → /organizations/[id], empty → /organizations link) + title/breadcrumbs
  * → leadingSlot, actions/user + HeaderProfileDropdown

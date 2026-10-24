@@ -82,7 +82,7 @@ describe('Sidebar registries dropdown', () => {
   });
 
   test('ru locale renders Docker-образы link (no hub)', async () => {
-    document.cookie = 'devbox-locale=ru; path=/';
+    document.cookie = 'rush-code-locale=ru; path=/';
     try {
       setup();
 
@@ -98,9 +98,9 @@ describe('Sidebar registries dropdown', () => {
 
       expect(screen.queryByRole('link', { name: /Все реестры/i })).toBeNull();
     } finally {
-      document.cookie = 'devbox-locale=; path=/; max-age=0';
+      document.cookie = 'rush-code-locale=; path=/; max-age=0';
       try {
-        window.localStorage.removeItem('devbox-locale');
+        window.localStorage.removeItem('rush-code-locale');
       } catch {
         // private mode / blocked storage — ignore
       }

@@ -5,7 +5,7 @@
  * Covers: kit UserTrigger rest/ref forward (0.25.9 regression stays green on
  * 0.26.0), open/close (click opens, Escape closes + focus return), sign-out
  * pushes /login, Tab reachability, ru labels via I18nProvider + cookie.
- * Trigger accessible name is now the kit displayName ("Devbox Developer"),
+ * Trigger accessible name is now the kit displayName ("Rush Code Developer"),
  * not the removed userMenu.openMenu aria-label (kit trigger renders the
  * name visibly; Radix still supplies aria-haspopup/expanded + data-state).
  *
@@ -85,9 +85,9 @@ mock.module('next/navigation', () => ({
 // Canned identity (module top — mock factories below close over these).
 const ME_USER = {
   id: 'mock-user-1',
-  firstName: 'Devbox',
+  firstName: 'Rush Code',
   lastName: 'Developer',
-  email: 'dev@devbox.local',
+  email: 'dev@rush-code.local',
   provider: 'local' as const,
   createdAt: '2026-01-15T09:00:00.000Z',
 };
@@ -175,10 +175,10 @@ afterEach(() => {
   pushMock.mockClear();
 });
 
-const USER = { name: 'Devbox Developer', email: 'dev@devbox.local' };
+const USER = { name: 'Rush Code Developer', email: 'dev@rush-code.local' };
 // Kit trigger renders AvatarFallback initial ("D") + visible displayName, so
-// the accessible name concatenates ("DDevbox Developer"). Match by substring.
-const TRIGGER_NAME = /Devbox Developer/;
+// the accessible name concatenates ("DRush Code Developer"). Match by substring.
+const TRIGGER_NAME = /Rush Code Developer/;
 const FIND_TIMEOUT = 5000;
 
 describe('ProfileDropdownUserTrigger rest/ref forward (0.25.9 regression)', () => {
@@ -290,7 +290,7 @@ describe('HeaderProfileDropdown (pure kit AuthorizedUserProfile)', () => {
   });
 
   test('ru locale renders translated labels', async () => {
-    document.cookie = 'devbox-locale=ru; path=/';
+    document.cookie = 'rush-code-locale=ru; path=/';
     try {
       const user = userEvent.setup();
       render(
@@ -307,7 +307,7 @@ describe('HeaderProfileDropdown (pure kit AuthorizedUserProfile)', () => {
       expect(screen.getByRole('link', { name: 'Профиль' })).toBeDefined();
       expect(screen.getByRole('button', { name: 'Выйти' })).toBeDefined();
     } finally {
-      document.cookie = 'devbox-locale=; path=/; max-age=0';
+      document.cookie = 'rush-code-locale=; path=/; max-age=0';
     }
   });
 });

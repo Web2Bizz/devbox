@@ -3,7 +3,7 @@ import { z } from 'zod';
 /**
  * Project-name validation — UX-strict superset of the wire contract.
  *
- * Wire source of truth is `@devbox/contracts` (`createProjectSchema`:
+ * Wire source of truth is `@rush-code/contracts` (`createProjectSchema`:
  * backend-verbatim 1..200, no trim/charset). This local schema stays
  * intentionally STRICTER (trim + 2..100 + allowed-charset + i18n codes
  * `project_name_*` mapped in CreateProjectDialog) — replacing it with the

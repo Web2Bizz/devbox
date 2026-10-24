@@ -1,4 +1,4 @@
-# DevBox Frontend — DESIGN
+# Rush Code Frontend — DESIGN
 
 Дизайн-договорённости `apps/frontend` (Next 16.3 Turbopack + `@web2bizz/ui`
 0.26.0). Подробности у кита: `node_modules/@web2bizz/ui/AGENTS.md`,
@@ -206,7 +206,7 @@ Header. Только `var()`-ссылки; hex — только в `:root` / `.d
 ## 6. Бренд
 
 `SidebarBrand` (`src/components/layout/Sidebar.tsx`: `Image`
-`/devbox-logo.png` 36 `priority` + `.logo-glow`, `DevBox` в
+`/rush-code-logo.png` 36 `priority` + `.logo-glow`, `Rush Code` в
 `.text-gradient-brand`, `t.nav.console`) — единый источник.
 
 - Header `leadingSlot`: `<SidebarBrand />` + (title/breadcrumbs, если есть).
@@ -234,7 +234,7 @@ Header. Только `var()`-ссылки; hex — только в `:root` / `.d
   `profile-dropdown.test.tsx`, ждёт патча кита).
 - Desktop `aside`: только `<SidebarNav />`, бренда нет.
 - Mobile drawer: свой `<SidebarBrand />`-фолбэк + кнопка закрытия.
-- i18n `en`/`ru` через `useI18n`, URL плоские (кука `devbox-locale`).
+- i18n `en`/`ru` через `useI18n`, URL плоские (кука `rush-code-locale`).
 
 ## 7. Плоский Content, без вложенных обводок
 

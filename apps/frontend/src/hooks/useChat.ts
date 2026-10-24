@@ -16,7 +16,7 @@ export type UseChatOptions = {
   sessionId?: string;
   /** Opencode working directory, forwarded as `?directory=`. */
   directory?: string;
-  /** DevBox project id (prj-*) — UI-only until backend maps project → directory. */
+  /** Rush Code project id (prj-*) — UI-only until backend maps project → directory. */
   projectId?: string;
 };
 

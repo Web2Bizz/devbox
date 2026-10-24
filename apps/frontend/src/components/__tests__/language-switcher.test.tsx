@@ -72,9 +72,9 @@ const { LanguageSwitcher } = await import('../language-switcher');
 
 afterEach(() => {
   cleanup();
-  document.cookie = 'devbox-locale=; path=/; max-age=0';
+  document.cookie = 'rush-code-locale=; path=/; max-age=0';
   try {
-    window.localStorage.removeItem('devbox-locale');
+    window.localStorage.removeItem('rush-code-locale');
   } catch {
     // storage may be unavailable — ignore
   }
@@ -142,7 +142,7 @@ describe('LanguageSwitcher (locale dropdown)', () => {
     await waitFor(() => expect(trigger.textContent).toContain('RU'));
     // … persistence is cookie-only: URL never changes, cookie + <html lang> do.
     expect(window.location.href).toBe(urlBefore);
-    expect(document.cookie).toContain('devbox-locale=ru');
+    expect(document.cookie).toContain('rush-code-locale=ru');
     expect(document.documentElement.lang).toBe('ru');
   });
 
@@ -162,7 +162,7 @@ describe('LanguageSwitcher (locale dropdown)', () => {
   });
 
   test('ru locale renders translated labels', async () => {
-    document.cookie = 'devbox-locale=ru; path=/';
+    document.cookie = 'rush-code-locale=ru; path=/';
     const user = userEvent.setup();
     renderSwitcher();
 

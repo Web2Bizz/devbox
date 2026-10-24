@@ -3,7 +3,7 @@
 import { useCallback, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiClientError, api } from '../api/client';
-import type { OpencodeUsage } from '@devbox/contracts';
+import type { OpencodeUsage } from '@rush-code/contracts';
 import { getValidAccessToken, refreshAccessToken } from '../lib/auth-store';
 import { USAGE_QUERY_KEY } from './query-keys';
 import { useI18n } from '../i18n';

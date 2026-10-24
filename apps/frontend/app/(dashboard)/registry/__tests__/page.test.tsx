@@ -48,7 +48,7 @@ describe('/registry hub page', () => {
   });
 
   test('ru locale renders Docker-образы + Npm-пакеты links', async () => {
-    document.cookie = 'devbox-locale=ru; path=/';
+    document.cookie = 'rush-code-locale=ru; path=/';
     try {
       setup();
 
@@ -62,9 +62,9 @@ describe('/registry hub page', () => {
       });
       expect(npm.getAttribute('href')).toBe('/registry/npm');
     } finally {
-      document.cookie = 'devbox-locale=; path=/; max-age=0';
+      document.cookie = 'rush-code-locale=; path=/; max-age=0';
       try {
-        window.localStorage.removeItem('devbox-locale');
+        window.localStorage.removeItem('rush-code-locale');
       } catch {
         // private mode / blocked storage — ignore
       }

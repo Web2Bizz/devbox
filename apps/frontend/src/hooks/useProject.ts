@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiClientError, api } from '../api/client';
 import { formatApiError } from '../lib/format-error';
 import type { Project } from '../lib/types';
-import type { Project as ProjectApiDto } from '@devbox/contracts';
+import type { Project as ProjectApiDto } from '@rush-code/contracts';
 import { useI18n } from '../i18n';
 
 export function mapApiToProject(dto: ProjectApiDto): Project {

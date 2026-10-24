@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { formatApiError } from '../lib/format-error';
 import { getValidAccessToken } from '../lib/auth-store';
-import type { Organization as OrganizationDto } from '@devbox/contracts';
+import type { Organization as OrganizationDto } from '@rush-code/contracts';
 import { useI18n } from '../i18n';
 
 export const ORGANIZATIONS_QUERY_KEY = ['organizations'] as const;

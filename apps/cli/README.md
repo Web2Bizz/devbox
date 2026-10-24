@@ -1,8 +1,8 @@
 # @devbox/cli — DevBox CLI (opencode style)
 
 Interactive REPL with `@file` refs (REPOS_ROOT jail) and `/agent` allowlist
-(dry-run by default). System output is ASCII boxes (width 80); chat
-messages (user prompt + agent reply) are plain full-width text (no boxes,
+(dry-run by default). System output is plain text; chat
+messages (user prompt + agent reply) are plain full-width text (no frames,
 fg-only color, see § TUI).
 
 ## Run
@@ -24,53 +24,55 @@ Non-TTY stdin prints help instead of hanging (CI-safe).
 
 ## TUI (transparent OpenTUI REPL)
 
-On a TTY the REPL renders through `@opentui/core` (`src/ui/tui.ts`,
-pinned in `package.json`): greeting, scrollback history, status and
-animated spinner are OpenTUI renderables, the input stays pinned to the
-bottom (`space-between` column + sticky-bottom history + focused
-`InputRenderable`, submit on `ENTER`).
+On a TTY the REPL renders through `@opentui/core` + `@opentui/react`
+(`src/commands/runners.ts` + `src/ui/screens/index.ts`, pinned in `package.json`):
+greeting, scrollback history, status and animated spinner are React
+`<text>` nodes, the input stays pinned to the bottom (`space-between`
+column + sticky-bottom history + focused `<input>`, submit on `onSubmit`).
 
 Transparency: the root never paints its own color — no backdrop/bg props
 anywhere in the render code (fg-only), the terminal shows through. Chat
 history + every message line is `width: "100%"` (full terminal width:
-renderer → `stdout.columns` → `80`, never fixed 80). The pure-ASCII
-`box.ts` renderer stays for system content (greeting, help, ref previews,
-`errorBox`) inside OpenTUI text nodes; history is capped
+renderer → `stdout.columns` → `80`). The plain-text
+`plain.ts` renderer stays for system content (greeting, help, ref previews,
+`errorText`) inside OpenTUI text nodes; history is capped
 (`TUI_HISTORY_CAP`) so the input never scrolls off.
 
-Chat style (`src/ui/chat.ts`, single source of truth): user prompt is
+Chat style (`src/ui/shared/chat.ts`, single source of truth): user prompt is
 cyan (`USER_FG="cyan"`, stdout `ESC[36m`), agent reply is green
 (`AGENT_FG="green"`, stdout `ESC[32m`) — readable pair on a dark
 transparent background. Both reset with fg-only `ESC[39m` (no `ESC[0m`,
 no `40-47`/`100-107` bg codes anywhere). Messages are plain wrapped
 text at terminal width (`terminalWidth()` / `resolveTerminalWidth()`,
-word-wrap `wrapMessage()`), never `box()`/`header()`/`separator()`
-frames; TUI history gets the same plain lines with `fg` via
-`TextRenderable` (`session.printUser` / `session.printAgent`,
-`formatUserPlain` / `formatAgentPlain`). `Greeting` and `errorBox` boxes
-stay as-is. `hasBgCodes()` + `stripAnsi()` guard the contract in tests
+word-wrap `wrapMessage()`), never frames — plain `headerText`/`tableText`/`errorText`
+lines; TUI history gets the same plain lines with `fg` via `<text>`
+(`session.printUser` / `session.printAgent`,
+`formatUserPlain` / `formatAgentPlain`). `greetingLines` and `errorText` stay
+plain. `hasBgCodes()` + `stripAnsi()` guard the contract in tests
 (`src/ui/__tests__/chat.test.ts`: user cyan / agent green, no bg codes,
-width = terminal, no box frames).
+width = terminal, no frames).
 
-Paste: `InputRenderable` handles bracketed paste natively; `tui.ts`
+Paste: `<input>` handles bracketed paste natively; `core/utils/paste.ts`
 normalizes it (`normalizePastedText`: strips `ESC[200~`/`ESC[201~`,
 CRLF→LF, multiline→single line with spaces, C0-strip, trim, cap
 `TUI_INPUT_MAX_LENGTH=10000` so pasted blocks are not cut at the
-upstream 1000). `ENTER` submits (`InputRenderableEvents.ENTER`);
-`maxLength` is passed explicitly. Focus is refocused after every
-`print`/`spin` mutation and after each submitted line, so Ctrl+V /
-Shift+Ins / bracketed paste keep flowing after alt-tab or spinner.
-Fallback: `--help` / `--version` / non-TTY / CI never load the native
-bindings and keep the stdout path (same boxes, static spinner line). If
-the TUI fails to start, the REPL falls back to `readline` automatically.
-`DEVBOX_NO_TUI=1` forces the stdout fallback (see `.env.example`).
+upstream 1000). Submit arrives through `onSubmit`;
+`maxLength` is passed explicitly. Focus is declarative (the `focused`
+prop survives every `print`/`spin` mutation and each submitted line), so
+Ctrl+V / Shift+Ins / bracketed paste keep flowing after alt-tab or spinner.
+One-shot routes (`--help` / `--version` / `agent` / `resolve`) and
+non-TTY keep the stdout path (same plain text, static spinner line) and never
+load the native bindings. Interactive flows (home, project open, chat)
+are always TUI — `DEVBOX_NO_TUI` is legacy and ignored. If the TUI
+fails to start, the REPL reports `[cli] TUI failed to start` on stderr
+(`exitCode 1`, no `readline` fallback).
 
 ## Env
 
 `REPOS_ROOT` is required for any `@ref` (no default, no `<cwd>/repos`
 fallback — fail-fast with `[cli] REPOS_ROOT is required …`, see
 `.env.example`). Refs must be relative (`@apps/backend/package.json`);
-absolute paths and any `..` segment are denied (traversal → error box).
+absolute paths and any `..` segment are denied (traversal → error lines).
 Reads only; previews are capped (`40` lines / `2000` chars) and scrubbed
 (`Bearer …` → `Bearer [redacted]`, `://user:pass@` → `://user:[redacted]@`).
 
@@ -79,7 +81,7 @@ auth.json ONLY (`$HOME/.local/share/opencode/auth.json`, `XDG_DATA_HOME`
 override, JSON `{opencode:{key}, opencode-go:{key}}` — `opencode-go.key`
 first). Env key vars (`OPENCODE_API_KEY`/`JEV_API_KEY`) are NOT read.
 Missing → fail-fast `missing opencode key in auth.json → вставь через
-/connect` (✗-box with path, secret never logged). Cloud endpoint:
+/connect` (✗ lines with path, secret never logged). Cloud endpoint:
 `OPENCODE_CLOUD_URL` (explicit override only, default
 `https://opencode.ai/inference/openai/v1/chat/completions` — documented
 inference endpoint, see § Chat). Cloud model: `OPENCODE_MODEL` (optional,
@@ -151,7 +153,7 @@ and must not be set back without re-verification.
   diagnostics WITHOUT the key value: `endpoint=` (`OPENCODE_CLOUD_URL`),
   `model=`, `key_len=` + `key_source=` (auth.json path, perms `600`, uid +
   `uid_match`), `body-shape={model,messages:1}`, scrubbed `cause=` (full
-  ≤2000, preview first 500 in `preview=`). `errorBox` wraps (never
+  ≤2000, preview first 500 in `preview=`). `errorText` keeps full lines (never
   `{"error":{"type":"serv…`-cuts). Hint by cause: `invalid-key` →
   refresh via `/connect`; `service` → check `OPENCODE_CLOUD_URL`/model;
   else generic. Reply is always text —
@@ -167,37 +169,39 @@ and must not be set back without re-verification.
 - `cli --help` / `cli --version`
 - `cli agent list` — allowlist table (`ask plan build build-fast
   build-smart refactor unit-test review diagnostics task-manager devops`)
-- `cli agent run <name> <prompt> [--apply]` — dry-run box by default
+- `cli agent run <name> <prompt> [--apply]` — dry-run plain lines by default
   (shows what would go + cloud-key hint); `--apply` sends the
-  prompt to the cloud via `src/agents/opencode.ts` (OpenAI-compatible,
-  timeout 30s, 1 retry, scrubbed `cause ≤2000`) and prints the reply in a
-  box (never empty/`answer`; no serve needed)
-- `cli resolve @path` — jailed preview box
+  prompt to the cloud via `src/agents/opencode/index.ts` (OpenAI-compatible,
+  timeout 30s, 1 retry, scrubbed `cause ≤2000`) and prints the reply as plain
+  text (never empty/`answer`; no serve needed)
+- `cli resolve @path` — jailed preview lines
 - REPL: `/help` `/exit` `/agent list` `/agent <name> <prompt> [--apply]`
   plus free text with `@refs` — free text goes to the cloud
-  (reply box) or fails with a cloud-key ✗-box; serve is never required
+  (plain reply) or fails with cloud-key ✗ lines; serve is never required
 
 ## Экраны
 
 Главная (RUSH CODE): заголовок `RUSH CODE` + 3 пункта по середине экрана —
 `1. Выбрать проект` / `2. Открыть директорию` / `3. Выйти` (см.
-`src/ui/home.ts`: `HOME_TITLE` + `HOME_OPTIONS`, `renderHomeScreen()` центрит
-горизонтально, отступ сверху центрит вертикально). Навигация TTY: стрелки
-`↑↓` + `Enter` (raw-mode селектор в `cli.ts`); фолбэк везде одинаковый —
-цифры `1-3` (`parseHomeInput()`, `DEVBOX_NO_TUI=1` / non-TTY / CI держат
-stdout-путь, прозрачность без bg не ломается).
+`src/ui/screens/home/index.tsx`: `HOME_TITLE` + `HOME_OPTIONS`, `renderHomeScreen()` центрит
+горизонтально, отступ сверху центрит вертикально). Навигация всегда TUI:
+стрелки `↑↓` + `Enter` + цифры `1-3` (селектор `HomeApp` в
+`src/ui/screens/index.ts` через `useKeyboard`). Интерактив (home, открытие
+проекта, чат) — всегда TUI, `DEVBOX_NO_TUI` больше не действует (legacy,
+игнорируется); stdout остаётся только для one-shot
+(`--help`/`--version`/`agent`/`resolve`) и non-TTY.
 
 - `Выбрать проект` — список из сканирования `REPOS_ROOT`
-  (`src/refs/projects.ts`: `listProjects()`; только директории без точки,
+  (`src/core/queries/refs/projects.ts`: `listProjects()`; только директории без точки,
   сортировка; пустой корень — fail-fast `нет проектов`, не молчаливый `[]`).
-  Выбор номером/именем → `resolveProjectDir()` (jail как в `resolve.ts`).
+  Выбор номером/именем → `resolveProjectDir()` (jail как в `core/queries/refs/resolve.ts`).
 - `Открыть директорию` — ввод пути + `resolveCustomDir()` (jail `REPOS_ROOT`,
   `..` denied, только директории).
 - `Выйти` — чистый выход (`bye ✓`, `exit 0`).
 
 Сессия (чат с агентом): после выбора проекта/директории — экран чата
 (`RUSH CODE — Сессия: <имя> (<путь>)` + переиспользуемый cloud-чат
-`chatLocal()` → `chatCloud()` из `src/agents/opencode.ts`: ключ строго
+`chatLocal()` → `chatCloud()` из `src/agents/opencode/index.ts`: ключ строго
 `auth.json`, `OPENCODE_*` env для ключа не читаются, scrub `Bearer`/userinfo,
 `cause ≤2000`, fail-fast `missing opencode key in auth.json`). История
 full-width plain: user cyan (`USER_FG`), agent green (`AGENT_FG`) — см. § TUI,
@@ -205,12 +209,15 @@ full-width plain: user cyan (`USER_FG`), agent green (`AGENT_FG`) — см. § T
 
 ## Layers
 
-- `src/ui/` — ASCII render only (`box/table/header/separator`,
-  `spinner` frames `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`)
-- `src/refs/` — ref resolve only (jail + read-only preview)
-- `src/agents/` — allowlist + dry-run runner + `opencode.ts` key/chat only
+- `src/commands/` — entry-команды (`commands`/`dispatchLine`, `interactive` TUI-флоу, `sinks`)
+- `src/ui/shared/` — plain-text render only (`chat/plain/store`: `headerText/tableText/errorText/greetingLines/statusLine`)
+- `src/ui/components/` — `Spinner` (фреймы — в `src/core/utils/frames.ts`: `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`)
+- `src/ui/screens/` (`home/`-модуль + `projects/` + `repl/` + `error/` + `index.ts`) + `src/commands/runners.ts` + `src/commands/session.ts` — экраны, TUI-раннеры, home-модуль
+- `src/core/utils/` — чистые хелперы (`frames`, `paste`)
+- `src/core/queries/refs/` — ref resolve only (jail + read-only preview)
+- `src/agents/` — allowlist + dry-run runner + `opencode/index.ts` key/chat only
 - `src/prompt/` — line parser only (`parseLine`, no readline)
 
 Output goes through `process.stdout.write` (never `console.*`, so the
 `noConsole` lint stays green); tests live in
-`src/ui/__tests__/ascii.test.ts` (width-80 snapshot, no broken layout).
+`src/ui/__tests__/ascii.test.ts` (plain snapshot, no frames).

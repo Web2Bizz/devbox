@@ -1,6 +1,6 @@
 {
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
-  "name": "@devbox/contracts",
+  "name": "@rush-code/contracts",
   "projectType": "library",
   "sourceRoot": "packages/contracts/src",
   "targets": {

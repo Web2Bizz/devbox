@@ -1,5 +1,5 @@
 /**
- * Client auth schemas — re-exported from '@devbox/contracts' (single source).
+ * Client auth schemas — re-exported from '@rush-code/contracts' (single source).
  *
  * Package `loginSchema`/`registerSchema` are backend-verbatim
  * (trim-first email regex, name trim/min/max, password min/max) so
@@ -8,10 +8,10 @@
  * share the same zod 4.6.5 instance, so `zodResolver(loginSchema)` keeps
  * working with no thin wrapper.
  *
- * @deprecated Import from '@devbox/contracts' directly in new code —
+ * @deprecated Import from '@rush-code/contracts' directly in new code —
  * this module is a Forward-Only alias kept so `@/lib/auth-schemas`
  * imports keep compiling.
  */
 
-export { loginSchema, registerSchema } from '@devbox/contracts';
-export type { LoginInput, RegisterInput } from '@devbox/contracts';
+export { loginSchema, registerSchema } from '@rush-code/contracts';
+export type { LoginInput, RegisterInput } from '@rush-code/contracts';

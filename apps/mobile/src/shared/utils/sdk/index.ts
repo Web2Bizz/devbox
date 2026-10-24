@@ -5,7 +5,7 @@
 //
 // NOTE (card 4/5, wire freeze): the types below are UPSTREAM opencode shapes
 // (`/global/health`, `/session`, `/project`, … on the opencode server itself),
-// NOT backend `/api/v1/*` wire from `@devbox/contracts`. In particular
+// NOT backend `/api/v1/*` wire from `@rush-code/contracts`. In particular
 // `HealthResponse` ({ healthy, version }) mirrors openapi `OpencodeHealth`,
 // `Session`/`Project` mirror the upstream session/project objects, and the
 // `ApiError` class below is a transport error (HTTP status + body) — not the

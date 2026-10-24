@@ -1,7 +1,7 @@
 {
-  "name": "@devbox/contracts",
+  "name": "@rush-code/contracts",
   "version": "0.1.0",
-  "description": "Shared DevBox wire contracts — entity types + zod v4 boundary schemas. Single source of truth for backend/frontend; mirrors contracts/openapi.yaml.",
+  "description": "Shared Rush Code wire contracts — entity types + zod v4 boundary schemas. Single source of truth for backend/frontend; mirrors contracts/openapi.yaml.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

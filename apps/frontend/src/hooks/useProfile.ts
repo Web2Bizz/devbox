@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiClientError, api } from '../api/client';
-import type { AuthUser } from '@devbox/contracts';
+import type { AuthUser } from '@rush-code/contracts';
 import { formatApiError } from '../lib/format-error';
 import { getValidAccessToken, refreshAccessToken } from '../lib/auth-store';
 import { PROFILE_QUERY_KEY } from './query-keys';

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, ApiClientError } from './api/client';
-import type { HealthResponse, SendChatResponse, Session } from '@devbox/contracts';
+import type { HealthResponse, SendChatResponse, Session } from '@rush-code/contracts';
 
 export default function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null);

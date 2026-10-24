@@ -1,5 +1,5 @@
 import { api } from '../api/client';
-import type { AuthSession } from '@devbox/contracts';
+import type { AuthSession } from '@rush-code/contracts';
 import { getActiveQueryClient } from './query-client';
 
 const ACCESS_KEY = 'devbox-access-token';

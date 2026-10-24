@@ -24,7 +24,7 @@ import type {
   Session,
   UpdateMemberRoleInput as UpdateMemberRoleRequest,
   UpdateOrganizationInput as UpdateOrganizationRequest,
-} from '@devbox/contracts';
+} from '@rush-code/contracts';
 
 // Base URL resolution (Next.js App Router):
 // - process.env.NEXT_PUBLIC_API_URL is inlined at `next build` time. The literal

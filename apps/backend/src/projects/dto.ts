@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 
 /**
- * Projects DTO — single source of truth is @devbox/contracts (verbatim
+ * Projects DTO — single source of truth is @rush-code/contracts (verbatim
  * regexes, min/max + error strings, partial-update derivation, link
  * default). Swagger DTO classes below stay as thin @nestjs/swagger
  * wrappers for contracts/openapi.yaml parity.

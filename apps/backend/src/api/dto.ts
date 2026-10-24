@@ -2,13 +2,13 @@ import { ApiProperty } from '@nestjs/swagger';
 import { z } from 'zod';
 
 /**
- * POST /api/v1/chat body — single source of truth is @devbox/contracts
+ * POST /api/v1/chat body — single source of truth is @rush-code/contracts
  * (verbatim constraints + error strings, Standard Schema compatible).
  * SendChatRequestDto below stays as the thin @nestjs/swagger wrapper for
  * contracts/openapi.yaml parity. Runtime validation via
  * ZodValidationPipe(sendChatSchema).
  */
-export { sendChatSchema, type SendChatInput } from '@devbox/contracts';
+export { sendChatSchema, type SendChatInput } from '@rush-code/contracts';
 
 /**
  * POST /api/opencode/session/:id/message body — passthrough shape for the

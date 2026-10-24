@@ -1,12 +1,12 @@
 /**
  * Shared domain types for mocked dashboard pages.
- * Real API DTOs live in '@devbox/contracts' (via src/api/types.ts
+ * Real API DTOs live in '@rush-code/contracts' (via src/api/types.ts
  * re-export) — these mirror the backend contracts so hooks can swap
  * mocks for `api.*` calls later.
  * TODO REAL-API: replace mock sources inside hooks with ApiClient calls.
  */
 
-import type { ProjectScope } from '@devbox/contracts';
+import type { ProjectScope } from '@rush-code/contracts';
 
 export type ProjectStatus = 'active' | 'draft' | 'archived';
 

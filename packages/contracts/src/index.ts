@@ -1,5 +1,5 @@
 /**
- * @devbox/contracts — shared DevBox wire contracts.
+ * @rush-code/contracts — shared Rush Code wire contracts.
  *
  * Entity types + zod v4 boundary schemas, single source of truth for
  * backend/frontend (replaces the backend/frontend contracts.ts + lib

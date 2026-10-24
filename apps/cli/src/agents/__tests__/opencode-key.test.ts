@@ -536,18 +536,19 @@ describe("400 diagnostics (no value, full scrubbed cause, no serv… cut)", () =
       const err = await chatLocal("hello", { env, fetchImpl: badFetch }).catch((e: unknown) =>
         e instanceof Error ? e : new Error(String(e)),
       );
-      expect(err.message).toContain("status=400");
-      expect(err.message).toContain("endpoint=");
-      expect(err.message).toContain(OPENCODE_CLOUD_URL);
-      expect(err.message).toContain(`model=${OPENCODE_CLOUD_MODEL}`);
-      expect(err.message).toContain("key_len=");
-      expect(err.message).toContain("key_source=");
-      expect(err.message).toContain("body-shape={model,messages:1}");
-      expect(err.message).toContain("cause=");
+      const errText = typeof err === "string" ? err : err.message;
+      expect(errText).toContain("status=400");
+      expect(errText).toContain("endpoint=");
+      expect(errText).toContain(OPENCODE_CLOUD_URL);
+      expect(errText).toContain(`model=${OPENCODE_CLOUD_MODEL}`);
+      expect(errText).toContain("key_len=");
+      expect(errText).toContain("key_source=");
+      expect(errText).toContain("body-shape={model,messages:1}");
+      expect(errText).toContain("cause=");
       // Full cause present (no {"error":{"type":"serv… cut): wrap shows all.
-      expect(err.message).toContain("service_unavailable");
-      expect(err.message).not.toContain("k123");
-      expect(classify400Cause(err.message)).toBe("service");
+      expect(errText).toContain("service_unavailable");
+      expect(errText).not.toContain("k123");
+      expect(classify400Cause(errText)).toBe("service");
       resetLocalSessionForTests();
     } finally {
       cleanup(dir);
@@ -566,11 +567,12 @@ describe("400 diagnostics (no value, full scrubbed cause, no serv… cut)", () =
       const err = await chatLocal("hi", { env, fetchImpl: leakFetch }).catch((e: unknown) =>
         e instanceof Error ? e : new Error(String(e)),
       );
-      expect(err.message).toContain("Bearer [redacted]");
-      expect(err.message).not.toContain("super-secret-xyz");
-      expect(err.message.length).toBeLessThanOrEqual(OPENCODE_CAUSE_MAX + 600);
+      const errText = typeof err === "string" ? err : err.message;
+      expect(errText).toContain("Bearer [redacted]");
+      expect(errText).not.toContain("super-secret-xyz");
+      expect(errText.length).toBeLessThanOrEqual(OPENCODE_CAUSE_MAX + 600);
       expect(OPENCODE_CAUSE_PREVIEW).toBe(500);
-      const boxed = errorText(err.message, "hint line");
+      const boxed = errorText(errText, "hint line");
       // errorText keeps the full cause (never …-cuts).
       expect(boxed).toContain("service");
       expect(boxed).toContain("✗");

@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 
 /**
- * Organizations DTO — single source of truth is @devbox/contracts
+ * Organizations DTO — single source of truth is @rush-code/contracts
  * (verbatim min/max, uuid shapes, defaults + error strings). Swagger DTO
  * classes below stay as thin @nestjs/swagger wrappers for
  * contracts/openapi.yaml parity. Runtime validation via ZodValidationPipe.
@@ -22,7 +22,7 @@ export {
   type OrgRole,
   type UpdateMemberRoleInput,
   type UpdateOrganizationInput,
-} from '@devbox/contracts';
+} from '@rush-code/contracts';
 
 export class CreateOrganizationDto {
   @ApiProperty({ example: 'acme' })

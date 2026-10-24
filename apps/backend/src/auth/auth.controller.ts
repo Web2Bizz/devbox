@@ -47,9 +47,9 @@ import { TokenService } from "./token.service";
 import { UsersService, toPublicUser } from "./users.service";
 
 /** httpOnly refresh cookie (read by POST /auth/refresh via body or cookie). */
-export const REFRESH_COOKIE = "devbox-refresh";
+export const REFRESH_COOKIE = "rush-code-refresh";
 /** Readable marker for the Next middleware guard (carries no secret). */
-export const AUTH_MARKER_COOKIE = "devbox-auth";
+export const AUTH_MARKER_COOKIE = "rush-code-auth";
 
 function refreshTtlSec(): { accessTtl: number; refreshTtl: number } {
   const env = validateEnv(process.env);

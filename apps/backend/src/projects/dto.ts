@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 
 /**
- * Projects DTO — single source of truth is @devbox/contracts (verbatim
+ * Projects DTO — single source of truth is @rush-code/contracts (verbatim
  * regexes, min/max + error strings, partial-update derivation, link
  * default). Swagger DTO classes below stay as thin @nestjs/swagger
  * wrappers for contracts/openapi.yaml parity.
@@ -14,13 +14,13 @@ export {
   type CreateProjectInput,
   type GithubLinkInput,
   type UpdateProjectInput,
-} from '@devbox/contracts';
+} from '@rush-code/contracts';
 
 export class CreateProjectDto {
   @ApiProperty({ example: 'my-app' })
   name!: string;
 
-  @ApiProperty({ required: false, example: 'Devbox backend service' })
+  @ApiProperty({ required: false, example: 'Rush Code backend service' })
   description?: string;
 
   @ApiProperty({ required: false, example: 'acme' })

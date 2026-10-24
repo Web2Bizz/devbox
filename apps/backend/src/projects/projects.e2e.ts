@@ -46,7 +46,7 @@ async function main(): Promise<void> {
   // suite never touches the developer's real jail. Set before app boot
   // (WorkspacePathService reads process.env per call; env validation runs
   // at NestFactory.create).
-  const reposRoot = await mkdtemp(path.join(tmpdir(), "devbox-repos-e2e-"));
+  const reposRoot = await mkdtemp(path.join(tmpdir(), "rush-code-repos-e2e-"));
   process.env.REPOS_ROOT = reposRoot;
   console.log(`[projects e2e] REPOS_ROOT: ${reposRoot}`);
 
@@ -382,7 +382,7 @@ async function main(): Promise<void> {
     // Best-effort cleanup of the isolated tmp jail (never masks results).
     try {
       const root = process.env.REPOS_ROOT ?? "";
-      if (root.includes("devbox-repos-e2e-")) {
+      if (root.includes("rush-code-repos-e2e-")) {
         await rm(root, { recursive: true, force: true });
       }
     } catch {

@@ -243,7 +243,7 @@ async function main(): Promise<void> {
           json({
             firstName: "Ada",
             lastName: "Lovelace",
-            email: "ada@devbox.local",
+            email: "ada@rush-code.local",
             password: "s3cret-p4ss",
           }),
         );
@@ -257,7 +257,7 @@ async function main(): Promise<void> {
     }
 
     // --- Live mode: full lifecycle --------------------------------------
-    const email = `opencode-keys-${Date.now()}-${process.pid}@devbox.local`;
+    const email = `opencode-keys-${Date.now()}-${process.pid}@rush-code.local`;
     let access = "";
     await check("register → 201 pair", async () => {
       const res = await fetch(

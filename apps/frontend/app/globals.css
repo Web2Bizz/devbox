@@ -3,10 +3,10 @@
  * Only semantic tokens / CSS vars here — no hardcoded hex colors
  * (see @web2bizz/ui docs/agents/anti-patterns.md).
  *
- * DevBox brand tokens below are the ONLY place where logo-palette hex
+ * Rush Code brand tokens below are the ONLY place where logo-palette hex
  * values may appear. Everything else references these vars semantically. */
 
-/* ---- DevBox logo palette (light = default) ----
+/* ---- Rush Code logo palette (light = default) ----
  * Logo: linear-gradient(135deg, #FF2A7A 0%, #FF5E62 50%, #FF9966 100%),
  * glow: feDropShadow 0 8px 12px #FF2A7A @ 25%.
  * This file loads AFTER `@web2bizz/ui/styles.css`, so these `:root`/`.dark`

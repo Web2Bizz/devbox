@@ -24,7 +24,7 @@ import type {
   Session,
   UpdateMemberRoleInput as UpdateMemberRoleRequest,
   UpdateOrganizationInput as UpdateOrganizationRequest,
-} from '@devbox/contracts';
+} from '@rush-code/contracts';
 
 // Base URL resolution (Next.js App Router):
 // - process.env.NEXT_PUBLIC_API_URL is inlined at `next build` time. The literal
@@ -193,11 +193,11 @@ export const api = {
     ),
   // Auth surface (internal accounts): register/login issue the access +
   // rotating refresh pair; refresh/logout carry `credentials: 'include'` so
-  // the httpOnly `devbox-refresh` cookie travels cross-origin (frontend
+  // the httpOnly `rush-code-refresh` cookie travels cross-origin (frontend
   // :3001 → backend). 401 codes are `invalid_credentials` (generic, no
   // enumeration) and `email_taken` (409) — surfaced as ApiClientError.
   // register/login also carry `credentials: 'include'` so the Set-Cookie
-  // pair (devbox-refresh + devbox-auth) is stored on cross-origin dev.
+  // pair (rush-code-refresh + rush-code-auth) is stored on cross-origin dev.
   register: (input: { firstName: string; lastName: string; email: string; password: string }) =>
     requestV1<AuthSession>('/auth/register', {
       method: 'POST',

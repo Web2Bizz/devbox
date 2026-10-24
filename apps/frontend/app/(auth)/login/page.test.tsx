@@ -123,8 +123,8 @@ describe('login page 400 wiring (source contract, RHF+zod)', () => {
 
   test('dev defaults removed, neutral placeholders, client zod before submit', async () => {
     const source = await loadSource();
-    expect(source).not.toContain('dev@devbox.local');
-    expect(source).not.toContain("defaultValues: { email: 'dev@devbox.local'");
+    expect(source).not.toContain('dev@rush-code.local');
+    expect(source).not.toContain("defaultValues: { email: 'dev@rush-code.local'");
     expect(source).toContain("defaultValues: { email: '', password: '' }");
     expect(source).toContain('name@example.com');
     expect(source).toContain('At least 8 characters');

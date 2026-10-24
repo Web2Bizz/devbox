@@ -13,7 +13,7 @@ export type SidebarNavItem = {
 };
 
 /**
- * Brand row: logo PNG + DevBox wordmark + console subtitle.
+ * Brand row: logo PNG + Rush Code wordmark + console subtitle.
  * Rendered in the Header leadingSlot (desktop + mobile) and as a fallback
  * at the top of the mobile drawer. Brand tokens live in globals.css
  * (`.text-gradient-brand` / `.logo-glow`).
@@ -23,9 +23,10 @@ export function SidebarBrand() {
 
   return (
     <div className="brand-row">
+      {/* TODO(design): regenerate public/rush-code-logo.png (currently only public/devbox-logo.png exists — binary, needs designer export). */}
       <Image
-        src="/devbox-logo.png"
-        alt="DevBox"
+        src="/rush-code-logo.png"
+        alt="Rush Code"
         width={36}
         height={36}
         className="logo-glow"
@@ -33,7 +34,7 @@ export function SidebarBrand() {
       />
       <div>
         <p className="text-gradient-brand text-lg font-semibold leading-none">
-          DevBox
+          Rush Code
         </p>
         <p className="text-muted-foreground text-sm">{t.nav.console}</p>
       </div>

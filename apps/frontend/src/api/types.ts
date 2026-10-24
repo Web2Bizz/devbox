@@ -1,5 +1,5 @@
 /**
- * @deprecated Import from '@devbox/contracts' instead — this module is a
+ * @deprecated Import from '@rush-code/contracts' instead — this module is a
  * thin Forward-Only re-export kept for one release so existing imports keep
  * compiling. It carries types only (no runtime schemas); the single source
  * of truth for entities + zod v4 boundary schemas is packages/contracts
@@ -54,7 +54,7 @@ export type {
   UpdateMemberRoleInput,
   UpdateOrganizationInput,
   UpdateProjectInput,
-} from '@devbox/contracts';
+} from '@rush-code/contracts';
 
 export type {
   Project as ProjectApiDto,
@@ -68,4 +68,4 @@ export type {
   OrganizationInvite as InviteDto,
   CreateInviteInput as CreateInviteRequest,
   AcceptInviteInput as AcceptInviteRequest,
-} from '@devbox/contracts';
+} from '@rush-code/contracts';

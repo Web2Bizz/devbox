@@ -9,7 +9,7 @@ import { LanguageSwitcher } from '../language-switcher';
  * Guest header for the (auth) group: same kit Header bar as the dashboard
  * (shape=rounded, className="app-header" for the grid-area + sticky pin in
  * globals.css, NATIVE radius/border — no overrides by design, see DESIGN.md).
- * Leading reuses SidebarBrand (logo + DevBox + Console, single source).
+ * Leading reuses SidebarBrand (logo + Rush Code + Console, single source).
  * Trailing is guest-only: LanguageSwitcher compact + ThemeToggleDefault —
  * no profile/user/menuToggle slots (no sidebar, no session on /login).
  * Cookie-only locale — switching never changes the URL.

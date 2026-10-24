@@ -9,7 +9,7 @@
  * - public: everything else (`/`, assets, backend API) — untouched by guards.
  *
  * Readers of the guard (edge `proxy.ts`, server group layouts) decide from
- * the readable marker cookie `devbox-auth=1` alone (set by the backend on
+ * the readable marker cookie `rush-code-auth=1` alone (set by the backend on
  * login/register/refresh, cleared on logout; client-duplicated in
  * `auth-store.ts` for cross-port dev). The marker carries no secret — real
  * authorization stays server-side (backend JwtAuthGuard); data hooks fail
@@ -20,7 +20,7 @@
  */
 
 /** Readable session-marker cookie name (contract with backend + proxy). */
-export const AUTH_MARKER = 'devbox-auth';
+export const AUTH_MARKER = 'rush-code-auth';
 /** Marker value meaning "a session exists". */
 export const AUTH_MARKER_VALUE = '1';
 

@@ -3,8 +3,8 @@ import type { Dictionary } from './types';
 /** Russian dictionary — same shape as EN (see types.ts). */
 export const ru: Dictionary = {
   metadata: {
-    title: 'Devbox MVP',
-    description: 'Devbox MVP — Next.js-фронтенд, работающий с API devbox-бэкенда',
+    title: 'Rush Code MVP',
+    description: 'Rush Code MVP — Next.js-фронтенд, работающий с API rush-code-бэкенда',
   },
   nav: {
     projects: 'Проекты',
@@ -39,7 +39,7 @@ export const ru: Dictionary = {
   },
   auth: {
     welcomeBack: 'С возвращением',
-    subtitle: 'Войдите в свой аккаунт DevBox.',
+    subtitle: 'Войдите в свой аккаунт Rush Code.',
     email: 'Email',
     password: 'Пароль',
     firstName: 'Имя',
@@ -48,7 +48,7 @@ export const ru: Dictionary = {
     signingIn: 'Входим…',
     signUp: 'Создать аккаунт',
     signingUp: 'Создаём…',
-    createAccount: 'Создайте аккаунт DevBox.',
+    createAccount: 'Создайте аккаунт Rush Code.',
     haveAccount: 'Уже есть аккаунт? Войти',
     noAccount: 'Нет аккаунта? Создайте',
     registerFailed: 'Ошибка регистрации',

@@ -3,8 +3,8 @@ import type { Dictionary } from './types';
 /** English dictionary (default locale). */
 export const en: Dictionary = {
   metadata: {
-    title: 'Devbox MVP',
-    description: 'Devbox MVP — Next.js frontend talking to the devbox backend API',
+    title: 'Rush Code MVP',
+    description: 'Rush Code MVP — Next.js frontend talking to the rush-code backend API',
   },
   nav: {
     projects: 'Projects',
@@ -39,7 +39,7 @@ export const en: Dictionary = {
   },
   auth: {
     welcomeBack: 'Welcome back',
-    subtitle: 'Sign in with your DevBox account.',
+    subtitle: 'Sign in with your Rush Code account.',
     email: 'Email',
     password: 'Password',
     firstName: 'First name',
@@ -48,7 +48,7 @@ export const en: Dictionary = {
     signingIn: 'Signing in…',
     signUp: 'Create account',
     signingUp: 'Creating…',
-    createAccount: 'Create your DevBox account.',
+    createAccount: 'Create your Rush Code account.',
     haveAccount: 'Already have an account? Sign in',
     noAccount: 'No account yet? Create one',
     registerFailed: 'Registration failed',

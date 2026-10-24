@@ -14,8 +14,8 @@ export type MockUser = {
 
 export const MOCK_USER: MockUser = {
   id: 'mock-user-1',
-  email: 'dev@devbox.local',
-  name: 'Devbox Developer',
+  email: 'dev@rush-code.local',
+  name: 'Rush Code Developer',
 };
 
 /** Any password with length >= 8 succeeds; used for mock validation demo. */

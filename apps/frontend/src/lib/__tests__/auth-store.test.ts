@@ -3,7 +3,7 @@
  *
  * Covers: isExpiredJwt fail-closed branches (valid / expired / inside-5s-skew
  * / malformed / non-JWT / exp-less), getValidAccessToken passthrough +
- * single-flight refresh, refresh-failure clearing incl. the `devbox-auth`
+ * single-flight refresh, refresh-failure clearing incl. the `rush-code-auth`
  * marker cookie, client-side marker stamping on setSession/successful
  * refresh (proxy.ts guard fallback), logoutEverywhere idempotency
  * on 401, signOutAndRedirect (router.replace preferred, push fallback,
@@ -76,7 +76,7 @@ function makeSession(accessToken: string, refreshToken: string): never {
 }
 
 function seed(accessToken: string, refreshToken: string): void {
-  // Маркер `devbox-auth=1` ставит сам setSession (клиентский fallback под
+  // Маркер `rush-code-auth=1` ставит сам setSession (клиентский fallback под
   // proxy.ts) — ручной document.cookie здесь больше не нужен.
   store.setSession(makeSession(accessToken, refreshToken));
 }
@@ -94,7 +94,7 @@ beforeEach(() => {
 afterEach(() => {
   store.clearSession();
   registerActiveQueryClient(null);
-  document.cookie = 'devbox-auth=; path=/; max-age=0';
+  document.cookie = 'rush-code-auth=; path=/; max-age=0';
 });
 
 describe('isExpiredJwt (fail-closed)', () => {
@@ -156,7 +156,7 @@ describe('getValidAccessToken', () => {
     await expect(store.getValidAccessToken()).resolves.toBeNull();
     expect(store.getAccessToken()).toBeNull();
     expect(store.getRefreshToken()).toBeNull();
-    expect(document.cookie).not.toContain('devbox-auth=1');
+    expect(document.cookie).not.toContain('rush-code-auth=1');
   });
 
   test('no tokens at all → null without network', async () => {
@@ -165,29 +165,29 @@ describe('getValidAccessToken', () => {
   });
 });
 
-describe('devbox-auth marker (client fallback под proxy.ts)', () => {
+describe('rush-code-auth marker (client fallback под proxy.ts)', () => {
   test('setSession сам ставит маркер без ручного document.cookie', () => {
     store.setSession(makeSession(mintJwt(inAnHour()), mintJwt(inAnHour())));
-    expect(document.cookie).toContain('devbox-auth=1');
+    expect(document.cookie).toContain('rush-code-auth=1');
   });
 
   test('clearSession сносит маркер', () => {
     seed(mintJwt(inAnHour()), mintJwt(inAnHour()));
-    expect(document.cookie).toContain('devbox-auth=1');
+    expect(document.cookie).toContain('rush-code-auth=1');
     store.clearSession();
-    expect(document.cookie).not.toContain('devbox-auth=1');
+    expect(document.cookie).not.toContain('rush-code-auth=1');
   });
 
   test('успешный refresh перевыставляет протухший маркер', async () => {
     const fresh = mintJwt(inAnHour());
     seed(mintJwt(anHourAgo()), mintJwt(inAnHour()));
     // Маркер протух/слетел (backend Set-Cookie не долетел), refresh жив.
-    document.cookie = 'devbox-auth=; path=/; max-age=0';
-    expect(document.cookie).not.toContain('devbox-auth=1');
+    document.cookie = 'rush-code-auth=; path=/; max-age=0';
+    expect(document.cookie).not.toContain('rush-code-auth=1');
     refreshImpl = async () => ({ accessToken: fresh, refreshToken: mintJwt(inAnHour()) });
 
     await expect(store.getValidAccessToken()).resolves.toBe(fresh);
-    expect(document.cookie).toContain('devbox-auth=1');
+    expect(document.cookie).toContain('rush-code-auth=1');
   });
 });
 
@@ -201,7 +201,7 @@ describe('logoutEverywhere', () => {
     await expect(store.logoutEverywhere()).resolves.toBeUndefined();
     await expect(store.logoutEverywhere()).resolves.toBeUndefined();
     expect(store.getAccessToken()).toBeNull();
-    expect(document.cookie).not.toContain('devbox-auth=1');
+    expect(document.cookie).not.toContain('rush-code-auth=1');
   });
 });
 
@@ -219,7 +219,7 @@ describe('signOutAndRedirect (единый путь)', () => {
     expect(replace).toHaveBeenCalledWith('/login');
     expect(push).not.toHaveBeenCalled();
     expect(qc.getQueryData(['profile'])).toBeUndefined();
-    expect(document.cookie).not.toContain('devbox-auth=1');
+    expect(document.cookie).not.toContain('rush-code-auth=1');
   });
 
   test('falls back to router.push when replace is missing (legacy stub)', async () => {

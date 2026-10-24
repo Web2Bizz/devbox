@@ -6,7 +6,7 @@ import { AUTH_MARKER, AUTH_MARKER_VALUE, resolveAuthRedirect } from './src/lib/r
  * deprecated since v16 and renamed to `proxy`: same file location, exported
  * function renamed `middleware` → `proxy`).
  *
- * Reads the readable marker cookie only (`devbox-auth=1`, set by the
+ * Reads the readable marker cookie only (`rush-code-auth=1`, set by the
  * backend on login/register/refresh, cleared on logout). Carries no secret;
  * real authorization stays server-side (backend JwtAuthGuard).
  * - Guest on auth/root → `/login`; authed on unauth/root → `/projects`.

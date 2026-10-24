@@ -2,6 +2,7 @@ import { useCallback, useMemo } from "react"
 import { View, TouchableOpacity } from "react-native"
 import { Stack } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
+import { colors } from "@web2bizz/ui-native"
 import { s } from "@app/session/styles"
 
 export type SessionHeaderProps = {
@@ -25,7 +26,7 @@ export function SessionHeader({ title, showInfo, isDark, onToggleInfo }: Session
           <Ionicons
             name={showInfo ? "stats-chart" : "stats-chart-outline"}
             size={20}
-            color={showInfo ? "#FF2A7A" : isDark ? "#888888" : "#666666"}
+            color={showInfo ? colors.accent : isDark ? colors.textSecondaryDark : colors.textSecondaryLight}
           />
         </TouchableOpacity>
       </View>

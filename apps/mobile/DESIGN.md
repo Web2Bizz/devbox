@@ -29,24 +29,43 @@
 
 Все hex ниже — из `packages/uikit/src/theme.ts`, если не помечено иначе.
 
-### 2.1 Акцент (бренд-рамп Pink → Orange, `assets/icon-source.svg`)
+### 2.1 Акцент (бренд-шкала CLI, 5 стопов horizontal — `assets/icon-source.svg`)
+
+CLI-эталон: `apps/cli/src/ui/screens/home/constants.ts` `HOME_TITLE_STOPS`
+(`#FFB02E → #FF4A2D → #E93A6B → #8B3DFF → #2E9BFF`, 90deg). Primary —
+средний розовый стоп `#E93A6B`: единственный насыщенный стоп шкалы с
+пригодным контрастом на светлом и тёмном (жёлтый `#FFB02E` на светлом и
+голубой `#2E9BFF` как primary слабее; розовый — прямой наследник старого
+`#FF2A7A` по hue).
 
 | Токен                    | Hex        | Роль                                          |
 | ------------------------ | ---------- | --------------------------------------------- |
-| `colors.accent`          | `#FF2A7A`  | primary: иконки, чекмарки, активный текст     |
-| `colors.accentStrong`    | `#C81D5E`  | текст акцента на приглушённом фоне (light)   |
-| `colors.accentLight`     | `#FF5E62`  | иконки/чекмарки в тёмной теме                 |
-| `colors.accentPale`      | `#FF9966`  | вторичный текст на muted в тёмной теме        |
-| `colors.accentExtraPale` | `#FFB199`  | tertiary-текст на тёмном muted                |
-| `colors.accentMuted`     | `#FFF0EA`  | фон muted (light): выбранные строки, баннеры  |
-| `colors.accentMutedDark` | `#2E1A22`  | фон muted (dark), тёплый бордо                |
-| `colors.accentBorder`    | `#FFD9CC`  | бордер на светлом muted                       |
-| `colors.accentBorderDark`| `#4A2633`  | бордер на тёмном muted                        |
-| `colors.accentBannerDark`| `#1F1016`  | тёмный баннерный фон                          |
+| `colors.accent`          | `#E93A6B`  | primary: иконки, чекмарки, активный текст     |
+| `colors.accentStrong`    | `#A91E52`  | текст акцента на приглушённом фоне (light, затемнённый primary) |
+| `colors.accentLight`     | `#FF4A2D`  | иконки/чекмарки в тёмной теме (стоп 2 шкалы)  |
+| `colors.accentPale`      | `#8B3DFF`  | вторичный текст на muted в тёмной теме (стоп 4, фиолет) |
+| `colors.accentExtraPale` | `#2E9BFF`  | tertiary-текст на тёмном muted (стоп 5, синий)|
+| `colors.accentMuted`     | `#FDEFF3`  | фон muted (light): тинт primary               |
+| `colors.accentMutedDark` | `#2B1522`  | фон muted (dark), тёплый бордо                |
+| `colors.accentBorder`    | `#F5C6D4`  | бордер на светлом muted (тинт primary)        |
+| `colors.accentBorderDark`| `#4A2536`  | бордер на тёмном muted                        |
+| `colors.accentBannerDark`| `#1F1016`  | тёмный баннерный фон (= `app.json` adaptiveIcon/splash, дрейфа нет) |
 | `colors.accentBannerBg`  | `#7A1E43`  | глубокий magenta — фон баннера revert         |
 | `colors.accentBannerText`| `#FFE4D9`  | светлый персик — текст заголовка баннера      |
-| `colors.accentChipBg`    | `#FFF0EA`  | чип, light                                     |
-| `colors.accentChipBgDark`| `#2E1A22`  | чип, dark                                      |
+| `colors.accentChipBg`    | `#FDEFF3`  | чип, light (= `accentMuted`)                  |
+| `colors.accentChipBgDark`| `#2B1522`  | чип, dark (= `accentMutedDark`)               |
+
+### 2.1.1 Маппинг терминальных имён CLI → mobile-hex
+
+CLI красит роли именами терминала (fg-only, фонов нет), mobile — hex из
+шкалы / семантики. Таблица единственного соответствия:
+
+| CLI имя             | CLI код            | Mobile-hex | Источник mobile-hex                           |
+| ------------------- | ------------------ | ---------- | --------------------------------------------- |
+| `cyan` (user)       | `ESC[36m`          | `#2E9BFF`  | `colors.accentExtraPale` (синий конец шкалы)  |
+| `green` (agent)     | `ESC[32m`          | `#22c55e`  | `colors.success` (смысл сохранён, не бренд)   |
+| `yellow` (header)   | `ESC[33m`          | `#FFB02E`  | начало бренд-шкалы CLI (токена нет — только градиент/SVG) |
+| `red` (error)       | `ESC[31m`          | `#ef4444`  | `colors.error` (смысл сохранён, не бренд)     |
 
 ### 2.2 Нейтрали (`colors.neutral.*`)
 
@@ -95,7 +114,7 @@
 | `error`              | `#ef4444`  | ошибка, destructive                 |
 | `errorStrong`        | `#dc2626`  | ошибка, текст                       |
 | `warning`            | `#f59e0b`  | предупреждение                      |
-| `info`               | `#FF5E62`  | информация (= акцент светлый)       |
+| `info`               | `#2E9BFF`  | информация (синий конец бренд-шкалы; было `#FF5E62` — сливалось со старым брендом) |
 
 #### Ролевые токены (`colors.roles.*`)
 

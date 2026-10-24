@@ -16,8 +16,8 @@ import type { HealthResponse } from '@rush-code/contracts';
 /**
  * Liveness probe — deliberately VERSION_NEUTRAL and excluded from the global
  * 'api' prefix (see configureApp in app.setup.ts): stays GET /health.
- * No /api/v1/health alias — monitoring probes must not depend on API
- * versioning, and health carries no versioned contract.
+ * The /api/v1/health alias is also exposed for API clients; monitoring can
+ * continue using the unversioned /health route.
  *
  * Always 200: db, opencode, registry and npmRegistry are reachability flags
  * ('up' | 'down' | 'skipped'), never error statuses. The opencode/registry
@@ -47,5 +47,13 @@ export class HealthController {
       this.npmRegistry?.checkConnectivity() ?? Promise.resolve('skipped' as NpmRegistryStatus),
     ]);
     return { status: 'ok', db, opencode, registry, npmRegistry };
+  }
+
+  @Get('v1/health')
+  @Version(VERSION_NEUTRAL)
+  @ApiOperation({ summary: 'Versioned backend liveness + dependency reachability' })
+  @ApiResponse({ status: 200, description: 'ok (dependency state is reported in the response)', type: HealthDto })
+  async getVersionedHealth(): Promise<HealthResponse> {
+    return this.getHealth();
   }
 }

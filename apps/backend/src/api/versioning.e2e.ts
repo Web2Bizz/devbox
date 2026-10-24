@@ -80,6 +80,9 @@ async function main(): Promise<void> {
       assert.equal(b.status, 'ok');
       assert.equal(b.db, 'down');
     });
+    await check('GET /api/v1/health 200 (versioned backend health)', '/api/v1/health', undefined, 200, (_res, body) => {
+      assert.equal((body as { status?: string }).status, 'ok');
+    });
 
     // v1 canonical (proxy live paths; upstream down → 503 envelope).
     const assertUnavailable = (body: unknown, res: Response): void => {
@@ -129,6 +132,7 @@ async function main(): Promise<void> {
     await check('GET /swagger/v1.json exposes only v1 paths', '/swagger/v1.json', undefined, 200, (_res, body) => {
       const paths = Object.keys((body as { paths?: Record<string, unknown> }).paths ?? {});
       assert.ok(paths.includes('/api/v1/session'), `missing /api/v1/session in ${paths.join(',')}`);
+      assert.ok(paths.includes('/api/v1/health'), `missing /api/v1/health in ${paths.join(',')}`);
       assert.ok(!paths.includes('/api/session'), `legacy /api/session must be gone, got ${paths.join(',')}`);
     });
     await check('GET /swagger/v2.json has empty paths', '/swagger/v2.json', undefined, 200, (_res, body) => {

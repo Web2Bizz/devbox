@@ -20,6 +20,7 @@ import { DEFAULT_API_VERSION } from './api/version';
  *   + @Controller('api') stacking — that would produce /api/api/*).
  * - /api/*     — removed (unversioned aliases gone → 404 not_found envelope).
  * - /health    — VERSION_NEUTRAL, excluded from the global prefix (root path).
+ * - /api/v1/health — explicit API alias for backend health clients.
  * - /api/v2/*  — unbound → 404 { code: 'not_found', … } envelope.
  */
 export function configureApp(app: INestApplication): void {

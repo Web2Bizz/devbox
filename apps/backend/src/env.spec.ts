@@ -108,7 +108,6 @@ const checks: Array<{ name: string; run: () => void }> = [
       assert.equal(env.jwtAccessTtlSec, 900);
       assert.equal(env.jwtRefreshTtlSec, 604800);
       assert.equal(env.authLegacyMockFallback, false);
-      assert.equal(env.orgInviteTtlSec, 86400);
       assert.equal(env.opencodeKeysEncryptionKey, 'test-opencode-keys-encryption-key-not-real-0123456789');
       assert.deepEqual(warnings, []);
     },

@@ -1,4 +1,4 @@
-// ui/spinner — ASCII spinner frames only (no timers, no I/O).
+// core/utils/frames — ASCII spinner frames only (no timers, no I/O).
 // Frames: ⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏. Caller drives timing (REPL or tests).
 
 export const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;

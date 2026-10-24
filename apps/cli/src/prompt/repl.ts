@@ -1,18 +1,19 @@
 // prompt/repl — line parser only (no readline here, keeps layers testable).
 // Commands: /help, /exit, /quit, /agent list, /agent <name> <prompt>.
-// Free text may carry @refs (resolved by the caller via refs/resolve).
+// Free text may carry @refs (resolved by the caller via core/queries/refs/resolve).
 // Startup helpers (clear + TTY gate) live here so tests can assert order
 // without importing cli.ts (which runs main() on import).
 
 import { assertAllowedAgent, listAgents } from "../agents/allowlist.js";
 import { runAgent } from "../agents/runner.js";
-import { extractRefs } from "../refs/resolve.js";
+import { extractRefs } from "../core/queries/refs/resolve.js";
 
 // Full-screen reset (ESC c). Written via process.stdout.write only.
 // Value equals ESC+c (27 + c); built without raw ESC byte to keep source ASCII.
 export const CLEAR_SEQUENCE: string = String.fromCharCode(27) + "c";
 
 // REPL input label — always the last visible line (prompt stays bottom).
+// Retained + tested pure contract (no production callers in TUI-only flows).
 export const PROMPT_LABEL = "prompt > ";
 
 // Clear only on interactive TTY (never --help/CI !isTTY paths).

@@ -1,9 +1,9 @@
-// ascii width-80 snapshot (no broken layout): box/table/separator/greeting.
+// plain-text snapshot (no frames, no width-80): headerText/errorText/tableText/greetingLines.
 // Run: bun test --isolate src (apps/cli).
 
 import { describe, expect, test } from "bun:test";
-import { box, errorBox, greeting, header, separator, table } from "../box.js";
-import { spinnerFrame, SPINNER_FRAMES } from "../spinner.js";
+import { errorText, greetingLines, headerText, statusLine, tableText } from "../shared/plain.js";
+import { spinnerFrame, SPINNER_FRAMES } from "../../core/utils/frames.js";
 import {
   CLEAR_SEQUENCE,
   PROMPT_LABEL,
@@ -14,53 +14,54 @@ import {
   shouldStartRepl,
   startupHintLines,
 } from "../../prompt/repl.js";
-import { extractRefs, scrubSecrets } from "../../refs/resolve.js";
+import { extractRefs, scrubSecrets } from "../../core/queries/refs/resolve.js";
 import { isAllowedAgent, listAgents } from "../../agents/allowlist.js";
 import { runAgent } from "../../agents/runner.js";
 
-function widthOf(line: string): number {
-  return [...line].length;
-}
-
-describe("ascii snapshot (width 80)", () => {
-  test("box is exactly 80 wide on every line", () => {
-    const rendered = box(["hello", "world"], 80);
-    for (const line of rendered.split("\n")) {
-      expect(widthOf(line)).toBe(80);
-    }
-    expect(rendered).toContain("┌");
-    expect(rendered).toContain("┘");
-    expect(rendered).toContain("│");
+describe("plain snapshot (no frames)", () => {
+  test("headerText returns title as-is (no ══ rule)", () => {
+    expect(headerText("title")).toBe("title");
+    expect(headerText("title")).not.toContain("═");
+    expect(headerText("title")).not.toContain("┌");
   });
 
-  test("error box keeps ✗ and → hint", () => {
-    const rendered = errorBox("boom", "fix it", 80);
+  test("errorText keeps ✗ and → hint (multiline)", () => {
+    const rendered = errorText("boom", "fix it\nsecond line");
     expect(rendered).toContain("✗ boom");
     expect(rendered).toContain("→ fix it");
-    for (const line of rendered.split("\n")) {
-      expect(widthOf(line)).toBe(80);
-    }
+    expect(rendered).toContain("→ second line");
+    expect(rendered).not.toContain("┌");
+    expect(rendered).not.toContain("┘");
+    expect(rendered).not.toContain("│");
+    expect(rendered).not.toContain("╔");
   });
 
-  test("table uses │ and corners, greeting keeps ◆", () => {
-    const rendered = table(["agent", "desc"], [["ask", "readonly"]], 80);
-    expect(rendered).toContain("│");
-    expect(rendered).toContain("┌");
-    expect(rendered).toContain("┘");
-    const greet = greeting("0.1.0");
+  test("tableText pads with two spaces, no borders; greetingLines keeps ◆", () => {
+    const rendered = tableText(["agent", "desc"], [["ask", "readonly"]]);
+    expect(rendered).toContain("agent");
+    expect(rendered).toContain("ask");
+    expect(rendered).not.toContain("│");
+    expect(rendered).not.toContain("┌");
+    expect(rendered).not.toContain("┘");
+    expect(rendered).not.toContain("─");
+    const greet = greetingLines("0.1.0").join("\n");
     expect(greet).toContain("◆ DEVBOX CLI v0.1.0");
     expect(greet).toContain("prompt >");
     expect(greet).toContain("@file");
     expect(greet).toContain("/agent");
     expect(greet).toContain("/help");
     expect(greet).toContain("/exit");
-    expect(greet).toContain("╔");
-    expect(greet).toContain("╚");
+    expect(greet).not.toContain("╔");
+    expect(greet).not.toContain("╚");
+    expect(greet).not.toContain("┌");
+    expect(greet).not.toContain("║");
   });
 
-  test("header uses ══ and separator uses ──", () => {
-    expect(header("title")).toContain("══");
-    expect(separator(80)).toBe("─".repeat(80));
+  test("statusLine markers stay (✓/✗/⚠/●, not a frame)", () => {
+    expect(statusLine("ok", "hi")).toBe("✓ hi");
+    expect(statusLine("err", "hi")).toBe("✗ hi");
+    expect(statusLine("warn", "hi")).toBe("⚠ hi");
+    expect(statusLine("run", "hi")).toBe("● hi");
   });
 
   test("spinner cycles all 10 frames", () => {
@@ -128,11 +129,11 @@ describe("repl startup (clear first, prompt bottom)", () => {
     expect(cleared).toBe(false);
   });
 
-  test("startup order: clear first, then single greeting frame, prompt last", () => {
-    // Mirrors cli.ts startRepl: clear → single greeting frame → prompt.
+  test("startup order: clear first, then single greeting block, prompt last", () => {
+    // Mirrors cli.ts startRepl: clear → single greeting block → prompt.
     const writes: string[] = [];
     writes.push(CLEAR_SEQUENCE);
-    writes.push(greeting("0.1.0"));
+    writes.push(greetingLines("0.1.0").join("\n"));
     writes.push(PROMPT_LABEL);
     expect(writes[0]).toBe(CLEAR_SEQUENCE);
     expect(writes[1]).toContain("◆ DEVBOX CLI v0.1.0");
@@ -141,12 +142,13 @@ describe("repl startup (clear first, prompt bottom)", () => {
     expect(writes[1]).toContain("/agent");
     expect(writes[1]).toContain("/help");
     expect(writes[1]).toContain("/exit");
-    // Exactly one frame at startup: single ╔…╚, no second ┌…┘ hint box.
+    // Plain block: no frame chars at all.
     const startup = writes.join("\n");
-    expect(startup.split("╔").length - 1).toBe(1);
-    expect(startup.split("╚").length - 1).toBe(1);
+    expect(startup).not.toContain("╔");
+    expect(startup).not.toContain("╚");
     expect(startup).not.toContain("┌");
     expect(startup).not.toContain("┘");
+    expect(startup).not.toContain("│");
     expect(writes[writes.length - 1]).toBe("prompt > ");
   });
 
@@ -162,27 +164,35 @@ describe("repl startup (clear first, prompt bottom)", () => {
     expect(shouldClearForRepl(["--help"], true)).toBe(false);
   });
 
-  test("startup hint helper stays width-80 for /help (not rendered at start)", () => {
-    const rendered = box(startupHintLines(), 80);
-    for (const line of rendered.split("\n")) {
-      expect(widthOf(line)).toBe(80);
-    }
+  test("startup hint helper stays plain lines for /help (not rendered at start)", () => {
+    const lines = startupHintLines();
+    expect(lines.join("\n")).toContain("type /help");
+    expect(lines.join("\n")).toContain("refs:");
     expect(PROMPT_LABEL).toBe("prompt > ");
   });
 });
 
 describe("chat messages (plain full-width, no boxes)", () => {
-  test("cli chat paths emit plain user/agent lines (greeting + errorBox stay boxed)", async () => {
-    const { readFileSync } = await import("node:fs");
+  test("cli chat paths emit plain user/agent lines (greetingLines + errorText stay plain)", async () => {
+    const { readFileSync, readdirSync } = await import("node:fs");
     const { join, dirname } = await import("node:path");
     const { fileURLToPath } = await import("node:url");
     const here = dirname(fileURLToPath(import.meta.url));
-    const cliSource = readFileSync(join(here, "..", "..", "cli.ts"), "utf8");
+    const cliDir = join(here, "..", "..");
+    // Decomposed tree (cli.ts is a facade over commands/*.ts): concat all parts.
+    const cliParts = [
+      "cli.ts",
+      ...readdirSync(join(cliDir, "commands"))
+        .filter((f: string) => f.endsWith(".ts") && f !== "index.ts")
+        .sort()
+        .map((f: string) => join("commands", f)),
+    ];
+    const cliSource = cliParts.map((rel) => readFileSync(join(cliDir, rel), "utf8")).join("\n");
     // Chat replies go through sink.user/sink.agent (plain, fg-only).
     expect(cliSource).toContain("sink.user(");
     expect(cliSource).toContain("sink.agent(");
-    // Greeting + errorBox boxes are kept.
-    expect(cliSource).toContain("greeting(");
-    expect(cliSource).toContain("errorBox(");
+    // Greeting + errors are plain helpers.
+    expect(cliSource).toContain("greetingLines(");
+    expect(cliSource).toContain("errorText(");
   });
 });

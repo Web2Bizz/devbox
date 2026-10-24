@@ -1,4 +1,4 @@
-// refs/resolve — file refs inside REPOS_ROOT only (read-only, no fallbacks).
+// core/queries/refs/resolve — file refs inside REPOS_ROOT only (read-only, no fallbacks).
 // Rules: REPOS_ROOT required (fail-fast), deny `..` segments, deny absolute
 // refs, jail by prefix check, read-only preview with secret scrub.
 

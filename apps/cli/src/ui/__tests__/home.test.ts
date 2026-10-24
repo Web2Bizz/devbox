@@ -19,10 +19,9 @@ import {
   parseHomeInput,
   renderHomeScreen,
   rgbToHex,
-  shouldUseHomeFallback,
   titleTextOptions,
-} from "../home.js";
-import { hasBgCodes, stripAnsi } from "../chat.js";
+} from "../screens/home/index.js";
+import { hasBgCodes, stripAnsi } from "../shared/chat.js";
 
 const ESC = String.fromCharCode(27);
 
@@ -173,15 +172,6 @@ describe("rush code home (Главная)", () => {
     expect(route(0)).toBe("projects");
     expect(route(1)).toBe("custom-dir");
     expect(route(2)).toBe("exit");
-  });
-
-  test("stdout fallback untouched: DEVBOX_NO_TUI/non-TTY/help force digits 1-3", () => {
-    expect(shouldUseHomeFallback([], true, { DEVBOX_NO_TUI: "1" })).toBe(true);
-    expect(shouldUseHomeFallback([], false, {})).toBe(true);
-    expect(shouldUseHomeFallback(["--help"], true, {})).toBe(true);
-    expect(shouldUseHomeFallback(["--version"], true, {})).toBe(true);
-    expect(shouldUseHomeFallback([], true, {})).toBe(false);
-    expect(shouldUseHomeFallback(["repl"], true, {})).toBe(false);
   });
 
   test("fallback parses digits 1-3, arrows stay a move hint (no highlight in line mode)", () => {

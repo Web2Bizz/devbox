@@ -31,7 +31,7 @@ import {
   resolveLocalBaseUrl,
   resolveServeToken,
   scrubOpencodeText,
-} from "../opencode.js";
+} from "../opencode/index.js";
 import {
   CLEAR_SEQUENCE,
   PROMPT_LABEL,
@@ -39,7 +39,7 @@ import {
   parseLine,
   shouldClearForRepl,
 } from "../../prompt/repl.js";
-import { errorBox, greeting } from "../../ui/box.js";
+import { errorText, greetingLines } from "../../ui/shared/plain.js";
 
 function makeAuthDir(payload: unknown): { dir: string; env: NodeJS.ProcessEnv } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "devbox-cli-auth-"));
@@ -440,11 +440,11 @@ describe("opencode direct cloud chat (free text, no serve)", () => {
 });
 
 describe("repl startup keeps fail-fast errors after clear", () => {
-  test("start writes clear first, then single greeting frame, prompt stays bottom", () => {
+  test("start writes clear first, then single greeting block, prompt stays bottom", () => {
     const writes: string[] = [];
     const write = (s: string): void => void writes.push(s);
     clearScreen(write);
-    write(greeting("0.1.0"));
+    write(greetingLines("0.1.0").join("\n"));
     write(PROMPT_LABEL);
     expect([...(writes[0] as string)].map((c) => c.charCodeAt(0))).toEqual([27, 99]);
     expect(writes[1]).toContain("◆ DEVBOX CLI v0.1.0");
@@ -454,12 +454,14 @@ describe("repl startup keeps fail-fast errors after clear", () => {
     expect(writes[1]).toContain("/help");
     expect(writes[1]).toContain("/exit");
     const startup = writes.join("\n");
-    expect(startup.split("╔").length - 1).toBe(1);
-    expect(startup.split("╚").length - 1).toBe(1);
+    expect(startup).not.toContain("╔");
+    expect(startup).not.toContain("╚");
+    expect(startup).not.toContain("┌");
+    expect(startup).not.toContain("┘");
     expect(writes[writes.length - 1]).toBe("prompt > ");
   });
 
-  test("missing-key error surfaces after clear in ✗-box (nothing lost)", () => {
+  test("missing-key error surfaces after clear in ✗ lines (nothing lost)", () => {
     const { dir, env } = makeMissingEnv();
     try {
       const writes: string[] = [];
@@ -472,7 +474,7 @@ describe("repl startup keeps fail-fast errors after clear", () => {
       }
       expect(message).toContain("auth.json");
       expect(message).toContain(opencodeAuthPath(env));
-      writes.push(errorBox(message, "Вставь ключ через /connect в TUI (см. apps/cli/.env.example)."));
+      writes.push(errorText(message, "Вставь ключ через /connect в TUI (см. apps/cli/.env.example)."));
       expect(writes[0]).toBe(CLEAR_SEQUENCE);
       expect(writes[1]).toContain("✗");
       expect(writes[1]).toContain("auth.json");
@@ -568,13 +570,14 @@ describe("400 diagnostics (no value, full scrubbed cause, no serv… cut)", () =
       expect(err.message).not.toContain("super-secret-xyz");
       expect(err.message.length).toBeLessThanOrEqual(OPENCODE_CAUSE_MAX + 600);
       expect(OPENCODE_CAUSE_PREVIEW).toBe(500);
-      const boxed = errorBox(err.message, "hint line");
-      // errorBox wraps instead of …-cutting the cause.
+      const boxed = errorText(err.message, "hint line");
+      // errorText keeps the full cause (never …-cuts).
       expect(boxed).toContain("service");
+      expect(boxed).toContain("✗");
+      expect(boxed).toContain("→ hint line");
       expect(boxed).not.toMatch(/serv…/);
-      for (const line of boxed.split("\n")) {
-        expect([...line].length).toBeLessThanOrEqual(80);
-      }
+      expect(boxed).not.toContain("┌");
+      expect(boxed).not.toContain("│");
       resetLocalSessionForTests();
     } finally {
       cleanup(dir);

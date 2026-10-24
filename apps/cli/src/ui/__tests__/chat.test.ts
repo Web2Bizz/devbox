@@ -18,7 +18,7 @@ import {
   stripAnsi,
   terminalWidth,
   wrapMessage,
-} from "../chat.js";
+} from "../shared/chat.js";
 
 const ESC = String.fromCharCode(27);
 const BG_RE = new RegExp(`${ESC}\\[(?:4\\d|10\\d)m`);

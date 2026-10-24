@@ -1,6 +1,6 @@
-// ui/chat — full-width plain chat messages (no boxes, fg-only color).
+// ui/shared/chat — full-width plain chat messages (no boxes, fg-only color).
 // Transparency: ANSI uses fg open + fg reset only (no bg codes 40-47/100-107).
-// TUI uses TextRenderable fg only, width 100%.
+// TUI uses <text> fg only, width 100%.
 // No raw ESC bytes in source (repo ASCII rule): ESC built via fromCharCode.
 
 const ESC = String.fromCharCode(27);
@@ -114,7 +114,7 @@ export function formatAgentMessage(text: string, width: number = terminalWidth()
   return colorizeLines(prefixed, ANSI_AGENT_OPEN);
 }
 
-/** Plain (no ANSI) user lines for the TUI history (fg comes from TextRenderable). */
+/** Plain (no ANSI) user lines for the TUI history (fg comes from <text>). */
 export function formatUserPlain(text: string, width: number = terminalWidth()): string {
   const safe = terminalWidth(width);
   const avail = Math.max(20, safe - [...USER_PREFIX].length);
@@ -124,7 +124,7 @@ export function formatUserPlain(text: string, width: number = terminalWidth()): 
     .join("\n");
 }
 
-/** Plain (no ANSI) agent lines for the TUI history (fg comes from TextRenderable). */
+/** Plain (no ANSI) agent lines for the TUI history (fg comes from <text>). */
 export function formatAgentPlain(text: string, width: number = terminalWidth()): string {
   const safe = terminalWidth(width);
   const avail = Math.max(20, safe - [...AGENT_PREFIX].length);

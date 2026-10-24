@@ -1,6 +1,6 @@
-// refs/projects — project list + custom dir resolve inside REPOS_ROOT jail.
-// Rules mirror refs/resolve.ts: REPOS_ROOT required (fail-fast), ".." denied,
-// absolute refs must stay inside the jail (prefix check via realpath).
+// core/queries/refs/projects — project list + custom dir resolve inside REPOS_ROOT jail.
+// Rules mirror core/queries/refs/resolve.ts: REPOS_ROOT required (fail-fast), ".." denied,
+// absolute refs must stay inside the jail (prefix-check via realpath).
 // Reads only (readdir/stat), previews untouched.
 
 import { readdir, realpath, stat } from "node:fs/promises";

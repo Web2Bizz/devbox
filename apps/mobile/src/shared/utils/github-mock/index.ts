@@ -15,9 +15,9 @@ export type MockRepo = {
 export const MOCK_REPOS: MockRepo[] = [
   {
     id: "1",
-    name: "devbox",
-    fullName: "web2bizz/devbox",
-    description: "React Native / Expo client for the DevBox AI coding agent",
+    name: "rush-code",
+    fullName: "web2bizz/rush-code",
+    description: "React Native / Expo client for the Rush Code AI coding agent",
     language: "TypeScript",
     stars: 128,
     isPrivate: false,
@@ -75,9 +75,9 @@ export const MOCK_REPOS: MockRepo[] = [
   },
   {
     id: "7",
-    name: "devbox-core",
-    fullName: "web2bizz/devbox-core",
-    description: "The AI coding agent engine powering DevBox",
+    name: "rush-code-core",
+    fullName: "web2bizz/rush-code-core",
+    description: "The AI coding agent engine powering Rush Code",
     language: "TypeScript",
     stars: 24100,
     isPrivate: false,

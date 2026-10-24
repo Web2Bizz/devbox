@@ -105,6 +105,6 @@ export function classify(
       (parsed.isHostname
         ? "Hostname may not resolve from this device (MagicDNS off?). Try the raw Tailscale IP. "
         : "") +
-      "Confirm the devbox server is running, the device is on the same tailnet, and the port is correct.",
+      "Confirm the rush-code server is running, the device is on the same tailnet, and the port is correct.",
   }
 }

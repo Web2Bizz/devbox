@@ -1,6 +1,6 @@
 /**
  * Backend wire contracts for mobile — thin Forward-Only re-export of
- * `@devbox/contracts` (single source of truth, mirrors
+ * `@rush-code/contracts` (single source of truth, mirrors
  * contracts/openapi.yaml field-for-field; zod v4 boundary schemas verbatim
  * from the backend DTOs).
  *
@@ -8,7 +8,7 @@
  * project, `--legacy-peer-deps` required — see apps/mobile/AGENTS.md).
  * Resolve: `file:../../packages/contracts` in package.json (outside the
  * mobile root) + `metro.config.js` watchFolders/extraNodeModules +
- * `tsconfig.json` paths `@devbox/contracts` → package src. Primary runtime
+ * `tsconfig.json` paths `@rush-code/contracts` → package src. Primary runtime
  * resolve is node_modules after install; the Metro/TS aliases keep the
  * pre-install and bundler paths working.
  *
@@ -44,7 +44,7 @@ export type {
   OpencodeKeyDeleteResult,
   OpencodeUsage,
   OpencodeLimitBucket,
-} from "@devbox/contracts";
+} from "@rush-code/contracts";
 
 export {
   apiErrorSchema,
@@ -66,7 +66,7 @@ export {
   opencodeKeyDeleteResultSchema,
   opencodeUsageSchema,
   opencodeLimitBucketSchema,
-} from "@devbox/contracts";
+} from "@rush-code/contracts";
 
 import {
   apiErrorSchema,
@@ -75,7 +75,7 @@ import {
   type ApiError,
   type HealthResponse,
   type OpencodeUsage,
-} from "@devbox/contracts";
+} from "@rush-code/contracts";
 
 /** Fail-fast backend `/health` boundary (throws on shape mismatch, as backend). */
 export function parseBackendHealth(payload: unknown): HealthResponse {

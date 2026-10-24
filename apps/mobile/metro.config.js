@@ -14,7 +14,7 @@ const config = getDefaultConfig(__dirname)
 config.watchFolders = [
   ...(config.watchFolders ?? []),
   path.resolve(__dirname, "packages"),
-  // @devbox/contracts lives OUTSIDE the mobile root (../../packages/contracts,
+  // @rush-code/contracts lives OUTSIDE the mobile root (../../packages/contracts,
   // file: dep) — watch it so Metro picks up wire-contract changes without a
   // cache clear. Installed via `npm install --legacy-peer-deps` from
   // apps/mobile (standalone npm project, not a bun workspace).

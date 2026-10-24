@@ -3,7 +3,7 @@
 NestJS 12 API that fronts the live opencode server (migrated from `node:http`).
 
 Contract: [`contracts/openapi.yaml`](../../contracts/openapi.yaml) ·
-DTOs: [`@devbox/contracts`](../../packages/contracts/src/index.ts) (single source of truth; [`src/contracts.ts`](./src/contracts.ts) is a deprecated re-export).
+DTOs: [`@rush-code/contracts`](../../packages/contracts/src/index.ts) (single source of truth; [`src/contracts.ts`](./src/contracts.ts) is a deprecated re-export).
 
 ## Stack (pinned)
 
@@ -84,8 +84,8 @@ npm run lint --workspace=apps/backend  # tsc --noEmit
 ## Диагностика регистрации
 
 Регистрация: `POST /api/v1/auth/register` → `201 { user, accessToken, refreshToken }`
-+ `Set-Cookie: devbox-refresh` (httpOnly, `path=/api/v1/auth`, `SameSite=Lax`,
-`Secure` только в production) и `devbox-auth=1` (маркер для Next-middleware).
++ `Set-Cookie: rush-code-refresh` (httpOnly, `path=/api/v1/auth`, `SameSite=Lax`,
+`Secure` только в production) и `rush-code-auth=1` (маркер для Next-middleware).
 Фронт шлёт `credentials: 'include'`, успех → `setSession()` → `/projects` →
 `GET /api/v1/auth/me` (`Authorization: Bearer …`) → `200`.
 

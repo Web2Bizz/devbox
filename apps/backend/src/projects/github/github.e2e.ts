@@ -255,7 +255,7 @@ async function main(): Promise<void> {
   // --- Phase B: multi-tenant, no legacy fallback -----------------------------
   process.env.GITHUB_APP_ID = "123456";
   process.env.GITHUB_APP_PRIVATE_KEY = "test-key-not-real-never-logged";
-  process.env.GITHUB_APP_SLUG = "devbox-test-app";
+  process.env.GITHUB_APP_SLUG = "rush-code-test-app";
   const WEBHOOK_SECRET = "whsec_e2e_not_real";
   process.env.GITHUB_WEBHOOK_SECRET = WEBHOOK_SECRET;
 
@@ -317,7 +317,7 @@ async function main(): Promise<void> {
         const body = (await readJson(res)) as { url?: string };
         assert.equal(
           body.url,
-          "https://github.com/apps/devbox-test-app/installations/new",
+          "https://github.com/apps/rush-code-test-app/installations/new",
         );
       });
 

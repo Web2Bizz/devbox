@@ -326,8 +326,8 @@ export class ProjectsService {
       await execFileAsync("git", ["init", "-b", "main"], opts);
       // Local identity so the empty commit never fails on machines without
       // a global git identity (repo-scoped, does not touch global config).
-      await execFileAsync("git", ["config", "user.email", "devbox@localhost"], opts);
-      await execFileAsync("git", ["config", "user.name", "devbox"], opts);
+      await execFileAsync("git", ["config", "user.email", "rush-code@localhost"], opts);
+      await execFileAsync("git", ["config", "user.name", "rush-code"], opts);
       await execFileAsync("git", ["commit", "--allow-empty", "-m", "init"], opts);
     } catch (err) {
       this.logger.error(

@@ -6,7 +6,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import type { ApiError } from '@devbox/contracts';
+import type { ApiError } from '@rush-code/contracts';
 import { AppLogger } from './app-logger.service';
 import { ExternalServiceError } from './external/external-error';
 

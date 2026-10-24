@@ -11,7 +11,7 @@ import {
   type NpmRegistryStatus,
 } from '../npm-registry/npm-registry.service';
 import { HealthDto } from '../api/dto';
-import type { HealthResponse } from '@devbox/contracts';
+import type { HealthResponse } from '@rush-code/contracts';
 
 /**
  * Liveness probe — deliberately VERSION_NEUTRAL and excluded from the global

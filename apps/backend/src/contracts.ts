@@ -1,5 +1,5 @@
 /**
- * @deprecated Import from '@devbox/contracts' instead — this module is a
+ * @deprecated Import from '@rush-code/contracts' instead — this module is a
  * thin Forward-Only re-export kept for one release so existing imports keep
  * compiling. It carries types only (no runtime schemas); the single source
  * of truth for entities + zod boundary schemas is
@@ -26,4 +26,4 @@ export type {
   SendChatRequest,
   SendChatResponse,
   Session,
-} from '@devbox/contracts';
+} from '@rush-code/contracts';

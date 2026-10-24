@@ -4,7 +4,7 @@ import type {
   MessagesResponse,
   SendChatResponse,
   Session,
-} from '@devbox/contracts';
+} from '@rush-code/contracts';
 import { OpencodeService } from '../opencode/opencode.service';
 import { AppLogger } from '../common/app-logger.service';
 import { ExternalClient } from '../common/external/external-client';

@@ -62,7 +62,7 @@ export class GithubRepoDto {
 
 /** GET /projects/github/install-url → where the user installs the App. */
 export class GithubInstallUrlDto {
-  @ApiProperty({ example: 'https://github.com/apps/devbox/installations/new' })
+  @ApiProperty({ example: 'https://github.com/apps/rush-code/installations/new' })
   url!: string;
 }
 

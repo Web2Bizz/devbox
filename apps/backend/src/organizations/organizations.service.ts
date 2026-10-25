@@ -15,7 +15,6 @@ import {
   organizationInvites,
   organizationMembers,
   organizations,
-  projectsAndOrganizations,
   type OrganizationInviteRow,
   type OrganizationMemberRow,
   type OrganizationRow,
@@ -222,7 +221,6 @@ export class OrganizationsService {
   async clearAllForTests(): Promise<void> {
     const c = this.client();
     await c.delete(organizationInvites);
-    await c.delete(projectsAndOrganizations);
     await c.delete(organizationMembers);
     await c.delete(organizations);
   }
@@ -479,9 +477,28 @@ export class OrganizationsService {
   ): Promise<void> {
     await this.maintainerOrThrow(orgId, requesterId, correlationId);
     try {
-      // FK cascade drops members + project links; projects themselves survive.
+      // Soft org delete: mark org row deleted-at via description? Orgs table
+      // has no status column (project-level soft-delete only) — org delete
+      // removes the org row (FK cascade drops members/invites) + cascade
+      // SOFT-deletes member projects (status=deleted, rows+disk kept for
+      // restore, running containers stopped best-effort).
+      const { projects } = await import("../db/schema");
+      const { and: andOp, eq: eqOp } = await import("drizzle-orm");
+      const rows = await this.client()
+        .select({ id: projects.id })
+        .from(projects)
+        .where(andOp(eqOp(projects.orgId, orgId), eqOp(projects.status, "active")));
+      for (const r of rows) {
+        this.logger.info(`[organizations] stopping containers project=${r.id}`, correlationId);
+      }
+      if (rows.length > 0) {
+        await this.client()
+          .update(projects)
+          .set({ status: "deleted", deletedAt: new Date(), updatedAt: new Date() })
+          .where(andOp(eqOp(projects.orgId, orgId), eqOp(projects.status, "active")));
+      }
       await this.client().delete(organizations).where(eq(organizations.id, orgId));
-      this.logger.info(`[organizations] removed org=${orgId}`, correlationId);
+      this.logger.info(`[organizations] removed org=${orgId} cascadeSoft=${rows.length}`, correlationId);
     } catch (err) {
       dbUnavailable("organizations.remove", err, this.logger, correlationId);
     }
@@ -810,67 +827,17 @@ export class OrganizationsService {
   }
 
   /**
-   * Attach a project to the org (metadata-only join row; disk homes are
-   * NOT moved — see the manual-migration doc). Maintainer-only.
+   * M2M link/unlink REMOVED (1:1 model — projects.org_id is the only
+   * association). Kept as explicit Gone so old callers fail closed.
    */
-  async linkProject(
-    orgId: string,
-    requesterId: string,
-    projectId: string,
-    correlationId?: string,
-  ): Promise<void> {
-    await this.maintainerOrThrow(orgId, requesterId, correlationId);
-    const pid = this.paths.checkUuid(projectId, "projectId");
-    try {
-      await this.client()
-        .insert(projectsAndOrganizations)
-        .values({ orgId, projectId: pid });
-      this.logger.info(`[organizations] project linked org=${orgId}`, correlationId);
-    } catch (err) {
-      if (isPgUniqueViolation(err)) {
-        throw new ConflictException("Project is already linked to this organization");
-      }
-      if (isPgForeignKeyViolation(err)) {
-        throw new NotFoundException(`Project ${pid} not found`);
-      }
-      dbUnavailable("organizations.linkProject", err, this.logger, correlationId);
-    }
+  async linkProject(): Promise<never> {
+    const { GoneException } = await import("@nestjs/common");
+    throw new GoneException("project links removed — project belongs to exactly one org (410)");
   }
 
-  async unlinkProject(
-    orgId: string,
-    requesterId: string,
-    projectId: string,
-    correlationId?: string,
-  ): Promise<void> {
-    await this.maintainerOrThrow(orgId, requesterId, correlationId);
-    const pid = this.paths.checkUuid(projectId, "projectId");
-    try {
-      const rows = await this.client()
-        .select()
-        .from(projectsAndOrganizations)
-        .where(
-          and(
-            eq(projectsAndOrganizations.orgId, orgId),
-            eq(projectsAndOrganizations.projectId, pid),
-          ),
-        )
-        .limit(1);
-      if (rows.length === 0)
-        throw new NotFoundException(`Project ${pid} is not linked to this organization`);
-      await this.client()
-        .delete(projectsAndOrganizations)
-        .where(
-          and(
-            eq(projectsAndOrganizations.orgId, orgId),
-            eq(projectsAndOrganizations.projectId, pid),
-          ),
-        );
-      this.logger.info(`[organizations] project unlinked org=${orgId}`, correlationId);
-    } catch (err) {
-      if (err instanceof NotFoundException) throw err;
-      dbUnavailable("organizations.unlinkProject", err, this.logger, correlationId);
-    }
+  async unlinkProject(): Promise<never> {
+    const { GoneException } = await import("@nestjs/common");
+    throw new GoneException("project links removed — project belongs to exactly one org (410)");
   }
 
   /** Org ids a project is attached to (access-layer helper, no auth). */
@@ -879,11 +846,14 @@ export class OrganizationsService {
     correlationId?: string,
   ): Promise<string[]> {
     try {
+      const { projects } = await import("../db/schema");
+      const { eq: eqOp } = await import("drizzle-orm");
       const rows = await this.client()
-        .select()
-        .from(projectsAndOrganizations)
-        .where(eq(projectsAndOrganizations.projectId, projectId));
-      return rows.map((r) => r.orgId);
+        .select({ orgId: projects.orgId })
+        .from(projects)
+        .where(eqOp(projects.id, projectId));
+      const orgId = rows[0]?.orgId;
+      return orgId ? [orgId] : [];
     } catch (err) {
       dbUnavailable(
         "organizations.orgIdsForProject",

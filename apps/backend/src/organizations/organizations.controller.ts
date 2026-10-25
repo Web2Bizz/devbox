@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  GoneException,
   HttpCode,
   HttpStatus,
   Param,
@@ -246,38 +247,19 @@ export class OrganizationsController {
 
   @Post(":id/projects/:projectId")
   @Version("1")
-  @V1Endpoint("Attach a project to the organization (maintainer only)")
-  @ApiResponse({ status: 204 })
-  @ApiResponse({ status: 401, description: "missing/invalid bearer" })
-  @ApiResponse({ status: 403, description: "member without the maintainer role" })
-  @ApiResponse({ status: 404, description: "not found (org, membership, or project)" })
-  @ApiResponse({ status: 409, description: "project is already linked to this organization" })
-  @ApiResponse({ status: 503, description: "postgres unreachable (EXTERNAL_UNAVAILABLE, Retry-After)" })
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async linkProject(
-    @Param("id") id: string,
-    @Param("projectId") projectId: string,
-    @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
-  ): Promise<void> {
-    await this.orgs.linkProject(id, identity.id, projectId, req?.correlationId);
+  @V1Endpoint("Attach a project (removed — 1:1, 410)")
+  @ApiResponse({ status: 410, description: "link/unlink removed (1:1 model)" })
+  @HttpCode(HttpStatus.GONE)
+  async linkProject(): Promise<void> {
+    throw new GoneException("project links removed — project belongs to exactly one org");
   }
 
   @Delete(":id/projects/:projectId")
   @Version("1")
-  @V1Endpoint("Detach a project from the organization (maintainer only)")
-  @ApiResponse({ status: 204 })
-  @ApiResponse({ status: 401, description: "missing/invalid bearer" })
-  @ApiResponse({ status: 403, description: "member without the maintainer role" })
-  @ApiResponse({ status: 404, description: "not found (org, membership, or link row)" })
-  @ApiResponse({ status: 503, description: "postgres unreachable (EXTERNAL_UNAVAILABLE, Retry-After)" })
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async unlinkProject(
-    @Param("id") id: string,
-    @Param("projectId") projectId: string,
-    @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
-  ): Promise<void> {
-    await this.orgs.unlinkProject(id, identity.id, projectId, req?.correlationId);
+  @V1Endpoint("Detach a project (removed — 1:1, 410)")
+  @ApiResponse({ status: 410, description: "link/unlink removed (1:1 model)" })
+  @HttpCode(HttpStatus.GONE)
+  async unlinkProject(): Promise<void> {
+    throw new GoneException("project links removed — project belongs to exactly one org");
   }
 }

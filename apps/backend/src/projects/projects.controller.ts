@@ -1,14 +1,17 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
   Get,
+  GoneException,
   Headers,
   HttpCode,
   HttpStatus,
   Param,
   Patch,
   Post,
+  Query,
   UseInterceptors,
   Version,
 } from "@nestjs/common";
@@ -48,17 +51,23 @@ export class ProjectsController {
 
   @Get()
   @Version("1")
-  @V1Endpoint("List projects")
+  @V1Endpoint("List projects (org-scoped — use /organizations/:id/projects)")
   @ApiResponse({ status: 200, type: [ProjectDto] })
   async list(
     @Headers("x-correlation-id") correlationId?: string,
+    @Query("orgId") _orgId?: string,
   ): Promise<ProjectDto[]> {
-    return (await this.projects.list(correlationId)) as ProjectDto[];
+    // Canonical list is GET /organizations/:id/projects. The global list
+    // cannot guess an org (no fallback to first org) → 400 ORG_REQUIRED.
+    throw new BadRequestException({
+      code: "ORG_REQUIRED",
+      message: "orgId is required — list via GET /api/v1/organizations/:id/projects",
+    });
   }
 
   @Post()
   @Version("1")
-  @V1Endpoint("Create project")
+  @V1Endpoint("Create project (use nested POST /organizations/:id/projects)")
   @ApiResponse({ status: 201, type: ProjectDto })
   async create(
     @Body(new ZodValidationPipe(createProjectSchema)) body: CreateProjectInput,
@@ -109,34 +118,23 @@ export class ProjectsController {
   @Post(":id/github-link")
   @Version("1")
   @V1Endpoint(
-    "Link GitHub repository (format validation only, no tokens stored)",
+    "Link GitHub repository (removed — project github fields are authoritative)",
   )
-  @HttpCode(HttpStatus.OK)
-  @ApiResponse({ status: 200, type: ProjectDto })
-  async linkGithub(
-    @Param("id") id: string,
-    @Body(new ZodValidationPipe(githubLinkSchema)) body: GithubLinkInput,
-    @Headers("x-correlation-id") correlationId?: string,
-  ): Promise<ProjectDto> {
-    return (await this.github.link(
-      id,
-      body,
-      correlationId,
-    )) as unknown as ProjectDto;
+  @HttpCode(HttpStatus.GONE)
+  async linkGithub(): Promise<never> {
+    throw new GoneException(
+      "github-link removed — set githubOwner/githubRepo via PATCH (410, see /organizations/:id/projects/:projectId)",
+    );
   }
 
   @Delete(":id/github-link")
   @Version("1")
-  @V1Endpoint("Unlink GitHub repository")
-  @ApiResponse({ status: 200, type: ProjectDto })
-  async unlinkGithub(
-    @Param("id") id: string,
-    @Headers("x-correlation-id") correlationId?: string,
-  ): Promise<ProjectDto> {
-    return (await this.github.unlink(
-      id,
-      correlationId,
-    )) as unknown as ProjectDto;
+  @V1Endpoint("Unlink GitHub repository (removed)")
+  @HttpCode(HttpStatus.GONE)
+  async unlinkGithub(): Promise<never> {
+    throw new GoneException(
+      "github-link removed — clear githubOwner/githubRepo via PATCH (410)",
+    );
   }
 
   @Get(":id/github-link")

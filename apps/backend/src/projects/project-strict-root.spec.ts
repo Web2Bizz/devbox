@@ -77,7 +77,15 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
       };
       const svc = makeService(fakeClient);
       await assert.rejects(
-        () => svc.create({ name: 'bad-owner', ownerId: 'alice' }, 'cid-strict-owner'),
+        () =>
+          svc.create(
+            {
+              name: 'bad-owner',
+              ownerId: 'alice',
+              orgId: '123e4567-e89b-12d3-a456-426614174001',
+            },
+            'cid-strict-owner',
+          ),
         /ownerId must be a uuid/,
       );
       assert.equal(insertCalled, 0);
@@ -97,7 +105,14 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
       };
       const svc = makeService(fakeClient);
       await assert.rejects(
-        () => svc.create({ name: 'should-not-exist' }, 'cid-strict-1'),
+        () =>
+          svc.create(
+            {
+              name: 'should-not-exist',
+              orgId: '123e4567-e89b-12d3-a456-426614174001',
+            },
+            'cid-strict-1',
+          ),
         /not configured|storage/i,
       );
       assert.equal(insertCalled, 0);

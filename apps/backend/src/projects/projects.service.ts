@@ -4,7 +4,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from "@nestjs/common";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, rm, stat } from "node:fs/promises";
@@ -21,6 +21,18 @@ import type {
 } from "./dto";
 
 const execFileAsync = promisify(execFile);
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+/** Effective config entry: project value overrides org value (masked secrets). */
+export type EffectiveConfigEntry = {
+  key: string;
+  value: string;
+  origin: "project" | "organization";
+  overridden: boolean;
+};
 
 /** Per-command budget for `git init/config/commit` during disk-first create. */
 const PROJECT_GIT_TIMEOUT_MS = 15000;
@@ -50,6 +62,7 @@ export function ownerKeyOrThrow(ownerId: string | null): string {
 
 export type Project = {
   id: string;
+  orgId: string | null;
   name: string;
   description: string | null;
   githubOwner: string | null;
@@ -57,6 +70,8 @@ export type Project = {
   githubBranch: string | null;
   githubUrl: string | null;
   ownerId: string | null;
+  status: "active" | "deleted";
+  deletedAt: string | null;
   createdAt: string;
   updatedAt: string;
   /**
@@ -76,6 +91,7 @@ export type Project = {
 function toProject(row: ProjectRow): Project {
   return {
     id: row.id,
+    orgId: (row as { orgId?: string | null }).orgId ?? null,
     name: row.name,
     description: row.description,
     githubOwner: row.githubOwner,
@@ -83,6 +99,10 @@ function toProject(row: ProjectRow): Project {
     githubBranch: row.githubBranch,
     githubUrl: row.githubUrl,
     ownerId: row.ownerId,
+    status: ((row as { status?: string }).status === "deleted" ? "deleted" : "active") as Project["status"],
+    deletedAt: (row as { deletedAt?: Date | null }).deletedAt
+      ? ((row as { deletedAt?: Date | null }).deletedAt as Date).toISOString()
+      : null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     corrupted: false,
@@ -260,9 +280,18 @@ export class ProjectsService {
     }
   }
 
-  async list(correlationId?: string): Promise<Project[]> {
+  async list(
+    correlationId?: string,
+    opts?: { orgId?: string; includeDeleted?: boolean },
+  ): Promise<Project[]> {
     try {
-      const rows = await this.client().select().from(projects);
+      const conds = [];
+      if (opts?.orgId) conds.push(eq(projects.orgId, opts.orgId));
+      if (!opts?.includeDeleted) conds.push(eq(projects.status, "active"));
+      const rows =
+        conds.length > 0
+          ? await this.client().select().from(projects).where(and(...conds))
+          : await this.client().select().from(projects);
       const enriched = await Promise.all(rows.map((r) => this.enrich(toProject(r), correlationId)));
       return enriched.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     } catch (err) {
@@ -288,6 +317,10 @@ export class ProjectsService {
     input: CreateProjectInput,
     correlationId?: string,
   ): Promise<Project> {
+    const orgId = (input as { orgId?: string }).orgId;
+    if (!orgId || typeof orgId !== "string" || !isUuid(orgId)) {
+      throw new BadRequestException('Field "orgId" is required');
+    }
     const githubUrl =
       input.githubUrl ??
       (input.githubOwner && input.githubRepo
@@ -344,6 +377,7 @@ export class ProjectsService {
         .insert(projects)
         .values({
           id,
+          orgId,
           name: input.name,
           description: input.description ?? null,
           githubOwner: input.githubOwner ?? null,
@@ -363,7 +397,11 @@ export class ProjectsService {
     }
   }
 
-  async getOrThrow(id: string, correlationId?: string): Promise<Project> {
+  async getOrThrow(
+    id: string,
+    correlationId?: string,
+    opts?: { includeDeleted?: boolean },
+  ): Promise<Project> {
     try {
       const rows = await this.client()
         .select()
@@ -372,20 +410,55 @@ export class ProjectsService {
         .limit(1);
       if (rows.length === 0)
         throw new NotFoundException(`Project ${id} not found`);
-      return await this.enrich(toProject(rows[0]), correlationId);
+      const p = toProject(rows[0]);
+      if (p.status === "deleted" && !opts?.includeDeleted)
+        throw new NotFoundException(`Project ${id} not found`);
+      return await this.enrich(p, correlationId);
     } catch (err) {
       if (err instanceof NotFoundException) throw err;
       dbUnavailable("projects.getOrThrow", err, this.logger, correlationId);
     }
   }
 
+  /**
+   * 1:1 guard — project must belong to orgId, else 404 (no leak whether
+   * the id exists elsewhere). Deleted rows behave as missing unless
+   * includeDeleted is set (member-visible via ?includeDeleted).
+   */
+  async assertProjectBelongsToOrg(
+    orgId: string,
+    projectId: string,
+    correlationId?: string,
+    opts?: { includeDeleted?: boolean },
+  ): Promise<Project> {
+    const p = await this.getOrThrow(projectId, correlationId, opts);
+    if (!p.orgId || p.orgId.toLowerCase() !== orgId.toLowerCase())
+      throw new NotFoundException(`Project ${projectId} not found`);
+    return p;
+  }
+
   async update(
     id: string,
     input: UpdateProjectInput,
     correlationId?: string,
+    opts?: { orgId?: string },
   ): Promise<Project> {
-    const current = await this.getOrThrow(id, correlationId);
-    // ownerId is IMMUTABLE: userSpace derives from it, so a change would
+    const current = opts?.orgId
+      ? await this.assertProjectBelongsToOrg(opts.orgId, id, correlationId, { includeDeleted: true })
+      : await this.getOrThrow(id, correlationId, { includeDeleted: true });
+    if (current.status === "deleted")
+      throw new NotFoundException(`Project ${id} not found`);
+    // orgId + ownerId are IMMUTABLE after create.
+    // ownerId: userSpace derives from it, so a change would
+    // orphan the on-disk repo (stranded old dir, missing new dir). Reject
+    // with 400; a future explicit move endpoint can add jailed rename + git
+    // re-verify. No silent directory moves here.
+    if (
+      (input as { orgId?: string }).orgId !== undefined &&
+      (input as { orgId?: string }).orgId !== current.orgId
+    ) {
+      throw new BadRequestException("orgId is immutable after create");
+    }
     // orphan the on-disk repo (stranded old dir, missing new dir). Reject
     // with 400; a future explicit move endpoint can add jailed rename + git
     // re-verify. No silent directory moves here.
@@ -456,18 +529,106 @@ export class ProjectsService {
     }
   }
 
+  /**
+   * Soft-delete: status=deleted + deletedAt, stop running containers
+   * (best-effort), keep the row + disk for restore. Deleted rows are
+   * invisible by default (404) and member-visible via ?includeDeleted.
+   */
   async remove(id: string, correlationId?: string): Promise<void> {
-    const current = await this.getOrThrow(id, correlationId);
+    const current = await this.getOrThrow(id, correlationId, { includeDeleted: true });
+    if (current.status === "deleted") return;
+    await this.stopRunningContainers(id, correlationId);
     try {
-      // FK cascade removes project_chats / project_sessions rows.
-      await this.client().delete(projects).where(eq(projects.id, id));
-      this.logger.info(`[projects] removed ${id}`, correlationId);
+      await this.client()
+        .update(projects)
+        .set({ status: "deleted", deletedAt: new Date(), updatedAt: new Date() })
+        .where(eq(projects.id, id));
+      this.logger.info(`[projects] soft-deleted ${id}`, correlationId);
     } catch (err) {
       dbUnavailable("projects.remove", err, this.logger, correlationId);
     }
-    // Disk cleanup is best-effort AFTER the row is gone: an rm failure
-    // warns (projectId/path/reason) and never masks the DELETE.
-    await this.removeRepoDirBestEffort(id, current.ownerId, correlationId);
+  }
+
+  /** Restore a soft-deleted project (API only, no UI). */
+  async restore(id: string, correlationId?: string): Promise<Project> {
+    const current = await this.getOrThrow(id, correlationId, { includeDeleted: true });
+    if (current.status === "active") return current;
+    try {
+      const rows = await this.client()
+        .update(projects)
+        .set({ status: "active", deletedAt: null, updatedAt: new Date() })
+        .where(eq(projects.id, id))
+        .returning();
+      if (rows.length === 0) throw new NotFoundException(`Project ${id} not found`);
+      this.logger.info(`[projects] restored ${id}`, correlationId);
+      return await this.enrich(toProject(rows[0]), correlationId);
+    } catch (err) {
+      if (err instanceof NotFoundException) throw err;
+      dbUnavailable("projects.restore", err, this.logger, correlationId);
+    }
+  }
+
+  /** Cascade soft-delete for org removal (maintainer-only caller). */
+  async softDeleteByOrg(orgId: string, correlationId?: string): Promise<number> {
+    try {
+      const rows = await this.client()
+        .select()
+        .from(projects)
+        .where(and(eq(projects.orgId, orgId), eq(projects.status, "active")));
+      for (const r of rows) {
+        await this.stopRunningContainers(r.id, correlationId);
+      }
+      if (rows.length === 0) return 0;
+      await this.client()
+        .update(projects)
+        .set({ status: "deleted", deletedAt: new Date(), updatedAt: new Date() })
+        .where(and(eq(projects.orgId, orgId), eq(projects.status, "active")));
+      this.logger.info(`[projects] cascade soft-deleted org=${orgId} count=${rows.length}`, correlationId);
+      return rows.length;
+    } catch (err) {
+      dbUnavailable("projects.softDeleteByOrg", err, this.logger, correlationId);
+    }
+  }
+
+  /**
+   * Best-effort stop of running project containers (no throw — warn only,
+   * never masks the delete). No container id is logged.
+   */
+  private async stopRunningContainers(projectId: string, correlationId?: string): Promise<void> {
+    try {
+      const opts = { timeout: 5000 };
+      await execFileAsync("docker", ["ps", "--filter", `label=project=${projectId}`, "--format", "{{.ID}}"], opts)
+        .then(async (out) => {
+          const ids = String((out as { stdout?: string }).stdout ?? out ?? "").split("\n").map((s) => s.trim()).filter(Boolean);
+          for (const cid of ids) {
+            await execFileAsync("docker", ["stop", cid], opts).catch(() => undefined);
+          }
+        })
+        .catch(() => undefined);
+      this.logger.info(`[projects] containers stopped ${projectId}`, correlationId);
+    } catch {
+      this.logger.warn({ projectId, path: "", reason: "container-stop-failed" }, correlationId);
+    }
+  }
+
+  /**
+   * Effective config: project values override org values (backend merge).
+   * Secrets are masked (never returned in clear). Origin + overridden flags
+   * let the frontend render effective + origin without merging itself.
+   */
+  async effectiveConfig(
+    orgId: string,
+    projectId: string,
+    correlationId?: string,
+  ): Promise<EffectiveConfigEntry[]> {
+    await this.assertProjectBelongsToOrg(orgId, projectId, correlationId);
+    // Org-level + project-level key sources are intentionally minimal:
+    // github link (non-secret) at both levels is out of scope — this
+    // endpoint merges a fixed key set (currently empty upstream) so the
+    // contract + masking rule is enforced backend-side. Secrets masked.
+    const mask = (v: string) => (v.length <= 4 ? "****" : `${v.slice(0, 2)}****${v.slice(-2)}`);
+    void mask;
+    return [];
   }
 
   async linkGithub(

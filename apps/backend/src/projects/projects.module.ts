@@ -8,6 +8,8 @@ import { ChatsModule } from "./chats/chats.module";
 import { ProjectFilesModule } from "./files/project-files.module";
 import { GithubModule } from "./github/github.module";
 import { SessionsModule } from "./sessions/sessions.module";
+import { OrgProjectsController } from "../organizations/org-projects.controller";
+import { OrganizationsModule } from "../organizations/organizations.module";
 
 /**
  * ProjectsModule — module-in-module composition:
@@ -28,9 +30,10 @@ import { SessionsModule } from "./sessions/sessions.module";
     forwardRef(() => ChatsModule),
     forwardRef(() => SessionsModule),
     forwardRef(() => GithubModule),
+    forwardRef(() => OrganizationsModule),
     ProjectFilesModule,
   ],
-  controllers: [ProjectsController],
+  controllers: [ProjectsController, OrgProjectsController],
   providers: [ProjectsService, GithubLinkService, WorkspacePathService],
   exports: [ProjectsService, GithubLinkService],
 })

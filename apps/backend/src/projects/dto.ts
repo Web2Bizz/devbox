@@ -17,6 +17,9 @@ export {
 } from '@rush-code/contracts';
 
 export class CreateProjectDto {
+  @ApiProperty({ example: 'org-uuid', format: 'uuid' })
+  orgId!: string;
+
   @ApiProperty({ example: 'my-app' })
   name!: string;
 
@@ -66,6 +69,15 @@ export class ProjectDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
 
+  @ApiProperty({ format: 'uuid' })
+  orgId!: string | null;
+
+  @ApiProperty({ enum: ['active', 'deleted'], example: 'active' })
+  status!: string;
+
+  @ApiProperty({ required: false, nullable: true, format: 'date-time' })
+  deletedAt!: string | null;
+
   @ApiProperty()
   name!: string;
 
@@ -109,17 +121,6 @@ export class ProjectDto {
   corruptedReason?: string | null;
 }
 
-export class GithubLinkDto {
-  @ApiProperty({ example: 'acme' })
-  owner!: string;
-
-  @ApiProperty({ example: 'my-app' })
-  repo!: string;
-
-  @ApiProperty({ required: false, example: 'main' })
-  branch?: string;
-}
-
 export class GithubLinkStatusDto {
   @ApiProperty()
   linked!: boolean;
@@ -135,4 +136,24 @@ export class GithubLinkStatusDto {
 
   @ApiProperty({ required: false, nullable: true })
   url!: string | null;
+}
+
+export class GithubLinkDto {
+  @ApiProperty({ example: 'acme' })
+  owner!: string;
+  @ApiProperty({ example: 'my-app' })
+  repo!: string;
+  @ApiProperty({ required: false, example: 'main' })
+  branch?: string;
+}
+
+export class EffectiveConfigDto {
+  @ApiProperty()
+  key!: string;
+  @ApiProperty()
+  value!: string;
+  @ApiProperty({ enum: ['project', 'organization'] })
+  origin!: string;
+  @ApiProperty()
+  overridden!: boolean;
 }

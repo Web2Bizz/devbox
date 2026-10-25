@@ -35,6 +35,9 @@ import {
 
 export const projects = pgTable("projects", {
   id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").references(() => organizations.id, {
+    onDelete: "cascade",
+  }),
   name: text("name").notNull(),
   description: text("description"),
   githubOwner: text("github_owner"),
@@ -42,13 +45,18 @@ export const projects = pgTable("projects", {
   githubBranch: text("github_branch").default("main"),
   githubUrl: text("github_url"),
   ownerId: text("owner_id"),
+  status: text("status").notNull().default("active"),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
-});
+}, (t) => [
+  index("projects_org_idx").on(t.orgId),
+  index("projects_org_status_idx").on(t.orgId, t.status),
+]);
 
 export const projectChats = pgTable("project_chats", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -252,6 +260,12 @@ export const organizationInvites = pgTable(
 
 export type OrganizationInviteRow = typeof organizationInvites.$inferSelect;
 
+/**
+ * M2M projects_and_organizations — REMOVED (1:1 model: projects.org_id).
+ * Kept as a deprecated stub so old imports fail closed loudly; the table
+ * itself is dropped by drizzle/0008 (see migration report column).
+ * Do not use — assertProjectBelongsToOrg is the only association check.
+ */
 export const projectsAndOrganizations = pgTable(
   "projects_and_organizations",
   {

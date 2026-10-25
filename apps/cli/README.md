@@ -101,9 +101,7 @@ Qwen 3 Coder 480B (`qwen-3-coder-480b`) is DEPRECATED since 2026-02-06
 (upstream `400 Model is unavailable`) — do not set it as default.
 Serve fallback is OFF by default (`OPENCODE_USE_SERVE=1` to enable):
 `OPENCODE_URL` / `OPENCODE_SERVER_URL` (default `http://127.0.0.1:4096`;
-`0.0.0.0`/`::` dialed as `127.0.0.1`), `OPENCODE_TOKEN` (serve password,
-alias `OPENCODE_SERVER_PASSWORD`; `''` = no password → header omitted,
-value never logged).
+`0.0.0.0`/`::` dialed as `127.0.0.1`).
 Copy `.env.example` → `.env`; never commit real keys/passwords.
 
 ## Legacy chat implementation (not used by current CLI)
@@ -184,13 +182,7 @@ sends prompts via `POST /session/{id}/message {parts:[{type:"text",text}]}`
 (`chatLocal` in `src/agents/opencode/index.ts`, base `OPENCODE_LOCAL_URL`
 `http://127.0.0.1:4096`, override `OPENCODE_URL`/`OPENCODE_SERVER_URL`).
 The Go key itself is read by serve from
-`~/.local/share/opencode/auth.json` (written by `/connect`), but new serve
-versions print a password on boot and require it as
-`Authorization: Bearer <OPENCODE_TOKEN>` (otherwise `401`). Pass it via
-`export OPENCODE_TOKEN=<пароль из лога opencode serve>` (or inline
-`OPENCODE_TOKEN=... bun src/cli.ts`); the password itself is shown by
-`pm2 logs opencode` / the `opencode serve` output. Empty = serve without
-a password → header omitted (as before); the value is never logged.
+`~/.local/share/opencode/auth.json` (written by `/connect`).
 Serve down → `✗`-box with the `opencode serve --port 4096` hint (503),
 reply never empty.
 Cloud systemone (`chatOpencode`, `{model:"jev-1.13-free", state, questions}` +

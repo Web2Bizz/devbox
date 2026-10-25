@@ -133,12 +133,6 @@ export function serveHint(base: string): string {
 
 export function mapServeFailure(status: number, rawBody: string, base: string): Error {
   const cause = scrubCause(rawBody) || "no body";
-  if (status === 401) {
-    return new Error(
-      `[cli] opencode serve rejected the password status=401 cause=${cause} ` +
-        `(hint: export OPENCODE_TOKEN=<пароль из лога opencode serve> либо запусти serve без пароля)`,
-    );
-  }
   if (status === 404) {
     return new Error(
       `[cli] opencode serve session expired status=404 cause=${cause} ${serveHint(base)}`,

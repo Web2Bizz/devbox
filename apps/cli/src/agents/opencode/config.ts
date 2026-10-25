@@ -46,16 +46,6 @@ export function resolveLocalBaseUrl(env: NodeJS.ProcessEnv = process.env): strin
 }
 
 /**
- * Serve password for the OPTIONAL fallback (`opencode serve` prints it on
- * boot, same secret as backend OPENCODE_TOKEN env; alias
- * OPENCODE_SERVER_PASSWORD). '' = serve without password → header omitted.
- * Value is never logged.
- */
-export function resolveServeToken(env: NodeJS.ProcessEnv = process.env): string {
-  return (env.OPENCODE_TOKEN ?? "").trim() || (env.OPENCODE_SERVER_PASSWORD ?? "").trim();
-}
-
-/**
  * Parse OPENCODE_MODEL="providerID/modelID" for the serve fallback
  * (surrounding whitespace and extra slashes trimmed;
  * "provider/model/extra" keeps the tail as modelID). Returns null when

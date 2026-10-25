@@ -1,6 +1,6 @@
 // agents/opencode/serve — OPTIONAL serve fallback (only when OPENCODE_USE_SERVE=1).
 import { OPENCODE_CAUSE_MAX, OPENCODE_TIMEOUT_MS } from "./constants.js";
-import { resolveChatModel, resolveLocalBaseUrl, resolveServeToken, type OpencodeModelRef } from "./config.js";
+import { resolveChatModel, resolveLocalBaseUrl, type OpencodeModelRef } from "./config.js";
 import {
   extractLocalPartsText,
   isPlaceholderReply,
@@ -35,7 +35,6 @@ export async function chatViaServe(prompt: string, opts: ChatLocalOptions): Prom
   const base = resolveLocalBaseUrl(env);
   const timeoutMs = opts.timeoutMs ?? OPENCODE_TIMEOUT_MS;
   const fetchImpl = opts.fetchImpl ?? fetch;
-  const serveToken = resolveServeToken(env);
   const model = opts.model !== undefined ? opts.model ?? undefined : resolveChatModel(env);
 
   const postJson = async (url: string, body: string): Promise<Response> => {
@@ -44,10 +43,7 @@ export async function chatViaServe(prompt: string, opts: ChatLocalOptions): Prom
     try {
       return await fetchImpl(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(serveToken ? { Authorization: `Bearer ${serveToken}` } : {}),
-        },
+        headers: { "Content-Type": "application/json" },
         body,
         signal: controller.signal,
       });

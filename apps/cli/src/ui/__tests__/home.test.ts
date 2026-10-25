@@ -62,13 +62,11 @@ describe("rush code home (Главная)", () => {
     const rendered = stripAnsi(renderHomeScreen(80, 0));
     const rows = rendered.split("\n");
     const artLast = rows.findIndex((l) => l.includes("██████  ██████  ██████  ███████"));
-    const idx0 = rendered.indexOf("Выбрать проект");
-    const idx1 = rendered.indexOf("Открыть директорию");
-    const idx2 = rendered.indexOf("Выйти");
+    const idx0 = rendered.indexOf("Чат");
+    const idx1 = rendered.indexOf("Выйти");
     expect(artLast).toBeGreaterThanOrEqual(0);
     expect(idx0).toBeGreaterThan(rendered.indexOf(rows[artLast] ?? ""));
     expect(idx1).toBeGreaterThan(idx0);
-    expect(idx2).toBeGreaterThan(idx1);
     // Monospace intact: each art line lives on its own row, never wrapped.
     for (const artLine of HOME_TITLE_ART.filter((l) => l !== "")) {
       const hits = rows.filter((r) => r.includes(artLine));
@@ -130,39 +128,35 @@ describe("rush code home (Главная)", () => {
     expect(titleTextOptions()).toEqual({ wrapMode: "none", truncate: false, width: "100%" });
   });
 
-  test("menu has exactly 3 items in spec order, centered", () => {
-    expect(HOME_OPTIONS).toEqual(["Выбрать проект", "Открыть директорию", "Выйти"]);
+  test("menu has exactly 2 items in spec order, centered", () => {
+    expect(HOME_OPTIONS).toEqual(["Чат", "Выйти"]);
     const rendered = renderHomeScreen(80, 0);
-    const idx0 = rendered.indexOf("Выбрать проект");
-    const idx1 = rendered.indexOf("Открыть директорию");
-    const idx2 = rendered.indexOf("Выйти");
+    const idx0 = rendered.indexOf("Чат");
+    const idx1 = rendered.indexOf("Выйти");
     expect(idx0).toBeGreaterThanOrEqual(0);
     expect(idx1).toBeGreaterThan(idx0);
-    expect(idx2).toBeGreaterThan(idx1);
     // Centered: every menu line starts with padding (screen middle, not col 0).
     for (const line of rendered.split("\n")) {
-      if (line.includes("Выбрать проект") || line.includes("Открыть директорию") || line.includes("Выйти")) {
+      if (line.includes("Чат") || line.includes("Выйти")) {
         expect(line.startsWith(" ")).toBe(true);
       }
     }
   });
 
   test("selected row carries the › marker", () => {
-    expect(renderHomeScreen(80, 1)).toContain("› 2. Открыть директорию");
-    expect(renderHomeScreen(80, 2)).toContain("› 3. Выйти");
+    expect(renderHomeScreen(80, 1)).toContain("› 2. Выйти");
   });
 
-  test("digits 1-3 select, arrows move, garbage is invalid", () => {
+  test("digits 1-2 select, arrows move, garbage is invalid", () => {
     expect(parseHomeInput("1")).toEqual({ kind: "select", index: 0 });
     expect(parseHomeInput("2")).toEqual({ kind: "select", index: 1 });
-    expect(parseHomeInput("3")).toEqual({ kind: "select", index: 2 });
     expect(parseHomeInput("nope")).toEqual({ kind: "invalid" });
     expect(parseHomeInput("")).toEqual({ kind: "invalid" });
   });
 
   test("arrow navigation wraps around", () => {
-    expect(moveHomeSelection(0, "up")).toBe(2);
-    expect(moveHomeSelection(2, "down")).toBe(0);
+    expect(moveHomeSelection(0, "up")).toBe(1);
+    expect(moveHomeSelection(1, "down")).toBe(0);
     expect(moveHomeSelection(0, "down")).toBe(1);
   });
 
@@ -172,18 +166,15 @@ describe("rush code home (Главная)", () => {
     expect(line?.startsWith(" ")).toBe(true);
   });
 
-  test("choice routes where it should (0 project, 1 dir, 2 exit)", () => {
-    // Contract: index 0 → project list, 1 → custom dir prompt, 2 → clean exit.
-    const route = (i: number): string => (i === 0 ? "projects" : i === 1 ? "custom-dir" : "exit");
-    expect(route(0)).toBe("projects");
-    expect(route(1)).toBe("custom-dir");
-    expect(route(2)).toBe("exit");
+  test("choice routes where it should (0 chat, 1 exit)", () => {
+    const route = (i: number): string => (i === 0 ? "chat" : "exit");
+    expect(route(0)).toBe("chat");
+    expect(route(1)).toBe("exit");
   });
 
-  test("fallback parses digits 1-3, arrows stay a move hint (no highlight in line mode)", () => {
+  test("fallback parses digits 1-2, arrows stay a move hint (no highlight in line mode)", () => {
     expect(parseHomeInput("1")).toEqual({ kind: "select", index: 0 });
     expect(parseHomeInput("2")).toEqual({ kind: "select", index: 1 });
-    expect(parseHomeInput("3")).toEqual({ kind: "select", index: 2 });
     expect(parseHomeInput(HOME_SELECT_UP)).toEqual({ kind: "move", dir: "up" });
     expect(parseHomeInput(HOME_SELECT_DOWN)).toEqual({ kind: "move", dir: "down" });
   });

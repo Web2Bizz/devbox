@@ -114,7 +114,8 @@ describe("tui transparency (terminal shows through)", () => {
     expect(home).toContain("checkBackendHealth");
     expect(home).toContain('" online"');
     expect(home).toContain('" offline"');
-    expect(home).toContain("backendOnline ? \"green\" : \"red\"");
+    expect(home).toContain('" connecting"');
+    expect(home).toContain("backendStatus === \"online\" ? \"green\"");
   });
 });
 
@@ -213,11 +214,10 @@ describe("tui home (Главная без мигания: арт статиче�
   test("selector changes only the marker: same width, same labels, › moves", () => {
     const a0 = homeOptionLine(0, 0, 80);
     const a1 = homeOptionLine(0, 1, 80);
-    expect(a0).toContain("› 1. Выбрать проект");
+    expect(a0).toContain("› 1. Чат");
     expect(a1).not.toContain("›");
-    expect(a1).toContain("1. Выбрать проект");
-    expect(homeOptionLine(1, 1, 80)).toContain("› 2. Открыть директорию");
-    expect(homeOptionLine(2, 2, 80)).toContain("› 3. Выйти");
+    expect(a1).toContain("1. Чат");
+    expect(homeOptionLine(1, 1, 80)).toContain("› 2. Выйти");
     // Marker-only diff: stripping the marker prefix equalizes the rows.
     const strip = (s: string): string => s.replace("›", " ").trim();
     expect(strip(a0)).toBe(strip(a1));
@@ -231,8 +231,7 @@ describe("tui home (Главная без мигания: арт статиче�
     }
     // Options never leak into the art block.
     const art = homeArtLines(80).join("\n");
-    expect(art).not.toContain("Выбрать проект");
-    expect(art).not.toContain("Открыть директорию");
+    expect(art).not.toContain("Чат");
     expect(art).not.toContain("Выйти");
   });
 
@@ -399,8 +398,6 @@ describe("no stdio в чате/открытии (только @opentui/react)", 
 
   test("интерактив идёт только через TUI-раннеры", () => {
     expect(INTERACTIVE_SOURCE).toContain("startTuiHome");
-    expect(INTERACTIVE_SOURCE).toContain("startTuiProjects");
-    expect(INTERACTIVE_SOURCE).toContain("startTuiDirInput");
     expect(INTERACTIVE_SOURCE).toContain("startTuiError");
     expect(TUI_SOURCE).toContain("startTuiError");
   });

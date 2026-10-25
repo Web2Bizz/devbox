@@ -178,10 +178,10 @@ export default function LoginPage() {
   // свежей кукой); если router кинул — полный переход через location.
   const onSuccess = () => {
     try {
-      router.replace('/projects');
+      router.replace('/organizations');
       router.refresh();
     } catch {
-      window.location.assign('/projects');
+      window.location.assign('/organizations');
     }
   };
 

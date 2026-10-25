@@ -18,23 +18,13 @@ import { useOrganizations } from '@/hooks/useOrganizations';
 import { useI18n } from '@/i18n';
 
 /**
- * Route: /organizations — membership-scoped list + create.
- * Data from `useOrganizations` (GET /api/v1/organizations via ApiClient);
- * empty/error/loading via hook, create via `CreateOrganizationDialog`.
- * Entity Cards allowed (§6: карточки данных); Alert — только ошибки.
+ * Route: /organizations — plain screen (no sidebar). Membership-scoped list.
+ * data-shell="plain" keeps the DESIGN §5 draft honest until approve.
  */
-export default function OrganizationsPage() {
+export default function OrganizationsPlainPage() {
   const { t } = useI18n();
-  const {
-    organizations,
-    loading,
-    error,
-    isEmpty,
-    reload,
-    createOrganization,
-    creating,
-    createError,
-  } = useOrganizations();
+  const { organizations, loading, error, isEmpty, reload, createOrganization, creating, createError } =
+    useOrganizations();
   const [open, setOpen] = useState(false);
 
   const handleCreate = useCallback(
@@ -42,14 +32,14 @@ export default function OrganizationsPage() {
       try {
         await createOrganization(name);
       } catch {
-        // validation/network error is surfaced via createError from the hook
+        // surfaced via createError
       }
     },
     [createOrganization],
   );
 
   return (
-    <div>
+    <main className="mx-auto w-full max-w-4xl px-6 py-10" data-shell="plain">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">
@@ -105,6 +95,6 @@ export default function OrganizationsPage() {
           ))}
         </div>
       )}
-    </div>
+    </main>
   );
 }

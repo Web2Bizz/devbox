@@ -320,3 +320,24 @@ h2-строки + `Separator` + `Badge`).
 | 2026-10-11 | Зафиксирован токен `--overlay-scrim: rgb(0 0 0 / 0.5)` (затемнение под мобильным drawer, `.app-sidebar-overlay`) в §2; объявление в `:root`/`globals.css` и замена литерала в коде — отдельная задача | Единственный оставшийся magic-color в `app/globals.css:355`; hex/rgba законны только внутри блока палитры `:root` / `.dark` |
 | 2026-10-11 | `I18nContext` НЕ внесён в реестр: это объект `createContext`, а не компонент; срабатывание guard на нём — известный false positive | Реестр описывает объявления компонентов; мусорные сущности в дизайн-документ не вносятся |
 | 2026-10-20 | usage переехал `src/components/usage/` → `src/features/usage/` без смены логики: `ApiKeyDialog` + `UsageSection` перенесены из §3.2 в новый §3.3 «Фичи», инфраструктура §3.3 → §3.4 | Первый фича-модуль; page `/profile` остаётся тонкой композицией `<UsageSection />` |
+
+## 9. DRAFT (не финализировано, требует approve): nested org-shell + 1:1
+
+DRAFT-предложение (без approve не применять как правило):
+
+- URL вложенные: `/organizations/[orgId]/projects/[projectId]/…`, сессии
+  `…/sessions/[sessionId]`. `/` — plain без сайдбара; `/organizations` и
+  `/organizations/[orgId]` — plain без сайдбара (`data-shell="plain"`).
+  Сайдбар только внутри проекта (`data-shell="dashboard"`, project shell
+  layout `organizations/[orgId]/projects/[projectId]/layout.tsx`:
+  SidebarNav items[] проектный, switcher-проп orgId, breadcrumbs,
+  выход → `/organizations/[orgId]`, хелперы `src/lib/navigation.ts`).
+- Глобальных nav нет: `SidebarNav` по умолчанию — только org-хаб;
+  проектный набор (`Overview/Sessions/Secrets/AI Providers/Registry`)
+  передаётся через `sidebarItems`. Старые глобальные
+  (`/projects`, `/secrets`, `/ai-providers`, `/registry*`) — 410 + CTA
+  на `/organizations` (без угадывания org). Легаси `/projects/[id]/**`
+  — 404 + CTA (id без org не резолвится, mismatch → 404 без утечки).
+- Guard-матрица: auth — nested org/project + legacy globals (гость → /login);
+  unauth — /login|/register|/restore (авторизован → /organizations);
+  `/` — гость → /login, авторизован → /organizations.

@@ -14,14 +14,14 @@ import { AUTH_MARKER, AUTH_MARKER_VALUE } from '@/lib/route-guard';
  * force-dynamic: login is a client form with useRouter — no static prerender.
  *
  * Server guard (defense-in-depth behind edge `proxy.ts`): a session marker
- * on an unauth page means an authed user — bounce to `/projects` (no
- * /login<->/projects loop: `/projects` never redirects authed users back).
+ * on an unauth page means an authed user — bounce to `/organizations` (no
+ * /login<->/organizations loop: `/organizations` never redirects authed users back).
  */
 export const dynamic = 'force-dynamic';
 
 export default async function AuthGroupLayout({ children }: { children: ReactNode }) {
   const store = await cookies();
-  if (store.get(AUTH_MARKER)?.value === AUTH_MARKER_VALUE) redirect('/projects');
+  if (store.get(AUTH_MARKER)?.value === AUTH_MARKER_VALUE) redirect('/organizations');
   return (
     <div className="w-full max-w-none mx-auto box-border min-h-dvh px-2 pb-4 flex flex-col gap-4 bg-background text-foreground" data-shell="auth">
       <a href="#main-content" className="sr-only focus:not-sr-only">

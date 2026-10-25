@@ -24,7 +24,6 @@ export function parseHomeInput(raw: string): HomeInput {
   const line = raw.trim().toLowerCase();
   if (line === "1" || line === HOME_OPTIONS[0].toLowerCase()) return { kind: "select", index: 0 };
   if (line === "2" || line === HOME_OPTIONS[1].toLowerCase()) return { kind: "select", index: 1 };
-  if (line === "3" || line === HOME_OPTIONS[2].toLowerCase()) return { kind: "select", index: 2 };
   if (raw === HOME_SELECT_UP || line === "up" || line === "к") return { kind: "move", dir: "up" };
   if (raw === HOME_SELECT_DOWN || line === "down") return { kind: "move", dir: "down" };
   return { kind: "invalid" };

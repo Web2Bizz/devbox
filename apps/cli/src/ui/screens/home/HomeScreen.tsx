@@ -31,7 +31,7 @@ export type HomeAppProps = {
  */
 export function HomeApp({ initialSelected, onSelect }: HomeAppProps) {
   const [selected, setSelected] = useState<HomeOptionIndex>(initialSelected);
-  const [backendOnline, setBackendOnline] = useState(false);
+  const [backendStatus, setBackendStatus] = useState<"connecting" | "online" | "offline">("connecting");
   const { width: termWidth } = useTerminalDimensions();
   const width = Number.isFinite(termWidth) && termWidth > 0 ? Math.floor(termWidth) : 80;
   const selectedRef = useRef(selected);
@@ -42,8 +42,9 @@ export function HomeApp({ initialSelected, onSelect }: HomeAppProps) {
   useEffect(() => {
     let active = true;
     const refresh = async (): Promise<void> => {
+      if (active) setBackendStatus("connecting");
       const online = await checkBackendHealth();
-      if (active) setBackendOnline(online);
+      if (active) setBackendStatus(online ? "online" : "offline");
     };
     void refresh();
     const timer = setInterval(() => void refresh(), 15_000);
@@ -54,7 +55,7 @@ export function HomeApp({ initialSelected, onSelect }: HomeAppProps) {
   }, []);
   useKeyboard((key) => {
     if (key.ctrl && key.name === "c") {
-      onSelect(2);
+      onSelect(1);
       return;
     }
     if (key.name === "up") {
@@ -70,7 +71,7 @@ export function HomeApp({ initialSelected, onSelect }: HomeAppProps) {
       return;
     }
     if (key.name === "escape" || key.name === "q") {
-      onSelect(2);
+      onSelect(1);
       return;
     }
     if (key.name === "1") {
@@ -81,9 +82,7 @@ export function HomeApp({ initialSelected, onSelect }: HomeAppProps) {
       onSelect(1);
       return;
     }
-    if (key.name === "3") {
-      onSelect(2);
-    }
+    // Only 0 and 1 are valid options now.
   });
   return (
     <box flexDirection="column" justifyContent="center" alignItems="center" width="100%" height="100%">
@@ -105,7 +104,9 @@ export function HomeApp({ initialSelected, onSelect }: HomeAppProps) {
       ))}
       <box flexDirection="row" width={verbatimWidth}>
         <text>{homeSignatureLine(width)}</text>
-        <text fg={backendOnline ? "green" : "red"}>{backendOnline ? " online" : " offline"}</text>
+        <text fg={backendStatus === "online" ? "green" : backendStatus === "offline" ? "red" : "yellow"}>
+          {backendStatus === "online" ? " online" : backendStatus === "offline" ? " offline" : " connecting"}
+        </text>
       </box>
       <text width="100%">{" "}</text>
       {HOME_OPTIONS.map((option, i) => (

@@ -9,7 +9,7 @@ export const HOME_TITLE_ART = [
 
 export const HOME_TITLE = [...HOME_TITLE_ART].join("\n");
 
-export const HOME_OPTIONS = ["Выбрать проект", "Открыть директорию", "Выйти"] as const;
+export const HOME_OPTIONS = ["Чат", "Выйти"] as const;
 
 export const HOME_SIGNATURE = "by web2bizz.team";
 
@@ -21,7 +21,7 @@ export const HOME_TITLE_STOPS = ["#FFB02E", "#FF4A2D", "#E93A6B", "#8B3DFF", "#2
 
 export type HomeRgb = { r: number; g: number; b: number };
 
-export type HomeOptionIndex = 0 | 1 | 2;
+export type HomeOptionIndex = 0 | 1;
 
 export const HOME_SELECT_UP: string = String.fromCharCode(27) + "[A";
 

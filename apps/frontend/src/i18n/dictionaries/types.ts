@@ -284,6 +284,7 @@ export type Dictionary = {
     emptyDesc: string;
     createTrigger: string;
     back: string;
+    noMembership: string;
     detailSubtitle: string;
     notFoundTitle: string;
     notFoundDesc: string;

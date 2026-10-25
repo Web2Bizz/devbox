@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useMemo } from 'react';
 import {
@@ -9,8 +8,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@web2bizz/ui/components';
@@ -97,28 +94,6 @@ export function OrganizationSwitcher() {
     );
   }
 
-  // Empty — plain link to the hub (no dropdown with zero options).
-  if (organizations.length === 0) {
-    return (
-      <Link
-        href="/organizations"
-        aria-label={t.nav.organizations}
-        className={`${buttonVariants({ variant: 'ghost', size: 'default' })} border-0 shadow-none outline-none hover:border-transparent focus-visible:border-transparent focus-visible:ring-0 focus-visible:outline-none`}
-      >
-        <span className="min-w-0 max-w-44 truncate">{t.nav.organizations}</span>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path
-            d="m6 9 6 6 6-6"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </Link>
-    );
-  }
-
   const triggerLabel = activeOrg ? activeOrg.name : t.nav.organizations;
 
   return (
@@ -145,19 +120,19 @@ export function OrganizationSwitcher() {
       <DropdownMenuContent align="start" aria-label={t.nav.organizations}>
         <DropdownMenuLabel>{t.nav.organizations}</DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuRadioGroup
-          value={activeId ?? ''}
-          onValueChange={(value) => {
-            if (!value) return;
-            router.push(`/organizations/${value}`);
-          }}
-        >
-          {organizations.map((org) => (
-            <DropdownMenuRadioItem key={org.id} value={org.id} aria-label={org.name}>
-              {org.name}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
+        {organizations.length === 0 ? (
+          <div className="px-2 py-1.5 text-sm text-muted-foreground">
+            {t.orgs.noMembership}
+          </div>
+        ) : (
+          organizations.map((org) => (
+            <DropdownMenuItem key={org.id} aria-label={org.name}>
+              <a href={`/organizations/${org.id}`} className="w-full">
+                {org.name}
+              </a>
+            </DropdownMenuItem>
+          ))
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuItem
           aria-label={t.orgs.back}

@@ -284,6 +284,7 @@ export const en: Dictionary = {
     emptyDesc: 'Create your first organization to see it here.',
     createTrigger: 'Create organization',
     back: 'Back to organizations',
+    noMembership: 'You are not a member of any organization',
     detailSubtitle: 'Organization overview — members, invites and projects.',
     notFoundTitle: 'Organization not found',
     notFoundDesc: 'No organization matches this id, or you are not a member.',

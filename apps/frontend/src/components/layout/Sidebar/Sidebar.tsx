@@ -3,8 +3,13 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import { useState, type KeyboardEvent } from 'react';
-import { Button } from '@web2bizz/ui/components';
+import { useState } from 'react';
+import {
+  Button,
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@web2bizz/ui/components';
 import { useI18n } from '../../../i18n';
 
 export type SidebarNavItem = {
@@ -98,18 +103,6 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const isActive = (href: string) =>
     pathname === href || pathname.startsWith(`${href}/`);
 
-  const handleGroupKeyDown = (
-    event: KeyboardEvent<HTMLButtonElement>,
-    id: string,
-  ) => {
-    // Enter/Space toggle natively via <button> onClick.
-    // Escape: collapse the group.
-    if (event.key === 'Escape') {
-      event.stopPropagation();
-      setExpanded((prev) => ({ ...prev, [id]: false }));
-    }
-  };
-
   return (
       <nav aria-label={t.nav.sections} className="flex flex-col gap-1 w-full">
       {NAV.map((item) => {
@@ -129,50 +122,50 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
       })}
       {EXPANDABLE.map((item) => {
         const isOpen = expanded[item.id] ?? false;
-        const sublistId = `sidebar-sublist-${item.id}`;
         return (
-          <div key={item.id} className="flex flex-col w-full">
-            <button
-              type="button"
-              aria-expanded={isOpen}
-              aria-controls={sublistId}
-              onClick={() => {
-                setExpanded((prev) => ({ ...prev, [item.id]: !isOpen }));
-              }}
-              onKeyDown={(event) => handleGroupKeyDown(event, item.id)}
-              className="flex items-center w-full justify-start gap-2 px-3 py-2 rounded-[var(--radius-md)] text-sm font-medium leading-5 text-muted-foreground no-underline border border-transparent transition-colors duration-150 hover:text-foreground hover:bg-[var(--sidebar-accent,var(--muted))] aria-[expanded=true]:text-foreground aria-[expanded=true]:bg-[var(--sidebar-accent,var(--muted))] aria-[expanded=true]:border-[var(--sidebar-border,var(--border))] focus-visible:outline-2 focus-visible:outline-[var(--sidebar-ring,var(--ring))] focus-visible:outline-offset-2"
-            >
-              <span className="flex-1 min-w-0">{item.label}</span>
-              <span aria-hidden="true" className={`shrink-0 text-muted-foreground transition-transform duration-150 ${isOpen ? 'rotate-0' : '-rotate-90'}`}>
-                ▾
-              </span>
-            </button>
-            <ul
-              id={sublistId}
-              hidden={!isOpen}
-              className="flex flex-col gap-1 w-full m-0 pl-4 list-none [&[hidden]]:hidden"
-            >
-              {item.items
-                ? item.items.map((sub) => {
-                    const subActive = isActive(sub.href);
-                    return (
-                      <li key={sub.href}>
-                        <Link
-                          href={sub.href}
-                          aria-current={subActive ? 'page' : undefined}
-                          data-active={subActive ? 'true' : undefined}
-                          onClick={onNavigate}
-                          className="flex items-center w-full justify-start gap-2 px-3 py-2 rounded-[var(--radius-md)] text-sm font-medium leading-5 text-muted-foreground no-underline border border-transparent transition-colors duration-150 hover:text-foreground hover:bg-[var(--sidebar-accent,var(--muted))] aria-[current=page]:text-foreground aria-[current=page]:bg-[var(--sidebar-accent,var(--muted))] aria-[current=page]:border-[var(--sidebar-border,var(--border))] focus-visible:outline-2 focus-visible:outline-[var(--sidebar-ring,var(--ring))] focus-visible:outline-offset-2"
-                        >
-                          {sub.label}
-                        </Link>
-                      </li>
-                    );
-                  })
-                : // TODO: sub-items for databases — pages land separately.
-                  null}
-            </ul>
-          </div>
+          <Collapsible
+            key={item.id}
+            open={isOpen}
+            onOpenChange={(open) => {
+              setExpanded((prev) => ({ ...prev, [item.id]: open }));
+            }}
+            className="flex flex-col w-full"
+          >
+            <CollapsibleTrigger asChild>
+              <button
+                type="button"
+                className="flex items-center w-full justify-start gap-2 px-3 py-2 rounded-[var(--radius-md)] text-sm font-medium leading-5 text-left text-muted-foreground no-underline border border-transparent transition-colors duration-150 hover:text-foreground hover:bg-[var(--sidebar-accent,var(--muted))] data-[state=open]:text-foreground data-[state=open]:bg-[var(--sidebar-accent,var(--muted))] data-[state=open]:border-[var(--sidebar-border,var(--border))] focus-visible:outline-2 focus-visible:outline-[var(--sidebar-ring,var(--ring))] focus-visible:outline-offset-2"
+              >
+                <span className="flex-1 min-w-0 text-left">{item.label}</span>
+                <span aria-hidden="true" className={`shrink-0 text-muted-foreground transition-transform duration-150 ${isOpen ? 'rotate-0' : '-rotate-90'}`}>
+                  ▾
+                </span>
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="flex flex-col gap-1 w-full m-0 p-0 list-none">
+              <ul className="flex flex-col gap-1 w-full m-0 p-0 pl-4 list-none">
+                {item.items
+                  ? item.items.map((sub) => {
+                      const subActive = isActive(sub.href);
+                      return (
+                        <li key={sub.href}>
+                          <Link
+                            href={sub.href}
+                            aria-current={subActive ? 'page' : undefined}
+                            data-active={subActive ? 'true' : undefined}
+                            onClick={onNavigate}
+                            className="flex items-center w-full justify-start gap-2 px-3 py-2 rounded-[var(--radius-md)] text-sm font-medium leading-5 text-muted-foreground no-underline border border-transparent transition-colors duration-150 hover:text-foreground hover:bg-[var(--sidebar-accent,var(--muted))] aria-[current=page]:text-foreground aria-[current=page]:bg-[var(--sidebar-accent,var(--muted))] aria-[current=page]:border-[var(--sidebar-border,var(--border))] focus-visible:outline-2 focus-visible:outline-[var(--sidebar-ring,var(--ring))] focus-visible:outline-offset-2"
+                          >
+                            {sub.label}
+                          </Link>
+                        </li>
+                      );
+                    })
+                  : // TODO: sub-items for databases — pages land separately.
+                    null}
+              </ul>
+            </CollapsibleContent>
+          </Collapsible>
         );
       })}
       {FLAT_EXTRA.map((item) => {

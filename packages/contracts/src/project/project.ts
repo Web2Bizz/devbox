@@ -7,11 +7,18 @@
  * backend-verbatim zod schemas).
  */
 
-/** Disk-home scope (REPOS_ROOT users/<uuid>/… vs orgs/<uuid>/…). */
+/**
+ * Disk-home scope — frontend-additive (older caches stay valid without it).
+ * Linking a project to an org is metadata-only (no disk move).
+ */
 export type ProjectScope = 'user' | 'org';
+
+export type ProjectStatus = 'active' | 'deleted';
 
 export type Project = {
   id: string;
+  /** Owning organization (1:1, required). */
+  orgId: string;
   name: string;
   description: string | null;
   githubOwner: string | null;
@@ -19,6 +26,10 @@ export type Project = {
   githubBranch: string | null;
   githubUrl: string | null;
   ownerId: string | null;
+  /** Lifecycle: active | deleted (soft-delete, restore via API only). */
+  status: ProjectStatus;
+  /** Soft-delete timestamp (null when active). */
+  deletedAt: string | null;
   /** ISO-8601 timestamp */
   createdAt: string;
   /** ISO-8601 timestamp */
@@ -30,9 +41,4 @@ export type Project = {
    * fsck-failed, timeout, storage-unconfigured, …).
    */
   corruptedReason: string | null;
-  /**
-   * Disk-home scope — frontend-additive (older caches stay valid without it).
-   * Linking a project to an org is metadata-only (no disk move).
-   */
-  scope?: ProjectScope;
 };

@@ -164,7 +164,7 @@ paths:
                 $ref: '#/components/schemas/ApiError'
   /api/v1/projects:
     get:
-      summary: List projects
+      summary: List projects (400 ORG_REQUIRED — use nested GET /organizations/{id}/projects)
       operationId: listProjectsV1
       responses:
         '200':
@@ -237,7 +237,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Project'
     delete:
-      summary: Delete project (cascades chats/sessions)
+      summary: Soft-delete project (status=deleted, stops containers, restore via API)
       operationId: deleteProjectV1
       parameters:
         - name: id
@@ -348,7 +348,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/GithubLinkStatus'
     post:
-      summary: Link GitHub repository (format validation only, no tokens stored)
+      summary: Link GitHub repository (REMOVED — 410, set githubOwner/githubRepo via PATCH)
       operationId: linkGithubV1
       parameters:
         - name: id
@@ -370,7 +370,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Project'
     delete:
-      summary: Unlink GitHub repository
+      summary: Unlink GitHub repository (REMOVED — 410)
       operationId: unlinkGithubV1
       parameters:
         - name: id
@@ -1141,7 +1141,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
     delete:
-      summary: Delete organization (maintainer only, projects survive — links cascade)
+      summary: Delete organization (maintainer only, cascade soft-deletes projects + stops containers)
       operationId: deleteOrganizationV1
       security:
         - bearerAuth: []
@@ -1463,7 +1463,7 @@ paths:
                 $ref: '#/components/schemas/ApiError'
   /api/v1/organizations/{id}/projects/{projectId}:
     post:
-      summary: Attach a project to the organization (maintainer only, metadata-only — no disk move)
+      summary: Attach a project (REMOVED — 410, 1:1 model)
       description: >-
         Project homes resolve per scope (ProjectScope user|org):
         users/<uuid>/projects/<id>/content vs
@@ -1522,7 +1522,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
     delete:
-      summary: Detach a project from the organization (maintainer only, project survives)
+      summary: Detach a project (REMOVED — 410, 1:1 model)
       operationId: unlinkOrganizationProjectV1
       security:
         - bearerAuth: []
@@ -1566,6 +1566,132 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+  /api/v1/organizations/{id}/projects:
+    get:
+      summary: List organization projects (canonical, ?includeDeleted member-visible)
+      operationId: listOrgProjectsV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: includeDeleted
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: org projects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Project'
+    post:
+      summary: Create project in organization (orgId forced from path)
+      operationId: createOrgProjectV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProject'
+      responses:
+        '201':
+          description: created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+  /api/v1/organizations/{id}/projects/{projectId}:
+    get:
+      summary: Get organization project (mismatch → 404, ?includeDeleted)
+      operationId: getOrgProjectV1
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '404':
+          description: not found (or belongs to another org — no leak)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    patch:
+      summary: Update organization project
+      operationId: updateOrgProjectV1
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProject'
+      responses:
+        '200':
+          description: updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+    delete:
+      summary: Soft-delete organization project (stops containers)
+      operationId: deleteOrgProjectV1
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: soft-deleted
+  /api/v1/organizations/{id}/projects/{projectId}/restore:
+    post:
+      summary: Restore soft-deleted project (API only, no UI)
+      operationId: restoreOrgProjectV1
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: restored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+  /api/v1/organizations/{id}/projects/{projectId}/effective-config:
+    get:
+      summary: Effective config (project overrides org, secrets masked)
+      operationId: getOrgProjectEffectiveConfigV1
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: effective entries (value + origin/overridden)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EffectiveConfigEntry'
   /api/v1/projects/{id}/files:
     get:
       summary: Readonly project file listing (path + depth, jailed, depth 0-5)
@@ -2666,6 +2792,23 @@ components:
         version:
           type: string
           example: 1.18.33
+    ProjectStatus:
+      type: string
+      enum: [active, deleted]
+    EffectiveConfigEntry:
+      type: object
+      required: [key, value, origin, overridden]
+      properties:
+        key:
+          type: string
+        value:
+          type: string
+          description: masked when secret-backed
+        origin:
+          type: string
+          enum: [project, organization]
+        overridden:
+          type: boolean
     ApiError:
       type: object
       required: [code, message, correlationId]
@@ -2849,11 +2992,22 @@ components:
           type: string
     Project:
       type: object
-      required: [id, name, createdAt, updatedAt]
+      required: [id, orgId, name, status, createdAt, updatedAt]
       properties:
         id:
           type: string
           format: uuid
+        orgId:
+          type: string
+          format: uuid
+          description: Owning organization (1:1, immutable after create)
+        status:
+          $ref: '#/components/schemas/ProjectStatus'
+        deletedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Soft-delete timestamp (null when active; restore via POST .../restore, API only)
         name:
           type: string
         description:
@@ -2888,11 +3042,17 @@ components:
           nullable: true
           description: "Machine reason when corrupted (missing-dir, no-git, rev-parse-failed, fsck-failed, timeout, storage-unconfigured, …). storage-unconfigured = REPOS_ROOT empty (required for project writes; fallback chain is readonly-registry only)"
         scope:
-          $ref: '#/components/schemas/ProjectScope'
+          type: string
+          enum: [user, org]
+          deprecated: true
+          description: REMOVED (1:1 model) — kept for old caches only
     CreateProject:
       type: object
-      required: [name]
+      required: [orgId, name]
       properties:
+        orgId:
+          type: string
+          format: uuid
         name:
           type: string
         description:

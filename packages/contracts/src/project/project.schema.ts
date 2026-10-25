@@ -1,16 +1,17 @@
 import { z } from 'zod';
 
-import type { Project, ProjectScope } from './project';
+import type { Project, ProjectStatus } from './project';
 
 /**
  * Boundary schemas for project.ts.
- * Input schemas are verbatim apps/backend/src/projects/dto.ts (same
- * regexes, min/max + error strings, partial-update derivation, link
- * default) so backend/frontend validation stays identical after consumer
- * migration. Response schema mirrors contracts/openapi.yaml Project.
+ * Backend-verbatim: same regexes, min/max + error strings, partial-update
+ * derivation. Response schema mirrors contracts/openapi.yaml Project.
+ * 1:1 model: orgId required on create, immutable after create; scope and
+ * link/unlink removed (M2M dropped).
  */
 
-export const projectScopeSchema = z.enum(['user', 'org']) satisfies z.ZodType<ProjectScope>;
+export const projectScopeSchema = z.enum(['user', 'org']);
+export const projectStatusSchema = z.enum(['active', 'deleted']) satisfies z.ZodType<ProjectStatus>;
 
 const ownerSchema = z
   .string()
@@ -26,6 +27,7 @@ const branchSchema = z
   .max(100);
 
 export const createProjectSchema = z.object({
+  orgId: z.uuid({ error: 'Field "orgId" is required' }),
   name: z.string({ error: 'Field "name" is required' }).min(1).max(200),
   description: z.string().max(2000).optional(),
   githubOwner: ownerSchema.optional(),
@@ -51,6 +53,7 @@ export type GithubLinkInput = z.infer<typeof githubLinkSchema>;
 
 export const projectSchema = z.object({
   id: z.uuid(),
+  orgId: z.uuid(),
   name: z.string().min(1),
   description: z.string().nullable(),
   githubOwner: z.string().nullable(),
@@ -58,11 +61,22 @@ export const projectSchema = z.object({
   githubBranch: z.string().nullable(),
   githubUrl: z.string().nullable(),
   ownerId: z.string().nullable(),
+  status: projectStatusSchema,
+  deletedAt: z.string().nullable(),
   /** ISO-8601 timestamp */
   createdAt: z.string().min(1),
   /** ISO-8601 timestamp */
   updatedAt: z.string().min(1),
   corrupted: z.boolean(),
   corruptedReason: z.string().nullable(),
-  scope: projectScopeSchema.optional(),
 }) satisfies z.ZodType<Project>;
+
+/** Effective config entry: project value overrides org value (backend merge). */
+export const effectiveConfigEntrySchema = z.object({
+  key: z.string().min(1),
+  value: z.string(),
+  origin: z.enum(['project', 'organization']),
+  overridden: z.boolean(),
+});
+
+export type EffectiveConfigEntry = z.infer<typeof effectiveConfigEntrySchema>;

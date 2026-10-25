@@ -3,8 +3,9 @@
 // arrows only move `selected` state, React repaints just the option
 // rows (marker `›` follows) — no clear, no art reprint, no flicker.
 // Transparency: fg-only, every row width 100%.
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
+import { checkBackendHealth } from "../../../core/backend.js";
 import {
   HOME_OPTIONS,
   centerLines,
@@ -30,6 +31,7 @@ export type HomeAppProps = {
  */
 export function HomeApp({ initialSelected, onSelect }: HomeAppProps) {
   const [selected, setSelected] = useState<HomeOptionIndex>(initialSelected);
+  const [backendOnline, setBackendOnline] = useState(false);
   const { width: termWidth } = useTerminalDimensions();
   const width = Number.isFinite(termWidth) && termWidth > 0 ? Math.floor(termWidth) : 80;
   const selectedRef = useRef(selected);
@@ -37,6 +39,19 @@ export function HomeApp({ initialSelected, onSelect }: HomeAppProps) {
   const verbatim = titleTextOptions();
   const verbatimWidth = verbatim.width as "100%";
   const hint = centerLines(["↑↓ + Enter · или 1-3"], width)[0] ?? "";
+  useEffect(() => {
+    let active = true;
+    const refresh = async (): Promise<void> => {
+      const online = await checkBackendHealth();
+      if (active) setBackendOnline(online);
+    };
+    void refresh();
+    const timer = setInterval(() => void refresh(), 15_000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, []);
   useKeyboard((key) => {
     if (key.ctrl && key.name === "c") {
       onSelect(2);
@@ -88,7 +103,10 @@ export function HomeApp({ initialSelected, onSelect }: HomeAppProps) {
           )}
         </box>
       ))}
-      <text width="100%">{homeSignatureLine(width)}</text>
+      <box flexDirection="row" width={verbatimWidth}>
+        <text>{homeSignatureLine(width)}</text>
+        <text fg={backendOnline ? "green" : "red"}>{backendOnline ? " online" : " offline"}</text>
+      </box>
       <text width="100%">{" "}</text>
       {HOME_OPTIONS.map((option, i) => (
         <text key={option} width="100%">

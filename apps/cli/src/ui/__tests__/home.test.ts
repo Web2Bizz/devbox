@@ -4,6 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   HOME_OPTIONS,
+  HOME_SIGNATURE,
   HOME_SELECT_DOWN,
   HOME_SELECT_UP,
   HOME_TITLE,
@@ -26,6 +27,11 @@ import { hasBgCodes, stripAnsi } from "../shared/chat.js";
 const ESC = String.fromCharCode(27);
 
 describe("rush code home (Главная)", () => {
+  test("shows the requested team signature", () => {
+    expect(HOME_SIGNATURE).toBe("by web2bizz.team");
+    expect(renderHomeScreen(80, 0)).toContain(HOME_SIGNATURE);
+  });
+
   test("title is RUSH CODE block-art (5 lines, exact)", () => {
     const expected = [
       "██████  ██    ██ ███████ ██   ██      ██████  ██████  ██████  ███████",

@@ -11,7 +11,7 @@ export const HOME_TITLE = [...HOME_TITLE_ART].join("\n");
 
 export const HOME_OPTIONS = ["Выбрать проект", "Открыть директорию", "Выйти"] as const;
 
-export const HOME_SIGNATURE = "by web2bizz team";
+export const HOME_SIGNATURE = "by web2bizz.team";
 
 /**
  * Logo gradient stops (eyedropper from the RUSH CODE logo, left → right):

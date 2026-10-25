@@ -108,6 +108,14 @@ describe("tui transparency (terminal shows through)", () => {
     expect(TUI_APP_SOURCE).toContain("useTerminalDimensions");
     expect(TUI_SOURCE).toContain("resolveTerminalWidth");
   });
+
+  test("home screen shows backend health beside the team signature", () => {
+    const home = readFileSync(join(UI_DIR, "screens/home/HomeScreen.tsx"), "utf8");
+    expect(home).toContain("checkBackendHealth");
+    expect(home).toContain('" online"');
+    expect(home).toContain('" offline"');
+    expect(home).toContain("backendOnline ? \"green\" : \"red\"");
+  });
 });
 
 describe("tui startup order (clear first, prompt last)", () => {

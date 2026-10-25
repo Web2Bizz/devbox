@@ -1,6 +1,6 @@
 # @rush-code/cli — Rush Code CLI (opencode style)
 
-Interactive REPL with `@file` refs (REPOS_ROOT jail) and `/agent` allowlist
+Interactive REPL with `/agent` allowlist
 (dry-run by default). System output is plain text; chat
 messages (user prompt + agent reply) are plain full-width text (no frames,
 fg-only color, see § TUI).

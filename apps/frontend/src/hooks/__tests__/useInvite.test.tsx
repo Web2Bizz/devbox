@@ -52,7 +52,9 @@ const MEMBERSHIP = {
   createdAt: '2026-10-04T00:00:00.000Z',
 };
 
-const mintMock = mock(async (_token: string, _orgId: string, _body: unknown) => ({ ...INVITE }));
+const mintMock = mock(
+  async (_token: string, _orgId: string, _body: unknown): Promise<typeof INVITE | typeof EMAIL_INVITE> => ({ ...INVITE }),
+);
 let acceptImpl: () => Promise<typeof MEMBERSHIP> = async () => ({ ...MEMBERSHIP });
 const acceptMock = mock(() => acceptImpl());
 

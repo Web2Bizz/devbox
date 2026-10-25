@@ -1,7 +1,7 @@
 /**
  * route-guard — redirect matrix + proxy matcher consistency.
  *
- * Covers: guest on auth/root → /login; authed on unauth/root → /projects;
+ * Covers: guest on auth/root → /login; authed on unauth/root → /organizations;
  * public → null; prefix boundaries (no `/loginx` / `/registries`-vs-
  * `/registry` confusion); loop-freedom (destinations are fixed points).
  * Also asserts edge `proxy.ts` matcher covers every guarded prefix —
@@ -12,7 +12,7 @@ import { describe, expect, test } from 'bun:test';
 import { AUTH_PREFIXES, UNAUTH_PREFIXES, isAuthPath, isUnauthPath, resolveAuthRedirect } from '../route-guard';
 
 describe('resolveAuthRedirect matrix', () => {
-  const cases: Array<{ path: string; authed: boolean; want: '/login' | '/projects' | null }> = [
+  const cases: Array<{ path: string; authed: boolean; want: '/login' | '/organizations' | null }> = [
     // guest on auth → /login
     { path: '/projects', authed: false, want: '/login' },
     { path: '/projects/abc', authed: false, want: '/login' },
@@ -25,11 +25,11 @@ describe('resolveAuthRedirect matrix', () => {
     // authed on auth/root → render
     { path: '/projects', authed: true, want: null },
     { path: '/profile', authed: true, want: null },
-    { path: '/', authed: true, want: '/projects' },
+    { path: '/', authed: true, want: '/organizations' },
     // authed on unauth → /projects
-    { path: '/login', authed: true, want: '/projects' },
-    { path: '/register', authed: true, want: '/projects' },
-    { path: '/restore', authed: true, want: '/projects' },
+    { path: '/login', authed: true, want: '/organizations' },
+    { path: '/register', authed: true, want: '/organizations' },
+    { path: '/restore', authed: true, want: '/organizations' },
     // guest on unauth → render
     { path: '/login', authed: false, want: null },
     // public → null either way
@@ -61,12 +61,12 @@ describe('resolveAuthRedirect matrix', () => {
 
   test('loop-freedom: destinations are fixed points', () => {
     expect(resolveAuthRedirect('/login', false)).toBe(null);
-    expect(resolveAuthRedirect('/projects', true)).toBe(null);
+    expect(resolveAuthRedirect('/organizations', true)).toBe(null);
     // single hop lands on a fixed point — no /login<->/projects cycle
     const hop1 = resolveAuthRedirect('/login', true);
-    expect(hop1).toBe('/projects');
+    expect(hop1).toBe('/organizations');
     expect(resolveAuthRedirect(hop1 as string, true)).toBe(null);
-    const hop2 = resolveAuthRedirect('/projects', false);
+    const hop2 = resolveAuthRedirect('/organizations', false);
     expect(hop2).toBe('/login');
     expect(resolveAuthRedirect(hop2 as string, false)).toBe(null);
   });

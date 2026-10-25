@@ -60,17 +60,14 @@ export function SidebarBrand() {
  * Databases keeps an empty sub-list with TODO — sub-pages land separately;
  * Data persist holds S3 + Volumes links. Brokers is a flat Link.
  */
-export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
+export function SidebarNav({ onNavigate, items }: { onNavigate?: () => void; items?: readonly SidebarNavItem[] }) {
   const pathname = usePathname();
   const { t } = useI18n();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
-  const NAV: readonly SidebarNavItem[] = [
-    { href: '/projects', label: t.nav.projects },
+  const NAV: readonly SidebarNavItem[] = items ?? ([
     { href: '/organizations', label: t.nav.organizations },
-    { href: '/secrets', label: t.nav.secrets },
-    { href: '/ai-providers', label: t.nav.aiProviders },
-  ] as const;
+  ] as const);
 
   const EXPANDABLE: readonly {
     id: string;
@@ -200,13 +197,13 @@ export type SidebarProps = {
  * - mobile: hidden, opened via header menu trigger as fixed drawer + overlay
  *   (drawer keeps its own SidebarBrand fallback + close button).
  */
-export function Sidebar({ open = false, onClose }: SidebarProps) {
+export function Sidebar({ open = false, onClose, items }: SidebarProps & { items?: readonly SidebarNavItem[] }) {
   const { t } = useI18n();
 
   return (
     <>
       <aside aria-label={t.nav.sections} className="hidden md:flex grid-area-[sidebar] w-[300px] h-full min-h-0 flex-col gap-6 p-6 px-4 border border-border rounded-[var(--radius-lg)] bg-[var(--sidebar,var(--card))] overflow-y-auto">
-        <SidebarNav />
+        <SidebarNav items={items} />
       </aside>
 
       {open && (
@@ -229,7 +226,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                 ✕
               </Button>
             </div>
-            <SidebarNav onNavigate={onClose} />
+            <SidebarNav onNavigate={onClose} items={items} />
           </aside>
         </div>
       )}

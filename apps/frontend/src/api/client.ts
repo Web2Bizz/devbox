@@ -233,8 +233,40 @@ export const api = {
       body: JSON.stringify(patch),
     }),
   // Projects surface — strict Postgres-backed, 503 when unavailable.
-  // No mock fallback here: client always talks /api/v1/projects.
+  // No mock fallback here: canonical paths are nested
+  // /organizations/:id/projects. Global GET /projects → 400 ORG_REQUIRED.
   listProjects: () => requestV1<ProjectApiDto[]>('/projects'),
+  listOrgProjects: (accessToken: string, orgId: string, includeDeleted = false) =>
+    requestV1<ProjectApiDto[]>(
+      `/organizations/${encodeURIComponent(orgId)}/projects${includeDeleted ? '?includeDeleted=true' : ''}`,
+      { headers: { authorization: `Bearer ${accessToken}` } },
+    ),
+  createOrgProject: (accessToken: string, orgId: string, input: CreateProjectRequest) =>
+    requestV1<ProjectApiDto>(`/organizations/${encodeURIComponent(orgId)}/projects`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ ...input, orgId }),
+    }),
+  getOrgProject: (accessToken: string, orgId: string, projectId: string, includeDeleted = false) =>
+    requestV1<ProjectApiDto>(
+      `/organizations/${encodeURIComponent(orgId)}/projects/${encodeURIComponent(projectId)}${includeDeleted ? '?includeDeleted=true' : ''}`,
+      { headers: { authorization: `Bearer ${accessToken}` } },
+    ),
+  restoreOrgProject: (accessToken: string, orgId: string, projectId: string) =>
+    requestV1<ProjectApiDto>(
+      `/organizations/${encodeURIComponent(orgId)}/projects/${encodeURIComponent(projectId)}/restore`,
+      {
+        method: 'POST',
+        credentials: 'include',
+        headers: { authorization: `Bearer ${accessToken}` },
+      },
+    ),
+  getEffectiveConfig: (accessToken: string, orgId: string, projectId: string) =>
+    requestV1<{ key: string; value: string; origin: 'project' | 'organization'; overridden: boolean }[]>(
+      `/organizations/${encodeURIComponent(orgId)}/projects/${encodeURIComponent(projectId)}/effective-config`,
+      { headers: { authorization: `Bearer ${accessToken}` } },
+    ),
   createProject: (input: CreateProjectRequest) =>
     requestV1<ProjectApiDto>('/projects', {
       method: 'POST',
@@ -324,22 +356,22 @@ export const api = {
       body: JSON.stringify(input),
     }),
   linkOrgProject: (accessToken: string, id: string, projectId: string) =>
-    requestV1<void>(
-      `/organizations/${encodeURIComponent(id)}/projects/${encodeURIComponent(projectId)}`,
-      {
-        method: 'POST',
-        credentials: 'include',
-        headers: { authorization: `Bearer ${accessToken}` },
-      },
+    Promise.reject(
+      new ApiClientError({
+        code: 'gone',
+        message: 'project links removed — project belongs to exactly one org',
+        status: 410,
+        correlationId: 'client',
+      }),
     ),
   unlinkOrgProject: (accessToken: string, id: string, projectId: string) =>
-    requestV1<void>(
-      `/organizations/${encodeURIComponent(id)}/projects/${encodeURIComponent(projectId)}`,
-      {
-        method: 'DELETE',
-        credentials: 'include',
-        headers: { authorization: `Bearer ${accessToken}` },
-      },
+    Promise.reject(
+      new ApiClientError({
+        code: 'gone',
+        message: 'project links removed — project belongs to exactly one org',
+        status: 410,
+        correlationId: 'client',
+      }),
     ),
   // GET /users/:id — own profile only ( чужой → 403 before any DB lookup,
   // private — never indexed). Surfaced as ApiClientError, no fallbacks.

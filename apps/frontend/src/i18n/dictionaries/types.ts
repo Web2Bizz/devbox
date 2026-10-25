@@ -91,6 +91,15 @@ export type Dictionary = {
     brokenTitle: string;
     brokenDesc: string;
     brokenReasonLabel: string;
+    nested: {
+      movedTitle: string;
+      movedDesc: string;
+      goneTitle: string;
+      goneDesc: string;
+      exitToOrg: string;
+      effectiveTitle: string;
+      effectiveEmpty: string;
+    };
     tabs: {
       overview: string;
       secrets: string;

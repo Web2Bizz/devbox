@@ -89,6 +89,15 @@ export const en: Dictionary = {
     brokenTitle: 'Project is broken',
     brokenDesc: 'The on-disk git repo is missing or invalid. Overview is read-only; sessions are disabled.',
     brokenReasonLabel: 'Reason',
+    nested: {
+      movedTitle: 'Project moved',
+      movedDesc: 'Projects now live under their organization.',
+      goneTitle: '410 — moved under organization',
+      goneDesc: 'This page moved to /organizations/[orgId]/projects/[projectId]/….',
+      exitToOrg: 'Exit to organization',
+      effectiveTitle: 'Effective config',
+      effectiveEmpty: 'No org/project overrides yet.',
+    },
     tabs: {
       overview: 'Overview',
       secrets: 'Secrets',

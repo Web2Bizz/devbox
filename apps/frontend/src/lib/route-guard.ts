@@ -25,10 +25,10 @@ export const AUTH_MARKER = 'rush-code-auth';
 export const AUTH_MARKER_VALUE = '1';
 
 /**
- * Auth-only path prefixes — flat URLs under `app/(dashboard)`.
- * `/registries` + `/npm` are legacy aliases (`next.config` redirects them to
- * `/registry/docker|npm` before guards run); listed so the matrix stays
- * closed if those redirects ever go away.
+ * Auth-only path prefixes — nested org/project URLs (sidebar only in project).
+ * `/projects` + `/secrets` + `/ai-providers` + `/registry*` + `/npm` are
+ * legacy globals (410 Gone + CTA, see gone pages) — kept here so guests
+ * still bounce to /login instead of rendering the gone shell.
  */
 export const AUTH_PREFIXES = [
   '/projects',
@@ -62,18 +62,23 @@ export function isUnauthPath(pathname: string): boolean {
 
 /**
  * Redirect destination for (`pathname`, `authed`), or `null` to render.
- * - `/`: authed → `/projects`, guest → `/login` (no bounce via `/login`).
- * - unauth + authed → `/projects`; auth + guest → `/login`.
+ * - `/`: authed → `/organizations`, guest → `/login` (no bounce via `/login`).
+ * - unauth + authed → `/organizations`; auth + guest → `/login`.
  * - public → `null` (unchanged).
  *
- * Loop-freedom: `/login` never redirects a guest, `/projects` never
+ * Loop-freedom: `/login` never redirects a guest, `/organizations` never
  * redirects an authed user, and the two destinations are fixed points
  * (`resolveAuthRedirect('/login', false) === null`,
- * `resolveAuthRedirect('/projects', true) === null`).
+ * `resolveAuthRedirect('/organizations', true) === null`).
  */
-export function resolveAuthRedirect(pathname: string, authed: boolean): '/login' | '/projects' | null {
-  if (pathname === '/') return authed ? '/projects' : '/login';
-  if (isUnauthPath(pathname)) return authed ? '/projects' : null;
+export function resolveAuthRedirect(pathname: string, authed: boolean): '/login' | '/organizations' | null {
+  if (pathname === '/') return authed ? '/organizations' : '/login';
+  if (isUnauthPath(pathname)) return authed ? '/organizations' : null;
   if (isAuthPath(pathname)) return authed ? null : '/login';
   return null;
+}
+
+/** Legacy global project path → nested CTA (no orgId → /organizations, never first-org fallback). */
+export function legacyProjectRedirect(): '/organizations' {
+  return '/organizations';
 }

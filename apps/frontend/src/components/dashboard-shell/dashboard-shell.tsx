@@ -32,6 +32,8 @@ export type DashboardShellProps = {
   children: ReactNode;
   header?: DashboardHeaderProps;
   content?: Omit<ContentProps, 'children'>;
+  /** Project-scoped sidebar items (project shell only; default = org hub). */
+  sidebarItems?: { href: string; label: string }[];
 };
 
 type DashboardHeaderInternalProps = DashboardHeaderProps & {
@@ -164,7 +166,7 @@ function DashboardHeader({ title, breadcrumbs, user, actions, onMenu }: Dashboar
  * Flat URLs (/projects, /secrets, …), i18n en/ru via cookie-only dictionaries,
  * force-dynamic lives in app/(dashboard)/layout.tsx.
  */
-export function DashboardShell({ children, header, content }: DashboardShellProps) {
+export function DashboardShell({ children, header, content, sidebarItems }: DashboardShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const openSidebar = useCallback(() => setSidebarOpen(true), []);
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
@@ -196,7 +198,7 @@ export function DashboardShell({ children, header, content }: DashboardShellProp
           Skip to content
         </a>
         <DashboardHeader {...header} onMenu={openSidebar} />
-        <Sidebar open={sidebarOpen} onClose={closeSidebar} />
+        <Sidebar open={sidebarOpen} onClose={closeSidebar} items={sidebarItems} />
         <Content {...content}>{children}</Content>
       </div>
     </div>

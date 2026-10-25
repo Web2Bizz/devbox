@@ -89,6 +89,15 @@ export const ru: Dictionary = {
     brokenTitle: 'Проект сломан',
     brokenDesc: 'Git-репозиторий на диске отсутствует или повреждён. Обзор доступен только для чтения; сессии отключены.',
     brokenReasonLabel: 'Причина',
+    nested: {
+      movedTitle: 'Проект переехал',
+      movedDesc: 'Проекты теперь живут под организацией.',
+      goneTitle: '410 — переехало под организацию',
+      goneDesc: 'Страница переехала на /organizations/[orgId]/projects/[projectId]/….',
+      exitToOrg: 'Выйти в организацию',
+      effectiveTitle: 'Итоговая конфигурация',
+      effectiveEmpty: 'Нет переопределений организации/проекта.',
+    },
     tabs: {
       overview: 'Обзор',
       secrets: 'Секреты',

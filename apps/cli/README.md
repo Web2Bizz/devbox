@@ -69,6 +69,17 @@ fails to start, the REPL reports `[cli] TUI failed to start` on stderr
 
 ## Env
 
+Current CLI connections go only through `RUSH_CODE_BACKEND_URL` (required,
+absolute `http(s)` backend base URL; no cloud or localhost fallback). Chat
+uses the backend's OpenCode-compatible API at `/api/opencode` and reuses its
+session/message wire format. The home screen checks `/api/v1/health` every
+15 seconds and displays `online` only for a valid `{ status: "ok" }`
+response; missing configuration, request failures and timeouts display
+`offline`. Copy `.env.example` to `.env`.
+
+The cloud/serve configuration described below is legacy reference material;
+the current CLI chat does not read it.
+
 `REPOS_ROOT` is required for any `@ref` (no default, no `<cwd>/repos`
 fallback — fail-fast with `[cli] REPOS_ROOT is required …`, see
 `.env.example`). Refs must be relative (`@apps/backend/package.json`);
@@ -95,7 +106,7 @@ alias `OPENCODE_SERVER_PASSWORD`; `''` = no password → header omitted,
 value never logged).
 Copy `.env.example` → `.env`; never commit real keys/passwords.
 
-## Chat
+## Legacy chat implementation (not used by current CLI)
 
 Decision (2026-10-23): chat is a DIRECT cloud client — no serve required.
 Default `chatLocal()` → `chatCloud()` (OpenAI-compatible
@@ -164,7 +175,7 @@ and must not be set back without re-verification.
   `OPENCODE_SDK_VERSION` 1.18.33); `404` on message → session recreated
   once.
 
-## Chat
+## Legacy serve implementation (not used by current CLI)
 
 Free-text answers with the paid OpenCode Go subscription go ONLY through
 the local serve (`opencode serve --port 4096`): the CLI creates a session
@@ -190,19 +201,16 @@ Bearer) stays ONLY for `choice` classification, never for user replies.
 - `cli --help` / `cli --version`
 - `cli agent list` — allowlist table (`ask plan build build-fast
   build-smart refactor unit-test review diagnostics task-manager devops`)
-- `cli agent run <name> <prompt> [--apply]` — dry-run plain lines by default
-  (shows what would go + cloud-key hint); `--apply` sends the
-  prompt to the cloud via `src/agents/opencode/index.ts` (OpenAI-compatible,
-  timeout 30s, 1 retry, scrubbed `cause ≤2000`) and prints the reply as plain
-  text (never empty/`answer`; no serve needed)
+- `cli agent run <name> <prompt> [--apply]` — dry-run plain lines by default;
+  `--apply` sends the prompt to the backend and prints its reply as plain text.
 - `cli resolve @path` — jailed preview lines
 - REPL: `/help` `/exit` `/agent list` `/agent <name> <prompt> [--apply]`
-  plus free text with `@refs` — free text goes to the cloud
-  (plain reply) or fails with cloud-key ✗ lines; serve is never required
+  plus free text with `@refs` — chat requests use the configured backend.
 
 ## Экраны
 
-Главная (RUSH CODE): заголовок `RUSH CODE` + 3 пункта по середине экрана —
+Главная (RUSH CODE): заголовок `RUSH CODE`, подпись `by web2bizz.team` и
+backend `online`/`offline` health-индикатор + 3 пункта по середине экрана —
 `1. Выбрать проект` / `2. Открыть директорию` / `3. Выйти` (см.
 `src/ui/screens/home/index.tsx`: `HOME_TITLE` + `HOME_OPTIONS`, `renderHomeScreen()` центрит
 горизонтально, отступ сверху центрит вертикально). Навигация всегда TUI:
@@ -221,10 +229,9 @@ Bearer) stays ONLY for `choice` classification, never for user replies.
 - `Выйти` — чистый выход (`bye ✓`, `exit 0`).
 
 Сессия (чат с агентом): после выбора проекта/директории — экран чата
-(`RUSH CODE — Сессия: <имя> (<путь>)` + переиспользуемый cloud-чат
-`chatLocal()` → `chatCloud()` из `src/agents/opencode/index.ts`: ключ строго
-`auth.json`, `OPENCODE_*` env для ключа не читаются, scrub `Bearer`/userinfo,
-`cause ≤2000`, fail-fast `missing opencode key in auth.json`). История
+(`RUSH CODE — Сессия: <имя> (<путь>)` + переиспользуемый чат через
+`RUSH_CODE_BACKEND_URL` и OpenCode-совместимые session/message routes backend).
+История
 full-width plain: user cyan (`USER_FG`), agent green (`AGENT_FG`) — см. § TUI,
 не ломать (тесты `chat.test.ts` + `tui.test.ts`).
 

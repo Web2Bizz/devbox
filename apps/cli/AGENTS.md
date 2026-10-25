@@ -37,22 +37,21 @@
     - `src/core/queries/refs/` — `@ref` внутри `REPOS_ROOT` (fail-fast, `..` denied, jail prefix-check, scrub превью):
       - `resolve.ts`, `projects.ts` (`listProjects/resolveProjectDir/resolveCustomDir`, только чтение), `__tests__/projects.test.ts`, `index.ts` — баррель.
     - `src/core/queries/index.ts` — баррель (`refs`).
-  - `src/core/index.ts` — баррель (`utils` + `queries`).
+  - `src/core/backend.ts` — валидатор `RUSH_CODE_BACKEND_URL`, URL API/health + bounded health probe.
+  - `src/core/index.ts` — баррель (`utils` + `queries` + `backend`).
 - `src/agents/`:
   - `src/agents/allowlist.ts` — статичный allowlist (ask/plan/build/build-fast/build-smart/refactor/unit-test/review/diagnostics/task-manager/devops).
   - `src/agents/runner.ts` — dry-run по умолчанию (`--apply` лишь подтверждает намерение, мутаций нет).
-  - `src/agents/opencode/index.ts` — фасад → siblings + `chatLocal` (cloud-first композиция; замена `agents/opencode.ts`).
+  - `src/agents/opencode/index.ts` — фасад → siblings + `chatLocal` через backend API.
   - `src/agents/index.ts` — баррель (`allowlist` + `runner` + `opencode/index`).
-- `src/agents/opencode/` — cloud-first чат:
-  - `constants.ts` — таймауты/URL/SDK-пин (`OPENCODE_CLOUD_URL`, `OPENCODE_CLOUD_MODEL=deepseek-v4.1-flash`, `OPENCODE_SDK_VERSION=1.18.33`).
-  - `config.ts` — env-резолверы cloud/serve (без секретов/I/O).
-  - `auth.ts` — ключ только из `auth.json` (диагностика без значения: `key_len/perms/uid`).
-  - `text.ts` — scrub + extract payload + маппинг ошибок (без fetch).
-  - `cloud.ts` — прямой cloud-чат (без serve/localhost).
-  - `serve.ts` — OPTIONAL fallback только при `OPENCODE_USE_SERVE=1`.
+- `src/agents/opencode/` — чат через OpenCode-совместимый Rush Code backend API:
+  - `backend.ts` — session/message requests, required `RUSH_CODE_BACKEND_URL`, cached session.
+  - `config.ts` — model resolver and legacy transport helpers.
+  - `text.ts` — scrub + extract payload + error mapping.
+  - `cloud.ts`/`serve.ts` — legacy helpers, not used by `chatLocal`.
 - `src/prompt/repl.ts` — парсер строк (`parseLine`), `CLEAR_SEQUENCE=ESC+c`, TTY-гейты, `helpText` (без readline).
 - `src/ui/__tests__/` — `ascii.test.ts` (plain-снапшот, 10 спиннер-фреймов), `chat.test.ts`, `home.test.ts`, `tui.test.ts` (source-контракты).
-- `src/agents/__tests__/opencode-key.test.ts` — ключ/клиент (missing-key fail-fast, scrub, `/agent`-парсинг).
+- `src/agents/__tests__/backend.test.ts` — backend URL, session/message requests, health status.
 - `src/core/queries/refs/__tests__/projects.test.ts` — jail-проекты.
 - Заглушки `// moved to …` (удалить через `git rm`, код уже живёт по новым путям): `src/cli/{commands,interactive,sinks}.ts`, `src/refs/{resolve,projects}.ts` + `src/refs/__tests__/projects.test.ts`, `src/agents/opencode.ts`, `src/ui/{chat,plain,store,tui,home,spinner}.ts`, `src/ui/tui/paste.ts`, `src/ui/tui-app.tsx`, `src/ui/home/*.ts` (→ `src/ui/screens/home/*`), `src/ui/tui/{index,runners,session}.ts` (→ `src/commands/*`). Каталоги `src/ui/spinner/` (старые `frames.ts`/`Spinner.tsx`) и `src/cli/`, `src/refs/`, `src/ui/home/`, `src/ui/tui/` удаляет человек целиком.
 
@@ -66,5 +65,5 @@
 - stdout — только one-shot/`--help`/non-TTY/exit-логи (`statusLine` после destroy). Интерактив всегда TUI (`startTuiHome/Projects/DirInput/Error/Repl`, `interactive.ts` без `node:readline`).
 - `process.stdout.write` только через `out()` из `commands/sinks.ts`. `console.*` запрещён в проде (тесты: `clearScreen` пишет через writer, `console.clear` не вызывается).
 - No raw ESC в исходниках: ESC только через `String.fromCharCode(27)` (`repl.ts`, `core/utils/paste.ts`, `shared/chat.ts`, `screens/home/*`).
-- Тесты — source-контракты + pure-функции: `bun test --isolate src`. Pre-existing красные в `opencode-key.test.ts` (3 шт) — не чинить молча.
+- Тесты — source-контракты + pure-функции: `bun test --isolate src`.
 - TypeScript `strict` (`tsconfig.json`), `import type` для типов, `.js`-суффиксы в относительных импортах.

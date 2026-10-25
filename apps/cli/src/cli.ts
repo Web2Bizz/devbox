@@ -5,7 +5,7 @@
 import { createRequire } from "node:module";
 import { errorText, headerText } from "./ui/shared/plain.js";
 import { helpText } from "./prompt/repl.js";
-import { cmdAgentList, cmdAgentRun, cmdResolve } from "./commands/index.js";
+import { cmdAgentList, cmdAgentRun } from "./commands/index.js";
 import { startRepl } from "./commands/interactive.js";
 import { out, stdoutSink } from "./commands/sinks.js";
 
@@ -48,11 +48,6 @@ export async function main(): Promise<void> {
       return;
     }
     await cmdAgentRun(stdoutSink, agentName, prompt, apply);
-    return;
-  }
-  if (args[0] === "resolve" && typeof args[1] === "string" && args[1]) {
-    const raw: string = args[1];
-    await cmdResolve(stdoutSink, raw);
     return;
   }
   if (args.length > 0 && args[0] !== "repl") {

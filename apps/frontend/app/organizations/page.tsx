@@ -12,16 +12,17 @@ import {
   CardHeader,
   CardTitle,
 } from '@web2bizz/ui/components';
+import { DashboardShell } from '@/components/dashboard-shell';
 import { EmptyState, ErrorState, LoadingState } from '@/components/states';
 import { CreateOrganizationDialog } from '@/components/organizations/create-organization-dialog';
 import { useOrganizations } from '@/hooks/useOrganizations';
 import { useI18n } from '@/i18n';
 
 /**
- * Route: /organizations — plain screen (no sidebar). Membership-scoped list.
- * data-shell="plain" keeps the DESIGN §5 draft honest until approve.
+ * Route: /organizations — org hub inside DashboardShell (Header + Sidebar + Content).
+ * Membership-scoped list. data-shell="dashboard" (auth shell).
  */
-export default function OrganizationsPlainPage() {
+export default function OrganizationsPage() {
   const { t } = useI18n();
   const { organizations, loading, error, isEmpty, reload, createOrganization, creating, createError } =
     useOrganizations();
@@ -39,7 +40,8 @@ export default function OrganizationsPlainPage() {
   );
 
   return (
-    <main className="mx-auto w-full max-w-4xl px-6 py-10" data-shell="plain">
+    <DashboardShell>
+      <div className="w-full max-w-none m-0 px-0 py-2" data-shell="dashboard">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">
@@ -83,7 +85,7 @@ export default function OrganizationsPlainPage() {
               key={o.id}
               href={`/organizations/${o.id}`}
               aria-label={o.name}
-              className="block h-full rounded-[var(--radius-lg)] focus-visible:outline-2 focus-visible:outline-offset-2"
+              className="block h-full rounded-[var(--radius-md)] focus-visible:outline-2 focus-visible:outline-offset-2"
             >
               <Card variant="default" className="h-full">
                 <CardHeader>
@@ -95,6 +97,7 @@ export default function OrganizationsPlainPage() {
           ))}
         </div>
       )}
-    </main>
+      </div>
+    </DashboardShell>
   );
 }

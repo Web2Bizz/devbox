@@ -55,6 +55,10 @@ services:
       # OPENCODE_SERVER_PASSWORD below.
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is not set — point it at the external postgres}
       OPENCODE_URL: ${OPENCODE_URL:-http://opencode:4096}
+      # opencode v2: the server reads OPENCODE_SERVER_PASSWORD, the client
+      # reads OPENCODE_PASSWORD — one value, two names. The backend is the
+      # client (Basic auth), so the external value goes under the client name.
+      OPENCODE_PASSWORD: ${OPENCODE_SERVER_PASSWORD:?OPENCODE_SERVER_PASSWORD is not set}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3001,http://localhost:8080}
       REQUEST_TIMEOUT_MS: ${REQUEST_TIMEOUT_MS:-10000}
       LOG_LEVEL: ${LOG_LEVEL:-info}

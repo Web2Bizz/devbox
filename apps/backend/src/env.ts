@@ -28,7 +28,11 @@ export type AppEnv = {
   opencodeToken: string;
   /**
    * Server password for the opencode stand (`opencode serve` always runs
-   * password-protected; v2 canonical OPENCODE_PASSWORD, username `opencode`).
+   * password-protected; username `opencode`). Source order:
+   * OPENCODE_PASSWORD (client-side — what the backend puts into its own
+   * Basic header) → OPENCODE_SERVER_PASSWORD (server-side — what `opencode
+   * serve` itself reads, used as the fallback). ONE value, two names: the
+   * wire credential is Basic base64("opencode:<password>").
    * '' = unset — serve paths send no Authorization header and the upstream
    * answers 401 (honest signal, never masked). Never logged.
    */
@@ -250,6 +254,7 @@ export const envRawSchema = z.object({
   OPENCODE_PROTOCOL: z.string().optional(),
   OPENCODE_TOKEN: z.string().optional(),
   OPENCODE_PASSWORD: z.string().optional(),
+  OPENCODE_SERVER_PASSWORD: z.string().optional(),
   DATABASE_URL: z.string().optional(),
   POSTGRES_USER: z.string().optional(),
   POSTGRES_PASSWORD: z.string().optional(),
@@ -713,7 +718,23 @@ export function validateEnvWithWarnings(
   // auth source: `opencode serve` always runs password-protected and its
   // clients authenticate with Basic base64("opencode:<OPENCODE_PASSWORD>").
   const opencodeToken = firstNonEmpty(env.OPENCODE_TOKEN);
-  const opencodePassword = firstNonEmpty(env.OPENCODE_PASSWORD);
+  // Password source order (opencode v2): the SERVER reads
+  // OPENCODE_SERVER_PASSWORD, the CLIENT reads OPENCODE_PASSWORD — one value,
+  // two names. The backend is the client (it dials the stand with Basic), so
+  // OPENCODE_PASSWORD wins; OPENCODE_SERVER_PASSWORD is the fallback (compose
+  // wires the single external OPENCODE_SERVER_PASSWORD under the client name).
+  const opencodePassword = firstNonEmpty(
+    env.OPENCODE_PASSWORD,
+    env.OPENCODE_SERVER_PASSWORD,
+  );
+  if (!opencodePassword) {
+    // Not fail-fast: the backend must boot without the stand (dev). The stand
+    // answers 401 without the Basic header — an honest signal, never masked.
+    warn(
+      "[env] WARN OPENCODE_PASSWORD is not set — the opencode stand will answer 401. " +
+        "Set OPENCODE_PASSWORD (or OPENCODE_SERVER_PASSWORD) (see .env.example).",
+    );
+  }
 
   // --- per-user OpenCode keys (encryption secret + billing endpoint) ---------
   // The encryption secret is REQUIRED for key storage but stays optional at

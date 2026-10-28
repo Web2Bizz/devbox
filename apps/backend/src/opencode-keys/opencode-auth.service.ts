@@ -14,11 +14,13 @@ function isUserId(value: string): boolean {
 /**
  * OpencodeAuthService — real-user gate for the serve paths.
  *
- * - Serve auth is the SERVER password (`OPENCODE_PASSWORD`, Basic
- *   base64("opencode:<password>")) — resolved from env by the callers
- *   (OpencodeSdkClient, ProxyService), NOT from per-user DB keys. The
- *   per-user DB Bearer is gone from the serve path: `opencode serve`
- *   always runs password-protected and rejects user-key Bearers with 401.
+ * - Serve auth is the SERVER password (opencode v2: the client-side
+ *   OPENCODE_PASSWORD wins, the server-side OPENCODE_SERVER_PASSWORD is the
+ *   fallback — one value, two names; Basic base64("opencode:<password>")) —
+ *   resolved from env by the callers (OpencodeSdkClient, ProxyService), NOT
+ *   from per-user DB keys. The per-user DB Bearer is gone from the serve
+ *   path: `opencode serve` always runs password-protected and rejects
+ *   user-key Bearers with 401.
  * - This service keeps exactly one job: reject non-uuid caller ids (mock
  *   identities like 'default') with 401 `unauthorized` /
  *   "Authentication required" (same envelope as
@@ -50,7 +52,9 @@ export class OpencodeAuthService {
  * Serve Basic auth header — single source for the upstream `Authorization`
  * on ALL serve paths (OpencodeSdkClient.create, ProxyService.authHeaders).
  *
- * Reads OPENCODE_PASSWORD from env per call (validateEnv, never logged);
+ * Reads the password from env per call (validateEnv → opencodePassword:
+ * OPENCODE_PASSWORD — client-side, priority; OPENCODE_SERVER_PASSWORD —
+ * server-side, fallback; one value, two names; never logged);
  * server-side Buffer base64 of `opencode:<password>` (never window.btoa).
  * Unset password (or unreadable env) → `{}` (no header at all — the
  * upstream 401 JSON is the honest signal, never masked, never a fallback

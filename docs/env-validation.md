@@ -70,6 +70,7 @@ are NOT errors: they recompose from the parts + WARN.
 | ------ | ------- |
 | `APP_BACKEND_HOST` empty → `localhost` | Dev default; set explicitly for production |
 | `OPENCODE_HOST` empty → `localhost`, `OPENCODE_PORT` unset → `4096` | Dev defaults (explicit `0.0.0.0` is preserved verbatim, no WARN) |
+| `OPENCODE_PASSWORD` unset (and `OPENCODE_SERVER_PASSWORD` unset) | No Basic header on the serve paths — the stand answers 401; set one of them (client-side name wins, server-side name is the fallback; never a boot fail-fast) |
 | `POSTGRES_HOST` empty → `localhost`, `POSTGRES_PORT` unset → `5432` | Only when composing from `POSTGRES_*` |
 | `LOG_LEVEL` unset/unknown → `info` | Expected `debug\|info\|warn\|error` |
 | `GITHUB_APP_*` empty pair | Normal: github endpoints answer 401/503 until configured |
@@ -103,7 +104,9 @@ are NOT errors: they recompose from the parts + WARN.
 `NPM_REGISTRY_TOKEN`, `NPM_TOKEN` (legacy fallback),
 `NPM_REGISTRY_USER/PASSWORD` (basic pair), `JWT_ACCESS_SECRET`,
 `JWT_REFRESH_SECRET`, `OPENCODE_KEYS_ENCRYPTION_KEY`,
-`OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS`, per-user OpenCode API
+`OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS`, `OPENCODE_PASSWORD` /
+`OPENCODE_SERVER_PASSWORD` (stand password — one value, two names),
+per-user OpenCode API
 keys, password hashes, access/refresh tokens,
 private keys, tokens: never appear in
 errors, warnings, or logs — only key NAMES plus the `.env.example` pointer.

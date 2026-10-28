@@ -16,9 +16,14 @@
  *   (the C4 project gate + the workspace jail are patched in that phase so
  *   the request really reaches the upstream);
  * - a v2 stand stub phase (gate/jail patched): POST session forwards the
- *   gated project jail as the body `location.directory` — an empty body
- *   dies at the 2.x server with 400 `Expected object` (the pinned sdk
- *   strips empty bodies), and the stub mirrors that rule;
+ *   gated project jail as the body `location.directory` (an empty body dies
+ *   at the 2.x server with 400 `Expected object`), GET global/health is
+ *   synthesized from GET /api/info ({healthy:true, version} — the 2.x spec
+ *   has no health path), and request-level upstream failures answer honestly
+ *   (400 → EXTERNAL_BAD_REQUEST, 404 → EXTERNAL_NOT_FOUND — 4xx, no
+ *   Retry-After, never the 503 outage mask); AppLogger is captured for the
+ *   whole phase (one-liner warn/error, planted upstream secret + Bearer
+ *   material never in any line);
  * - session/message/provider routes are project-scoped (C4): every call
  *   carries ?projectId past the Bearer guard; the gate denies with the same
  *   503 envelope here (no DB in this suite); missing projectId → 400
@@ -110,26 +115,34 @@ function startUnauthorizedUpstream(): Promise<{
   });
 }
 
+/** Marker secret planted in an upstream error body — must never reach logs. */
+const UPSTREAM_SECRET = 'e2e-upstream-secret-never-log-9f3a';
 /** Jailed dir the workspace-path prototype stub returns in this suite. */
 const E2E_PROJECT_DIR = '/tmp/rush-code-e2e-project';
 
 /**
- * Stub of the v2 stand for the session-create phase: POST /api/session
- * mirrors the real 2.2.0 server — an empty/absent JSON body (or one without
- * `location.directory`) → 400 `Expected object` (`Payload`), a
- * location-carrying body → 200 `{ data: SessionV2Info }`. Every create
- * attempt is captured (content-type + parsed body). Everything else is the
- * SPA text/html catch-all of the real server.
+ * Stub of the v2 stand for the location/health/4xx phase:
+ * - POST /api/session mirrors the real 2.2.0 server: an empty/absent JSON
+ *   body (or one without `location.directory`) → 400 `Expected object`
+ *   (`Payload`), a location-carrying body → 200 `{ data: SessionV2Info }`.
+ *   Every create attempt is captured (content-type + parsed body).
+ * - GET /api/info → 200 JSON liveness (`{version, pid, …}` — no `healthy`).
+ * - GET /api/session/ses_missing → 404 NotFoundError.
+ * - everything else → SPA text/html (the real 2.x catch-all behaviour).
+ * - `setMode('reject')` forces POST /api/session → 400 (regression trigger
+ *   for the honest EXTERNAL_BAD_REQUEST mapping).
  */
 function startV2StandStub(): Promise<{
   server: Server;
   url: string;
   paths: string[];
   creates: Array<{ contentType: string | null; body: unknown }>;
+  setMode: (mode: 'normal' | 'reject') => void;
   close: () => Promise<void>;
 }> {
   const paths: string[] = [];
   const creates: Array<{ contentType: string | null; body: unknown }> = [];
+  let mode: 'normal' | 'reject' = 'normal';
   return new Promise((resolve) => {
     const server = createServer((req, res) => {
       const chunks: Buffer[] = [];
@@ -153,6 +166,17 @@ function startV2StandStub(): Promise<{
             contentType: req.headers['content-type'] ?? null,
             body: parsed,
           });
+          if (mode === 'reject') {
+            // Body shape is fine — the upstream refuses anyway (400 surface
+            // check). The planted marker value must never reach the logs.
+            json(400, {
+              _tag: 'InvalidRequestError',
+              message: 'Expected object',
+              kind: 'Payload',
+              token: UPSTREAM_SECRET,
+            });
+            return;
+          }
           const location = (parsed as { location?: { directory?: unknown } } | null)?.location;
           if (!parsed || !location || typeof location.directory !== 'string') {
             // Exactly what the live 2.2.0 server does for a stripped/empty
@@ -171,6 +195,21 @@ function startV2StandStub(): Promise<{
           });
           return;
         }
+        if (req.method === 'GET' && path === '/api/info') {
+          json(200, {
+            version: '9.9.9-e2e',
+            pid: 4242,
+            hostname: 'opencode-stand',
+            urls: ['http://127.0.0.1:0'],
+            paths: {},
+            capabilities: {},
+          });
+          return;
+        }
+        if (req.method === 'GET' && path === '/api/session/ses_missing') {
+          json(404, { _tag: 'NotFoundError', message: 'Session not found' });
+          return;
+        }
         // SPA catch-all — never a liveness signal.
         res.writeHead(200, { 'content-type': 'text/html' });
         res.end('<!doctype html><html></html>');
@@ -183,6 +222,9 @@ function startV2StandStub(): Promise<{
         url: `http://127.0.0.1:${port}`,
         paths,
         creates,
+        setMode: (m) => {
+          mode = m;
+        },
         close: () => new Promise<void>((done) => server.close(() => done())),
       });
     });
@@ -380,17 +422,36 @@ async function main(): Promise<void> {
         await unauthorized.close();
       }
 
-      // --- v2 stand stub: gated session location ---------------------------
-      // POST /api/opencode/session must forward the GATED project jail as
-      // the v2 body `location.directory` — an empty/absent body dies at the
-      // live 2.2.0 server with 400 `Expected object` (and the pinned sdk
-      // strips empty bodies entirely), so the stub mirrors that rule and
-      // the check asserts the captured create carried the jail dir. The
-      // C4 gate + workspace jail are patched on the PROTOTYPES (no
-      // Postgres here) so the request really reaches the stub.
+      // --- v2 stand stub: gated session location + /api/info health ------
+      // Card 1: POST /api/opencode/session must forward the GATED project
+      // dir as the v2 body `location.directory` — an empty/absent body dies
+      // at the live 2.2.0 server with 400 `Expected object` (and the pinned
+      // sdk strips empty bodies entirely), so the stub mirrors that rule
+      // and the check asserts the captured create carried the jail dir.
+      // Card 2: GET global/health is synthesized from GET /api/info (the
+      // 2.x spec has no health path), upstream 404/400 answer honestly as
+      // EXTERNAL_NOT_FOUND / EXTERNAL_BAD_REQUEST (4xx, no Retry-After)
+      // instead of the old 503 outage mask. Log discipline is scanned for
+      // the whole phase (one-liner warn/error, no marker secret, no Bearer).
       const stand = await startV2StandStub();
       process.env.OPENCODE_URL = stand.url;
+      const { AppLogger } = await import('../common/app-logger.service');
+      const logged: Array<{ method: string; args: unknown[] }> = [];
+      const logMethods = ['debug', 'info', 'warn', 'error'] as const;
+      const logOriginals = logMethods.map(
+        (m) => (AppLogger.prototype as unknown as Record<string, unknown>)[m],
+      );
+      logMethods.forEach((m, i) => {
+        (
+          AppLogger.prototype as unknown as Record<string, (...a: unknown[]) => void>
+        )[m] = function (...args: unknown[]) {
+          logged.push({ method: m, args });
+          return (logOriginals[i] as (...a: unknown[]) => void).apply(this, args);
+        };
+      });
       try {
+        // The C4 gate + workspace jail are patched on the PROTOTYPES (no
+        // Postgres here) so the request really reaches the stub.
         const { OrganizationsService } = await import('../organizations/organizations.service');
         const { WorkspacePathService } = await import('../workspaces/workspace-path.service');
         (
@@ -424,9 +485,80 @@ async function main(): Promise<void> {
             `create body must carry the gated jail as location.directory (got ${JSON.stringify(create.body)})`,
           );
         }
+
+        await check(
+          'GET /api/opencode/global/health 200 synthesized from /api/info',
+          '/api/opencode/global/health',
+          undefined,
+          200,
+          (_res, body) => {
+            const b = body as { healthy?: boolean; version?: string };
+            assert.equal(b.healthy, true);
+            assert.equal(b.version, '9.9.9-e2e');
+          },
+        );
+        assert.ok(stand.paths.includes('/api/info'), 'probe must hit /api/info');
+        assert.ok(!stand.paths.includes('/global/health'), '/global/health probed');
+
+        await check(
+          'GET /api/opencode/session/:id upstream 404 → 404 EXTERNAL_NOT_FOUND (no Retry-After)',
+          `/api/opencode/session/ses_missing?projectId=${E2E_PROJECT_ID}`,
+          undefined,
+          404,
+          (res, body) => {
+            const b = body as { code?: string; message?: string };
+            assert.equal(b.code, 'EXTERNAL_NOT_FOUND');
+            // NOT the masked outage answer.
+            assert.notEqual(b.message, 'сервис временно недоступен, повторите позже');
+            assert.equal(res.headers.get('Retry-After'), null);
+          },
+        );
+
+        stand.setMode('reject');
+        await check(
+          'POST /api/opencode/session upstream 400 → 400 EXTERNAL_BAD_REQUEST (no Retry-After)',
+          `/api/opencode/session?projectId=${E2E_PROJECT_ID}`,
+          json({ title: 'e2e-reject' }),
+          400,
+          (res, body) => {
+            const b = body as { code?: string; message?: string };
+            assert.equal(b.code, 'EXTERNAL_BAD_REQUEST');
+            assert.notEqual(b.message, 'сервис временно недоступен, повторите позже');
+            assert.equal(res.headers.get('Retry-After'), null);
+          },
+        );
       } finally {
         process.env.OPENCODE_URL = 'http://127.0.0.1:9';
         await stand.close();
+        logMethods.forEach((m, i) => {
+          (AppLogger.prototype as unknown as Record<string, unknown>)[m] = logOriginals[i];
+        });
+        // Log discipline over the whole phase (opencode-keys.e2e reference):
+        // warn/error stay one-liners; the planted upstream secret and any
+        // Bearer/URL material never reach a captured log line.
+        for (const { method, args } of logged) {
+          const text = args.map((a) => (typeof a === 'string' ? a : '')).join(' ');
+          if (method === 'warn' || method === 'error') {
+            assert.ok(!text.includes('\n'), `${method} line is not a one-liner: ${text.slice(0, 120)}`);
+          }
+          assert.ok(!text.includes(UPSTREAM_SECRET), `upstream secret leaked into ${method} log`);
+          assert.ok(!text.includes('Bearer '), `authorization material leaked into ${method} log`);
+        }
+        {
+          const rejected = logged
+            .filter((l) => l.method === 'debug')
+            .map((l) => l.args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '))
+            .join('\n');
+          // The cause detail rides as readable JSON (serializeCause) while
+          // the secret key inside it is redacted — never `[object Object]`.
+          if (rejected.includes('EXTERNAL_BAD_REQUEST')) {
+            assert.ok(
+              rejected.includes('InvalidRequestError'),
+              'cause detail lost the upstream shape signal',
+            );
+            assert.ok(!rejected.includes('[object Object]'), 'cause serialized as [object Object]');
+          }
+        }
       }
     }
   } finally {
@@ -634,19 +766,13 @@ async function liveChecks(check: CheckFn, json: (obj: unknown) => RequestInit, b
   // Live 200s through the proxy (no mocks — upstream is the real server).
   // LLM-dependent executions (prompt/command/shell runs) are intentionally
   // NOT asserted: the temp server has no model credentials.
-  const { readFile } = await import('node:fs/promises');
-  const { createRequire } = await import('node:module');
-  const require = createRequire(__filename);
-  const sdkPkg = JSON.parse(
-    await readFile(require.resolve('@opencode-ai/sdk/package.json'), 'utf8'),
-  ) as { version?: string };
-  assert.ok(sdkPkg.version, 'pinned @opencode-ai/sdk version readable');
-
-  await check('live GET /api/opencode/global/health 200 + version == sdk pin', '/api/opencode/global/health', undefined, 200, (_res, body) => {
+  await check('live GET /api/opencode/global/health 200 {healthy:true, version} from /api/info', '/api/opencode/global/health', undefined, 200, (_res, body) => {
     const b = body as { healthy?: boolean; version?: string };
     assert.equal(b.healthy, true);
+    // The version is the SERVER's (GET /api/info), independent of the pinned
+    // @opencode-ai/sdk release — assert the type, not an equality.
     assert.equal(typeof b.version, 'string');
-    assert.equal(b.version, sdkPkg.version, `server ${b.version} !== sdk pin ${sdkPkg.version}`);
+    assert.ok((b.version ?? '').length > 0, 'version must be a non-empty string');
   });
 
   let sessionId = '';
@@ -672,9 +798,13 @@ async function liveChecks(check: CheckFn, json: (obj: unknown) => RequestInit, b
   await check('live POST /api/opencode/session/:id/fork 200', `/api/opencode/session/${sessionId}/fork?projectId=${E2E_PROJECT_ID}`, json({}), 200, (_res, body) => {
     assert.equal(typeof (body as { id?: string }).id, 'string');
   });
-  // Upstream 404 (unknown message) surfaces through the uniform 503 mapping.
-  await check('live GET unknown message → 503 (uniform upstream mapping)', `/api/opencode/session/${sessionId}/message/msg_nope?projectId=${E2E_PROJECT_ID}`, undefined, 503, (res, body) => {
-    assertUnavailable(body, res);
+  // Upstream 404 (unknown message) surfaces honestly as 404
+  // EXTERNAL_NOT_FOUND — no Retry-After (repeating the same request finds
+  // the same absence), never masked as a 503 outage.
+  await check('live GET unknown message → 404 EXTERNAL_NOT_FOUND', `/api/opencode/session/${sessionId}/message/msg_nope?projectId=${E2E_PROJECT_ID}`, undefined, 404, (res, body) => {
+    const b = body as { code?: string; message?: string };
+    assert.equal(b.code, 'EXTERNAL_NOT_FOUND');
+    assert.equal(res.headers.get('Retry-After'), null);
   });
   await check(
     'live POST /api/opencode/session/:id/prompt_async {} → 400 envelope',

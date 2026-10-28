@@ -105,7 +105,13 @@ export type OpencodeSessionUpdate = {
   title?: string;
 };
 
-/** GET /api/opencode/global/health payload (upstream global.health passthrough). */
+/**
+ * GET /api/opencode/global/health payload — SYNTHESIZED by the backend from
+ * the 2.x v2 liveness endpoint GET /api/info (the upstream spec has no
+ * /global/health: that path serves the SPA index; there is no upstream
+ * `healthy` field). `healthy` is true iff /api/info answered 2xx JSON with
+ * a string `version`. Shape unchanged from the legacy passthrough.
+ */
 export type OpencodeHealth = {
   healthy: boolean;
   version: string;

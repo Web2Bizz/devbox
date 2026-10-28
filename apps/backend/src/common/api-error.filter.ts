@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { ApiError } from '@rush-code/contracts';
-import { AppLogger } from './app-logger.service';
+import { AppLogger, serializeCause } from './app-logger.service';
 import { ExternalServiceError } from './external/external-error';
 
 function isAbortError(err: unknown): boolean {
@@ -131,11 +131,7 @@ export class ApiErrorFilter implements ExceptionFilter {
         if (exception.cause !== undefined) {
           this.logger.debug(
             `[http] cause service=${exception.service} operation=${exception.operation} ` +
-              `code=${exception.code} detail=${String(
-                exception.cause instanceof Error
-                  ? (exception.cause.stack ?? exception.cause.message)
-                  : exception.cause,
-              ).slice(0, 2000)}`,
+              `code=${exception.code} detail=${serializeCause(exception.cause).slice(0, 2000)}`,
             correlationId,
           );
         }
@@ -175,9 +171,7 @@ export class ApiErrorFilter implements ExceptionFilter {
         if (status >= 500) {
           this.logger.error(line, correlationId);
           this.logger.debug(
-            `[http] cause status=${status} code=${code} detail=${String(
-              (exception as Error)?.stack ?? (exception as Error)?.message ?? String(exception),
-            ).slice(0, 2000)}`,
+            `[http] cause status=${status} code=${code} detail=${serializeCause(exception).slice(0, 2000)}`,
             correlationId,
           );
         } else {
@@ -196,9 +190,7 @@ export class ApiErrorFilter implements ExceptionFilter {
     try {
       this.logger.error('[http] unhandled status=500 code=internal_error', correlationId);
       this.logger.debug(
-        `[http] unhandled cause detail=${String(
-          (exception as Error)?.stack ?? (exception as Error)?.message ?? String(exception),
-        ).slice(0, 2000)}`,
+        `[http] unhandled cause detail=${serializeCause(exception).slice(0, 2000)}`,
         correlationId,
       );
     } catch {

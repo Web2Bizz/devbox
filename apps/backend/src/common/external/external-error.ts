@@ -16,6 +16,8 @@ export type ExternalErrorCode =
   | 'EXTERNAL_RATE_LIMITED'
   | 'EXTERNAL_UPSTREAM_5XX'
   | 'EXTERNAL_UNAUTHORIZED'
+  | 'EXTERNAL_BAD_REQUEST'
+  | 'EXTERNAL_NOT_FOUND'
   | 'GITHUB_AUTH';
 
 export type ExternalErrorOptions = {
@@ -48,6 +50,13 @@ const FIXED_MESSAGES: Record<ExternalErrorCode, string> = {
   // "try again later". Service-neutral (the map is keyed by code, not by
   // service), no upstream echo, no secrets.
   EXTERNAL_UNAUTHORIZED: 'внутренняя авторизация в вышестоящем сервисе не пройдена',
+  // Fixed messages for NON-RETRYABLE request-level 4xx from the upstream
+  // (400/422 → rejected as invalid, 404 → not found). These are NOT
+  // outages: masking them as 503 «сервис временно недоступен, повторите
+  // позже» told the caller to retry a request that can only fail the same
+  // way. Fixed per code, no upstream echo, no secrets.
+  EXTERNAL_BAD_REQUEST: 'вышестоящий сервис отклонил запрос как некорректный',
+  EXTERNAL_NOT_FOUND: 'ресурс не найден на вышестоящем сервисе',
   GITHUB_AUTH: 'GitHub authorization failed',
 };
 
@@ -74,6 +83,15 @@ export function httpStatusFor(code: ExternalErrorCode, upstreamStatus?: number):
       // upstream refused the credentials we sent" — a config defect on our
       // side, not the caller's session. 503 keeps it out of the refresh path.
       return 503;
+    case 'EXTERNAL_BAD_REQUEST':
+      // Honest 4xx passthrough (400 or 422): the upstream rejected THIS
+      // request shape — neither an outage nor a caller-session problem, and
+      // the filter never puts Retry-After on <500 answers.
+      return upstreamStatus === 422 ? 422 : 400;
+    case 'EXTERNAL_NOT_FOUND':
+      // Honest 404: the upstream knows this resource is absent. Retry-After
+      // would be a lie — repeating the same request finds the same 404.
+      return 404;
     case 'EXTERNAL_UNAVAILABLE':
     default:
       return 503;
@@ -115,6 +133,10 @@ function defaultRetryable(code: ExternalErrorCode): boolean {
     case 'EXTERNAL_UNAUTHORIZED':
       // Refused credentials — the same request with the same credentials
       // fails the same way, so a retry is pointless.
+      return false;
+    case 'EXTERNAL_BAD_REQUEST':
+    case 'EXTERNAL_NOT_FOUND':
+      // Request-level 4xx: the same request can only fail the same way.
       return false;
     case 'GITHUB_AUTH':
       return false;
@@ -169,9 +191,10 @@ export function timeoutError(
  * 401/403 → GITHUB_AUTH for the github service, EXTERNAL_UNAUTHORIZED for
  * every other service (the upstream refused OUR credentials — the original
  * status is kept on the error, the http answer is 503 and never retryable);
- * 404 → EXTERNAL_UNAVAILABLE (never retryable); 429 →
- * EXTERNAL_RATE_LIMITED; 5xx → EXTERNAL_UPSTREAM_5XX; anything else →
- * EXTERNAL_UNAVAILABLE.
+ * 400/422 → EXTERNAL_BAD_REQUEST and 404 → EXTERNAL_NOT_FOUND (honest
+ * non-retryable request-level 4xx passthrough — never masked as a 503
+ * outage with Retry-After); 429 → EXTERNAL_RATE_LIMITED; 5xx →
+ * EXTERNAL_UPSTREAM_5XX; anything else → EXTERNAL_UNAVAILABLE.
  */
 export function fromStatus(
   service: string,
@@ -227,6 +250,37 @@ export function fromStatus(
       service,
       operation,
       message: FIXED_MESSAGES.EXTERNAL_UNAUTHORIZED,
+      status,
+      attempt,
+      isRetryable: false,
+      cause,
+    });
+  }
+  if (status === 400 || status === 422) {
+    // The upstream rejected THIS request shape (e.g. POST /api/session with
+    // a missing/empty body → 400 `Expected object`). NOT an outage and NOT
+    // retryable: the same request fails the same way, so masking it as the
+    // 503 «повторите позже» would be a lie. Answered as an honest 4xx
+    // (httpStatusFor) — the filter puts no Retry-After on <500 statuses.
+    return new ExternalServiceError({
+      code: 'EXTERNAL_BAD_REQUEST',
+      service,
+      operation,
+      message: FIXED_MESSAGES.EXTERNAL_BAD_REQUEST,
+      status,
+      attempt,
+      isRetryable: false,
+      cause,
+    });
+  }
+  if (status === 404) {
+    // The upstream knows this resource is absent (e.g. a deleted session).
+    // Honest 404 EXTERNAL_NOT_FOUND — not a 503 outage, no Retry-After.
+    return new ExternalServiceError({
+      code: 'EXTERNAL_NOT_FOUND',
+      service,
+      operation,
+      message: FIXED_MESSAGES.EXTERNAL_NOT_FOUND,
       status,
       attempt,
       isRetryable: false,

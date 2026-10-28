@@ -5,8 +5,10 @@
  * Also executes under `bun test dist` (top-level run, throws on failure).
  *
  * Covers: fixed codes, 401/403 → EXTERNAL_UNAUTHORIZED (http 503, never
- * 401), 404/429/5xx mapping, httpStatus derivation, isRetryable flags,
- * timeout detection, never-leak-messages.
+ * 401), request-level 4xx → EXTERNAL_BAD_REQUEST (400/422) and
+ * EXTERNAL_NOT_FOUND (404) honest passthrough (never the 503 outage mask),
+ * 429/5xx mapping, httpStatus derivation, isRetryable flags, timeout
+ * detection, never-leak-messages.
  */
 import assert from 'node:assert/strict';
 import {
@@ -83,12 +85,38 @@ const checks: Array<{ name: string; run: () => void }> = [
     },
   },
   {
-    name: '404 maps to EXTERNAL_UNAVAILABLE (never retryable)',
+    name: '404 maps to EXTERNAL_NOT_FOUND (never retryable, honest 404)',
     run: () => {
       const err = fromStatus('github', 'listRepos', 404);
-      assert.equal(err.code, 'EXTERNAL_UNAVAILABLE');
+      assert.equal(err.code, 'EXTERNAL_NOT_FOUND');
       assert.equal(err.isRetryable, false);
-      assert.equal(err.httpStatus, 503);
+      // Not a 503 outage: the upstream answered, the resource is just absent.
+      assert.equal(err.httpStatus, 404);
+      assert.equal(err.status, 404);
+      // Never masked as the generic "unavailable" answer.
+      assert.notEqual(err.message, 'сервис временно недоступен, повторите позже');
+    },
+  },
+  {
+    name: '400 maps to EXTERNAL_BAD_REQUEST (never retryable, honest 400)',
+    run: () => {
+      const err = fromStatus('opencode', 'createSession', 400);
+      assert.equal(err.code, 'EXTERNAL_BAD_REQUEST');
+      assert.equal(err.isRetryable, false);
+      assert.equal(err.httpStatus, 400);
+      assert.equal(err.status, 400);
+      assert.notEqual(err.message, 'сервис временно недоступен, повторите позже');
+      // Fixed message: the upstream echo (its 400 body) stays off the wire.
+      assert.ok(!/Expected object|Payload/i.test(err.message), 'upstream text leaked');
+    },
+  },
+  {
+    name: '422 maps to EXTERNAL_BAD_REQUEST (http 422 passes through)',
+    run: () => {
+      const err = fromStatus('opencode', 'createSession', 422);
+      assert.equal(err.code, 'EXTERNAL_BAD_REQUEST');
+      assert.equal(err.isRetryable, false);
+      assert.equal(err.httpStatus, 422);
     },
   },
   {
@@ -133,6 +161,9 @@ const checks: Array<{ name: string; run: () => void }> = [
     run: () => {
       const err = fromUnknown('github', 'listRepos', { status: 403 }, 1);
       assert.equal(err.code, 'GITHUB_AUTH');
+      // Request-level 4xx ride the same honest mapping.
+      assert.equal(fromUnknown('opencode', 'createSession', { status: 400 }, 1).code, 'EXTERNAL_BAD_REQUEST');
+      assert.equal(fromUnknown('github', 'listRepos', { status: 404 }, 1).code, 'EXTERNAL_NOT_FOUND');
     },
   },
   {
@@ -167,6 +198,12 @@ const checks: Array<{ name: string; run: () => void }> = [
       assert.equal(httpStatusFor('EXTERNAL_UNAUTHORIZED'), 503);
       assert.equal(httpStatusFor('EXTERNAL_UNAUTHORIZED', 401), 503);
       assert.equal(httpStatusFor('EXTERNAL_UNAUTHORIZED', 403), 503);
+      // Request-level 4xx answer honestly (no 503 outage mask, no Retry-After).
+      assert.equal(httpStatusFor('EXTERNAL_BAD_REQUEST', 400), 400);
+      assert.equal(httpStatusFor('EXTERNAL_BAD_REQUEST', 422), 422);
+      assert.equal(httpStatusFor('EXTERNAL_BAD_REQUEST'), 400);
+      assert.equal(httpStatusFor('EXTERNAL_NOT_FOUND', 404), 404);
+      assert.equal(httpStatusFor('EXTERNAL_NOT_FOUND'), 404);
     },
   },
 ];

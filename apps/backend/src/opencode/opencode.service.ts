@@ -6,7 +6,7 @@ import { ExternalClient } from '../common/external/external-client';
 
 export type OpencodeStatus = 'up' | 'down';
 
-/** Short probe budget for GET /health — liveness must not wait on upstream. */
+/** Short probe budget for the liveness probe (GET /api/info) — must not wait on upstream. */
 export const OPENCODE_HEALTH_TIMEOUT_MS = 2000;
 
 const FALLBACK_URL = 'http://localhost:4096';
@@ -163,20 +163,26 @@ export class OpencodeService {
   }
 
   /**
-   * Liveness probe for the opencode server (v2 `GET /api/health`,
-   * sdk.gen.js `Health.get` → `url: "/api/health"`).
+   * Liveness probe for the opencode server (v2 `GET /api/info`).
+   *
+   * The 2.x spec has NO health path at all: `GET /api/health` answers 404,
+   * while `/health` and `/global/health` return the SPA index (200
+   * text/html) — a JSON liveness endpoint is the only honest signal, and
+   * that is `/api/info` (`{version, pid, hostname, urls, paths,
+   * capabilities}`; there is no `healthy` field to look for).
    *
    * `up` only when ALL hold: 2xx status AND `content-type: application/json`
-   * AND the body parses as JSON. A 401 with a JSON body also means `up`
-   * (the server is alive; the bearer token is missing/rejected — auth,
-   * not liveness). HTML/non-JSON bodies (proxies, stale gateways) and
-   * network errors/timeouts mean `down`. Always resolves, never throws;
-   * single attempt (no retry budget on the probe); never logs secrets.
+   * AND the body parses as a JSON object. A 401 with a JSON body also means
+   * `up` (the server is alive; the bearer token is missing/rejected — auth,
+   * not liveness). HTML/non-JSON bodies (the SPA catch-all, proxies, stale
+   * gateways) and network errors/timeouts mean `down`. Always resolves,
+   * never throws; single attempt (no retry budget on the probe); never logs
+   * secrets.
    */
   async checkConnectivity(timeoutMs = OPENCODE_HEALTH_TIMEOUT_MS): Promise<OpencodeStatus> {
     try {
       const res = await this.fetchWithTimeout(
-        `${this.dialUrl()}/api/health`,
+        `${this.dialUrl()}/api/info`,
         { method: 'GET' },
         timeoutMs,
       );

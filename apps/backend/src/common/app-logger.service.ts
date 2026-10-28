@@ -110,6 +110,34 @@ function maskUrlCredentials(text: string): string {
   return text.replace(CREDENTIALS_IN_URL, '://***:***@');
 }
 
+/**
+ * Serializes an arbitrary cause/exception-ish value for the debug `detail=`
+ * field (AGENTS.md: stacks/cause go to debug only, sanitized, ≤2000):
+ * Error → stack/message, string → as-is, plain object/array → JSON with
+ * known secret KEYS redacted, everything else → a stable placeholder.
+ * Never returns `[object Object]` — non-Error object causes (parsed sdk
+ * error bodies like `{_tag: 'InvalidRequestError'}`) must stay readable.
+ * Value-level scrubbing (URL credentials, live secrets) is applied
+ * downstream by the message sanitizer on every logger call.
+ */
+export function serializeCause(cause: unknown): string {
+  if (cause instanceof Error) return cause.stack ?? cause.message;
+  if (typeof cause === 'string') return cause;
+  if (cause === null) return 'null';
+  if (cause === undefined) return 'undefined';
+  if (typeof cause !== 'object') return String(cause);
+  try {
+    return (
+      JSON.stringify(cause, (key, value) =>
+        SECRET_KEYS.has(key.toLowerCase()) ? '[redacted]' : value,
+      ) ?? '[unserializable]'
+    );
+  } catch {
+    // Circular refs / exotic payloads — shape signal only, no echo.
+    return '[unserializable]';
+  }
+}
+
 function sanitizeString(text: string): string {
   let out = maskUrlCredentials(text);
   for (const secret of liveSecrets()) {

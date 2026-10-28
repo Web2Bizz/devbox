@@ -10,7 +10,10 @@ info:
     with a Retry-After header — no mock fallbacks, a 200 always means live
     upstream data. An upstream that refuses the credentials we sent (401/403)
     answers 503 EXTERNAL_UNAUTHORIZED instead — a distinct code and NO
-    Retry-After (a retry with the same credentials cannot help).
+    Retry-After (a retry with the same credentials cannot help). Request-level
+    upstream 4xx are never masked as outages: 400/422 answer
+    EXTERNAL_BAD_REQUEST (400/422) and 404 answers EXTERNAL_NOT_FOUND (404),
+    both non-retryable and without Retry-After.
     Error envelope is always { code, message, correlationId }.
     New sdk mirror (VERSION_NEUTRAL, no version segment):
     /api/opencode/session, /api/opencode/session/status,
@@ -27,7 +30,8 @@ info:
     <NEXT_PUBLIC_API_URL>/api/opencode. Unreachable upstream answers 503
     EXTERNAL_UNAVAILABLE with Retry-After (no mock 200s); an upstream that
     refused our credentials (401/403) answers 503 EXTERNAL_UNAUTHORIZED
-    without Retry-After.
+    without Retry-After; request-level upstream 4xx answer honestly
+    (EXTERNAL_BAD_REQUEST 400/422, EXTERNAL_NOT_FOUND 404, no Retry-After).
 
     Versioning policy:
     - canonical: /api/v1/* (frontend clients must use these paths);
@@ -2558,12 +2562,12 @@ paths:
                 $ref: '#/components/schemas/ApiError'
   /api/opencode/global/health:
     get:
-      summary: Opencode server health (passthrough, 503 when unreachable)
+      summary: Opencode server liveness (synthesized from v2 GET /api/info, 503 when unreachable)
       operationId: opencodeGlobalHealth
       tags: [opencode]
       responses:
         '200':
-          description: live upstream health ({healthy, version})
+          description: "live upstream ({healthy: true, version}) — healthy is SYNTHESIZED from a 2xx JSON /api/info answer (the 2.x upstream spec has no /global/health: that path serves the SPA index); version is the server's own (GET /api/info), independent of the pinned sdk release"
           content:
             application/json:
               schema:
@@ -2839,14 +2843,14 @@ components:
     OpencodeHealth:
       type: object
       required: [healthy, version]
-      description: GET /api/opencode/global/health payload (upstream global.health passthrough).
+      description: GET /api/opencode/global/health payload — synthesized by the backend from the 2.x v2 liveness endpoint GET /api/info (there is no upstream `healthy` field; healthy=true iff /api/info answered 2xx JSON with a string version). Shape is unchanged from the legacy global.health passthrough.
       properties:
         healthy:
           type: boolean
           example: true
         version:
           type: string
-          example: 1.18.33
+          example: 2.2.0
     ProjectStatus:
       type: string
       enum: [active, deleted]
@@ -2878,7 +2882,12 @@ components:
         (503, the upstream refused the credentials we sent — upstream
         401/403, never a caller session problem: the answer is 503 and NOT
         401 on purpose, and it carries NO Retry-After because a retry with
-        the same credentials cannot help), GITHUB_AUTH
+        the same credentials cannot help), EXTERNAL_BAD_REQUEST (the upstream
+        rejected THIS request shape — upstream 400/422 answered as 400/422,
+        non-retryable, no Retry-After: repeating the request cannot help),
+        EXTERNAL_NOT_FOUND (the upstream knows the resource is absent —
+        upstream 404 answered as 404, non-retryable, no Retry-After),
+        GITHUB_AUTH
         (401/403 from the GitHub App surface), auth codes:
         invalid_credentials (401, generic — no user enumeration),
         email_taken (409), provider_not_configured (501 stub seam).
@@ -3454,7 +3463,7 @@ components:
 #   POST   /api/opencode/session/{id}/abort      → sdk session.abort()
 #   GET    /api/opencode/config/providers        → sdk config.providers()
 #   GET    /api/opencode/global/event (SSE)      → sdk global.event() re-stream
-#   GET    /api/opencode/global/health           → raw GET {upstream}/global/health (no sdk binding)
+#   GET    /api/opencode/global/health           → raw GET {upstream}/api/info → synthesized {healthy, version} (no sdk binding; the 2.x spec has no /global/health)
 #   GET    /api/opencode/event (SSE)             → sdk event.subscribe() re-stream
 # Removed: unversioned /api/session, /api/messages, /api/chat → 404 not_found.
 # Reserved: /api/v2/* → 404 { code: 'not_found', … } (no v2 bindings yet).

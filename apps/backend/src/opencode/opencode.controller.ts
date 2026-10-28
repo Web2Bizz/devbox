@@ -84,7 +84,9 @@ type SseSubscription = {
  * `unauthorized`); upstream auth is the server Basic password
  * (OPENCODE_PASSWORD, unset → no header, upstream 401). There is NO
  * per-user DB Bearer and NO env token fallback on this path. GET
- * global/health stays anonymous (liveness probe, no auth sent).
+ * global/health stays anonymous (liveness probe, no auth sent) and is
+ * SYNTHESIZED from the v2 liveness endpoint GET /api/info — the 2.x
+ * upstream spec has no /global/health (the path answers the SPA index).
  *
  * Project scope (Card C4): every session/message/provider route requires a
  * `?projectId` and gates through
@@ -107,11 +109,15 @@ type SseSubscription = {
  * ExternalClient retry budget inside OpencodeSdkClient) throw
  * ExternalServiceError — the api-error.filter answers 503
  * EXTERNAL_UNAVAILABLE («сервис временно недоступен, повторите позже»)
- * with a Retry-After header. An upstream 401/403 (the stand refused the
- * credentials we sent) answers 503 EXTERNAL_UNAUTHORIZED instead — a
- * distinct code, no Retry-After (a retry with the same credentials cannot
- * help). No mock 200s: a 200 always means live upstream data (warn + debug
- * via AppLogger, never logs secrets — no URLs/headers/bodies).
+ * with a Retry-After header for real outages (network/timeout/5xx). An
+ * upstream 401/403 (the stand refused the credentials we sent) answers
+ * 503 EXTERNAL_UNAUTHORIZED — a distinct code, no Retry-After (a retry
+ * with the same credentials cannot help). Request-level 4xx are never
+ * masked as outages: upstream 400/422 answer 400/422 EXTERNAL_BAD_REQUEST
+ * and upstream 404 answers 404 EXTERNAL_NOT_FOUND — both non-retryable,
+ * both without Retry-After. No mock 200s: a 200 always means live upstream
+ * data (warn + debug via AppLogger, never logs secrets — no URLs/headers/
+ * bodies).
  */
 @ApiTags('opencode')
 @ApiBearerAuth()
@@ -1022,8 +1028,8 @@ export class OpencodeController {
 
   @Get('global/health')
   @Version(VERSION_NEUTRAL)
-  @ApiOperation({ summary: 'Opencode server health (passthrough, 503 when unreachable)' })
-  @ApiResponse({ status: 200, description: 'live upstream health ({healthy, version})' })
+  @ApiOperation({ summary: 'Opencode server liveness (synthesized from v2 GET /api/info, 503 when unreachable)' })
+  @ApiResponse({ status: 200, description: 'live upstream ({healthy: true, version}) — healthy is synthesized from a 2xx JSON /api/info answer (the 2.x upstream spec has no /global/health: it answers the SPA index)' })
   @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async globalHealth(
     @Headers('x-correlation-id') correlationId?: string,
@@ -1031,10 +1037,22 @@ export class OpencodeController {
     // The pinned sdk exposes no global.health (only global.event), so this
     // one goes through OpencodeService.fetchWithRetry directly (same
     // REQUEST_TIMEOUT_MS budget + idempotent retry as the sdk transport).
+    //
+    // CONTRACT CHANGE (forward-only): the 2.x upstream has NO /global/health
+    // — the old passthrough always hit the SPA index (200 text/html) and the
+    // shape check failed deterministically. The route now probes the real
+    // liveness endpoint GET /api/info ({version, pid, hostname, …} — there
+    // is no `healthy` field upstream) and SYNTHESIZES the public payload:
+    // `healthy: true` iff /api/info answered 2xx JSON with a string
+    // `version`; the wire shape ({healthy, version}) is unchanged so the
+    // mobile ConnectionBadge/`client.global.health()` keep working (their
+    // fail-closed shape check is exactly `healthy===true && version:
+    // string`). A 2xx that is not that JSON (SPA catch-all, proxy page) is
+    // NOT healthy — it stays a 503 shape failure, never a masked 200.
     const cid = correlationId ?? '';
     try {
       const res = await this.opencode.fetchWithRetry(
-        `${this.opencode.dialUrl()}/global/health`,
+        `${this.opencode.dialUrl()}/api/info`,
         { method: 'GET' },
         { operation: 'globalHealth' },
       );
@@ -1045,15 +1063,14 @@ export class OpencodeController {
         throw this.upstreamError('globalHealth', new Error(`status_${res.status}`), res.status);
       }
       const body = (await res.json().catch(() => null)) as unknown;
-      if (
-        typeof body !== 'object' ||
-        body === null ||
-        (body as { healthy?: unknown }).healthy !== true ||
-        typeof (body as { version?: unknown }).version !== 'string'
-      ) {
+      if (typeof body !== 'object' || body === null) {
         throw this.upstreamError('globalHealth', new Error('bad_health_shape'));
       }
-      return body as { healthy: boolean; version: string };
+      const version = (body as { version?: unknown }).version;
+      if (typeof version !== 'string') {
+        throw this.upstreamError('globalHealth', new Error('bad_health_shape'));
+      }
+      return { healthy: true, version };
     } catch (err) {
       this.logger.warn('[opencode] GET /global/health upstream failed', cid);
       this.logger.debug((err as Error).message, cid);

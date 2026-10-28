@@ -59,7 +59,9 @@ import {
  * недоступен, повторите позже») with Retry-After when the upstream is
  * unreachable, and EXTERNAL_UNAUTHORIZED (no Retry-After) when the upstream
  * refused the credentials we sent (401/403 — a retry with the same
- * credentials cannot help).
+ * credentials cannot help). Request-level 4xx are never masked as outages:
+ * upstream 400/422 → EXTERNAL_BAD_REQUEST (400/422), upstream 404 →
+ * EXTERNAL_NOT_FOUND (404) — non-retryable, no Retry-After.
  *
  * Project scope (Card C4): every route requires `?projectId` and gates
  * through OrganizationsService.assertProjectAccessById BEFORE any upstream

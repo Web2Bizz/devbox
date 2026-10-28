@@ -42,3 +42,19 @@ export const NPM_QUERY_KEY = ['npm', 'status'] as const;
  */
 export const aiProvidersQueryKey = (directory?: string) =>
   ['ai-providers', directory ?? 'all'] as const;
+
+/**
+ * GET /api/opencode/session — live opencode session list.
+ * Nullish directory maps to the shared `'all'` scope so the
+ * default view has one stable cache entry (`??`, empty string stays as-is).
+ */
+export const opencodeSessionsQueryKey = (directory?: string) =>
+  ['opencode-sessions', directory ?? 'all'] as const;
+
+/**
+ * GET /api/opencode/session/:id/message — live session thread.
+ * `sessionId` null maps to the `'none'` scope so hooks without a session
+ * share one stable empty entry instead of one entry per null render.
+ */
+export const opencodeMessagesQueryKey = (sessionId: string | null, directory?: string) =>
+  ['opencode-messages', sessionId ?? 'none', directory ?? 'all'] as const;

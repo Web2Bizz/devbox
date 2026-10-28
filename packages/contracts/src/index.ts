@@ -26,3 +26,5 @@ export * from './organization/organization';
 export * from './organization/organization.schema';
 export * from './opencode-key/opencode-key';
 export * from './opencode-key/opencode-key.schema';
+export * from './opencode/opencode';
+export * from './opencode/opencode.schema';

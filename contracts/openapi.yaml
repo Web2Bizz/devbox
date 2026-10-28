@@ -126,6 +126,57 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+  /api/v1/sessions:
+    get:
+      summary: List sessions (proxy → opencode server, 503 when unreachable)
+      operationId: listSessionsV1
+      parameters:
+        - name: Api-Version
+          in: header
+          required: false
+          description: Effective URI API version (always "1" for this endpoint).
+          schema:
+            type: string
+            example: '1'
+        - name: projectId
+          in: query
+          required: true
+          description: Rush Code project id (project-scoped proxy, missing → 400 PROJECT_REQUIRED).
+          schema:
+            type: string
+      responses:
+        '200':
+          description: live sessions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Session'
+        '400':
+          description: projectId is required (code PROJECT_REQUIRED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: missing/invalid bearer (code unauthorized)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
   /api/v1/messages:
     get:
       summary: Session messages (proxy → opencode server, 503 when unreachable)

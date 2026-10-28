@@ -7,6 +7,7 @@ import type {
   SendChatRequest,
   SendChatResponse,
   Session,
+  SessionsResponse,
 } from './session';
 
 /**
@@ -56,3 +57,5 @@ export const messagesResponseSchema = z.object({
   sessionId: z.string().min(1),
   messages: z.array(chatMessageSchema),
 }) satisfies z.ZodType<MessagesResponse>;
+
+export const sessionsResponseSchema = z.array(sessionSchema) satisfies z.ZodType<SessionsResponse>;

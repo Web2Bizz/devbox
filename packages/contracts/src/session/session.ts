@@ -1,8 +1,8 @@
 /**
  * Session + chat contracts.
  *
- * Mirrors contracts/openapi.yaml components/schemas: Session, ChatMessage,
- * SendChatRequest, SendChatResponse, MessagesResponse (field-for-field).
+ * Mirrors contracts/openapi.yaml components/schemas: Session, SessionsResponse,
+ * ChatMessage, SendChatRequest, SendChatResponse, MessagesResponse (field-for-field).
  * Previously duplicated in apps/backend/src/contracts.ts and
  * apps/frontend/src/api/types.ts — this package is the single source.
  */
@@ -28,6 +28,9 @@ export type ChatMessage = {
   /** ISO-8601 timestamp */
   createdAt: string;
 };
+
+/** GET /api/v1/sessions — live upstream session list (503 when opencode unreachable) */
+export type SessionsResponse = Session[];
 
 /** POST /api/v1/chat request body */
 export type SendChatRequest = {

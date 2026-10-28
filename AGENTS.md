@@ -65,6 +65,22 @@ package.json, не Nx-проект, вне bun workspaces).
 | Lib | `src/lib/` | утилиты, сторы (`auth-store`, `format-error`) + алиасы схем (`auth-schemas` — реэкспорт пакета); `project/org-schemas` локально строже wire (UX trim/min/max/charset/i18n-коды, subset wire) с комментом-обоснованием | `@/lib/*` | `../../lib/auth-store` (из `src/features/usage/`) |
 | i18n | `src/i18n/` | словарь en/ru, провайдер | `@/i18n/*` | `../../i18n` (из `src/features/usage/`) |
 
+### Data-хуки — только React Query
+
+- Все data-хуки `src/hooks/*` — на `useQuery`/`useMutation`/`useQueryClient`
+  через `src/providers.tsx:createQueryClient` (staleTime 30s, gcTime 5m,
+  retry 1, `refetchOnWindowFocus: false`).
+- `queryFn` бросает raw `ApiClientError` (без форматирования); формат —
+  в `useMemo` через `format-error` + `t` (см. `useProjects`, `useAiProviders`, `useUsage`).
+- `reload` = `invalidateQueries({ queryKey })`; оптимистичные правки —
+  через `setQueryData` + `invalidate`.
+- Ключи — только из `src/hooks/query-keys.ts` (single source; пример:
+  `sessionsQueryKey(projectId)` → `['sessions', projectId ?? 'none']`).
+- Исключение — streaming/SSE (`useChat`): остаётся на `useEffect`
+  (живые дельты `event.subscribe` + `session.prompt` с `AbortController`,
+  бэкофф 1s→15s) с комментом-обоснованием; на React Query не переносится
+  (wontfix — см. аудит Card3).
+
 ## Фолбэки запрещены по умолчанию
 
 - Никаких тихих фолбэков (дефолтные пути вроде `<cwd>/...`, захардкоженные хосты/порты, подмена отсутствующего значения «удобным») без явного указания пользователя. Не задано → ошибка, а не додумывание.

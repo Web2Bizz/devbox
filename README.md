@@ -165,6 +165,83 @@ bun run dev:frontend   # frontend (+ contracts build) → http://localhost:3001 
 # frontend → http://localhost:3001 (or $NEXT_PUBLIC_PORT)
 ```
 
+# Запуск
+
+## Локальный запуск
+
+Предусловия: Bun 1.4.2 (сверь с `.bun-version`), `cp .env.example .env` один раз
+(`.env` в gitignore, не коммитить), внешний Postgres (своего сервиса в
+`docker-compose.yml` нет), свободные порты `3100`/`3001`. Процессы держит
+pm2 `6.0.14` без ecosystem-файла, обёрткой без watch (`watching disabled` —
+нет double-restart). При рассинхроне версий демона/клиента pm2 `6.0.14`/`7.0.1`
+pm2 пишет warning — лечится через `pm2 update`.
+
+Старт:
+
+```bash
+cp .env.example .env   # once; .env is gitignored, never commit it
+bun install
+pm2 start bun --name rush-backend -- run dev:backend
+pm2 start bun --name rush-frontend -- run dev:frontend
+```
+
+Статус и логи:
+
+```bash
+pm2 list
+pm2 logs --nostream --lines 50
+pm2 logs rush-backend --nostream --lines 50
+```
+
+Рестарт:
+
+```bash
+pm2 restart rush-backend
+pm2 restart rush-frontend
+pm2 restart all
+```
+
+Стоп и удаление из pm2:
+
+```bash
+pm2 stop rush-backend rush-frontend
+pm2 delete rush-backend rush-frontend
+```
+
+Проверки:
+
+```bash
+curl -s http://localhost:3100/health   # 200 {"status":"ok","db":"up","opencode":"down",...} — opencode down ожидаемо, локально не поднимали
+curl -sI http://localhost:3001        # 307 location /login (Next 16.3.6 Turbopack Ready)
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3001/login   # 200
+```
+
+Порты: `3100` backend · `3001` frontend (`next dev`) · `4096` opencode только
+внутри сети (`expose`, наружу не публикуется) · `5432` Postgres внешний ·
+`8080` frontend via compose (Next standalone, compose маппит `8080:3000`).
+
+Env-имена (значений не пиши, секреты — только имена, источник — `.env.example`):
+`APP_BACKEND_PORT`, `APP_BACKEND_HOST`, `APP_BACKEND_PROTOCOL`,
+`APP_BACKEND_SOCKET`, `OPENCODE_HOST`, `OPENCODE_PORT`, `OPENCODE_PROTOCOL`,
+`OPENCODE_URL`, `OPENCODE_SERVER_PASSWORD`, `POSTGRES_USER`,
+`POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_PORT`, `POSTGRES_HOST`,
+`DATABASE_URL`, `CORS_ORIGINS`, `REQUEST_TIMEOUT_MS`, `LOG_LEVEL`,
+`BACKEND_PUBLISH`, `FRONTEND_PUBLISH`, `TAG`, `NEXT_PUBLIC_PORT`,
+`NEXT_PUBLIC_API_URL`, `NPM_TOKEN`.
+
+## Production запуск
+
+Только то, что уже есть в репо: сборка/старт или единый
+`docker-compose.yml` (сети `front`/`back`, registry-образы
+`docker.registry.web2bizz.team/web2bizz/rush-code/<service>:${TAG:-latest}`).
+`TAG`, `DATABASE_URL` и `OPENCODE_SERVER_PASSWORD` — обязательны извне
+(shell/Dokploy, не из git).
+
+```bash
+docker login docker.registry.web2bizz.team   # registry приватный
+docker compose pull && docker compose up -d   # prod: registry-образы, лимиты вшиты, standalone
+```
+
 ## Окружение (dev/prod)
 
 Single source: `.env.example` → скопируй в `.env` (gitignored, секреты только

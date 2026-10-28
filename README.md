@@ -185,6 +185,20 @@ pm2 start bun --name rush-backend -- run dev:backend
 pm2 start bun --name rush-frontend -- run dev:frontend
 ```
 
+Важно (pm2 и окружение): `scripts/dev/with-env.ts` отдаёт приоритет
+`process.env` над файлом `.env`. Если `DATABASE_URL`/`POSTGRES_*` уже есть в
+окружении терминала (или pm2-демон поднялся с ними), они перебьют значения из
+`.env` — backend стартует, в `/health` будет `db:"up"`, но любой запрос к БД
+упадёт `relation ... does not exist` → 503 EXTERNAL_UNAVAILABLE. Стартуй pm2 с
+чистым окружением, иначе стенд поднимется на чужой БД:
+
+```bash
+env -u DATABASE_URL -u POSTGRES_USER -u POSTGRES_PASSWORD -u POSTGRES_DB -u POSTGRES_HOST -u POSTGRES_PORT \
+  pm2 start bun --name rush-backend -- run dev:backend
+env -u DATABASE_URL -u POSTGRES_USER -u POSTGRES_PASSWORD -u POSTGRES_DB -u POSTGRES_HOST -u POSTGRES_PORT \
+  pm2 start bun --name rush-frontend -- run dev:frontend
+```
+
 Статус и логи:
 
 ```bash
@@ -211,7 +225,7 @@ pm2 delete rush-backend rush-frontend
 Проверки:
 
 ```bash
-curl -s http://localhost:3100/health   # 200 {"status":"ok","db":"up","opencode":"down",...} — opencode down ожидаемо, локально не поднимали
+curl -s http://localhost:3100/health   # 200 {"status":"ok","db":"up","opencode":"down",...} — opencode down ожидаемо, пока не поднят локальный стенд
 curl -sI http://localhost:3001        # 307 location /login (Next 16.3.6 Turbopack Ready)
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3001/login   # 200
 ```
@@ -223,11 +237,53 @@ curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3001/login   # 200
 Env-имена (значений не пиши, секреты — только имена, источник — `.env.example`):
 `APP_BACKEND_PORT`, `APP_BACKEND_HOST`, `APP_BACKEND_PROTOCOL`,
 `APP_BACKEND_SOCKET`, `OPENCODE_HOST`, `OPENCODE_PORT`, `OPENCODE_PROTOCOL`,
-`OPENCODE_URL`, `OPENCODE_SERVER_PASSWORD`, `POSTGRES_USER`,
-`POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_PORT`, `POSTGRES_HOST`,
-`DATABASE_URL`, `CORS_ORIGINS`, `REQUEST_TIMEOUT_MS`, `LOG_LEVEL`,
-`BACKEND_PUBLISH`, `FRONTEND_PUBLISH`, `TAG`, `NEXT_PUBLIC_PORT`,
-`NEXT_PUBLIC_API_URL`, `NPM_TOKEN`.
+`OPENCODE_URL`, `OPENCODE_PASSWORD`, `OPENCODE_SERVER_PASSWORD`,
+`POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_PORT`,
+`POSTGRES_HOST`, `DATABASE_URL`, `JWT_ACCESS_SECRET`, `CORS_ORIGINS`,
+`REQUEST_TIMEOUT_MS`, `LOG_LEVEL`, `BACKEND_PUBLISH`, `FRONTEND_PUBLISH`,
+`TAG`, `NEXT_PUBLIC_PORT`, `NEXT_PUBLIC_API_URL`, `NPM_TOKEN`.
+
+`JWT_ACCESS_SECRET` — опционально: без него backend генерирует эфемерный
+dev-секрет, и все сессии сбрасываются при каждом рестарте; с ним — сессии живут
+между рестартами.
+
+Локальный стенд opencode: приложение — надстройка над opencode, поэтому список
+сессий и чат работают только при живом стенде; без него backend отдаёт
+503 EXTERNAL_UNAVAILABLE. Стенд поднимается отдельным процессом на свободном
+порту `4097` (порт `4096` в dev занят личным opencode — его не трогаем),
+супервизор — pm2, имя приложения — `rush-opencode`.
+
+Обязательна изоляция конфига: `OPENCODE_CONFIG_DIR=<изолированный каталог>` —
+иначе стенд унаследует личный конфиг opencode (пароль из
+`~/.config/opencode/service.json`) и поднимется с чужими настройками.
+
+Пароль стенда — `OPENCODE_SERVER_PASSWORD` (серверная переменная opencode v2);
+она же едет в backend как `OPENCODE_PASSWORD` (клиентская), Basic-логин стенда —
+user `opencode`. В `.env` задай `OPENCODE_URL=http://127.0.0.1:4097`, иначе
+backend пойдёт в дефолтный `4096`.
+
+```bash
+mkdir -p "$HOME/.config/rush-opencode-stand"   # изолированный каталог вне репо
+OPENCODE_CONFIG_DIR="$HOME/.config/rush-opencode-stand" \
+  bun scripts/dev/with-env.ts pm2 start opencode --name rush-opencode -- serve --port 4097 --hostname 127.0.0.1
+```
+
+Значения (в т.ч. пароль стенда) подхватывает `scripts/dev/with-env.ts` из
+`.env` — `source .env` не эквивалентно (shell-подстановка ломает пароли).
+
+Стоп стенда:
+
+```bash
+pm2 stop rush-opencode
+pm2 delete rush-opencode
+```
+
+Проверка стенда (секрет — только по имени):
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" -u "opencode:$OPENCODE_PASSWORD" http://127.0.0.1:4097/api/session   # 200
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:4097/api/session                                     # 401 — без авторизации
+```
 
 ## Production запуск
 

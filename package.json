@@ -14,6 +14,7 @@
     "dev": "bun scripts/dev/with-env.ts bunx nx run-many -t dev --parallel --output-style=stream",
     "dev:backend": "bun scripts/dev/with-env.ts bunx nx run backend:dev --output-style=stream",
     "dev:frontend": "bun scripts/dev/with-env.ts bunx nx run frontend:dev --output-style=stream",
+    "dev:logs": "pm2 logs",
     "build": "bunx nx run-many -t build",
     "build:backend": "bunx nx run backend:build",
     "build:frontend": "bunx nx run frontend:build",

@@ -27,6 +27,20 @@ process.env.DATABASE_URL = '';
 for (const key of ['POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB', 'POSTGRES_HOST']) {
   delete process.env[key];
 }
+// Project-scoped proxy routes (C4) need a Bearer past the guard; the gate
+// itself denies with 503 here (no DB) — same EXTERNAL_UNAVAILABLE envelope.
+process.env.JWT_ACCESS_SECRET = 'e2e-access-secret-not-real-0123456789';
+process.env.JWT_REFRESH_SECRET = 'e2e-refresh-secret-not-real-0123456789';
+process.env.JWT_ACCESS_TTL = '15m';
+process.env.JWT_REFRESH_TTL = '7d';
+process.env.AUTH_LEGACY_MOCK_FALLBACK = 'false';
+
+// Project id carried on every proxy call (C4 ?projectId). No DB here, so
+// the gate denies with 503 EXTERNAL_UNAVAILABLE (never reached upstream).
+const E2E_PROJECT_ID = '123e4567-e89b-12d3-a456-426614174090';
+// Hand-signed caller (TokenService.sign is pure, no DB — same pattern as
+// the organizations unreachable-branch probe).
+const E2E_USER_ID = '123e4567-e89b-12d3-a456-426614174091';
 
 type CheckResult = {
   name: string;
@@ -46,6 +60,22 @@ async function main(): Promise<void> {
   const base = await app.getUrl();
   const results: CheckResult[] = [];
 
+  // Bearer for the guarded proxy routes (guard passes, gate denies 503 w/o DB).
+  const { TokenService } = await import('../auth/token.service');
+  const tokens = app.get(TokenService, { strict: false }) as {
+    sign: (
+      claims: Record<string, unknown>,
+      secret: string,
+      ttlSec: number,
+    ) => { token: string };
+  };
+  const bearer = tokens.sign(
+    { sub: E2E_USER_ID, email: 'probe@rush-code.local', typ: 'access' },
+    process.env.JWT_ACCESS_SECRET as string,
+    900,
+  ).token;
+  const authHeaders = { authorization: `Bearer ${bearer}` };
+
   async function check(
     name: string,
     path: string,
@@ -53,7 +83,15 @@ async function main(): Promise<void> {
     expectedStatus: number,
     validate?: (res: Response, body: unknown) => void,
   ): Promise<void> {
-    const res = await fetch(`${base}${path}`, init);
+    // Guarded routes need the Bearer; /health + /swagger + legacy-404s stay bare.
+    const withAuth =
+      init === undefined
+        ? { headers: { ...authHeaders } }
+        : {
+            ...init,
+            headers: { ...authHeaders, ...((init.headers as Record<string, string> | undefined) ?? {}) },
+          };
+    const res = await fetch(`${base}${path}`, withAuth);
     const body = (await res.json().catch(() => null)) as unknown;
     try {
       assert.equal(res.status, expectedStatus, `status ${res.status} !== ${expectedStatus}`);
@@ -84,7 +122,8 @@ async function main(): Promise<void> {
       assert.equal((body as { status?: string }).status, 'ok');
     });
 
-    // v1 canonical (proxy live paths; upstream down → 503 envelope).
+    // v1 canonical (proxy live paths; project-scoped (C4): the guard passes
+    // via Bearer, the gate denies 503 here (no DB) — same envelope).
     const assertUnavailable = (body: unknown, res: Response): void => {
       const b = body as { code?: string; message?: string; correlationId?: string };
       assert.equal(b.code, 'EXTERNAL_UNAVAILABLE');
@@ -93,18 +132,55 @@ async function main(): Promise<void> {
       assert.equal(res.headers.get('x-correlation-id'), b.correlationId);
       assert.equal(res.headers.get('Retry-After'), '30');
     };
-    await check('GET /api/v1/session down → 503 + Retry-After', '/api/v1/session', undefined, 503, (res, body) => {
+    await check('GET /api/v1/session down → 503 + Retry-After', `/api/v1/session?projectId=${E2E_PROJECT_ID}`, undefined, 503, (res, body) => {
       assertUnavailable(body, res);
     });
-    await check('GET /api/v1/messages down → 503 + Retry-After', '/api/v1/messages?sessionId=s1', undefined, 503, (res, body) => {
+    await check('GET /api/v1/sessions down → 503 + Retry-After', `/api/v1/sessions?projectId=${E2E_PROJECT_ID}`, undefined, 503, (res, body) => {
       assertUnavailable(body, res);
     });
-    await check('POST /api/v1/chat down → 503 + Retry-After', '/api/v1/chat', json({ message: 'hi' }), 503, (res, body) => {
+    await check('GET /api/v1/messages down → 503 + Retry-After', `/api/v1/messages?sessionId=s1&projectId=${E2E_PROJECT_ID}`, undefined, 503, (res, body) => {
       assertUnavailable(body, res);
     });
-    await check('POST /api/v1/chat {} → 400 envelope', '/api/v1/chat', json({}), 400, (_res, body) => {
+    await check('POST /api/v1/chat down → 503 + Retry-After', `/api/v1/chat?projectId=${E2E_PROJECT_ID}`, json({ message: 'hi' }), 503, (res, body) => {
+      assertUnavailable(body, res);
+    });
+    await check('POST /api/v1/chat {} → 400 envelope', `/api/v1/chat?projectId=${E2E_PROJECT_ID}`, json({}), 400, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'bad_request');
     });
+    // C4: no project context → 400 PROJECT_REQUIRED (fail-closed).
+    await check('GET /api/v1/session w/o projectId → 400 PROJECT_REQUIRED', '/api/v1/session', undefined, 400, (_res, body) => {
+      assert.equal((body as { code?: string }).code, 'PROJECT_REQUIRED');
+    });
+    await check('GET /api/v1/sessions w/o projectId → 400 PROJECT_REQUIRED', '/api/v1/sessions', undefined, 400, (_res, body) => {
+      assert.equal((body as { code?: string }).code, 'PROJECT_REQUIRED');
+    });
+    // C1–C4: anonymous (no Bearer) → 401 before any gate/DB touch.
+    {
+      const anon = await fetch(`${base}/api/v1/session?projectId=${E2E_PROJECT_ID}`);
+      try {
+        assert.equal(anon.status, 401);
+        assert.equal(((await anon.json().catch(() => null)) as { code?: string } | null)?.code, 'unauthorized');
+        results.push({ name: 'GET /api/v1/session anon → 401', ok: true });
+        console.log('ok   - GET /api/v1/session anon → 401');
+      } catch (err) {
+        const detail = (err as Error).message;
+        results.push({ name: 'GET /api/v1/session anon → 401', ok: false, detail });
+        console.log(`FAIL - GET /api/v1/session anon → 401: ${detail}`);
+      }
+    }
+    {
+      const anon = await fetch(`${base}/api/v1/sessions?projectId=${E2E_PROJECT_ID}`);
+      try {
+        assert.equal(anon.status, 401);
+        assert.equal(((await anon.json().catch(() => null)) as { code?: string } | null)?.code, 'unauthorized');
+        results.push({ name: 'GET /api/v1/sessions anon → 401', ok: true });
+        console.log('ok   - GET /api/v1/sessions anon → 401');
+      } catch (err) {
+        const detail = (err as Error).message;
+        results.push({ name: 'GET /api/v1/sessions anon → 401', ok: false, detail });
+        console.log(`FAIL - GET /api/v1/sessions anon → 401: ${detail}`);
+      }
+    }
 
     // legacy unversioned aliases — removed → 404 envelope.
     await check('GET /api/session → 404 not_found (legacy removed)', '/api/session', undefined, 404, (_res, body) => {
@@ -113,12 +189,19 @@ async function main(): Promise<void> {
     await check('GET /api/messages → 404 not_found (legacy removed)', '/api/messages?sessionId=s1', undefined, 404, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'not_found');
     });
+    // Never-versioned plural alias: no /api/sessions handler by convention.
+    await check('GET /api/sessions → 404 not_found (never versioned)', '/api/sessions', undefined, 404, (_res, body) => {
+      assert.equal((body as { code?: string }).code, 'not_found');
+    });
     await check('POST /api/chat → 404 not_found (legacy removed)', '/api/chat', json({ message: 'hi' }), 404, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'not_found');
     });
 
     // reserved v2 → 404 envelope.
     await check('GET /api/v2/session → 404 not_found', '/api/v2/session', undefined, 404, (_res, body) => {
+      assert.equal((body as { code?: string }).code, 'not_found');
+    });
+    await check('GET /api/v2/sessions → 404 not_found', '/api/v2/sessions', undefined, 404, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'not_found');
     });
     await check('POST /api/v2/chat → 404 not_found', '/api/v2/chat', json({ message: 'hi' }), 404, (_res, body) => {
@@ -132,15 +215,17 @@ async function main(): Promise<void> {
     await check('GET /swagger/v1.json exposes only v1 paths', '/swagger/v1.json', undefined, 200, (_res, body) => {
       const paths = Object.keys((body as { paths?: Record<string, unknown> }).paths ?? {});
       assert.ok(paths.includes('/api/v1/session'), `missing /api/v1/session in ${paths.join(',')}`);
+      assert.ok(paths.includes('/api/v1/sessions'), `missing /api/v1/sessions in ${paths.join(',')}`);
       assert.ok(paths.includes('/api/v1/health'), `missing /api/v1/health in ${paths.join(',')}`);
       assert.ok(!paths.includes('/api/session'), `legacy /api/session must be gone, got ${paths.join(',')}`);
+      assert.ok(!paths.includes('/api/sessions'), `never-versioned /api/sessions must be gone, got ${paths.join(',')}`);
     });
     await check('GET /swagger/v2.json has empty paths', '/swagger/v2.json', undefined, 200, (_res, body) => {
       assert.deepEqual((body as { paths?: unknown }).paths, {});
     });
 
     // CORS preserved on versioned routes (even on 503 proxy errors).
-    await check('CORS echo on /api/v1/session (503)', '/api/v1/session', { headers: { origin: 'http://localhost:8080' } }, 503, (res) => {
+    await check('CORS echo on /api/v1/session (503)', `/api/v1/session?projectId=${E2E_PROJECT_ID}`, { headers: { origin: 'http://localhost:8080' } }, 503, (res) => {
       assert.equal(res.headers.get('access-control-allow-origin'), 'http://localhost:8080');
     });
   } finally {

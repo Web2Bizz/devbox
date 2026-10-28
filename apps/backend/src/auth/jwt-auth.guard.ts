@@ -37,9 +37,10 @@ function attach(
  * JwtAuthGuard — Bearer access-token guard with legacy mock dual-mode.
  *
  * - Valid `Authorization: Bearer <access>` → `req.user = { id, email, mock:false }`.
- * - Otherwise, when `AUTH_LEGACY_MOCK_FALLBACK` is on (dev default + boot WARN),
- *   the old `x-user-id` / `?userId` mock identity is attached (`mock:true`) so
- *   pre-auth e2e (github/workspaces) keeps passing; otherwise 401.
+ * - Otherwise, only when `AUTH_LEGACY_MOCK_FALLBACK` is explicitly on
+ *   (local-dev opt-in + boot WARN, never production; strict default off),
+ *   the old `x-user-id` / `?userId` mock identity is attached (`mock:true`);
+ *   otherwise 401.
  * - 401 envelope code is `unauthorized` (frozen shape { code, message,
  *   correlationId }); login/refresh use `invalid_credentials` instead.
  * - AppLogger only, fixed messages, secrets never logged.

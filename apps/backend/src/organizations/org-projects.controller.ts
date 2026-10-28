@@ -92,7 +92,12 @@ export class OrgProjectsController {
     @Headers("x-correlation-id") correlationId?: string,
   ): Promise<ProjectDto> {
     await this.memberOrThrow(id, identity.id, correlationId);
-    return (await this.projects.create({ ...body, orgId: id }, correlationId)) as ProjectDto;
+    // ownerId is never trusted from the body — the row is always owned by
+    // the Bearer identity (same rule as top-level POST /projects, C1).
+    return (await this.projects.create(
+      { ...body, orgId: id, ownerId: identity.id },
+      correlationId,
+    )) as ProjectDto;
   }
 
   @Get(":projectId")

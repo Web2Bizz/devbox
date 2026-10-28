@@ -31,6 +31,13 @@ process.env.DOCKER_REGISTRY_RETRY_MAX_DELAY_MS = '0';
 process.env.EXTERNAL_RETRY_MAX_ATTEMPTS = '1';
 process.env.EXTERNAL_RETRY_BASE_DELAY_MS = '0';
 process.env.EXTERNAL_RETRY_MAX_DELAY_MS = '0';
+// Guarded readonly surface (C3): Bearer past JwtAuthGuard (hand-signed,
+// TokenService.sign is pure, no DB).
+process.env.JWT_ACCESS_SECRET = 'e2e-access-secret-not-real-0123456789';
+process.env.JWT_REFRESH_SECRET = 'e2e-refresh-secret-not-real-0123456789';
+process.env.JWT_ACCESS_TTL = '15m';
+process.env.JWT_REFRESH_TTL = '7d';
+process.env.AUTH_LEGACY_MOCK_FALLBACK = 'false';
 
 const SECRET_TOKEN = 'e2e-secret-token-xyz-never-log';
 
@@ -88,11 +95,36 @@ async function main(): Promise<void> {
   const readJson = async (res: Response): Promise<unknown> =>
     (await res.json().catch(() => null)) as unknown;
 
+  // Bearer for the guarded catalog route (guard passes; the registry checks
+  // below exercise the service, not the guard).
+  async function bearerFor(app: unknown): Promise<Record<string, string>> {
+    const { TokenService } = await import('../auth/token.service');
+    const nest = app as { get: (t: unknown, o: unknown) => unknown };
+    const tokens = nest.get(TokenService, { strict: false }) as {
+      sign: (
+        claims: Record<string, unknown>,
+        secret: string,
+        ttlSec: number,
+      ) => { token: string };
+    };
+    const bearer = tokens.sign(
+      {
+        sub: '123e4567-e89b-12d3-a456-426614174001',
+        email: 'probe@rush-code.local',
+        typ: 'access',
+      },
+      process.env.JWT_ACCESS_SECRET as string,
+      900,
+    ).token;
+    return { authorization: `Bearer ${bearer}` };
+  }
+
   // --- phase 1: down (unreachable URL, soft start must not throw) ------------
   process.env.DOCKER_REGISTRY_URL = 'http://127.0.0.1:9';
   process.env.DOCKER_REGISTRY_TOKEN = SECRET_TOKEN;
   {
     const { app, base } = await boot();
+    const auth = { headers: await bearerFor(app) };
     try {
       await check('down: GET /health is 200 with registry=down', async () => {
         const res = await fetch(`${base}/health`);
@@ -102,7 +134,7 @@ async function main(): Promise<void> {
       });
 
       await check('down: GET /api/v1/registry/catalog is 503 + Retry-After', async () => {
-        const res = await fetch(`${base}/api/v1/registry/catalog`);
+        const res = await fetch(`${base}/api/v1/registry/catalog`, auth);
         assert.equal(res.status, 503);
         assert.equal(res.headers.get('retry-after'), '30');
         const body = (await readJson(res)) as {
@@ -114,6 +146,12 @@ async function main(): Promise<void> {
         assert.ok(body.correlationId, 'correlationId must be echoed');
         assert.ok(!JSON.stringify(body).includes(SECRET_TOKEN), 'secret leaked into envelope');
       });
+
+      await check('down: GET /api/v1/registry/catalog anon → 401', async () => {
+        const res = await fetch(`${base}/api/v1/registry/catalog`);
+        assert.equal(res.status, 401);
+        assert.equal(((await readJson(res)) as { code?: string }).code, 'unauthorized');
+      });
     } finally {
       await app.close();
     }
@@ -124,6 +162,7 @@ async function main(): Promise<void> {
   delete process.env.DOCKER_REGISTRY_TOKEN;
   {
     const { app, base } = await boot();
+    const auth = { headers: await bearerFor(app) };
     try {
       await check('skipped: GET /health is 200 with registry=skipped', async () => {
         const res = await fetch(`${base}/health`);
@@ -133,7 +172,7 @@ async function main(): Promise<void> {
       });
 
       await check('skipped: GET /api/v1/registry/catalog is 503', async () => {
-        const res = await fetch(`${base}/api/v1/registry/catalog`);
+        const res = await fetch(`${base}/api/v1/registry/catalog`, auth);
         assert.equal(res.status, 503);
         assert.equal(res.headers.get('retry-after'), '30');
         const body = (await readJson(res)) as { code?: string };
@@ -149,6 +188,7 @@ async function main(): Promise<void> {
   process.env.DOCKER_REGISTRY_URL = stub.url;
   {
     const { app, base } = await boot();
+    const auth = { headers: await bearerFor(app) };
     try {
       await check('up: GET /health is 200 with registry=up', async () => {
         const res = await fetch(`${base}/health`);
@@ -158,7 +198,7 @@ async function main(): Promise<void> {
       });
 
       await check('up: GET /api/v1/registry/catalog is 200 with live repos', async () => {
-        const res = await fetch(`${base}/api/v1/registry/catalog`);
+        const res = await fetch(`${base}/api/v1/registry/catalog`, auth);
         assert.equal(res.status, 200);
         const body = (await readJson(res)) as { repositories?: unknown };
         assert.deepEqual(body.repositories, ['library/nginx', 'team/app']);

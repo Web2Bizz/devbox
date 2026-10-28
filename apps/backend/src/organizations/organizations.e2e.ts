@@ -422,23 +422,21 @@ async function main(): Promise<void> {
 
       let projectId = "";
       let sessionId = "";
-      await check("link project → member sessions/files pass, stranger 404", async () => {
+      await check("nested project → owner forced (spoof ignored), member passes, stranger 404", async () => {
+        // C1: the body ownerId is ignored — the row is always owned by the
+        // Bearer identity (orgId rides in the body for schema compat, the
+        // path value wins). Spoof attempt: A sends ownerId=B.
         const created = await fetch(
-          `${base}/api/v1/projects`,
-          json({ name: "org-project", ownerId: a.id }),
+          `${base}/api/v1/organizations/${orgId}/projects`,
+          json({ name: "org-project", orgId, ownerId: b.id }, "POST", a.token),
         );
         assert.equal(created.status, 201);
-        projectId = ((await readJson(created)) as { id?: string }).id as string;
-        const link = await fetch(
-          `${base}/api/v1/organizations/${orgId}/projects/${projectId}`,
-          { method: "POST", ...auth(a.token) },
-        );
-        assert.equal(link.status, 204);
-        const relink = await fetch(
-          `${base}/api/v1/organizations/${orgId}/projects/${projectId}`,
-          { method: "POST", ...auth(a.token) },
-        );
-        assert.equal(relink.status, 409);
+        const createdBody = (await readJson(created)) as {
+          id?: string;
+          ownerId?: string;
+        };
+        projectId = createdBody.id as string;
+        assert.equal(createdBody.ownerId, a.id);
         // Org member (B) passes the scope gate…
         const made = await fetch(
           `${base}/api/v1/projects/${projectId}/sessions`,
@@ -452,6 +450,12 @@ async function main(): Promise<void> {
         );
         assert.equal(files.status, 200);
         assert.equal(files.headers.get("x-robots-tag"), "noindex");
+        // Top-level :id routes gate through the same Card 5 rule (C1).
+        const topMember = await fetch(
+          `${base}/api/v1/projects/${projectId}`,
+          auth(b.token),
+        );
+        assert.equal(topMember.status, 200);
         // …stranger (fresh D) gets 404 with no existence leak.
         const d = await register("dave");
         const deniedGet = await fetch(
@@ -469,15 +473,42 @@ async function main(): Promise<void> {
           auth(d.token),
         );
         assert.equal(deniedFiles.status, 404);
+        const deniedTop = await fetch(
+          `${base}/api/v1/projects/${projectId}`,
+          auth(d.token),
+        );
+        assert.equal(deniedTop.status, 404);
+        const anonTop = await fetch(`${base}/api/v1/projects/${projectId}`);
+        assert.equal(anonTop.status, 401);
       });
 
-      await check("user-space project: owner passes, non-owner 404", async () => {
-        const created = await fetch(
-          `${base}/api/v1/projects`,
-          json({ name: "solo-project", ownerId: a.id }),
-        );
-        assert.equal(created.status, 201);
-        const soloId = ((await readJson(created)) as { id?: string }).id as string;
+      await check("user-space project: owner passes, non-owner 404, ownerless denied (C5)", async () => {
+        // New API rows always carry an org (orgId required on create) —
+        // legacy user-space / ownerless rows are seeded directly (the hand
+        // migration surface): org_id NULL + owner, and org_id NULL + owner
+        // NULL (pre-auth legacy → deny-by-default, C5).
+        const { DbService } = await import("../db/db.service");
+        const { projects: projectsTable } = await import("../db/schema");
+        const { eq: eqOp } = await import("drizzle-orm");
+        const db = app.get(DbService, { strict: false }) as {
+          client: {
+            insert: (t: typeof projectsTable) => {
+              values: (v: Array<typeof projectsTable.$inferInsert>) => Promise<unknown>;
+            };
+            delete: (t: typeof projectsTable) => {
+              where: (c: unknown) => Promise<unknown>;
+            };
+          };
+        };
+        const soloId = "123e4567-e89b-12d3-a456-426614174071";
+        const ownerlessId = "123e4567-e89b-12d3-a456-426614174072";
+        // DELETE with no match succeeds with 0 rows (idempotent seed reset).
+        await db.client.delete(projectsTable).where(eqOp(projectsTable.id, soloId));
+        await db.client.delete(projectsTable).where(eqOp(projectsTable.id, ownerlessId));
+        await db.client.insert(projectsTable).values([
+          { id: soloId, orgId: null, name: "solo-project", ownerId: a.id },
+          { id: ownerlessId, orgId: null, name: "ownerless-project", ownerId: null },
+        ]);
         const ownerOk = await fetch(
           `${base}/api/v1/projects/${soloId}/sessions`,
           json({}, "POST", a.token),
@@ -488,24 +519,29 @@ async function main(): Promise<void> {
           json({}, "POST", b.token),
         );
         assert.equal(stranger.status, 404);
+        const ownerlessOwner = await fetch(
+          `${base}/api/v1/projects/${ownerlessId}`,
+          auth(a.token),
+        );
+        assert.equal(ownerlessOwner.status, 404);
+        const ownerlessStranger = await fetch(
+          `${base}/api/v1/projects/${ownerlessId}`,
+          auth(b.token),
+        );
+        assert.equal(ownerlessStranger.status, 404);
       });
 
-      await check("unlink restores owner-only scope", async () => {
+      await check("link/unlink removed (1:1) → 410", async () => {
+        const link = await fetch(
+          `${base}/api/v1/organizations/${orgId}/projects/${projectId}`,
+          { method: "POST", ...auth(a.token) },
+        );
+        assert.equal(link.status, 410);
         const unlink = await fetch(
           `${base}/api/v1/organizations/${orgId}/projects/${projectId}`,
           { method: "DELETE", ...auth(a.token) },
         );
-        assert.equal(unlink.status, 204);
-        const memberDenied = await fetch(
-          `${base}/api/v1/projects/${projectId}/sessions/${sessionId}`,
-          auth(b.token),
-        );
-        assert.equal(memberDenied.status, 404);
-        const ownerOk = await fetch(
-          `${base}/api/v1/projects/${projectId}/sessions/${sessionId}`,
-          auth(a.token),
-        );
-        assert.equal(ownerOk.status, 200);
+        assert.equal(unlink.status, 410);
       });
 
       await check("GET /api/v1/users/:id — own 200, чужой 403, без токена 401", async () => {

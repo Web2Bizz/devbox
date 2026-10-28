@@ -15,16 +15,12 @@ import {
 } from "@nestjs/common";
 import {
   ApiBearerAuth,
-  ApiHeader,
   ApiQuery,
   ApiResponse,
   ApiTags,
 } from "@nestjs/swagger";
 import { V1Endpoint } from "../../api/version";
-import {
-  DEFAULT_MOCK_USER_ID,
-  resolveIdentityUserId,
-} from "../../auth/identity.service";
+import { DEFAULT_MOCK_USER_ID } from "../../auth/identity.service";
 import { JwtAuthGuard } from "../../auth/jwt-auth.guard";
 import { ReqUser } from "../../auth/req-user.decorator";
 import type { RequestIdentity } from "../../auth/identity.service";
@@ -56,11 +52,11 @@ import { GithubService } from "./github.service";
 export { DEFAULT_MOCK_USER_ID };
 
 /**
- * Resolves the MVP user key: x-user-id header wins, then ?userId query,
- * then the 'default' dev user. Single copy lives in
- * auth/identity.service.ts (re-exported here for compat).
+ * resolveUserId re-export kept for import compat only — the controller no
+ * longer calls it (C2: userId comes from @ReqUser(), header/query
+ * spoofing removed).
  */
-export { resolveIdentityUserId as resolveUserId };
+export { resolveIdentityUserId as resolveUserId } from "../../auth/identity.service";
 
 /**
  * GithubController — multi-tenant GitHub App surface.
@@ -72,6 +68,11 @@ export { resolveIdentityUserId as resolveUserId };
  * - GET  /api/v1/projects/github/repos (per-user installation repos)
  * 401 when GITHUB_APP_* is unconfigured; 404 GITHUB_NOT_INSTALLED when the
  * user has no installation; GithubLink endpoints untouched.
+ *
+ * Identity (C2): userId comes ONLY from @ReqUser() (Bearer via
+ * JwtAuthGuard) — the legacy x-user-id header / ?userId query spoofing is
+ * removed (same ownUserId doctrine as OpencodeKeysController). A forged
+ * header/query is ignored, never trusted.
  */
 @ApiTags("projects-github")
 @Controller("projects/github")
@@ -119,12 +120,6 @@ export class GithubController {
     type: String,
     example: "install",
   })
-  @ApiQuery({ name: "userId", required: false, type: String, example: "dev-1" })
-  @ApiHeader({
-    name: "x-user-id",
-    required: false,
-    description: "MVP mock user key (wins over ?userId)",
-  })
   @ApiResponse({ status: 200, type: GithubCallbackResultDto })
   @ApiResponse({
     status: 400,
@@ -133,12 +128,10 @@ export class GithubController {
   async callback(
     @Query(new ZodValidationPipe(installCallbackQuerySchema))
     query: InstallCallbackQueryInput,
-    @Req() req: unknown,
-    @ReqUser() _identity?: RequestIdentity,
+    @ReqUser() identity: RequestIdentity,
     @Headers("x-correlation-id") correlationId?: string,
   ): Promise<GithubCallbackResultDto> {
-    void _identity;
-    const userId = resolveIdentityUserId(req, query.userId);
+    const userId = identity.id;
     await this.installations.upsert(
       { installationId: query.installation_id, userId },
       correlationId,
@@ -226,12 +219,6 @@ export class GithubController {
   @ApiBearerAuth()
   @ApiQuery({ name: "page", required: false, type: Number, example: 1 })
   @ApiQuery({ name: "per_page", required: false, type: Number, example: 30 })
-  @ApiQuery({ name: "userId", required: false, type: String, example: "dev-1" })
-  @ApiHeader({
-    name: "x-user-id",
-    required: false,
-    description: "MVP mock user key (wins over ?userId)",
-  })
   @ApiResponse({ status: 200, type: [GithubRepoDto] })
   @ApiResponse({
     status: 401,
@@ -244,15 +231,13 @@ export class GithubController {
   async list(
     @Query(new ZodValidationPipe(listReposQuerySchema))
     query: ListReposQueryInput,
-    @Req() req: unknown,
-    @ReqUser() _identity?: RequestIdentity,
+    @ReqUser() identity: RequestIdentity,
     @Headers("x-correlation-id") correlationId?: string,
   ): Promise<GithubRepoDto[]> {
-    void _identity;
     if (!this.appAuth.isConfigured()) {
       throw new UnauthorizedException("GitHub App is not configured");
     }
-    const userId = resolveIdentityUserId(req, query.userId);
+    const userId = identity.id;
     const stored = await this.installations.findByUserId(userId, correlationId);
     // Legacy dev fallback: single GITHUB_APP_INSTALLATION_ID install applies
     // to the default mock user when no per-user binding exists.

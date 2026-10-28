@@ -3,10 +3,13 @@
  *
  * Runs against COMPILED dist: `bun run build && bun dist/repos/repos.e2e.js`.
  *
- * Covers: GET /api/v1/repos lists only valid git repos (no-git + corrupted
- * skipped, never 500), GET /api/v1/repos/:userSpace per-space filtering,
- * invalid userSpace → 400, POST /api/v1/repos → 404 (readonly: GET only),
- * missing root → 200 []. Never logs secrets; reports db 'down' (strict Postgres).
+ * Covers: GET /api/v1/repos lists only your own space (Bearer identity,
+ * no-git + corrupted skipped, never 500), GET /api/v1/repos/:userSpace
+ * per-space filtering (own space 200, foreign space 404 — 503 here since
+ * the member gate needs PG and this suite runs without DB), invalid
+ * userSpace → 400, anonymous → 401, POST /api/v1/repos → 404 (readonly:
+ * GET only), missing root → 200 []. Never logs secrets; reports db 'down'
+ * (strict Postgres).
  */
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -38,6 +41,13 @@ process.env.DATABASE_URL = '';
 for (const key of ['POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB', 'POSTGRES_HOST']) {
   delete process.env[key];
 }
+// Guarded readonly surface (C3): Bearer past JwtAuthGuard, own-space scope.
+// No DB here — the foreign-space member gate denies 503 (same envelope).
+process.env.JWT_ACCESS_SECRET = 'e2e-access-secret-not-real-0123456789';
+process.env.JWT_REFRESH_SECRET = 'e2e-refresh-secret-not-real-0123456789';
+process.env.JWT_ACCESS_TTL = '15m';
+process.env.JWT_REFRESH_TTL = '7d';
+process.env.AUTH_LEGACY_MOCK_FALLBACK = 'false';
 
 async function main(): Promise<void> {
   const { NestFactory } = await import('@nestjs/core');
@@ -65,9 +75,26 @@ async function main(): Promise<void> {
   const readJson = async (res: Response): Promise<unknown> =>
     (await res.json().catch(() => null)) as unknown;
 
+  // Bearer caller = the fixture space owner (E2E_UID). Hand-signed
+  // (TokenService.sign is pure, no DB — organizations unreachable pattern).
+  const { TokenService } = await import('../auth/token.service');
+  const tokens = app.get(TokenService, { strict: false }) as {
+    sign: (
+      claims: Record<string, unknown>,
+      secret: string,
+      ttlSec: number,
+    ) => { token: string };
+  };
+  const bearer = tokens.sign(
+    { sub: E2E_UID, email: 'probe@rush-code.local', typ: 'access' },
+    process.env.JWT_ACCESS_SECRET as string,
+    900,
+  ).token;
+  const auth = { headers: { authorization: `Bearer ${bearer}` } };
+
   try {
-    await check('GET /api/v1/repos lists only the valid repo', async () => {
-      const res = await fetch(`${base}/api/v1/repos`);
+    await check('GET /api/v1/repos lists only the valid repo (own space)', async () => {
+      const res = await fetch(`${base}/api/v1/repos`, auth);
       assert.equal(res.status, 200);
       const body = (await readJson(res)) as Array<{ name?: string; path?: string }>;
       assert.ok(Array.isArray(body));
@@ -76,33 +103,41 @@ async function main(): Promise<void> {
       assert.equal(body[0].path, `users/${E2E_UID}/projects/${E2E_PID}/content`);
     });
 
+    await check('GET /api/v1/repos anon → 401', async () => {
+      const res = await fetch(`${base}/api/v1/repos`);
+      assert.equal(res.status, 401);
+      assert.equal(((await readJson(res)) as { code?: string }).code, 'unauthorized');
+    });
+
     await check('GET /api/v1/repos?q filters by name', async () => {
-      const hit = await fetch(`${base}/api/v1/repos?q=DEM`);
+      const hit = await fetch(`${base}/api/v1/repos?q=DEM`, auth);
       assert.equal(hit.status, 200);
       assert.equal(((await readJson(hit)) as unknown[]).length, 1);
-      const miss = await fetch(`${base}/api/v1/repos?q=zzz-nope`);
+      const miss = await fetch(`${base}/api/v1/repos?q=zzz-nope`, auth);
       assert.equal(miss.status, 200);
       assert.deepEqual(await readJson(miss), []);
     });
 
     await check('GET /api/v1/repos/:userSpace scopes to one space', async () => {
-      const res = await fetch(`${base}/api/v1/repos/${E2E_UID}`);
+      const res = await fetch(`${base}/api/v1/repos/${E2E_UID}`, auth);
       assert.equal(res.status, 200);
       assert.equal(((await readJson(res)) as unknown[]).length, 1);
-      const empty = await fetch(`${base}/api/v1/repos/nobody-here`);
-      assert.equal(empty.status, 200);
-      assert.deepEqual(await readJson(empty), []);
+      // Foreign space: the member gate needs PG — without DB it denies 503
+      // (same EXTERNAL_UNAVAILABLE envelope); with DB a stranger gets 404.
+      const empty = await fetch(`${base}/api/v1/repos/nobody-here`, auth);
+      assert.equal(empty.status, 503);
+      assert.equal(((await readJson(empty)) as { code?: string }).code, 'EXTERNAL_UNAVAILABLE');
     });
 
     await check('GET /api/v1/repos/:userSpace invalid chars → 400', async () => {
-      const res = await fetch(`${base}/api/v1/repos/bad!space`);
+      const res = await fetch(`${base}/api/v1/repos/bad!space`, auth);
       assert.equal(res.status, 400);
     });
 
     await check('POST /api/v1/repos → 404 (readonly, GET only)', async () => {
       const res = await fetch(`${base}/api/v1/repos`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${bearer}` },
         body: JSON.stringify({}),
       });
       assert.equal(res.status, 404);
@@ -110,7 +145,7 @@ async function main(): Promise<void> {
 
     await check('missing REPOS_ROOT → 200 [] (never 500)', async () => {
       process.env.REPOS_ROOT = path.join(REPOS_ROOT, 'definitely-missing-xyz');
-      const res = await fetch(`${base}/api/v1/repos`);
+      const res = await fetch(`${base}/api/v1/repos`, auth);
       assert.equal(res.status, 200);
       assert.deepEqual(await readJson(res), []);
     });

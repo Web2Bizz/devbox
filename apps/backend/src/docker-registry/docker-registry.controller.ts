@@ -1,7 +1,8 @@
-import { Controller, Get, Headers, Version } from '@nestjs/common';
-import { ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Controller, Get, Headers, UseGuards, Version } from '@nestjs/common';
+import { ApiBearerAuth, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { V1Endpoint } from '../api/version';
 import { ApiErrorDto } from '../api/dto';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { DockerRegistryService } from './docker-registry.service';
 import { RegistryCatalogDto } from './dto';
 
@@ -12,8 +13,13 @@ import { RegistryCatalogDto } from './dto';
  *   upstream GET /v2/_catalog; 503 EXTERNAL_UNAVAILABLE + Retry-After 30
  *   when the registry is unconfigured or unreachable — no mock 200s).
  * - Health is surfaced via GET /health (`registry: up | down | skipped`).
+ *
+ * Security (Card C3): Bearer-guarded read-only surface (JwtAuthGuard;
+ * anonymous → 401). No per-row scoping — the catalog is not user data.
  */
 @ApiTags('docker-registry')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller('registry')
 export class DockerRegistryController {
   constructor(private readonly registry: DockerRegistryService) {}

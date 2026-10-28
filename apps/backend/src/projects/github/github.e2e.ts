@@ -31,6 +31,13 @@ import { createHmac } from "node:crypto";
 process.env.APP_BACKEND_PORT ??= "3000";
 process.env.REQUEST_TIMEOUT_MS = "2000";
 process.env.OPENCODE_URL = "http://127.0.0.1:9";
+// Identity-only auth (C2): callback/repos need a Bearer past JwtAuthGuard;
+// userIds below ride as JWT subs (hand-signed, TokenService.sign is pure).
+process.env.JWT_ACCESS_SECRET = "e2e-access-secret-not-real-0123456789";
+process.env.JWT_REFRESH_SECRET = "e2e-refresh-secret-not-real-0123456789";
+process.env.JWT_ACCESS_TTL = "15m";
+process.env.JWT_REFRESH_TTL = "7d";
+process.env.AUTH_LEGACY_MOCK_FALLBACK = "false";
 for (const key of [
   "GITHUB_APP_ID",
   "GITHUB_APP_PRIVATE_KEY",
@@ -117,6 +124,29 @@ async function main(): Promise<void> {
   const readJson = async (res: Response): Promise<unknown> =>
     (await res.json().catch(() => null)) as unknown;
 
+  // Bearer minting per phase (JWT sub = the caller's user key; installations
+  // bind to the same string — C2 identity-only, no x-user-id / ?userId).
+  async function bearerFor(
+    app: unknown,
+    sub: string,
+  ): Promise<Record<string, string>> {
+    const { TokenService } = await import("../../auth/token.service");
+    const nest = app as { get: (t: unknown, o: unknown) => unknown };
+    const tokens = nest.get(TokenService, { strict: false }) as {
+      sign: (
+        claims: Record<string, unknown>,
+        secret: string,
+        ttlSec: number,
+      ) => { token: string };
+    };
+    const bearer = tokens.sign(
+      { sub, email: `${sub}@rush-code.local`, typ: "access" },
+      process.env.JWT_ACCESS_SECRET as string,
+      900,
+    ).token;
+    return { authorization: `Bearer ${bearer}` };
+  }
+
   function stubOctokitFetch(): { lastUrl: () => string } {
     let lastUrl = "";
     __setGithubFetchForTests((async (input: unknown) => {
@@ -145,6 +175,7 @@ async function main(): Promise<void> {
     configureApp(app);
     await app.listen(0);
     const base = await app.getUrl();
+    const alice = await bearerFor(app, "alice");
     try {
       await check(
         "callback without PG → 503 EXTERNAL_UNAVAILABLE",
@@ -152,7 +183,7 @@ async function main(): Promise<void> {
           const cid = "e2e-github-503-0001";
           const res = await fetch(
             `${base}/api/v1/projects/github/callback?installation_id=111&setup_action=install`,
-            { headers: { "x-correlation-id": cid } },
+            { headers: { "x-correlation-id": cid, ...alice } },
           );
           assert.equal(res.status, 503);
           const body = (await readJson(res)) as {
@@ -178,6 +209,13 @@ async function main(): Promise<void> {
         assert.equal(body.status, "ok");
         assert.equal(body.db, "down");
       });
+
+      await check("callback anon (no Bearer) → 401", async () => {
+        const res = await fetch(
+          `${base}/api/v1/projects/github/callback?installation_id=111&setup_action=install`,
+        );
+        assert.equal(res.status, 401);
+      });
     } finally {
       await app.close();
     }
@@ -192,12 +230,20 @@ async function main(): Promise<void> {
     configureApp(app);
     await app.listen(0);
     const base = await app.getUrl();
+    const alice = await bearerFor(app, "alice");
     try {
-      await check("GET repos w/o config → 401", async () => {
-        const res = await fetch(`${base}/api/v1/projects/github/repos`);
+      await check("GET repos w/o config → 401 (app unconfigured)", async () => {
+        const res = await fetch(`${base}/api/v1/projects/github/repos`, {
+          headers: { ...alice },
+        });
         assert.equal(res.status, 401);
         const body = (await readJson(res)) as { code?: string };
         assert.equal(body.code, "unauthorized");
+      });
+
+      await check("GET repos anon (no Bearer) → 401", async () => {
+        const res = await fetch(`${base}/api/v1/projects/github/repos`);
+        assert.equal(res.status, 401);
       });
 
       await check("GET install-url w/o slug → 503", async () => {
@@ -213,9 +259,10 @@ async function main(): Promise<void> {
         assert.equal(res.status, 503);
       });
 
-      await check("GET callback binds (200, harmless w/o config)", async () => {
+      await check("GET callback binds alice (200, harmless w/o config)", async () => {
         const res = await fetch(
           `${base}/api/v1/projects/github/callback?installation_id=111&setup_action=install`,
+          { headers: { ...alice } },
         );
         assert.equal(res.status, 200);
         const body = (await readJson(res)) as {
@@ -229,24 +276,17 @@ async function main(): Promise<void> {
       await check("GET callback bad installation_id → 400", async () => {
         const res = await fetch(
           `${base}/api/v1/projects/github/callback?installation_id=nope`,
+          { headers: { ...alice } },
         );
         assert.equal(res.status, 400);
       });
 
-      await check(
-        "github-link format-validation still 200 (no regression)",
-        async () => {
-          const created = (await (
-            await fetch(`${base}/api/v1/projects`, json({ name: "gh-e2e" }))
-          ).json()) as { id?: string };
-          assert.ok(created.id);
-          const link = await fetch(
-            `${base}/api/v1/projects/${created.id}/github-link`,
-            json({ owner: "acme", repo: "demo", branch: "main" }),
-          );
-          assert.equal(link.status, 200);
-        },
-      );
+      await check("GET callback anon (no Bearer) → 401", async () => {
+        const res = await fetch(
+          `${base}/api/v1/projects/github/callback?installation_id=111&setup_action=install`,
+        );
+        assert.equal(res.status, 401);
+      });
     } finally {
       await app.close();
     }
@@ -310,6 +350,9 @@ async function main(): Promise<void> {
 
     await app.listen(0);
     const base = await app.getUrl();
+    const alice = await bearerFor(app, "alice");
+    const bob = await bearerFor(app, "bob");
+    const carol = await bearerFor(app, "carol");
     try {
       await check("GET install-url → 200 with slug", async () => {
         const res = await fetch(`${base}/api/v1/projects/github/install-url`);
@@ -323,8 +366,8 @@ async function main(): Promise<void> {
 
       await check("callback binds alice → install 111", async () => {
         const res = await fetch(
-          `${base}/api/v1/projects/github/callback?installation_id=111&setup_action=install&userId=alice`,
-          { headers: { "x-user-id": "alice" } },
+          `${base}/api/v1/projects/github/callback?installation_id=111&setup_action=install`,
+          { headers: { ...alice } },
         );
         assert.equal(res.status, 200);
       });
@@ -333,7 +376,7 @@ async function main(): Promise<void> {
         const res = await fetch(
           `${base}/api/v1/projects/github/repos?page=1&per_page=2`,
           {
-            headers: { "x-user-id": "alice" },
+            headers: { ...alice },
           },
         );
         assert.equal(res.status, 200);
@@ -362,10 +405,13 @@ async function main(): Promise<void> {
       });
 
       await check(
-        "GET repos query userId fallback (no header) → 200",
+        "GET repos ignores spoofed ?userId (Bearer alice wins) → 200",
         async () => {
+          // Bob has no installation — if ?userId were honored this would
+          // 404 GITHUB_NOT_INSTALLED. The Bearer identity always wins (C2).
           const res = await fetch(
-            `${base}/api/v1/projects/github/repos?userId=alice`,
+            `${base}/api/v1/projects/github/repos?userId=bob`,
+            { headers: { ...alice } },
           );
           assert.equal(res.status, 200);
         },
@@ -375,7 +421,7 @@ async function main(): Promise<void> {
         "GET repos bob (no install) → 404 GITHUB_NOT_INSTALLED",
         async () => {
           const res = await fetch(`${base}/api/v1/projects/github/repos`, {
-            headers: { "x-user-id": "bob" },
+            headers: { ...bob },
           });
           assert.equal(res.status, 404);
           const body = (await readJson(res)) as { code?: string };
@@ -387,7 +433,7 @@ async function main(): Promise<void> {
         const res = await fetch(
           `${base}/api/v1/projects/github/repos?per_page=999`,
           {
-            headers: { "x-user-id": "alice" },
+            headers: { ...alice },
           },
         );
         assert.equal(res.status, 400);
@@ -395,7 +441,7 @@ async function main(): Promise<void> {
 
       await check("GET repos page=0 → 400", async () => {
         const res = await fetch(`${base}/api/v1/projects/github/repos?page=0`, {
-          headers: { "x-user-id": "alice" },
+          headers: { ...alice },
         });
         assert.equal(res.status, 400);
       });
@@ -430,7 +476,7 @@ async function main(): Promise<void> {
         async () => {
           const cb = await fetch(
             `${base}/api/v1/projects/github/callback?installation_id=333&setup_action=install`,
-            { headers: { "x-user-id": "carol" } },
+            { headers: { ...carol } },
           );
           assert.equal(cb.status, 200);
           const wh = await postWebhook(
@@ -445,7 +491,7 @@ async function main(): Promise<void> {
           );
           assert.equal(wh.status, 200);
           const repos = await fetch(`${base}/api/v1/projects/github/repos`, {
-            headers: { "x-user-id": "carol" },
+            headers: { ...carol },
           });
           assert.equal(repos.status, 200);
         },
@@ -458,7 +504,7 @@ async function main(): Promise<void> {
         );
         assert.equal(wh.status, 200);
         const repos = await fetch(`${base}/api/v1/projects/github/repos`, {
-          headers: { "x-user-id": "carol" },
+          headers: { ...carol },
         });
         assert.equal(repos.status, 401);
       });
@@ -470,7 +516,7 @@ async function main(): Promise<void> {
         );
         assert.equal(wh.status, 200);
         const repos = await fetch(`${base}/api/v1/projects/github/repos`, {
-          headers: { "x-user-id": "carol" },
+          headers: { ...carol },
         });
         assert.equal(repos.status, 200);
       });
@@ -482,7 +528,7 @@ async function main(): Promise<void> {
         );
         assert.equal(wh.status, 200);
         const repos = await fetch(`${base}/api/v1/projects/github/repos`, {
-          headers: { "x-user-id": "carol" },
+          headers: { ...carol },
         });
         assert.equal(repos.status, 404);
         const body = (await readJson(repos)) as { code?: string };
@@ -518,15 +564,21 @@ async function main(): Promise<void> {
     stubOctokitFetch();
     await app.listen(0);
     const base = await app.getUrl();
+    // Legacy single-install: only the 'default' Bearer identity rides the
+    // fallback install (C2: no header/query spoofing — identity only).
+    const def = await bearerFor(app, "default");
+    const stranger = await bearerFor(app, "stranger");
     try {
       await check("legacy fallback: default user repos → 200", async () => {
-        const res = await fetch(`${base}/api/v1/projects/github/repos`);
+        const res = await fetch(`${base}/api/v1/projects/github/repos`, {
+          headers: { ...def },
+        });
         assert.equal(res.status, 200);
       });
 
       await check("legacy fallback: other user still 404", async () => {
         const res = await fetch(`${base}/api/v1/projects/github/repos`, {
-          headers: { "x-user-id": "stranger" },
+          headers: { ...stranger },
         });
         assert.equal(res.status, 404);
       });

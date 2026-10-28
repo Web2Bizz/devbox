@@ -9,17 +9,13 @@ import {
   Param,
   Post,
   Query,
-  Req,
   UseGuards,
   Version,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiHeader, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Inject, Optional, forwardRef } from '@nestjs/common';
 import { V1Endpoint } from '../api/version';
-import {
-  DEFAULT_MOCK_USER_ID as DEFAULT_WORKSPACE_USER_ID,
-  resolveIdentityUserId as resolveUserId,
-} from '../auth/identity.service';
+import { DEFAULT_MOCK_USER_ID as DEFAULT_WORKSPACE_USER_ID } from '../auth/identity.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ReqUser } from '../auth/req-user.decorator';
 import type { RequestIdentity } from '../auth/identity.service';
@@ -42,7 +38,13 @@ import { WorkspacesService } from './workspaces.service';
 
 /** MVP mock user key (single copy lives in auth/identity.service.ts). */
 export { DEFAULT_WORKSPACE_USER_ID };
-export { resolveUserId };
+
+/**
+ * resolveUserId re-export kept for import compat only — the controller no
+ * longer calls it (C2: userId comes from @ReqUser(), header/query
+ * spoofing removed).
+ */
+export { resolveIdentityUserId as resolveUserId } from '../auth/identity.service';
 
 function toJobDto(job: {
   userSpace: string;
@@ -74,8 +76,11 @@ function toJobDto(job: {
  * - GET /api/v1/workspaces/:repo/tree — jailed readonly listing (path+depth)
  * - GET /api/v1/workspaces/:repo/submodules — parsed .gitmodules + status
  *
- * Identity: x-user-id header wins over ?userId (same MVP rule as GitHub).
- * When `installationId` is supplied it must belong to the requesting userId
+ * Identity (C2): userId comes ONLY from @ReqUser() (Bearer via
+ * JwtAuthGuard) — the legacy x-user-id header / ?userId query spoofing is
+ * removed (same ownUserId doctrine as OpencodeKeysController). A forged
+ * header is ignored, never trusted. When `installationId` is supplied it
+ * must belong to the requesting identity
  * (GithubInstallationsService binding) — otherwise 403. Existing
  * repos/projects/opencode routes are untouched.
  */
@@ -107,22 +112,16 @@ export class WorkspacesController {
   @HttpCode(202)
   @V1Endpoint('Clone a repo into the per-user workspace (idempotent, per-user lock)')
   @ApiBearerAuth()
-  @ApiHeader({ name: 'x-user-id', required: false, description: 'MVP mock user key (wins over ?userId)' })
   @ApiResponse({ status: 202, type: WorkspaceCloneJobDto })
   @ApiResponse({ status: 400, description: 'bad repoUrl/repoName' })
   @ApiResponse({ status: 403, description: 'installation belongs to another user' })
   @ApiResponse({ status: 503, description: 'storage unconfigured (EXTERNAL_UNAVAILABLE, Retry-After)' })
   async clone(
     @Body(new ZodValidationPipe(cloneWorkspaceSchema)) body: CloneWorkspaceInput,
-    @Req() req: unknown,
-    @Query('userId') queryUserId?: string,
-    @Headers('x-user-id') _headerUserId?: string,
-    @ReqUser() _identity?: RequestIdentity,
+    @ReqUser() identity: RequestIdentity,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<WorkspaceCloneJobDto> {
-    void _headerUserId;
-    void _identity;
-    const userId = resolveUserId(req, queryUserId);
+    const userId = identity.id;
     await this.assertInstallationOwner(userId, body.installationId);
     const job = await this.clones.clone(userId, body.repoUrl, body.repoName, correlationId);
     return toJobDto(job);
@@ -134,22 +133,17 @@ export class WorkspacesController {
   @V1Endpoint('Clone job status for a repo in the per-user workspace')
   @ApiBearerAuth()
   @ApiParam({ name: 'repo', example: 'demo' })
-  @ApiHeader({ name: 'x-user-id', required: false, description: 'MVP mock user key (wins over ?userId)' })
   @ApiResponse({ status: 200, type: WorkspaceCloneJobDto })
   @ApiResponse({ status: 404, description: 'no clone job for this repo+user' })
   cloneStatus(
     @Param('repo') repo: string,
-    @Req() req: unknown,
-    @Query('userId') queryUserId?: string,
-    @ReqUser() _identity?: RequestIdentity,
+    @ReqUser() identity: RequestIdentity,
   ): WorkspaceCloneJobDto {
-    void _identity;
     const parsed = workspaceRepoSchema.safeParse(repo);
     if (!parsed.success) {
       throw new NotFoundException(`No clone job for repo ${repo}`);
     }
-    const userId = resolveUserId(req, queryUserId);
-    const job = this.jobs.get(userId, parsed.data);
+    const job = this.jobs.get(identity.id, parsed.data);
     if (!job) throw new NotFoundException(`No clone job for repo ${parsed.data}`);
     return toJobDto(job);
   }
@@ -162,26 +156,21 @@ export class WorkspacesController {
   @ApiParam({ name: 'repo', example: 'demo' })
   @ApiQuery({ name: 'path', required: false, example: '.' })
   @ApiQuery({ name: 'depth', required: false, example: 1 })
-  @ApiHeader({ name: 'x-user-id', required: false, description: 'MVP mock user key (wins over ?userId)' })
   @ApiResponse({ status: 200, type: WorkspaceTreeNodeDto })
   @ApiResponse({ status: 403, description: 'traversal forbidden' })
   @ApiResponse({ status: 503, description: 'storage unconfigured (EXTERNAL_UNAVAILABLE, Retry-After)' })
   async tree(
     @Param('repo') repo: string,
     @Query(new ZodValidationPipe(workspaceTreeQuerySchema)) query: WorkspaceTreeQuery,
-    @Req() req: unknown,
-    @Query('userId') queryUserId?: string,
-    @ReqUser() _identity?: RequestIdentity,
+    @ReqUser() identity: RequestIdentity,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<WorkspaceTreeNodeDto> {
-    void _identity;
     const parsed = workspaceRepoSchema.safeParse(repo);
     if (!parsed.success) {
       throw new NotFoundException(`Repo ${repo} not found`);
     }
-    const userId = resolveUserId(req, queryUserId);
     return (await this.workspaces.tree(
-      userId,
+      identity.id,
       parsed.data,
       query.path ?? '.',
       Number(query.depth ?? 1),
@@ -195,24 +184,19 @@ export class WorkspacesController {
   @V1Endpoint('Workspace repo submodules (.gitmodules + status, jailed paths)')
   @ApiBearerAuth()
   @ApiParam({ name: 'repo', example: 'demo' })
-  @ApiHeader({ name: 'x-user-id', required: false, description: 'MVP mock user key (wins over ?userId)' })
   @ApiResponse({ status: 200, type: [WorkspaceSubmoduleDto] })
   @ApiResponse({ status: 404, description: 'repo not found' })
   @ApiResponse({ status: 503, description: 'storage unconfigured (EXTERNAL_UNAVAILABLE, Retry-After)' })
   async submodules(
     @Param('repo') repo: string,
-    @Req() req: unknown,
-    @Query('userId') queryUserId?: string,
-    @ReqUser() _identity?: RequestIdentity,
+    @ReqUser() identity: RequestIdentity,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<WorkspaceSubmoduleDto[]> {
-    void _identity;
     const parsed = workspaceRepoSchema.safeParse(repo);
     if (!parsed.success) {
       throw new NotFoundException(`Repo ${repo} not found`);
     }
-    const userId = resolveUserId(req, queryUserId);
-    return this.workspaces.submodules(userId, parsed.data, correlationId);
+    return this.workspaces.submodules(identity.id, parsed.data, correlationId);
   }
 }
 

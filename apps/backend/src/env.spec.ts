@@ -656,16 +656,22 @@ const checks: Array<{ name: string; run: () => void }> = [
     },
   },
   {
-    name: 'AUTH_LEGACY_MOCK_FALLBACK unset → true + WARN; false disables; garbage ERRORs',
+    name: 'AUTH_LEGACY_MOCK_FALLBACK unset → false + WARN; explicit true enables + WARN (dev only); garbage ERRORs',
     run: () => {
       const unset = validateEnvWithWarnings(without(baseEnv(), 'AUTH_LEGACY_MOCK_FALLBACK'));
-      assert.equal(unset.env.authLegacyMockFallback, true);
+      assert.equal(unset.env.authLegacyMockFallback, false);
       assert.ok(
         unset.warnings.some((w) => w.includes('AUTH_LEGACY_MOCK_FALLBACK')),
         `expected fallback WARN, got: ${JSON.stringify(unset.warnings)}`,
       );
       const off = validateEnv({ ...baseEnv(), AUTH_LEGACY_MOCK_FALLBACK: 'false' } as Source);
       assert.equal(off.authLegacyMockFallback, false);
+      const on = validateEnvWithWarnings({ ...baseEnv(), AUTH_LEGACY_MOCK_FALLBACK: 'true' } as Source);
+      assert.equal(on.env.authLegacyMockFallback, true);
+      assert.ok(
+        on.warnings.some((w) => w.includes('AUTH_LEGACY_MOCK_FALLBACK')),
+        `expected explicit-enable WARN, got: ${JSON.stringify(on.warnings)}`,
+      );
       expectThrow(
         () => validateEnv({ ...baseEnv(), AUTH_LEGACY_MOCK_FALLBACK: 'maybe' } as Source),
         /\[env\] AUTH_LEGACY_MOCK_FALLBACK/,

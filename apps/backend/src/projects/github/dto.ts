@@ -13,11 +13,8 @@ import { z } from 'zod';
 export const listReposQuerySchema = z.object({
   page: z.coerce.number().int().min(1).max(1000).default(1),
   per_page: z.coerce.number().int().min(1).max(100).default(30),
-  /**
-   * MVP mock user key (fallback when the x-user-id header is absent).
-   * Header wins over query; both fall back to the 'default' dev user.
-   */
-  userId: z.string().trim().min(1).max(100).optional(),
+  // NOTE (C2): no userId — the caller is the Bearer identity (@ReqUser());
+  // a ?userId query is stripped by validation and never trusted.
 });
 
 export type ListReposQueryInput = z.infer<typeof listReposQuerySchema>;
@@ -28,13 +25,6 @@ export class ListReposQueryDto {
 
   @ApiProperty({ required: false, minimum: 1, maximum: 100, default: 30, example: 30 })
   per_page?: number;
-
-  @ApiProperty({
-    required: false,
-    description: 'MVP mock user key (x-user-id header wins over this query param)',
-    example: 'dev-1',
-  })
-  userId?: string;
 }
 
 export class GithubRepoDto {
@@ -66,11 +56,12 @@ export class GithubInstallUrlDto {
   url!: string;
 }
 
-/** GET /projects/github/callback?installation_id=&setup_action=[&userId=] */
+/** GET /projects/github/callback?installation_id=&setup_action= */
 export const installCallbackQuerySchema = z.object({
   installation_id: z.coerce.number().int().positive(),
   setup_action: z.string().trim().min(1).max(50).default('install'),
-  userId: z.string().trim().min(1).max(100).optional(),
+  // NOTE (C2): no userId — the binding target is the Bearer identity
+  // (@ReqUser()); a ?userId query is stripped by validation and never trusted.
 });
 
 export type InstallCallbackQueryInput = z.infer<typeof installCallbackQuerySchema>;
@@ -81,13 +72,6 @@ export class InstallCallbackQueryDto {
 
   @ApiProperty({ required: false, default: 'install', example: 'install' })
   setup_action?: string;
-
-  @ApiProperty({
-    required: false,
-    description: 'MVP mock user key (x-user-id header wins over this query param)',
-    example: 'dev-1',
-  })
-  userId?: string;
 }
 
 export class GithubCallbackResultDto {

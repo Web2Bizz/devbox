@@ -13,24 +13,34 @@ import {
   Query,
   Res,
   Req,
+  UseGuards,
   Version,
   VERSION_NEUTRAL,
 } from '@nestjs/common';
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
-import type {
-  EventSubscribeData,
-  GlobalEventData,
-  Session,
-  SessionCommandData,
-  SessionForkData,
-  SessionMessagesData,
-  SessionPromptAsyncData,
-  SessionPromptData,
-  SessionShellData,
-  SessionUpdateData,
-} from '@opencode-ai/sdk';
+// NOTE: v2 SDK (pinned 1.18.33, `./v2` subpath) — flat params
+// (`{ sessionID, directory, ...body }`, signal via the 2nd options arg),
+// NOT the v1 `{ path, body, query }` nesting. Reads (+ providers/sse)
+// go through the v2 `/api/*` namespace (`client.v2.session/*`,
+// `client.v2.provider`, `client.v2.event`) — the stand serves the API
+// there, while the legacy `/session`, `/event`, `/config/providers`
+// root answers SPA text/html (SDK throws `Server responded with
+// text/html`). `session.create` already goes through the v2 namespace
+// (`client.v2.session.create` → POST /api/session, minimal `{}` body —
+// the legacy POST /session answers 405). Writes without a v2 equivalent
+// (update/delete/fork/prompt/prompt_async/command/shell, status, abort,
+// global.event)
+// stay on the legacy `Session2`/`Config2`/`Event`/`Global` surface —
+// the same paths this controller mirrors under `/api/opencode/*`.
+import type { OutputFormat, Session, SessionV2Info } from '@opencode-ai/sdk/v2';
 import { OpencodeSdkClient } from './opencode-client';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import type { RequestIdentity } from '../auth/identity.service';
+import { ReqUser } from '../auth/req-user.decorator';
+import { OrganizationsService } from '../organizations/organizations.service';
+import { ownerKeyOrThrow } from '../projects/projects.service';
+import { WorkspacePathService } from '../workspaces/workspace-path.service';
 import { OpencodeService } from './opencode.service';
 import { AppLogger } from '../common/app-logger.service';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
@@ -69,6 +79,30 @@ type SseSubscription = {
  * base URL (`<NEXT_PUBLIC_API_URL>/api/opencode`) with no new contracts
  * and no direct browser → opencode calls.
  *
+ * Auth: every upstream route except GET global/health requires JwtAuthGuard
+ * (@ReqUser() identity → real-user gate: non-uuid mock → 401
+ * `unauthorized`); upstream auth is the server Basic password
+ * (OPENCODE_PASSWORD, unset → no header, upstream 401). There is NO
+ * per-user DB Bearer and NO env token fallback on this path. GET
+ * global/health stays anonymous (liveness probe, no auth sent).
+ *
+ * Project scope (Card C4): every session/message/provider route requires a
+ * `?projectId` and gates through
+ * OrganizationsService.assertProjectAccessById BEFORE any upstream call
+ * (org-linked → member, user-space → owner; strangers → 404, no existence
+ * leak; missing projectId → 400 PROJECT_REQUIRED). The caller's `?directory`
+ * is accepted for compatibility but IGNORED — upstream calls that take a
+ * directory always use the gated project's jailed content dir
+ * (WorkspacePathService.resolveUserStrict + assertInsideJail; unconfigured
+ * storage fails closed). v2 calls without a directory parameter ride the
+ * gate only (documented per route). The SSE event streams (`global/event`,
+ * `event`) and GET `global/health` stay project-free (global surfaces, no
+ * session :id) — recorded remainder, not an exception for session reads.
+ *
+ * Serve auth is untouched: JwtAuthGuard + @ReqUser() + OpencodeAuthService
+ * real-user gate + serveBasicAuthHeader (server Basic) behave exactly as
+ * before — only auth=yes|no presence is traced, never secrets.
+ *
  * Behavior mirrors ProxyService: upstream failures (even after the
  * ExternalClient retry budget inside OpencodeSdkClient) throw
  * ExternalServiceError — the api-error.filter answers 503
@@ -78,13 +112,57 @@ type SseSubscription = {
  * no URLs/headers/bodies).
  */
 @ApiTags('opencode')
+@ApiBearerAuth()
 @Controller('opencode')
 export class OpencodeController {
   constructor(
     private readonly sdk: OpencodeSdkClient,
     private readonly opencode: OpencodeService,
+    private readonly orgs: OrganizationsService,
+    private readonly paths: WorkspacePathService,
     private readonly logger: AppLogger = new AppLogger('OpencodeController'),
   ) {}
+
+  /**
+   * C4 project gate + directory jail (reuse, not a new rule).
+   *
+   * - Missing projectId → 400 PROJECT_REQUIRED (fail-closed: session routes
+   *   are project-scoped, there is no cross-project listing anymore).
+   * - assertProjectAccessById → 404 for strangers (no existence leak).
+   * - Returns the gated project's jailed content dir; callers pass it as
+   *   the upstream directory INSTEAD of the client `?directory` (which is
+   *   ignored — a forged directory can never escape the project jail).
+   * - Unconfigured storage fails closed (500 before any upstream call).
+   */
+  private async requireProjectDir(
+    projectId: string | undefined,
+    userId: string,
+    correlationId?: string,
+  ): Promise<string> {
+    if (!projectId || projectId.trim() === '') {
+      throw new BadRequestException({
+        code: 'PROJECT_REQUIRED',
+        message: 'projectId is required — session routes are project-scoped',
+      });
+    }
+    const { ownerId } = await this.orgs.assertProjectAccessById(
+      projectId,
+      userId,
+      correlationId,
+    );
+    // Ownerless rows are denied by the gate (C5 deny-by-default), so the
+    // owner is always a real uuid here; ownerKeyOrThrow reuses the
+    // ProjectsService user-home mapping (no new layout).
+    const resolved = await this.paths.resolveUserStrict(
+      ownerKeyOrThrow(ownerId),
+      projectId,
+    );
+    await this.paths.assertInsideJail(
+      resolved.absRepo,
+      await this.paths.realStrictRoot(),
+    );
+    return resolved.absRepo;
+  }
 
   private isUpstreamOk<T>(data: T | undefined, error: unknown): data is T {
     return data !== undefined && error === undefined;
@@ -95,25 +173,10 @@ export class OpencodeController {
   }
 
   /**
-   * Merge optional query keys onto sdk options. The pinned sdk query types
-   * lag the upstream OpenAPI (e.g. no `before` on session.messages yet —
-   * see contracts/opencode-upstream.json); extra keys are forwarded at
-   * runtime so the proxy stays 1:1 without waiting for the sdk.
-   */
-  private withQuery<T extends object>(
-    base: T,
-    query: Record<string, string | number | undefined>,
-  ): T {
-    const clean = Object.fromEntries(
-      Object.entries(query).filter(([, v]) => v !== undefined),
-    );
-    return { ...base, ...(Object.keys(clean).length > 0 ? { query: clean } : {}) } as T;
-  }
-
-  /**
    * Copy upstream cursor headers (x-next-cursor/Link, when present) onto
-   * the downstream JSON response. The hey-api client exposes the raw fetch
-   * Response on the result tuple (`response` field, responseStyle 'fields').
+   * the downstream JSON response. The v2 client defaults to
+   * `responseStyle: 'fields'`, so the raw fetch Response rides on the
+   * result tuple (`response` field).
    */
   private passthroughCursors(
     sdkResult: { response?: { headers?: Headers } },
@@ -298,21 +361,30 @@ export class OpencodeController {
 
   // --- sessions -----------------------------------------------------------
 
+  @UseGuards(JwtAuthGuard)
   @Get('session')
   @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'List sessions (sdk → opencode server, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'live sessions' })
   @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
   async listSessions(
-    @Query('directory') directory?: string,
+    @ReqUser() identity: RequestIdentity,
+    @Query('projectId') projectId?: string,
+    @Query('directory') _directory?: string,
     @Headers('x-correlation-id') correlationId?: string,
-  ): Promise<Session[]> {
+  ): Promise<SessionV2Info[]> {
     const cid = correlationId ?? '';
+    const userId = identity.id;
+    // C4: project gate first; the listing is scoped to the project jail
+    // (client ?directory ignored — see requireProjectDir).
+    const projectDir = await this.requireProjectDir(projectId, userId, cid);
+    const client = await this.sdk.create(userId, cid);
     try {
-      const res = await (await this.sdk.create(cid)).session.list(
-        directory ? { query: { directory } } : undefined,
-      );
-      if (this.isUpstreamOk(res.data, res.error)) return res.data;
+      // v2 namespace (GET /api/session): the v2 envelope is { data, cursor }
+      // — unwrap .data so the route still answers an array (external
+      // signature unchanged).
+      const res = await client.v2.session.list({ directory: projectDir });
+      if (this.isUpstreamOk(res.data, res.error)) return res.data.data;
       throw this.upstreamError('listSessions', res.error);
     } catch (err) {
       this.logger.warn('[opencode] GET /session upstream failed', cid);
@@ -321,6 +393,7 @@ export class OpencodeController {
     }
   }
 
+  @UseGuards(JwtAuthGuard)
   @Post('session')
   @Version(VERSION_NEUTRAL)
   @HttpCode(HttpStatus.OK)
@@ -328,17 +401,32 @@ export class OpencodeController {
   @ApiResponse({ status: 200, description: 'live session' })
   @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
   async createSession(
+    @ReqUser() identity: RequestIdentity,
     @Body() body: { title?: string; parentID?: string } = {},
-    @Query('directory') directory?: string,
+    @Query('projectId') projectId?: string,
+    @Query('directory') _directory?: string,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<Session> {
     const cid = correlationId ?? '';
+    const userId = identity.id;
+    // C4: project gate first (v2 create takes no directory — the gate is
+    // the binding; client ?directory ignored).
+    await this.requireProjectDir(projectId, userId, cid);
+    const client = await this.sdk.create(userId, cid);
     try {
-      const res = await (await this.sdk.create(cid)).session.create({
-        body: { title: body?.title, parentID: body?.parentID },
-        ...(directory ? { query: { directory } } : {}),
-      });
-      if (this.isUpstreamOk(res.data, res.error)) return res.data;
+      // v2 namespace (POST /api/session): the legacy POST /session answers
+      // 405, so create goes through `client.v2.session.create` with a minimal
+      // `{}` body (all v2 fields optional: id/agent/model/location). The
+      // external signature keeps `body`/`?directory` for stability — neither
+      // is forwarded upstream (v2 takes no directory query). The envelope is
+      // `{ data: SessionV2Info }` — unwrap .data and pass through minimally
+      // (frontend navigates by .id; numeric `time` is Date-parseable).
+      void body;
+      void _directory;
+      const res = await client.v2.session.create({});
+      if (this.isUpstreamOk(res.data, res.error)) {
+        return res.data.data as unknown as Session;
+      }
       throw this.upstreamError('createSession', res.error);
     } catch (err) {
       this.logger.warn('[opencode] POST /session upstream failed', cid);
@@ -347,20 +435,26 @@ export class OpencodeController {
     }
   }
 
+  @UseGuards(JwtAuthGuard)
   @Get('session/status')
   @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'Get session status (sdk → opencode server, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'live session status map' })
   @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
   async sessionStatus(
-    @Query('directory') directory?: string,
+    @ReqUser() identity: RequestIdentity,
+    @Query('projectId') projectId?: string,
+    @Query('directory') _directory?: string,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<unknown> {
     const cid = correlationId ?? '';
+    const userId = identity.id;
+    // C4: project gate first; upstream status is scoped to the project jail
+    // (client ?directory ignored).
+    const projectDir = await this.requireProjectDir(projectId, userId, cid);
+    const client = await this.sdk.create(userId, cid);
     try {
-      const res = await (await this.sdk.create(cid)).session.status(
-        directory ? { query: { directory } } : undefined,
-      );
+      const res = await client.session.status({ directory: projectDir });
       if (this.isUpstreamOk(res.data, res.error)) return res.data;
       throw this.upstreamError('sessionStatus', res.error);
     } catch (err) {
@@ -370,23 +464,33 @@ export class OpencodeController {
     }
   }
 
+  @UseGuards(JwtAuthGuard)
   @Get('session/:id')
   @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'Get session (sdk → opencode server, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'live session' })
   @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
   async getSession(
+    @ReqUser() identity: RequestIdentity,
     @Param('id') id: string,
-    @Query('directory') directory?: string,
+    @Query('projectId') projectId?: string,
+    @Query('directory') _directory?: string,
     @Headers('x-correlation-id') correlationId?: string,
-  ): Promise<Session> {
+  ): Promise<SessionV2Info> {
     const cid = correlationId ?? '';
+    const userId = identity.id;
+    // C4: project gate before the session :id (v2 get is path-only — the
+    // gate is the binding; client ?directory ignored).
+    await this.requireProjectDir(projectId, userId, cid);
+    const client = await this.sdk.create(userId, cid);
     try {
-      const res = await (await this.sdk.create(cid)).session.get({
-        path: { id },
-        ...(directory ? { query: { directory } } : {}),
+      // v2 namespace (GET /api/session/{sessionID}, path-only — ?directory
+      // stays on the route for signature stability, v2 takes no query).
+      // Envelope is { data } — unwrap (route still answers one object).
+      const res = await client.v2.session.get({
+        sessionID: id,
       });
-      if (this.isUpstreamOk(res.data, res.error)) return res.data;
+      if (this.isUpstreamOk(res.data, res.error)) return res.data.data;
       throw this.upstreamError('getSession', res.error);
     } catch (err) {
       this.logger.warn('[opencode] GET /session/:id upstream failed', cid);
@@ -395,21 +499,29 @@ export class OpencodeController {
     }
   }
 
+  @UseGuards(JwtAuthGuard)
   @Delete('session/:id')
   @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'Delete session (sdk → opencode server, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'deleted flag (live upstream only)' })
   @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
   async deleteSession(
+    @ReqUser() identity: RequestIdentity,
     @Param('id') id: string,
-    @Query('directory') directory?: string,
+    @Query('projectId') projectId?: string,
+    @Query('directory') _directory?: string,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<{ deleted: boolean }> {
     const cid = correlationId ?? '';
+    const userId = identity.id;
+    // C4: project gate before the session :id; upstream delete runs in the
+    // project jail (client ?directory ignored).
+    const projectDir = await this.requireProjectDir(projectId, userId, cid);
+    const client = await this.sdk.create(userId, cid);
     try {
-      const res = await (await this.sdk.create(cid)).session.delete({
-        path: { id },
-        ...(directory ? { query: { directory } } : {}),
+      const res = await client.session.delete({
+        sessionID: id,
+        directory: projectDir,
       });
       if (res.error === undefined) return { deleted: true };
       throw this.upstreamError('deleteSession', res.error);
@@ -420,26 +532,33 @@ export class OpencodeController {
     }
   }
 
+  @UseGuards(JwtAuthGuard)
   @Patch('session/:id')
   @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'Update session (sdk → opencode server, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'live session' })
   @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
   async updateSession(
+    @ReqUser() identity: RequestIdentity,
     @Param('id') id: string,
     @Body(new ZodValidationPipe(opencodeSessionUpdateSchema))
     body: OpencodeSessionUpdateInput,
-    @Query('directory') directory?: string,
+    @Query('projectId') projectId?: string,
+    @Query('directory') _directory?: string,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<Session> {
     const cid = correlationId ?? '';
+    const userId = identity.id;
+    // C4: project gate before the session :id; upstream update runs in the
+    // project jail (client ?directory ignored).
+    const projectDir = await this.requireProjectDir(projectId, userId, cid);
+    const client = await this.sdk.create(userId, cid);
     try {
-      const res = await (await this.sdk.create(cid)).session.update(
-        this.withQuery(
-          { path: { id }, body: { ...body } as SessionUpdateData['body'] },
-          { directory },
-        ),
-      );
+      const res = await client.session.update({
+        sessionID: id,
+        ...body,
+        directory: projectDir,
+      });
       if (this.isUpstreamOk(res.data, res.error)) return res.data;
       throw this.upstreamError('updateSession', res.error);
     } catch (err) {
@@ -449,6 +568,7 @@ export class OpencodeController {
     }
   }
 
+  @UseGuards(JwtAuthGuard)
   @Post('session/:id/fork')
   @Version(VERSION_NEUTRAL)
   @HttpCode(HttpStatus.OK)
@@ -456,20 +576,26 @@ export class OpencodeController {
   @ApiResponse({ status: 200, description: 'live forked session' })
   @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
   async forkSession(
+    @ReqUser() identity: RequestIdentity,
     @Param('id') id: string,
     @Body(new ZodValidationPipe(opencodeForkSchema))
     body: OpencodeForkInput = {},
-    @Query('directory') directory?: string,
+    @Query('projectId') projectId?: string,
+    @Query('directory') _directory?: string,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<Session> {
     const cid = correlationId ?? '';
+    const userId = identity.id;
+    // C4: project gate before the session :id; upstream fork runs in the
+    // project jail (client ?directory ignored).
+    const projectDir = await this.requireProjectDir(projectId, userId, cid);
+    const client = await this.sdk.create(userId, cid);
     try {
-      const res = await (await this.sdk.create(cid)).session.fork(
-        this.withQuery(
-          { path: { id }, body: { ...body } as SessionForkData['body'] },
-          { directory },
-        ),
-      );
+      const res = await client.session.fork({
+        sessionID: id,
+        ...body,
+        directory: projectDir,
+      });
       if (this.isUpstreamOk(res.data, res.error)) return res.data;
       throw this.upstreamError('forkSession', res.error);
     } catch (err) {
@@ -481,28 +607,44 @@ export class OpencodeController {
 
   // --- messages -----------------------------------------------------------
 
+  @UseGuards(JwtAuthGuard)
   @Get('session/:id/message')
   @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'List session messages (sdk → opencode server, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'live messages' })
   @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
   async listMessages(
+    @ReqUser() identity: RequestIdentity,
     @Param('id') id: string,
-    @Query('directory') directory?: string,
+    @Query('projectId') projectId?: string,
+    @Query('directory') _directory?: string,
     @Query('limit') limitRaw?: string,
     @Query('before') before?: string,
     @Res({ passthrough: true }) res?: ExpressResponse,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<unknown> {
     const cid = correlationId ?? '';
+    const userId = identity.id;
+    // C4: project gate before the session :id (v2 messages take no
+    // directory — the gate is the binding; client ?directory ignored).
+    await this.requireProjectDir(projectId, userId, cid);
+    const client = await this.sdk.create(userId, cid);
     try {
       const limit = this.parseLimit(limitRaw);
-      const sdkRes = await (await this.sdk.create(cid)).session.messages(
-        this.withQuery({ path: { id } }, { directory, limit, before }) as SessionMessagesData,
-      );
+      // v2 namespace (GET /api/session/{sessionID}/message): limit maps 1:1;
+      // legacy `before` (message id) has no v2 counterpart — forwarded
+      // best-effort as the opaque `cursor` (upstream 400 → our 503);
+      // ?directory stays on the route, v2 takes no directory query.
+      // Envelope is { data, cursor } — return the array (route shape
+      // unchanged); cursor-header passthrough below is a no-op for v2.
+      const sdkRes = await client.v2.session.messages({
+        sessionID: id,
+        ...(limit !== undefined ? { limit } : {}),
+        ...(before ? { cursor: before } : {}),
+      });
       if (this.isUpstreamOk(sdkRes.data, sdkRes.error)) {
         this.passthroughCursors(sdkRes, res);
-        return sdkRes.data;
+        return sdkRes.data.data;
       }
       throw this.upstreamError('listMessages', sdkRes.error);
     } catch (err) {
@@ -514,24 +656,35 @@ export class OpencodeController {
     }
   }
 
+  @UseGuards(JwtAuthGuard)
   @Get('session/:id/message/:messageID')
   @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'Get session message (sdk → opencode server, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'live message' })
   @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
   async getMessage(
+    @ReqUser() identity: RequestIdentity,
     @Param('id') id: string,
     @Param('messageID') messageID: string,
-    @Query('directory') directory?: string,
+    @Query('projectId') projectId?: string,
+    @Query('directory') _directory?: string,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<unknown> {
     const cid = correlationId ?? '';
+    const userId = identity.id;
+    // C4: project gate before the session :id (v2 message is path-only —
+    // the gate is the binding; client ?directory ignored).
+    await this.requireProjectDir(projectId, userId, cid);
+    const client = await this.sdk.create(userId, cid);
     try {
-      const res = await (await this.sdk.create(cid)).session.message({
-        path: { id, messageID },
-        ...(directory ? { query: { directory } } : {}),
+      // v2 namespace (GET /api/session/{sessionID}/message/{messageID},
+      // path-only — ?directory stays on the route, v2 takes no query).
+      // Envelope is { data } — unwrap (route still answers one object).
+      const res = await client.v2.session.message({
+        sessionID: id,
+        messageID,
       });
-      if (this.isUpstreamOk(res.data, res.error)) return res.data;
+      if (this.isUpstreamOk(res.data, res.error)) return res.data.data;
       throw this.upstreamError('getMessage', res.error);
     } catch (err) {
       this.logger.warn('[opencode] GET /session/:id/message/:messageID upstream failed', cid);
@@ -540,6 +693,7 @@ export class OpencodeController {
     }
   }
 
+  @UseGuards(JwtAuthGuard)
   @Post('session/:id/message')
   @Version(VERSION_NEUTRAL)
   @HttpCode(HttpStatus.OK)
@@ -547,20 +701,30 @@ export class OpencodeController {
   @ApiResponse({ status: 200, description: 'live assistant reply' })
   @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
   async prompt(
+    @ReqUser() identity: RequestIdentity,
     @Param('id') id: string,
     @Body(new ZodValidationPipe(opencodePromptSchema))
     body: OpencodePromptInput,
-    @Query('directory') directory?: string,
+    @Query('projectId') projectId?: string,
+    @Query('directory') _directory?: string,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<unknown> {
     const cid = correlationId ?? '';
+    const userId = identity.id;
+    // C4: project gate before the session :id; the prompt runs in the
+    // project jail (client ?directory ignored).
+    const projectDir = await this.requireProjectDir(projectId, userId, cid);
+    const client = await this.sdk.create(userId, cid);
     try {
-      const res = await (await this.sdk.create(cid)).session.prompt(
-        this.withQuery(
-          { path: { id }, body: { ...body } as SessionPromptData['body'] },
-          { directory },
-        ),
-      );
+      // zod keeps `format` as unknown (upstream OutputFormat passthrough) —
+      // narrow it at the boundary so the flat v2 params stay typed.
+      const { format, ...rest } = body;
+      const res = await client.session.prompt({
+        sessionID: id,
+        ...rest,
+        ...(format === undefined ? {} : { format: format as OutputFormat }),
+        directory: projectDir,
+      });
       if (this.isUpstreamOk(res.data, res.error)) return res.data;
       throw this.upstreamError('prompt', res.error);
     } catch (err) {
@@ -570,6 +734,7 @@ export class OpencodeController {
     }
   }
 
+  @UseGuards(JwtAuthGuard)
   @Post('session/:id/prompt_async')
   @Version(VERSION_NEUTRAL)
   @HttpCode(HttpStatus.NO_CONTENT)
@@ -577,20 +742,28 @@ export class OpencodeController {
   @ApiResponse({ status: 204, description: 'prompt accepted (live upstream only)' })
   @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
   async promptAsync(
+    @ReqUser() identity: RequestIdentity,
     @Param('id') id: string,
     @Body(new ZodValidationPipe(opencodePromptSchema))
     body: OpencodePromptInput,
-    @Query('directory') directory?: string,
+    @Query('projectId') projectId?: string,
+    @Query('directory') _directory?: string,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<void> {
     const cid = correlationId ?? '';
+    const userId = identity.id;
+    // C4: project gate before the session :id; the prompt runs in the
+    // project jail (client ?directory ignored).
+    const projectDir = await this.requireProjectDir(projectId, userId, cid);
+    const client = await this.sdk.create(userId, cid);
     try {
-      const res = await (await this.sdk.create(cid)).session.promptAsync(
-        this.withQuery(
-          { path: { id }, body: { ...body } as SessionPromptAsyncData['body'] },
-          { directory },
-        ),
-      );
+      const { format, ...rest } = body;
+      const res = await client.session.promptAsync({
+        sessionID: id,
+        ...rest,
+        ...(format === undefined ? {} : { format: format as OutputFormat }),
+        directory: projectDir,
+      });
       if (res.error !== undefined) throw this.upstreamError('promptAsync', res.error);
     } catch (err) {
       this.logger.warn('[opencode] POST /session/:id/prompt_async upstream failed', cid);
@@ -599,6 +772,7 @@ export class OpencodeController {
     }
   }
 
+  @UseGuards(JwtAuthGuard)
   @Post('session/:id/command')
   @Version(VERSION_NEUTRAL)
   @HttpCode(HttpStatus.OK)
@@ -606,20 +780,26 @@ export class OpencodeController {
   @ApiResponse({ status: 200, description: 'live assistant reply' })
   @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
   async runCommand(
+    @ReqUser() identity: RequestIdentity,
     @Param('id') id: string,
     @Body(new ZodValidationPipe(opencodeCommandSchema))
     body: OpencodeCommandInput,
-    @Query('directory') directory?: string,
+    @Query('projectId') projectId?: string,
+    @Query('directory') _directory?: string,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<unknown> {
     const cid = correlationId ?? '';
+    const userId = identity.id;
+    // C4: project gate before the session :id; the command runs in the
+    // project jail (client ?directory ignored).
+    const projectDir = await this.requireProjectDir(projectId, userId, cid);
+    const client = await this.sdk.create(userId, cid);
     try {
-      const res = await (await this.sdk.create(cid)).session.command(
-        this.withQuery(
-          { path: { id }, body: { ...body } as SessionCommandData['body'] },
-          { directory },
-        ),
-      );
+      const res = await client.session.command({
+        sessionID: id,
+        ...body,
+        directory: projectDir,
+      });
       if (this.isUpstreamOk(res.data, res.error)) return res.data;
       throw this.upstreamError('runCommand', res.error);
     } catch (err) {
@@ -629,6 +809,7 @@ export class OpencodeController {
     }
   }
 
+  @UseGuards(JwtAuthGuard)
   @Post('session/:id/shell')
   @Version(VERSION_NEUTRAL)
   @HttpCode(HttpStatus.OK)
@@ -636,20 +817,26 @@ export class OpencodeController {
   @ApiResponse({ status: 200, description: 'live created message' })
   @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
   async runShell(
+    @ReqUser() identity: RequestIdentity,
     @Param('id') id: string,
     @Body(new ZodValidationPipe(opencodeShellSchema))
     body: OpencodeShellInput,
-    @Query('directory') directory?: string,
+    @Query('projectId') projectId?: string,
+    @Query('directory') _directory?: string,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<unknown> {
     const cid = correlationId ?? '';
+    const userId = identity.id;
+    // C4: project gate before the session :id; the shell runs in the
+    // project jail (client ?directory ignored).
+    const projectDir = await this.requireProjectDir(projectId, userId, cid);
+    const client = await this.sdk.create(userId, cid);
     try {
-      const res = await (await this.sdk.create(cid)).session.shell(
-        this.withQuery(
-          { path: { id }, body: { ...body } as SessionShellData['body'] },
-          { directory },
-        ),
-      );
+      const res = await client.session.shell({
+        sessionID: id,
+        ...body,
+        directory: projectDir,
+      });
       if (this.isUpstreamOk(res.data, res.error)) return res.data;
       throw this.upstreamError('runShell', res.error);
     } catch (err) {
@@ -659,6 +846,7 @@ export class OpencodeController {
     }
   }
 
+  @UseGuards(JwtAuthGuard)
   @Post('session/:id/abort')
   @Version(VERSION_NEUTRAL)
   @HttpCode(HttpStatus.OK)
@@ -666,15 +854,22 @@ export class OpencodeController {
   @ApiResponse({ status: 200, description: 'abort result (live upstream only)' })
   @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
   async abortSession(
+    @ReqUser() identity: RequestIdentity,
     @Param('id') id: string,
-    @Query('directory') directory?: string,
+    @Query('projectId') projectId?: string,
+    @Query('directory') _directory?: string,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<unknown> {
     const cid = correlationId ?? '';
+    const userId = identity.id;
+    // C4: project gate before the session :id; upstream abort runs in the
+    // project jail (client ?directory ignored).
+    const projectDir = await this.requireProjectDir(projectId, userId, cid);
+    const client = await this.sdk.create(userId, cid);
     try {
-      const res = await (await this.sdk.create(cid)).session.abort({
-        path: { id },
-        ...(directory ? { query: { directory } } : {}),
+      const res = await client.session.abort({
+        sessionID: id,
+        directory: projectDir,
       });
       if (res.error === undefined) return res.data ?? { aborted: true };
       throw this.upstreamError('abortSession', res.error);
@@ -687,20 +882,31 @@ export class OpencodeController {
 
   // --- providers ----------------------------------------------------------
 
+  @UseGuards(JwtAuthGuard)
   @Get('config/providers')
   @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'List providers (sdk → opencode server, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'live providers' })
   @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
   async listProviders(
-    @Query('directory') directory?: string,
+    @ReqUser() identity: RequestIdentity,
+    @Query('projectId') projectId?: string,
+    @Query('directory') _directory?: string,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<unknown> {
     const cid = correlationId ?? '';
+    const userId = identity.id;
+    // C4: project gate (the provider list takes a location directory — it
+    // always uses the project jail; client ?directory ignored).
+    const projectDir = await this.requireProjectDir(projectId, userId, cid);
+    const client = await this.sdk.create(userId, cid);
     try {
-      const res = await (await this.sdk.create(cid)).config.providers(
-        directory ? { query: { directory } } : undefined,
-      );
+      // v2 namespace (GET /api/provider): legacy ?directory maps to the v2
+      // `location` object; the v2 envelope ({ location, data }) is returned
+      // as-is (route type is unknown — external signature unchanged).
+      const res = await client.v2.provider.list({
+        location: { directory: projectDir },
+      });
       if (this.isUpstreamOk(res.data, res.error)) return res.data;
       throw this.upstreamError('listProviders', res.error);
     } catch (err) {
@@ -712,50 +918,63 @@ export class OpencodeController {
 
   // --- events (SSE re-stream) ---------------------------------------------
 
+  @UseGuards(JwtAuthGuard)
   @Get('global/event')
   @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'Subscribe to opencode events (SSE re-stream, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'text/event-stream of upstream GlobalEvent frames' })
   @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
   async streamEvents(
+    @ReqUser() identity: RequestIdentity,
     @Req() req: ExpressRequest,
     @Res() res: ExpressResponse,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<void> {
     const cid = correlationId ?? '';
+    const userId = identity.id;
+    // 401 unauthorized (mock identity) resolves here (before relaySse),
+    // so a mock caller answers 401 instead of being mapped to 503 inside
+    // relaySse.
+    const client = await this.sdk.create(userId, cid);
     await this.relaySse('GET /global/event', cid, req, res, (signal) =>
-      this.sdk.create(cid).then(
-        (client) =>
-          client.global.event({
-            signal,
-            sseDefaultRetryDelay: 500,
-            sseMaxRetryDelay: 2000,
-          } as unknown as GlobalEventData) as unknown as Promise<SseSubscription>,
+      Promise.resolve(
+        client.global.event({
+          signal,
+          sseDefaultRetryDelay: 500,
+          sseMaxRetryDelay: 2000,
+        }) as unknown as Promise<SseSubscription>,
       ),
     );
   }
 
+  @UseGuards(JwtAuthGuard)
   @Get('event')
   @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'Subscribe to legacy opencode events (SSE re-stream, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'text/event-stream of upstream Event frames' })
   @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
   async streamLegacyEvents(
+    @ReqUser() identity: RequestIdentity,
     @Req() req: ExpressRequest,
     @Res() res: ExpressResponse,
     @Query('directory') directory?: string,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<void> {
     const cid = correlationId ?? '';
+    const userId = identity.id;
+    // 401 unauthorized (mock identity) resolves here (before relaySse),
+    // so a mock caller answers 401 instead of being mapped to 503 inside
+    // relaySse.
+    const client = await this.sdk.create(userId, cid);
     await this.relaySse('GET /event', cid, req, res, (signal) =>
-      this.sdk.create(cid).then(
-        (client) =>
-          client.event.subscribe({
-            signal,
-            sseDefaultRetryDelay: 500,
-            sseMaxRetryDelay: 2000,
-            ...(directory ? { query: { directory } } : {}),
-          } as unknown as EventSubscribeData) as unknown as Promise<SseSubscription>,
+      Promise.resolve(
+        // v2 namespace (GET /api/event SSE): takes no params — ?directory
+        // stays on the route for signature stability, not forwarded.
+        client.v2.event.subscribe({
+          signal,
+          sseDefaultRetryDelay: 500,
+          sseMaxRetryDelay: 2000,
+        }) as unknown as Promise<SseSubscription>,
       ),
     );
   }

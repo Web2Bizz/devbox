@@ -163,15 +163,36 @@ export class OpencodeService {
   }
 
   /**
-   * Liveness probe for the opencode server. Any HTTP response (even 404 —
-   * the server may not serve `/`) means the process is up; network errors
-   * and timeouts mean down. Always resolves, never throws.
+   * Liveness probe for the opencode server (v2 `GET /api/health`,
+   * sdk.gen.js `Health.get` → `url: "/api/health"`).
+   *
+   * `up` only when ALL hold: 2xx status AND `content-type: application/json`
+   * AND the body parses as JSON. A 401 with a JSON body also means `up`
+   * (the server is alive; the bearer token is missing/rejected — auth,
+   * not liveness). HTML/non-JSON bodies (proxies, stale gateways) and
+   * network errors/timeouts mean `down`. Always resolves, never throws;
+   * single attempt (no retry budget on the probe); never logs secrets.
    */
   async checkConnectivity(timeoutMs = OPENCODE_HEALTH_TIMEOUT_MS): Promise<OpencodeStatus> {
     try {
-      const res = await this.fetchWithTimeout(`${this.dialUrl()}/`, { method: 'GET' }, timeoutMs);
-      // Drain the body to free the socket; parse errors are irrelevant here.
-      await res.arrayBuffer().catch(() => null);
+      const res = await this.fetchWithTimeout(
+        `${this.dialUrl()}/api/health`,
+        { method: 'GET' },
+        timeoutMs,
+      );
+      const contentType = res.headers.get('content-type') ?? '';
+      const isJson = contentType.toLowerCase().includes('application/json');
+      const body = await res.arrayBuffer().catch(() => null);
+      if (!body) return 'down';
+      let parsed: unknown = null;
+      try {
+        parsed = JSON.parse(Buffer.from(body).toString('utf8'));
+      } catch {
+        return 'down';
+      }
+      if (parsed === null || typeof parsed !== 'object') return 'down';
+      if (res.status === 401) return isJson ? 'up' : 'down';
+      if (!res.ok || !isJson) return 'down';
       return 'up';
     } catch (err) {
       this.logger.debug(`[opencode] unreachable: ${(err as Error).message}`);

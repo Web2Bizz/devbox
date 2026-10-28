@@ -11,6 +11,10 @@
  * - unreachable upstream (OPENCODE_URL down) answers 503 EXTERNAL_UNAVAILABLE
  *   («сервис временно недоступен, повторите позже») with Retry-After —
  *   no mock 200s, a 200 always means live upstream data;
+ * - session/message/provider routes are project-scoped (C4): every call
+ *   carries ?projectId past the Bearer guard; the gate denies with the same
+ *   503 envelope here (no DB in this suite); missing projectId → 400
+ *   PROJECT_REQUIRED; anonymous → 401;
  * - POST prompt/command/shell validate bodies (400 envelope);
  *   GET messages validates ?limit (400 envelope);
  * - /health stays 200; swagger v1 JSON exposes the opencode tag/paths.
@@ -20,7 +24,10 @@
  * dist/opencode/opencode.e2e.js — after the down phase, respawns itself with
  * OPENCODE_URL=<live> and asserts live 200s (create/patch/fork/status,
  * messages list with limit cursor, SSE headers, global/health version ==
- * pinned @opencode-ai/sdk version). LLM-dependent 200s (prompt/command/shell
+ * pinned @opencode-ai/sdk version). Live session routes ALSO pass the C4
+ * project gate, so live mode additionally needs a live Postgres with a
+ * project the caller can access (same ?projectId) — without it the gate
+ * denies before upstream is reached. LLM-dependent 200s (prompt/command/shell
  * execution) are intentionally NOT asserted — the temp server has no model
  * credentials; their 400-validation is covered in down mode.
  */
@@ -40,6 +47,20 @@ process.env.DATABASE_URL = '';
 for (const key of ['POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB', 'POSTGRES_HOST']) {
   delete process.env[key];
 }
+// Guarded mirror routes (C4) need a Bearer past JwtAuthGuard; the project
+// gate itself denies with 503 here (no DB) — same EXTERNAL_UNAVAILABLE envelope.
+process.env.JWT_ACCESS_SECRET = 'e2e-access-secret-not-real-0123456789';
+process.env.JWT_REFRESH_SECRET = 'e2e-refresh-secret-not-real-0123456789';
+process.env.JWT_ACCESS_TTL = '15m';
+process.env.JWT_REFRESH_TTL = '7d';
+process.env.AUTH_LEGACY_MOCK_FALLBACK = 'false';
+
+// Project id carried on every session/provider call (C4 ?projectId). No DB
+// here, so the gate denies with 503 EXTERNAL_UNAVAILABLE (never upstream).
+const E2E_PROJECT_ID = '123e4567-e89b-12d3-a456-426614174090';
+// Hand-signed caller (TokenService.sign is pure, no DB — same pattern as
+// the organizations unreachable-branch probe).
+const E2E_USER_ID = '123e4567-e89b-12d3-a456-426614174091';
 
 type CheckResult = {
   name: string;
@@ -59,6 +80,22 @@ async function main(): Promise<void> {
   const base = await app.getUrl();
   const results: CheckResult[] = [];
 
+  // Bearer for the guarded mirror routes (guard passes, gate denies 503 w/o DB).
+  const { TokenService } = await import('../auth/token.service');
+  const tokens = app.get(TokenService, { strict: false }) as {
+    sign: (
+      claims: Record<string, unknown>,
+      secret: string,
+      ttlSec: number,
+    ) => { token: string };
+  };
+  const bearer = tokens.sign(
+    { sub: E2E_USER_ID, email: 'probe@rush-code.local', typ: 'access' },
+    process.env.JWT_ACCESS_SECRET as string,
+    900,
+  ).token;
+  const authHeaders = { authorization: `Bearer ${bearer}` };
+
   async function check(
     name: string,
     path: string,
@@ -66,7 +103,16 @@ async function main(): Promise<void> {
     expectedStatus: number,
     validate?: (res: Response, body: unknown) => void,
   ): Promise<void> {
-    const res = await fetch(`${base}${path}`, init);
+    // Guarded routes need the Bearer; /health + /swagger stay bare-safe
+    // (extra auth is ignored there).
+    const withAuth =
+      init === undefined
+        ? { headers: { ...authHeaders } }
+        : {
+            ...init,
+            headers: { ...authHeaders, ...((init.headers as Record<string, string> | undefined) ?? {}) },
+          };
+    const res = await fetch(`${base}${path}`, withAuth);
     const body = (await res.json().catch(() => null)) as unknown;
     try {
       assert.equal(res.status, expectedStatus, `status ${res.status} !== ${expectedStatus}`);
@@ -94,7 +140,7 @@ async function main(): Promise<void> {
     });
 
     if (LIVE_MODE) {
-      await liveChecks(check, json, base);
+      await liveChecks(check, json, base, authHeaders);
     } else {
       await downChecks(check, json);
     }
@@ -135,9 +181,25 @@ async function main(): Promise<void> {
 
     if (!LIVE_MODE) {
       // CORS preserved on mirror routes (even on 503 proxy errors).
-      await check('CORS echo on /api/opencode/session (503)', '/api/opencode/session', { headers: { origin: 'http://localhost:8080' } }, 503, (res) => {
+      await check('CORS echo on /api/opencode/session (503)', `/api/opencode/session?projectId=${E2E_PROJECT_ID}`, { headers: { origin: 'http://localhost:8080' } }, 503, (res) => {
         assert.equal(res.headers.get('access-control-allow-origin'), 'http://localhost:8080');
       });
+      // C1–C4: anonymous (no Bearer) → 401 before any gate/DB touch.
+      // check() always attaches the Bearer, so this one uses raw fetch.
+      {
+        const anon = await fetch(`${base}/api/opencode/session?projectId=${E2E_PROJECT_ID}`);
+        const anonBody = (await anon.json().catch(() => null)) as { code?: string } | null;
+        try {
+          assert.equal(anon.status, 401);
+          assert.equal(anonBody?.code, 'unauthorized');
+          results.push({ name: 'GET /api/opencode/session anon → 401', ok: true });
+          console.log('ok   - GET /api/opencode/session anon → 401');
+        } catch (err) {
+          const detail = `${(err as Error).message} :: ${(JSON.stringify(anonBody) ?? '').slice(0, 200)}`;
+          results.push({ name: 'GET /api/opencode/session anon → 401', ok: false, detail });
+          console.log(`FAIL - GET /api/opencode/session anon → 401: ${detail}`);
+        }
+      }
     }
   } finally {
     await app.close();
@@ -180,58 +242,63 @@ function assertUnavailable(body: unknown, res: Response): void {
 }
 
 async function downChecks(check: CheckFn, json: (obj: unknown) => RequestInit): Promise<void> {
-  // Sdk mirror — every live path answers 503 when upstream is down.
-  await check('GET /api/opencode/session down → 503 + Retry-After', '/api/opencode/session', undefined, 503, (res, body) => {
+  // Sdk mirror — every live path answers 503 when upstream is down. All
+  // session/provider routes carry ?projectId (C4): the guard passes via
+  // Bearer, the gate denies with the same 503 envelope (no DB here).
+  const P = `projectId=${E2E_PROJECT_ID}`;
+  await check('GET /api/opencode/session down → 503 + Retry-After', `/api/opencode/session?${P}`, undefined, 503, (res, body) => {
     assertUnavailable(body, res);
   });
-  await check('POST /api/opencode/session down → 503 + Retry-After', '/api/opencode/session', json({ title: 'e2e' }), 503, (res, body) => {
+  await check('POST /api/opencode/session down → 503 + Retry-After', `/api/opencode/session?${P}`, json({ title: 'e2e' }), 503, (res, body) => {
     assertUnavailable(body, res);
   });
-  await check('GET /api/opencode/session/status down → 503', '/api/opencode/session/status', undefined, 503, (res, body) => {
+  await check('GET /api/opencode/session/status down → 503', `/api/opencode/session/status?${P}`, undefined, 503, (res, body) => {
     assertUnavailable(body, res);
   });
-  await check('GET /api/opencode/session/:id down → 503', '/api/opencode/session/ses_nope', undefined, 503, (res, body) => {
+  await check('GET /api/opencode/session/:id down → 503', `/api/opencode/session/ses_nope?${P}`, undefined, 503, (res, body) => {
     assertUnavailable(body, res);
   });
-  await check('DELETE /api/opencode/session/:id down → 503', '/api/opencode/session/ses_nope', { method: 'DELETE' }, 503, (res, body) => {
+  await check('DELETE /api/opencode/session/:id down → 503', `/api/opencode/session/ses_nope?${P}`, { method: 'DELETE' }, 503, (res, body) => {
     assertUnavailable(body, res);
   });
-  await check('PATCH /api/opencode/session/:id down → 503', '/api/opencode/session/ses_nope', { ...json({ title: 'e2e' }), method: 'PATCH' }, 503, (res, body) => {
+  await check('PATCH /api/opencode/session/:id down → 503', `/api/opencode/session/ses_nope?${P}`, { ...json({ title: 'e2e' }), method: 'PATCH' }, 503, (res, body) => {
     assertUnavailable(body, res);
   });
-  await check('POST /api/opencode/session/:id/fork down → 503', '/api/opencode/session/ses_nope/fork', json({}), 503, (res, body) => {
+  await check('POST /api/opencode/session/:id/fork down → 503', `/api/opencode/session/ses_nope/fork?${P}`, json({}), 503, (res, body) => {
     assertUnavailable(body, res);
   });
-  await check('GET /api/opencode/session/:id/message down → 503', '/api/opencode/session/ses_nope/message', undefined, 503, (res, body) => {
+  await check('GET /api/opencode/session/:id/message down → 503', `/api/opencode/session/ses_nope/message?${P}`, undefined, 503, (res, body) => {
     assertUnavailable(body, res);
   });
-  await check('GET /api/opencode/session/:id/message?limit=5 down → 503', '/api/opencode/session/ses_nope/message?limit=5&before=msg_nope', undefined, 503, (res, body) => {
+  await check('GET /api/opencode/session/:id/message?limit=5 down → 503', `/api/opencode/session/ses_nope/message?limit=5&before=msg_nope&${P}`, undefined, 503, (res, body) => {
     assertUnavailable(body, res);
   });
+  // C4: the project gate runs before in-method validation — a bad ?limit
+  // without ?projectId answers 400 PROJECT_REQUIRED (fail-closed).
   await check(
-    'GET /api/opencode/session/:id/message?limit=abc → 400 envelope',
+    'GET /api/opencode/session/:id/message w/o projectId → 400 PROJECT_REQUIRED',
     '/api/opencode/session/ses_nope/message?limit=abc',
     undefined,
     400,
     (_res, body) => {
-      assert.equal((body as { code?: string }).code, 'bad_request');
+      assert.equal((body as { code?: string }).code, 'PROJECT_REQUIRED');
     },
   );
   await check(
-    'GET /api/opencode/session/:id/message?limit=-1 → 400 envelope',
+    'GET /api/opencode/session/:id/message w/o projectId → 400 PROJECT_REQUIRED (-1)',
     '/api/opencode/session/ses_nope/message?limit=-1',
     undefined,
     400,
     (_res, body) => {
-      assert.equal((body as { code?: string }).code, 'bad_request');
+      assert.equal((body as { code?: string }).code, 'PROJECT_REQUIRED');
     },
   );
-  await check('GET /api/opencode/session/:id/message/:messageID down → 503', '/api/opencode/session/ses_nope/message/msg_nope', undefined, 503, (res, body) => {
+  await check('GET /api/opencode/session/:id/message/:messageID down → 503', `/api/opencode/session/ses_nope/message/msg_nope?${P}`, undefined, 503, (res, body) => {
     assertUnavailable(body, res);
   });
   await check(
     'POST /api/opencode/session/:id/message down → 503',
-    '/api/opencode/session/ses_nope/message',
+    `/api/opencode/session/ses_nope/message?${P}`,
     json({ parts: [{ type: 'text', text: 'hi' }] }),
     503,
     (res, body) => {
@@ -240,7 +307,7 @@ async function downChecks(check: CheckFn, json: (obj: unknown) => RequestInit): 
   );
   await check(
     'POST /api/opencode/session/:id/message full body (model/agent/system/tools) down → 503',
-    '/api/opencode/session/ses_nope/message',
+    `/api/opencode/session/ses_nope/message?${P}`,
     json({
       model: { providerID: 'p', modelID: 'm' },
       agent: 'general',
@@ -256,7 +323,7 @@ async function downChecks(check: CheckFn, json: (obj: unknown) => RequestInit): 
   );
   await check(
     'POST /api/opencode/session/:id/message {} → 400 envelope',
-    '/api/opencode/session/ses_nope/message',
+    `/api/opencode/session/ses_nope/message?${P}`,
     json({}),
     400,
     (_res, body) => {
@@ -265,7 +332,7 @@ async function downChecks(check: CheckFn, json: (obj: unknown) => RequestInit): 
   );
   await check(
     'POST /api/opencode/session/:id/prompt_async valid → 503',
-    '/api/opencode/session/ses_nope/prompt_async',
+    `/api/opencode/session/ses_nope/prompt_async?${P}`,
     json({ parts: [{ type: 'text', text: 'hi' }] }),
     503,
     (res, body) => {
@@ -274,7 +341,7 @@ async function downChecks(check: CheckFn, json: (obj: unknown) => RequestInit): 
   );
   await check(
     'POST /api/opencode/session/:id/prompt_async {} → 400 envelope',
-    '/api/opencode/session/ses_nope/prompt_async',
+    `/api/opencode/session/ses_nope/prompt_async?${P}`,
     json({}),
     400,
     (_res, body) => {
@@ -283,7 +350,7 @@ async function downChecks(check: CheckFn, json: (obj: unknown) => RequestInit): 
   );
   await check(
     'POST /api/opencode/session/:id/command valid → 503',
-    '/api/opencode/session/ses_nope/command',
+    `/api/opencode/session/ses_nope/command?${P}`,
     json({ command: 'test', arguments: 'arg' }),
     503,
     (res, body) => {
@@ -292,7 +359,7 @@ async function downChecks(check: CheckFn, json: (obj: unknown) => RequestInit): 
   );
   await check(
     'POST /api/opencode/session/:id/command {} → 400 envelope',
-    '/api/opencode/session/ses_nope/command',
+    `/api/opencode/session/ses_nope/command?${P}`,
     json({}),
     400,
     (_res, body) => {
@@ -301,7 +368,7 @@ async function downChecks(check: CheckFn, json: (obj: unknown) => RequestInit): 
   );
   await check(
     'POST /api/opencode/session/:id/shell valid → 503',
-    '/api/opencode/session/ses_nope/shell',
+    `/api/opencode/session/ses_nope/shell?${P}`,
     json({ agent: 'general', command: 'echo hi' }),
     503,
     (res, body) => {
@@ -310,17 +377,17 @@ async function downChecks(check: CheckFn, json: (obj: unknown) => RequestInit): 
   );
   await check(
     'POST /api/opencode/session/:id/shell {} → 400 envelope',
-    '/api/opencode/session/ses_nope/shell',
+    `/api/opencode/session/ses_nope/shell?${P}`,
     json({}),
     400,
     (_res, body) => {
       assert.equal((body as { code?: string }).code, 'bad_request');
     },
   );
-  await check('POST /api/opencode/session/:id/abort down → 503', '/api/opencode/session/ses_nope/abort', json({}), 503, (res, body) => {
+  await check('POST /api/opencode/session/:id/abort down → 503', `/api/opencode/session/ses_nope/abort?${P}`, json({}), 503, (res, body) => {
     assertUnavailable(body, res);
   });
-  await check('GET /api/opencode/config/providers down → 503', '/api/opencode/config/providers', undefined, 503, (res, body) => {
+  await check('GET /api/opencode/config/providers down → 503', `/api/opencode/config/providers?${P}`, undefined, 503, (res, body) => {
     assertUnavailable(body, res);
   });
   // SSE subscribes BEFORE headers: down upstream → 503 JSON (never a mock stream).
@@ -335,7 +402,7 @@ async function downChecks(check: CheckFn, json: (obj: unknown) => RequestInit): 
   });
 }
 
-async function liveChecks(check: CheckFn, json: (obj: unknown) => RequestInit, base: string): Promise<void> {
+async function liveChecks(check: CheckFn, json: (obj: unknown) => RequestInit, base: string, authHeaders: Record<string, string>): Promise<void> {
   // Live 200s through the proxy (no mocks — upstream is the real server).
   // LLM-dependent executions (prompt/command/shell runs) are intentionally
   // NOT asserted: the temp server has no model credentials.
@@ -355,35 +422,35 @@ async function liveChecks(check: CheckFn, json: (obj: unknown) => RequestInit, b
   });
 
   let sessionId = '';
-  await check('live POST /api/opencode/session 200', '/api/opencode/session', json({ title: 'e2e-live' }), 200, (_res, body) => {
+  await check('live POST /api/opencode/session 200', `/api/opencode/session?projectId=${E2E_PROJECT_ID}`, json({ title: 'e2e-live' }), 200, (_res, body) => {
     const b = body as { id?: string };
     assert.equal(typeof b.id, 'string');
     sessionId = b.id as string;
   });
   assert.ok(sessionId, 'session id captured for follow-up live checks');
 
-  await check('live GET /api/opencode/session/status 200', '/api/opencode/session/status', undefined, 200, (_res, body) => {
+  await check('live GET /api/opencode/session/status 200', `/api/opencode/session/status?projectId=${E2E_PROJECT_ID}`, undefined, 200, (_res, body) => {
     assert.equal(typeof body, 'object');
   });
-  await check('live PATCH /api/opencode/session/:id 200', `/api/opencode/session/${sessionId}`, { ...json({ title: 'e2e-live-renamed' }), method: 'PATCH' }, 200, (_res, body) => {
+  await check('live PATCH /api/opencode/session/:id 200', `/api/opencode/session/${sessionId}?projectId=${E2E_PROJECT_ID}`, { ...json({ title: 'e2e-live-renamed' }), method: 'PATCH' }, 200, (_res, body) => {
     assert.equal((body as { title?: string }).title, 'e2e-live-renamed');
   });
-  await check('live GET /api/opencode/session/:id/message?limit=1 200 array', `/api/opencode/session/${sessionId}/message?limit=1`, undefined, 200, (res, body) => {
+  await check('live GET /api/opencode/session/:id/message?limit=1 200 array', `/api/opencode/session/${sessionId}/message?limit=1&projectId=${E2E_PROJECT_ID}`, undefined, 200, (res, body) => {
     assert.ok(Array.isArray(body), `expected array, got ${JSON.stringify(body)?.slice(0, 120)}`);
     // Cursor passthrough documented; upstream currently sends none — assert
     // only the plumbing (header read must not crash the 200).
     assert.equal(typeof res.headers.get('content-type'), 'string');
   });
-  await check('live POST /api/opencode/session/:id/fork 200', `/api/opencode/session/${sessionId}/fork`, json({}), 200, (_res, body) => {
+  await check('live POST /api/opencode/session/:id/fork 200', `/api/opencode/session/${sessionId}/fork?projectId=${E2E_PROJECT_ID}`, json({}), 200, (_res, body) => {
     assert.equal(typeof (body as { id?: string }).id, 'string');
   });
   // Upstream 404 (unknown message) surfaces through the uniform 503 mapping.
-  await check('live GET unknown message → 503 (uniform upstream mapping)', `/api/opencode/session/${sessionId}/message/msg_nope`, undefined, 503, (res, body) => {
+  await check('live GET unknown message → 503 (uniform upstream mapping)', `/api/opencode/session/${sessionId}/message/msg_nope?projectId=${E2E_PROJECT_ID}`, undefined, 503, (res, body) => {
     assertUnavailable(body, res);
   });
   await check(
     'live POST /api/opencode/session/:id/prompt_async {} → 400 envelope',
-    `/api/opencode/session/${sessionId}/prompt_async`,
+    `/api/opencode/session/${sessionId}/prompt_async?projectId=${E2E_PROJECT_ID}`,
     json({}),
     400,
     (_res, body) => {
@@ -398,7 +465,7 @@ async function liveChecks(check: CheckFn, json: (obj: unknown) => RequestInit, b
   const timer = setTimeout(() => ctrl.abort(), 8000);
   try {
     const res = await fetch(`${base}/api/opencode/global/event`, {
-      headers: { accept: 'text/event-stream' },
+      headers: { accept: 'text/event-stream', ...authHeaders },
       signal: ctrl.signal,
     });
     assert.equal(res.status, 200);

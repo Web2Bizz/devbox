@@ -27,6 +27,13 @@ export type AppEnv = {
   /** Optional bearer token for the opencode server ('' = unauthenticated; never logged). */
   opencodeToken: string;
   /**
+   * Server password for the opencode stand (`opencode serve` always runs
+   * password-protected; v2 canonical OPENCODE_PASSWORD, username `opencode`).
+   * '' = unset — serve paths send no Authorization header and the upstream
+   * answers 401 (honest signal, never masked). Never logged.
+   */
+  opencodePassword: string;
+  /**
    * Server secret for per-user OpenCode API-key encryption at rest
    * ('' = unconfigured — key endpoints answer 500; explicit values must be
    * ≥ 32 chars; never logged). This is the ACTIVE KEK: new rows are wrapped
@@ -150,8 +157,9 @@ export type AppEnv = {
   /** Refresh token lifetime in seconds (default 604800 = 7d). */
   jwtRefreshTtlSec: number;
   /**
-   * Legacy x-user-id / ?userId mock identity fallback (dev default true +
-   * WARN; explicit 'false' disables — JwtAuthGuard then requires Bearer).
+   * Legacy x-user-id / ?userId mock identity fallback (strict default false —
+   * JwtAuthGuard requires Bearer; explicit 'true' re-enables the mock for
+   * local dev only (boot WARN), never for production).
    */
   authLegacyMockFallback: boolean;
 };
@@ -241,6 +249,7 @@ export const envRawSchema = z.object({
   OPENCODE_PORT: z.string().optional(),
   OPENCODE_PROTOCOL: z.string().optional(),
   OPENCODE_TOKEN: z.string().optional(),
+  OPENCODE_PASSWORD: z.string().optional(),
   DATABASE_URL: z.string().optional(),
   POSTGRES_USER: z.string().optional(),
   POSTGRES_PASSWORD: z.string().optional(),
@@ -699,8 +708,12 @@ export function validateEnvWithWarnings(
     );
   }
 
-  // --- opencode auth (optional bearer; never echoed in errors/logs) ----------
+  // --- opencode auth (optional bearer + server Basic password; never echoed in errors/logs) ----------
+  // OPENCODE_TOKEN stays parsed for billing/compat but is NO LONGER the serve
+  // auth source: `opencode serve` always runs password-protected and its
+  // clients authenticate with Basic base64("opencode:<OPENCODE_PASSWORD>").
   const opencodeToken = firstNonEmpty(env.OPENCODE_TOKEN);
+  const opencodePassword = firstNonEmpty(env.OPENCODE_PASSWORD);
 
   // --- per-user OpenCode keys (encryption secret + billing endpoint) ---------
   // The encryption secret is REQUIRED for key storage but stays optional at
@@ -1328,8 +1341,9 @@ export function validateEnvWithWarnings(
   // Secrets only via env, never logged (values never echoed, names only).
   // Unset secret → ephemeral dev secret (random per boot) + WARN — explicit
   // values must be ≥ 32 chars (ERROR otherwise). TTLs accept '15m' | '1h' |
-  // '7d' | seconds; garbage is ERROR. AUTH_LEGACY_MOCK_FALLBACK unset → true
-  // (dev default) + WARN; explicit 'true'/'1' or 'false'/'0', else ERROR.
+  // '7d' | seconds; garbage is ERROR. AUTH_LEGACY_MOCK_FALLBACK unset → false
+  // (strict default) + WARN; explicit 'true' re-enables the mock for local
+  // dev only (+ WARN, never production); 'false' stays strict; else ERROR.
   const jwtAccessSecretRaw = firstNonEmpty(env.JWT_ACCESS_SECRET);
   const jwtRefreshSecretRaw = firstNonEmpty(env.JWT_REFRESH_SECRET);
   const checkJwtSecret = (raw: string, name: string): void => {
@@ -1403,13 +1417,18 @@ export function validateEnvWithWarnings(
   const legacyFallbackRaw = firstNonEmpty(env.AUTH_LEGACY_MOCK_FALLBACK);
   let authLegacyMockFallback: boolean;
   if (!legacyFallbackRaw) {
-    authLegacyMockFallback = true;
+    authLegacyMockFallback = false;
     warn(
-      '[env] WARN AUTH_LEGACY_MOCK_FALLBACK is unset, falling back to "true" (dev default: ' +
-        'x-user-id mock identity still accepted). Set "false" for production (see .env.example).',
+      '[env] WARN AUTH_LEGACY_MOCK_FALLBACK is unset, falling back to "false" (strict default: ' +
+        'JwtAuthGuard requires Bearer, x-user-id mock identity rejected). Set "true" for local dev only, ' +
+        'never for production (see .env.example).',
     );
   } else if (/^(true|1)$/i.test(legacyFallbackRaw)) {
     authLegacyMockFallback = true;
+    warn(
+      "[env] WARN AUTH_LEGACY_MOCK_FALLBACK is explicitly enabled — " +
+        "x-user-id mock identity accepted (local dev only, never for production).",
+    );
   } else if (/^(false|0)$/i.test(legacyFallbackRaw)) {
     authLegacyMockFallback = false;
   } else {
@@ -1436,6 +1455,7 @@ export function validateEnvWithWarnings(
       backendSocket,
       opencodeUrl,
       opencodeToken,
+      opencodePassword,
       opencodeKeysEncryptionKey,
       opencodeKeysEncryptionKeyPrevious,
       opencodeKeysActiveKeyId,

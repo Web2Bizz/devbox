@@ -1,7 +1,8 @@
-import { Controller, Get, Headers, Version } from '@nestjs/common';
-import { ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Controller, Get, Headers, UseGuards, Version } from '@nestjs/common';
+import { ApiBearerAuth, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { V1Endpoint } from '../api/version';
 import { ApiErrorDto } from '../api/dto';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { NpmRegistryService } from './npm-registry.service';
 import { NpmRegistryStatusDto } from './dto';
 
@@ -21,8 +22,14 @@ import { NpmRegistryStatusDto } from './dto';
  * 'down' (AUTH_401/AUTH_403 internally) and answers 503 outward — the
  * 401/403 detail stays in backend logs/monitoring only. The endpoint
  * therefore never answers 401/403/502 for upstream auth.
+ *
+ * Security (Card C3): Bearer-guarded read-only surface (JwtAuthGuard;
+ * anonymous → 401). The 401 here is the guard (missing/invalid caller
+ * Bearer), never the upstream credential state (still 503 outward).
  */
 @ApiTags('npm-registry')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller('registry')
 export class NpmRegistryController {
   constructor(private readonly registry: NpmRegistryService) {}

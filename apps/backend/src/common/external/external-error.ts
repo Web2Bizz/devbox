@@ -15,6 +15,7 @@ export type ExternalErrorCode =
   | 'EXTERNAL_UNAVAILABLE'
   | 'EXTERNAL_RATE_LIMITED'
   | 'EXTERNAL_UPSTREAM_5XX'
+  | 'EXTERNAL_UNAUTHORIZED'
   | 'GITHUB_AUTH';
 
 export type ExternalErrorOptions = {
@@ -41,6 +42,12 @@ const FIXED_MESSAGES: Record<ExternalErrorCode, string> = {
   EXTERNAL_UNAVAILABLE: 'сервис временно недоступен, повторите позже',
   EXTERNAL_RATE_LIMITED: 'Upstream rate limit exceeded, retry later',
   EXTERNAL_UPSTREAM_5XX: 'Upstream service returned a server error',
+  // Fixed 503 message for an upstream that refused OUR credentials (401/403).
+  // Deliberately different from EXTERNAL_UNAVAILABLE: a retry with the same
+  // credentials fails the same way, so the client must not read this as
+  // "try again later". Service-neutral (the map is keyed by code, not by
+  // service), no upstream echo, no secrets.
+  EXTERNAL_UNAUTHORIZED: 'внутренняя авторизация в вышестоящем сервисе не пройдена',
   GITHUB_AUTH: 'GitHub authorization failed',
 };
 
@@ -60,6 +67,13 @@ export function httpStatusFor(code: ExternalErrorCode, upstreamStatus?: number):
         : 502;
     case 'GITHUB_AUTH':
       return upstreamStatus === 401 || upstreamStatus === 403 ? upstreamStatus : 401;
+    case 'EXTERNAL_UNAUTHORIZED':
+      // 503, NOT 401: the frontend treats ANY 401 as "our session expired"
+      // (refresh → logout, see useUsage / useProfile / useOpencodeSessions),
+      // so a 401 here would kick the user out of the app. Our 401 means "the
+      // upstream refused the credentials we sent" — a config defect on our
+      // side, not the caller's session. 503 keeps it out of the refresh path.
+      return 503;
     case 'EXTERNAL_UNAVAILABLE':
     default:
       return 503;
@@ -98,6 +112,10 @@ function defaultRetryable(code: ExternalErrorCode): boolean {
     case 'EXTERNAL_UPSTREAM_5XX':
     case 'EXTERNAL_UNAVAILABLE':
       return true;
+    case 'EXTERNAL_UNAUTHORIZED':
+      // Refused credentials — the same request with the same credentials
+      // fails the same way, so a retry is pointless.
+      return false;
     case 'GITHUB_AUTH':
       return false;
     default:
@@ -148,8 +166,10 @@ export function timeoutError(
 
 /**
  * Maps an upstream HTTP status to a fixed-code error.
- * 401/403 → GITHUB_AUTH for the github service, EXTERNAL_UNAVAILABLE
- * otherwise; 404 → EXTERNAL_UNAVAILABLE (never retryable); 429 →
+ * 401/403 → GITHUB_AUTH for the github service, EXTERNAL_UNAUTHORIZED for
+ * every other service (the upstream refused OUR credentials — the original
+ * status is kept on the error, the http answer is 503 and never retryable);
+ * 404 → EXTERNAL_UNAVAILABLE (never retryable); 429 →
  * EXTERNAL_RATE_LIMITED; 5xx → EXTERNAL_UPSTREAM_5XX; anything else →
  * EXTERNAL_UNAVAILABLE.
  */
@@ -190,6 +210,23 @@ export function fromStatus(
       service,
       operation,
       message: FIXED_MESSAGES.GITHUB_AUTH,
+      status,
+      attempt,
+      isRetryable: false,
+      cause,
+    });
+  }
+  if (status === 401 || status === 403) {
+    // The upstream answered 401/403 — it refused the credentials we sent
+    // (e.g. the opencode stand without a matching Basic password). NOT an
+    // outage: the original status is kept for logs/monitoring, the http
+    // answer is 503 EXTERNAL_UNAUTHORIZED (no Retry-After — a retry with
+    // the same credentials cannot help).
+    return new ExternalServiceError({
+      code: 'EXTERNAL_UNAUTHORIZED',
+      service,
+      operation,
+      message: FIXED_MESSAGES.EXTERNAL_UNAUTHORIZED,
       status,
       attempt,
       isRetryable: false,

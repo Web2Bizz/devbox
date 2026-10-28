@@ -16,6 +16,8 @@
  *    Retry-After (no mock echo);
  *  - POST /chat {} → 400 envelope { code, message, correlationId } with the
  *    x-correlation-id response header echoed.
+ *  - a refused credential (401) is NEVER retried — exactly 1 upstream hit
+ *    even with EXTERNAL_RETRY_MAX_ATTEMPTS=3.
  */
 import assert from 'node:assert/strict';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
@@ -73,6 +75,12 @@ function startFlaky(): Promise<Flaky> {
     if (path === '/messages') {
       hit('/messages');
       json(res, 503, { error: 'always unavailable' });
+      return;
+    }
+    if (path === '/unauthorized') {
+      // Refused credentials — 4xx is never retried (EXTERNAL_RETRY_MAX_ATTEMPTS=3).
+      hit('/unauthorized');
+      json(res, 401, { error: 'unauthorized' });
       return;
     }
     if (path === '/chat') {
@@ -186,6 +194,22 @@ async function main(): Promise<void> {
       assert.equal(typeof body.message, 'string');
       assert.equal(typeof body.correlationId, 'string');
       assert.equal(res.headers.get('x-correlation-id'), body.correlationId);
+    });
+
+    await check('401 is not retried: /unauthorized → 1 upstream hit', async () => {
+      // Direct client call (no HTTP surface): a refused credential is a 4xx —
+      // never a retryable status, so the upstream is hit EXACTLY once even
+      // though EXTERNAL_RETRY_MAX_ATTEMPTS=3.
+      const { ExternalClient } = await import('./external-client');
+      const { AppLogger } = await import('../app-logger.service');
+      const client = new ExternalClient(new AppLogger('ExternalClient'));
+      const res = await client.fetchWithRetry(
+        `${flaky.url}/unauthorized`,
+        {},
+        { service: 'test', operation: 'unauthorized' },
+      );
+      assert.equal(res.status, 401);
+      assert.equal(flaky.hits('/unauthorized'), 1);
     });
   } finally {
     await app.close();

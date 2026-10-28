@@ -9,7 +9,6 @@ import {
   Post,
   Query,
   UseGuards,
-  UsePipes,
   Version,
 } from '@nestjs/common';
 import {
@@ -55,6 +54,12 @@ import {
  * the real-user gate (non-uuid mock → 401 `unauthorized`); upstream auth is
  * the server Basic password (OPENCODE_PASSWORD, unset → no header, upstream
  * 401). No per-user DB Bearer on this path.
+ *
+ * Upstream failures answer 503: EXTERNAL_UNAVAILABLE («сервис временно
+ * недоступен, повторите позже») with Retry-After when the upstream is
+ * unreachable, and EXTERNAL_UNAUTHORIZED (no Retry-After) when the upstream
+ * refused the credentials we sent (401/403 — a retry with the same
+ * credentials cannot help).
  *
  * Project scope (Card C4): every route requires `?projectId` and gates
  * through OrganizationsService.assertProjectAccessById BEFORE any upstream
@@ -113,7 +118,7 @@ export class ApiController {
   @Version(DEFAULT_API_VERSION)
   @V1Endpoint('Active session (proxy → opencode server, 503 when unreachable)')
   @ApiResponse({ status: 200, description: 'live session', type: SessionDto })
-  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async getSessionV1(
     @ReqUser() identity: RequestIdentity,
     @Query('projectId') projectId?: string,
@@ -128,7 +133,7 @@ export class ApiController {
   @V1Endpoint('Session list (proxy → opencode server, 503 when unreachable)')
   @ApiQuery({ name: 'projectId', required: true, type: String })
   @ApiResponse({ status: 200, description: 'live sessions', type: [SessionDto] })
-  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async listSessionsV1(
     @ReqUser() identity: RequestIdentity,
     @Query('projectId') projectId?: string,
@@ -144,7 +149,7 @@ export class ApiController {
   @ApiQuery({ name: 'sessionId', required: false, type: String })
   @ApiQuery({ name: 'projectId', required: true, type: String })
   @ApiResponse({ status: 200, description: 'live messages', type: MessagesResponseDto })
-  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async getMessagesV1(
     @ReqUser() identity: RequestIdentity,
     @Query('sessionId') sessionId?: string,
@@ -163,11 +168,10 @@ export class ApiController {
   @ApiQuery({ name: 'projectId', required: true, type: String })
   @ApiResponse({ status: 200, description: 'live assistant reply', type: SendChatResponseDto })
   @ApiResponse({ status: 400, description: 'bad request', type: ApiErrorDto })
-  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
-  @UsePipes(new ZodValidationPipe(sendChatSchema))
+  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async sendChatV1(
     @ReqUser() identity: RequestIdentity,
-    @Body() body: SendChatRequestDto,
+    @Body(new ZodValidationPipe(sendChatSchema)) body: SendChatRequestDto,
     @Query('projectId') projectId?: string,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<SendChatResponseDto> {

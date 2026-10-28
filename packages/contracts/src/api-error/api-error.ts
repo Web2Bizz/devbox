@@ -7,10 +7,16 @@
  * `unauthorized` | `forbidden` | `not_found` | `payload_too_large` |
  * `request_failed` | `internal_error`), typed upstream codes
  * (`EXTERNAL_TIMEOUT` | `EXTERNAL_UNAVAILABLE` | `EXTERNAL_RATE_LIMITED` |
- * `EXTERNAL_UPSTREAM_5XX` | `GITHUB_AUTH` | `GITHUB_NOT_INSTALLED`), auth
+ * `EXTERNAL_UPSTREAM_5XX` | `EXTERNAL_UNAUTHORIZED` | `GITHUB_AUTH` |
+ * `GITHUB_NOT_INSTALLED`), auth
  * codes (`invalid_credentials` | `email_taken` | `provider_not_configured`),
  * key codes (`opencode_key_invalid` | `opencode_key_missing` |
  * `opencode_keys_unconfigured`).
+ *
+ * `EXTERNAL_UNAUTHORIZED` — the upstream refused the credentials we sent
+ * (401/403). It is answered with HTTP 503 (NOT 401: the frontend reads any
+ * 401 as "our session expired" and would log the user out) and carries no
+ * Retry-After (a retry with the same credentials cannot help).
  */
 export type ApiError = {
   /** machine-readable code (see above — frozen shape, values only) */

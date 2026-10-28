@@ -4,8 +4,9 @@
  *   `bun run build && bun dist/common/external/external-error.spec.js`
  * Also executes under `bun test dist` (top-level run, throws on failure).
  *
- * Covers: fixed codes, 401/403/404/429/503 mapping, httpStatus derivation,
- * isRetryable flags, timeout detection, never-leak-messages.
+ * Covers: fixed codes, 401/403 → EXTERNAL_UNAUTHORIZED (http 503, never
+ * 401), 404/429/5xx mapping, httpStatus derivation, isRetryable flags,
+ * timeout detection, never-leak-messages.
  */
 import assert from 'node:assert/strict';
 import {
@@ -58,11 +59,27 @@ const checks: Array<{ name: string; run: () => void }> = [
     },
   },
   {
-    name: '401 for non-github maps to EXTERNAL_UNAVAILABLE (http 503)',
+    name: '401 for non-github maps to EXTERNAL_UNAUTHORIZED (http 503, not retryable)',
     run: () => {
       const err = fromStatus('opencode', 'getSession', 401);
-      assert.equal(err.code, 'EXTERNAL_UNAVAILABLE');
+      assert.equal(err.code, 'EXTERNAL_UNAUTHORIZED');
       assert.equal(err.httpStatus, 503);
+      assert.equal(err.isRetryable, false);
+      // The original upstream status stays on the error (logs/monitoring).
+      assert.equal(err.status, 401);
+      // Never masked as the generic "unavailable" answer.
+      assert.notEqual(err.message, 'сервис временно недоступен, повторите позже');
+    },
+  },
+  {
+    name: '403 for non-github maps to EXTERNAL_UNAUTHORIZED (http 503, not retryable)',
+    run: () => {
+      const err = fromStatus('opencode', 'getSession', 403);
+      assert.equal(err.code, 'EXTERNAL_UNAUTHORIZED');
+      assert.equal(err.httpStatus, 503);
+      assert.equal(err.isRetryable, false);
+      assert.equal(err.status, 403);
+      assert.notEqual(err.message, 'сервис временно недоступен, повторите позже');
     },
   },
   {
@@ -145,6 +162,11 @@ const checks: Array<{ name: string; run: () => void }> = [
       assert.equal(httpStatusFor('GITHUB_AUTH'), 401);
       assert.equal(httpStatusFor('EXTERNAL_TIMEOUT'), 504);
       assert.equal(httpStatusFor('EXTERNAL_RATE_LIMITED'), 429);
+      // EXTERNAL_UNAUTHORIZED answers 503, NEVER 401 (the frontend reads any
+      // 401 as "our session expired" → refresh → logout).
+      assert.equal(httpStatusFor('EXTERNAL_UNAUTHORIZED'), 503);
+      assert.equal(httpStatusFor('EXTERNAL_UNAUTHORIZED', 401), 503);
+      assert.equal(httpStatusFor('EXTERNAL_UNAUTHORIZED', 403), 503);
     },
   },
 ];

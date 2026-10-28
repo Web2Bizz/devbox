@@ -57,7 +57,7 @@ import {
   type OpencodeSessionUpdateInput,
   type OpencodeShellInput,
 } from '../api/dto';
-import { fromUnknown } from '../common/external/external-error';
+import { fromStatus, fromUnknown } from '../common/external/external-error';
 
 /** Upstream cursor headers passed through on GET message lists (when present). */
 const CURSOR_PASSTHROUGH_HEADERS = ['x-next-cursor', 'link'] as const;
@@ -107,9 +107,11 @@ type SseSubscription = {
  * ExternalClient retry budget inside OpencodeSdkClient) throw
  * ExternalServiceError — the api-error.filter answers 503
  * EXTERNAL_UNAVAILABLE («сервис временно недоступен, повторите позже»)
- * with a Retry-After header. No mock 200s: a 200 always means live
- * upstream data (warn + debug via AppLogger, never logs secrets —
- * no URLs/headers/bodies).
+ * with a Retry-After header. An upstream 401/403 (the stand refused the
+ * credentials we sent) answers 503 EXTERNAL_UNAUTHORIZED instead — a
+ * distinct code, no Retry-After (a retry with the same credentials cannot
+ * help). No mock 200s: a 200 always means live upstream data (warn + debug
+ * via AppLogger, never logs secrets — no URLs/headers/bodies).
  */
 @ApiTags('opencode')
 @ApiBearerAuth()
@@ -168,7 +170,32 @@ export class OpencodeController {
     return data !== undefined && error === undefined;
   }
 
-  private upstreamError(operation: string, error: unknown): Error {
+  /**
+   * Real upstream HTTP status carried by the sdk result tuple.
+   *
+   * The v2 sdk answers a non-2xx with `{ error, request, response }` — the
+   * parsed upstream body lands in `error` (it has NO status field, e.g.
+   * `{"_tag":"UnauthorizedError"}`), while the HTTP status lives on
+   * `response.status`. Without this the upstream 401/403 was masked as
+   * "service unavailable" (EXTERNAL_UNAVAILABLE).
+   */
+  private sdkStatus(result: { response?: { status?: number } }): number | undefined {
+    const status = result.response?.status;
+    return typeof status === 'number' && Number.isInteger(status) ? status : undefined;
+  }
+
+  /**
+   * Maps an upstream failure to a typed ExternalServiceError.
+   *
+   * `status` is the REAL upstream status when the caller has it (see
+   * sdkStatus) — 401/403 then become EXTERNAL_UNAUTHORIZED instead of the
+   * generic "service unavailable". Without a known status the error is
+   * normalized by fromUnknown (network / timeout / unknown shape).
+   */
+  private upstreamError(operation: string, error: unknown, status?: number): Error {
+    if (status !== undefined && Number.isInteger(status) && status >= 400 && status <= 599) {
+      return fromStatus('opencode', operation, status, 1, error);
+    }
     return fromUnknown('opencode', operation, error ?? new Error('upstream_error'));
   }
 
@@ -366,7 +393,7 @@ export class OpencodeController {
   @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'List sessions (sdk → opencode server, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'live sessions' })
-  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async listSessions(
     @ReqUser() identity: RequestIdentity,
     @Query('projectId') projectId?: string,
@@ -385,7 +412,7 @@ export class OpencodeController {
       // signature unchanged).
       const res = await client.v2.session.list({ directory: projectDir });
       if (this.isUpstreamOk(res.data, res.error)) return res.data.data;
-      throw this.upstreamError('listSessions', res.error);
+      throw this.upstreamError('listSessions', res.error, this.sdkStatus(res));
     } catch (err) {
       this.logger.warn('[opencode] GET /session upstream failed', cid);
       this.logger.debug((err as Error).message, cid);
@@ -399,7 +426,7 @@ export class OpencodeController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Create session (sdk → opencode server, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'live session' })
-  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async createSession(
     @ReqUser() identity: RequestIdentity,
     @Body() body: { title?: string; parentID?: string } = {},
@@ -427,7 +454,7 @@ export class OpencodeController {
       if (this.isUpstreamOk(res.data, res.error)) {
         return res.data.data as unknown as Session;
       }
-      throw this.upstreamError('createSession', res.error);
+      throw this.upstreamError('createSession', res.error, this.sdkStatus(res));
     } catch (err) {
       this.logger.warn('[opencode] POST /session upstream failed', cid);
       this.logger.debug((err as Error).message, cid);
@@ -440,7 +467,7 @@ export class OpencodeController {
   @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'Get session status (sdk → opencode server, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'live session status map' })
-  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async sessionStatus(
     @ReqUser() identity: RequestIdentity,
     @Query('projectId') projectId?: string,
@@ -456,7 +483,7 @@ export class OpencodeController {
     try {
       const res = await client.session.status({ directory: projectDir });
       if (this.isUpstreamOk(res.data, res.error)) return res.data;
-      throw this.upstreamError('sessionStatus', res.error);
+      throw this.upstreamError('sessionStatus', res.error, this.sdkStatus(res));
     } catch (err) {
       this.logger.warn('[opencode] GET /session/status upstream failed', cid);
       this.logger.debug((err as Error).message, cid);
@@ -469,7 +496,7 @@ export class OpencodeController {
   @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'Get session (sdk → opencode server, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'live session' })
-  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async getSession(
     @ReqUser() identity: RequestIdentity,
     @Param('id') id: string,
@@ -491,7 +518,7 @@ export class OpencodeController {
         sessionID: id,
       });
       if (this.isUpstreamOk(res.data, res.error)) return res.data.data;
-      throw this.upstreamError('getSession', res.error);
+      throw this.upstreamError('getSession', res.error, this.sdkStatus(res));
     } catch (err) {
       this.logger.warn('[opencode] GET /session/:id upstream failed', cid);
       this.logger.debug((err as Error).message, cid);
@@ -504,7 +531,7 @@ export class OpencodeController {
   @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'Delete session (sdk → opencode server, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'deleted flag (live upstream only)' })
-  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async deleteSession(
     @ReqUser() identity: RequestIdentity,
     @Param('id') id: string,
@@ -524,7 +551,7 @@ export class OpencodeController {
         directory: projectDir,
       });
       if (res.error === undefined) return { deleted: true };
-      throw this.upstreamError('deleteSession', res.error);
+      throw this.upstreamError('deleteSession', res.error, this.sdkStatus(res));
     } catch (err) {
       this.logger.warn('[opencode] DELETE /session/:id upstream failed', cid);
       this.logger.debug((err as Error).message, cid);
@@ -537,7 +564,7 @@ export class OpencodeController {
   @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'Update session (sdk → opencode server, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'live session' })
-  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async updateSession(
     @ReqUser() identity: RequestIdentity,
     @Param('id') id: string,
@@ -560,7 +587,7 @@ export class OpencodeController {
         directory: projectDir,
       });
       if (this.isUpstreamOk(res.data, res.error)) return res.data;
-      throw this.upstreamError('updateSession', res.error);
+      throw this.upstreamError('updateSession', res.error, this.sdkStatus(res));
     } catch (err) {
       this.logger.warn('[opencode] PATCH /session/:id upstream failed', cid);
       this.logger.debug((err as Error).message, cid);
@@ -574,7 +601,7 @@ export class OpencodeController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Fork session (sdk → opencode server, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'live forked session' })
-  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async forkSession(
     @ReqUser() identity: RequestIdentity,
     @Param('id') id: string,
@@ -597,7 +624,7 @@ export class OpencodeController {
         directory: projectDir,
       });
       if (this.isUpstreamOk(res.data, res.error)) return res.data;
-      throw this.upstreamError('forkSession', res.error);
+      throw this.upstreamError('forkSession', res.error, this.sdkStatus(res));
     } catch (err) {
       this.logger.warn('[opencode] POST /session/:id/fork upstream failed', cid);
       this.logger.debug((err as Error).message, cid);
@@ -612,7 +639,7 @@ export class OpencodeController {
   @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'List session messages (sdk → opencode server, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'live messages' })
-  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async listMessages(
     @ReqUser() identity: RequestIdentity,
     @Param('id') id: string,
@@ -646,7 +673,7 @@ export class OpencodeController {
         this.passthroughCursors(sdkRes, res);
         return sdkRes.data.data;
       }
-      throw this.upstreamError('listMessages', sdkRes.error);
+      throw this.upstreamError('listMessages', sdkRes.error, this.sdkStatus(sdkRes));
     } catch (err) {
       this.logger.warn('[opencode] GET /session/:id/message upstream failed', cid);
       this.logger.debug((err as Error).message, cid);
@@ -661,7 +688,7 @@ export class OpencodeController {
   @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'Get session message (sdk → opencode server, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'live message' })
-  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async getMessage(
     @ReqUser() identity: RequestIdentity,
     @Param('id') id: string,
@@ -685,7 +712,7 @@ export class OpencodeController {
         messageID,
       });
       if (this.isUpstreamOk(res.data, res.error)) return res.data.data;
-      throw this.upstreamError('getMessage', res.error);
+      throw this.upstreamError('getMessage', res.error, this.sdkStatus(res));
     } catch (err) {
       this.logger.warn('[opencode] GET /session/:id/message/:messageID upstream failed', cid);
       this.logger.debug((err as Error).message, cid);
@@ -699,7 +726,7 @@ export class OpencodeController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Send session message (sdk → opencode server, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'live assistant reply' })
-  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async prompt(
     @ReqUser() identity: RequestIdentity,
     @Param('id') id: string,
@@ -726,7 +753,7 @@ export class OpencodeController {
         directory: projectDir,
       });
       if (this.isUpstreamOk(res.data, res.error)) return res.data;
-      throw this.upstreamError('prompt', res.error);
+      throw this.upstreamError('prompt', res.error, this.sdkStatus(res));
     } catch (err) {
       this.logger.warn('[opencode] POST /session/:id/message upstream failed', cid);
       this.logger.debug((err as Error).message, cid);
@@ -740,7 +767,7 @@ export class OpencodeController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Send async session message, return immediately (sdk → opencode server, 503 when unreachable)' })
   @ApiResponse({ status: 204, description: 'prompt accepted (live upstream only)' })
-  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async promptAsync(
     @ReqUser() identity: RequestIdentity,
     @Param('id') id: string,
@@ -764,7 +791,9 @@ export class OpencodeController {
         ...(format === undefined ? {} : { format: format as OutputFormat }),
         directory: projectDir,
       });
-      if (res.error !== undefined) throw this.upstreamError('promptAsync', res.error);
+      if (res.error !== undefined) {
+        throw this.upstreamError('promptAsync', res.error, this.sdkStatus(res));
+      }
     } catch (err) {
       this.logger.warn('[opencode] POST /session/:id/prompt_async upstream failed', cid);
       this.logger.debug((err as Error).message, cid);
@@ -778,7 +807,7 @@ export class OpencodeController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Send command to session (sdk → opencode server, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'live assistant reply' })
-  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async runCommand(
     @ReqUser() identity: RequestIdentity,
     @Param('id') id: string,
@@ -801,7 +830,7 @@ export class OpencodeController {
         directory: projectDir,
       });
       if (this.isUpstreamOk(res.data, res.error)) return res.data;
-      throw this.upstreamError('runCommand', res.error);
+      throw this.upstreamError('runCommand', res.error, this.sdkStatus(res));
     } catch (err) {
       this.logger.warn('[opencode] POST /session/:id/command upstream failed', cid);
       this.logger.debug((err as Error).message, cid);
@@ -815,7 +844,7 @@ export class OpencodeController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Run shell command in session (sdk → opencode server, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'live created message' })
-  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async runShell(
     @ReqUser() identity: RequestIdentity,
     @Param('id') id: string,
@@ -838,7 +867,7 @@ export class OpencodeController {
         directory: projectDir,
       });
       if (this.isUpstreamOk(res.data, res.error)) return res.data;
-      throw this.upstreamError('runShell', res.error);
+      throw this.upstreamError('runShell', res.error, this.sdkStatus(res));
     } catch (err) {
       this.logger.warn('[opencode] POST /session/:id/shell upstream failed', cid);
       this.logger.debug((err as Error).message, cid);
@@ -852,7 +881,7 @@ export class OpencodeController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Abort session (sdk → opencode server, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'abort result (live upstream only)' })
-  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async abortSession(
     @ReqUser() identity: RequestIdentity,
     @Param('id') id: string,
@@ -872,7 +901,7 @@ export class OpencodeController {
         directory: projectDir,
       });
       if (res.error === undefined) return res.data ?? { aborted: true };
-      throw this.upstreamError('abortSession', res.error);
+      throw this.upstreamError('abortSession', res.error, this.sdkStatus(res));
     } catch (err) {
       this.logger.warn('[opencode] POST /session/:id/abort upstream failed', cid);
       this.logger.debug((err as Error).message, cid);
@@ -887,7 +916,7 @@ export class OpencodeController {
   @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'List providers (sdk → opencode server, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'live providers' })
-  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async listProviders(
     @ReqUser() identity: RequestIdentity,
     @Query('projectId') projectId?: string,
@@ -908,7 +937,7 @@ export class OpencodeController {
         location: { directory: projectDir },
       });
       if (this.isUpstreamOk(res.data, res.error)) return res.data;
-      throw this.upstreamError('listProviders', res.error);
+      throw this.upstreamError('listProviders', res.error, this.sdkStatus(res));
     } catch (err) {
       this.logger.warn('[opencode] GET /config/providers upstream failed', cid);
       this.logger.debug((err as Error).message, cid);
@@ -923,7 +952,7 @@ export class OpencodeController {
   @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'Subscribe to opencode events (SSE re-stream, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'text/event-stream of upstream GlobalEvent frames' })
-  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async streamEvents(
     @ReqUser() identity: RequestIdentity,
     @Req() req: ExpressRequest,
@@ -952,7 +981,7 @@ export class OpencodeController {
   @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'Subscribe to legacy opencode events (SSE re-stream, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'text/event-stream of upstream Event frames' })
-  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async streamLegacyEvents(
     @ReqUser() identity: RequestIdentity,
     @Req() req: ExpressRequest,
@@ -985,7 +1014,7 @@ export class OpencodeController {
   @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'Opencode server health (passthrough, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'live upstream health ({healthy, version})' })
-  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async globalHealth(
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<{ healthy: boolean; version: string }> {
@@ -999,7 +1028,12 @@ export class OpencodeController {
         { method: 'GET' },
         { operation: 'globalHealth' },
       );
-      if (!res.ok) throw this.upstreamError('globalHealth', new Error(`status_${res.status}`));
+      // The upstream answered non-2xx — the real status is known here (a raw
+      // fetch Response), so 401/403 become EXTERNAL_UNAUTHORIZED instead of
+      // the masked "service unavailable".
+      if (!res.ok) {
+        throw this.upstreamError('globalHealth', new Error(`status_${res.status}`), res.status);
+      }
       const body = (await res.json().catch(() => null)) as unknown;
       if (
         typeof body !== 'object' ||

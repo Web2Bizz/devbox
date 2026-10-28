@@ -10,10 +10,16 @@
  * (now 404), the v2 404 contract and the versioned Swagger surface.
  * Unreachable upstream (OPENCODE_URL down) answers 503 EXTERNAL_UNAVAILABLE
  * («сервис временно недоступен, повторите позже») with Retry-After —
- * no mock 200s. Never logs secrets; reports db 'down' (strict Postgres) (no external
+ * no mock 200s. An upstream that refuses the credentials we sent (401)
+ * answers 503 EXTERNAL_UNAUTHORIZED instead — a distinct code and NO
+ * Retry-After (the C4 project gate + the workspace jail are patched in
+ * that phase so the request really reaches the upstream).
+ * Never logs secrets; reports db 'down' (strict Postgres) (no external
  * network).
  */
 import assert from 'node:assert/strict';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 
 // --- deterministic env (overrides repo .env AFTER bun/node dotenv load) ---
 // NOTE: must run BEFORE AppModule is imported — ConfigModule.forRoot({validate})
@@ -47,6 +53,38 @@ type CheckResult = {
   ok: boolean;
   detail?: string;
 };
+
+/**
+ * Upstream that refuses the credentials we sent (401) — the honest auth
+ * signal, never masked as "service unavailable".
+ *
+ * The body mirrors the opencode stand (`{"_tag":"UnauthorizedError"}`): it
+ * carries NO status field, so the backend must take the real status from the
+ * HTTP response (the sdk result tuple keeps it on `response.status`).
+ */
+function startUnauthorizedUpstream(): Promise<{
+  server: Server;
+  url: string;
+  close: () => Promise<void>;
+}> {
+  return new Promise((resolve) => {
+    const server = createServer((req, res) => {
+      req.resume();
+      res.writeHead(401, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({ _tag: 'UnauthorizedError', message: 'Authentication required' }),
+      );
+    });
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address() as AddressInfo;
+      resolve({
+        server,
+        url: `http://127.0.0.1:${port}`,
+        close: () => new Promise<void>((done) => server.close(() => done())),
+      });
+    });
+  });
+}
 
 async function main(): Promise<void> {
   const { NestFactory } = await import('@nestjs/core');
@@ -228,6 +266,66 @@ async function main(): Promise<void> {
     await check('CORS echo on /api/v1/session (503)', `/api/v1/session?projectId=${E2E_PROJECT_ID}`, { headers: { origin: 'http://localhost:8080' } }, 503, (res) => {
       assert.equal(res.headers.get('access-control-allow-origin'), 'http://localhost:8080');
     });
+
+    // --- upstream refuses our credentials (401) → EXTERNAL_UNAUTHORIZED ------
+    // The upstream answered 401/403: that is NOT "the service is
+    // unavailable" — it is a distinct code (EXTERNAL_UNAUTHORIZED), answered
+    // with 503 (never 401: the frontend reads any 401 as "our session
+    // expired" → refresh → logout) and WITHOUT Retry-After (a retry with
+    // the same credentials cannot help).
+    //
+    // The C4 project gate and the workspace jail are patched on the service
+    // PROTOTYPES (no Postgres in this suite) so the request really reaches
+    // the upstream; the real gate denial stays asserted above
+    // (assertUnavailable) and the "down" contract is untouched. The
+    // prototype (not the instance) is patched because WorkspacePathService is
+    // provided by several modules — one instance per module.
+    const unauthorized = await startUnauthorizedUpstream();
+    process.env.OPENCODE_URL = unauthorized.url;
+    try {
+      const { OrganizationsService } = await import('../organizations/organizations.service');
+      const { WorkspacePathService } = await import('../workspaces/workspace-path.service');
+      const orgsProto = OrganizationsService.prototype as unknown as {
+        assertProjectAccessById: (
+          projectId: string,
+          userId: string,
+          correlationId?: string,
+        ) => Promise<{ ownerId: string | null; orgIds: string[] }>;
+      };
+      orgsProto.assertProjectAccessById = async () => ({ ownerId: E2E_USER_ID, orgIds: [] });
+      const pathsProto = WorkspacePathService.prototype as unknown as {
+        resolveUserStrict: (
+          userId: string,
+          projectId: string,
+          subPath?: string,
+        ) => Promise<{ absRepo: string }>;
+        realStrictRoot: () => Promise<string>;
+        assertInsideJail: (abs: string, jailReal: string) => Promise<string>;
+      };
+      pathsProto.resolveUserStrict = async () => ({ absRepo: '/tmp/rush-code-e2e-project' });
+      pathsProto.realStrictRoot = async () => '/tmp/rush-code-e2e-root';
+      pathsProto.assertInsideJail = async (abs: string) => abs;
+
+      await check(
+        'GET /api/v1/session upstream 401 → 503 EXTERNAL_UNAUTHORIZED (no Retry-After)',
+        `/api/v1/session?projectId=${E2E_PROJECT_ID}`,
+        undefined,
+        503,
+        (res, body) => {
+          const b = body as { code?: string; message?: string; correlationId?: string };
+          assert.equal(b.code, 'EXTERNAL_UNAUTHORIZED');
+          // NOT the masked "service is unavailable" answer.
+          assert.notEqual(b.message, 'сервис временно недоступен, повторите позже');
+          assert.equal(typeof b.correlationId, 'string');
+          assert.equal(res.headers.get('x-correlation-id'), b.correlationId);
+          // No Retry-After: repeating the request cannot fix the credentials.
+          assert.equal(res.headers.get('Retry-After'), null);
+        },
+      );
+    } finally {
+      process.env.OPENCODE_URL = 'http://127.0.0.1:9';
+      await unauthorized.close();
+    }
   } finally {
     await app.close();
   }

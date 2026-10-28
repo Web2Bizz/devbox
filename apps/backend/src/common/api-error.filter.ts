@@ -100,13 +100,19 @@ export class ApiErrorFilter implements ExceptionFilter {
       // polling: 429 rate limit + any 5xx (502 passthrough / 503 unavailable /
       // 504 timeout). 4xx client states (401 invalid / 404 missing key) never
       // carry it — the fix is user action, not a retry delay.
+      // EXTERNAL_UNAUTHORIZED is the exception inside the 5xx family: the
+      // upstream refused the credentials we sent, so a retry can only fail
+      // the same way — no Retry-After, the fix is a config change.
       // (proxy /api/v1/* and the /api/opencode/* surface throw
       // EXTERNAL_UNAVAILABLE when the opencode server is unreachable —
       // no mock 200s).
       // Logging: normal-path one-liner with service/operation/status/code,
       // no stack, no URL/body/Bearer (AppLogger sanitizes); cause/stack (if
       // any) goes to debug only.
-      if (exception.httpStatus === 429 || exception.httpStatus >= 500) {
+      const retryableAnswer =
+        exception.code !== 'EXTERNAL_UNAUTHORIZED' &&
+        (exception.httpStatus === 429 || exception.httpStatus >= 500);
+      if (retryableAnswer) {
         try {
           res.setHeader('Retry-After', '30');
         } catch {

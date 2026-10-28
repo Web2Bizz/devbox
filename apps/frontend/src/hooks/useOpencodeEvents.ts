@@ -19,7 +19,7 @@ const MAX_DELAY_MS = 15000;
 
 /**
  * Live opencode event subscription through the backend reverse-proxy SSE
- * (`GET /api/opencode/global/event`, same sdk `global.event()` stream).
+ * (`GET /api/opencode/event`, sdk `event.subscribe()` stream).
  *
  * - One `AbortController` per attempt; aborted on unmount (unsubscribe) and
  *   before every reconnect.
@@ -43,7 +43,9 @@ export function useOpencodeEvents(): UseOpencodeEventsResult {
     // upstream fetch via BOTH AbortController.signal AND stream.return()
     // (the sdk stream is an AsyncGenerator over fetch SSE; abort alone may
     // leave it hanging).
-    let sub: Awaited<ReturnType<typeof opencode.global.event>> | null = null;
+    // v2 event path: `event.subscribe()` (GET /event; native `Event`
+    // frames) instead of the legacy `global.event()`.
+    let sub: Awaited<ReturnType<typeof opencode.event.subscribe>> | null = null;
 
     const scheduleReconnect = () => {
       if (disposed) return;
@@ -63,7 +65,7 @@ export function useOpencodeEvents(): UseOpencodeEventsResult {
       ctrl = new AbortController();
       setStatus(attemptRef.current === 0 ? 'connecting' : 'reconnecting');
       try {
-        const next = await opencode.global.event({ signal: ctrl.signal });
+        const next = await opencode.event.subscribe(undefined, { signal: ctrl.signal });
         if (disposed || ctrl.signal.aborted) {
           await next.stream.return(undefined).catch(() => null);
           return;

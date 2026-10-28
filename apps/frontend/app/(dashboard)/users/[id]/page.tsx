@@ -28,7 +28,7 @@ export default function UserDetailPage() {
     <div>
       <div className="mb-4">
         <h1 className="text-2xl font-semibold">
-          {t.users.titleA} <span className="text-gradient-brand">{t.users.titleB}</span>
+          {t.users.titleA} <span className="text-foreground">{t.users.titleB}</span>
         </h1>
         <p className="text-muted-foreground text-sm">{t.users.subtitle}</p>
       </div>

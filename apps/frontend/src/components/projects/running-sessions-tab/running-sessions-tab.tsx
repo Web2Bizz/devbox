@@ -7,8 +7,8 @@ import {
   Button,
   Separator,
 } from '@web2bizz/ui/components';
-import type { Session, SessionStatus } from '@opencode-ai/sdk/client';
-import { opencode, toErrorMessage } from '../../../api/opencode-client';
+import type { Session, SessionStatus } from '@opencode-ai/sdk/v2/client';
+import { opencode, projectScope, toErrorMessage } from '../../../api/opencode-client';
 import { EmptyState, ErrorState, LoadingState } from '../../states';
 import { useOpencodeEvents } from '../../../hooks/useOpencodeEvents';
 import { useOpencodeSessions } from '../../../hooks/useOpencodeSessions';
@@ -23,11 +23,12 @@ function streamColor(status: string) {
 /**
  * Running tab for /projects/[id] — busy sessions only.
  *
- * Reuses useOpencodeSessions list + abort; liveness comes from
- * useOpencodeEvents (SSE backoff 1s→15s) which triggers a list reload on
- * session.* frames, plus a one-shot `session.status()` map for the
- * busy/retry filter. `directory` is forwarded as `?directory=` to both the
- * list and the status map (same contract as SessionsTab).
+ * Reuses useOpencodeSessions list + abort (both carry `?projectId=`, see
+ * SessionsTab); liveness comes from useOpencodeEvents (SSE backoff 1s→15s,
+ * global — no project key) which triggers a list reload on session.*
+ * frames, plus a one-shot `session.status()` map for the busy/retry
+ * filter. `projectId` also rides the status call as `?projectId=` (C4
+ * gate); `?directory=` still rides along but the backend ignores it.
  *
  * List: linear ul/li + Separator (DESIGN §6, no Card), scroll owned by
  * the list container (max-h dvh + overflow-y-auto, overscroll-contain),
@@ -48,14 +49,17 @@ function RunningSessionRow({
   onAbort: () => void;
 }) {
   const { t } = useI18n();
+  const noId = !s.id;
   return (
     <div className="flex flex-col gap-2 py-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <p className="truncate text-sm font-medium">
-            {s.title || s.id.slice(0, 8)}
+            {s.title || (s.id ? s.id.slice(0, 8) : t.opencode.untitled)}
           </p>
-          <code className="font-mono text-[0.85em] break-all text-muted-foreground text-xs">{s.id}</code>
+          {s.id ? (
+            <code className="font-mono text-[0.85em] break-all text-muted-foreground text-xs">{s.id}</code>
+          ) : null}
         </div>
         <Badge color="success" variant="soft">
           {t.opencode.live}
@@ -66,7 +70,7 @@ function RunningSessionRow({
           variant="outline"
           size="sm"
           onClick={onAbort}
-          disabled={aborting || rowDisabled}
+          disabled={aborting || rowDisabled || noId}
         >
           {aborting ? t.common.loading : t.opencode.stop}
         </Button>
@@ -86,7 +90,10 @@ export function RunningSessionsTab({
   disabled?: boolean;
 }) {
   const { t } = useI18n();
-  const { sessions, loading, error, reload, abort, abortingId } = useOpencodeSessions(directory);
+  const { sessions, loading, error, reload, abort, abortingId } = useOpencodeSessions({
+    directory,
+    projectId,
+  });
   const { events, status, reconnect } = useOpencodeEvents();
   const [statusMap, setStatusMap] = useState<Record<string, SessionStatus>>({});
   const [statusError, setStatusError] = useState<string | null>(null);
@@ -96,7 +103,10 @@ export function RunningSessionsTab({
     let cancelled = false;
     const ctrl = new AbortController();
     opencode.session
-      .status(directory ? { query: { directory }, signal: ctrl.signal } : { signal: ctrl.signal })
+      .status(
+        { ...(directory ? { directory } : {}), ...projectScope(projectId) },
+        { signal: ctrl.signal },
+      )
       .then((res) => {
         if (cancelled) return;
         if (res.error !== undefined || res.data === undefined) {
@@ -114,7 +124,7 @@ export function RunningSessionsTab({
       cancelled = true;
       ctrl.abort();
     };
-  }, [directory]);
+  }, [directory, projectId]);
 
   // SSE session.* frames trigger a list reload; the busy/retry filter reads
   // the status map (server-scoped via `?directory=` when set).
@@ -125,8 +135,8 @@ export function RunningSessionsTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events.length]);
 
-  // Busy/retry filter from the status map (Rush Code projectId → opencode
-  // directory mapping lands server-side later; `directory` scopes both).
+  // Busy/retry filter from the status map (server-scoped via `?projectId=`
+  // when set; `?directory=` still rides along but the backend ignores it).
   const running = sessions.filter((s) => {
     const st = statusMap[s.id];
     return st?.type === 'busy' || (st as { type?: string })?.type === 'retry';

@@ -46,9 +46,10 @@ type DashboardHeaderInternalProps = DashboardHeaderProps & {
  * `components` entry, shape=rounded): SidebarBrand (logo + Rush Code + Console)
  * + OrganizationSwitcher (authenticated-only org dropdown next to the logo
  * → /organizations/[id], empty → /organizations link) + title/breadcrumbs
- * → leadingSlot, actions/user + HeaderProfileDropdown
- * (ProfileDropdown from `widgets` entry, useProfile mock, sign-out →/login)
- * + LanguageSwitcher compact + ThemeToggleDefault → trailingSlot, drawer
+ * → leadingSlot, actions/user + LanguageSwitcher compact
+ * + ThemeToggleDefault + HeaderProfileDropdown (ProfileDropdown from
+ * `widgets` entry, useProfile mock, sign-out →/login, profile last at the
+ * right edge) → trailingSlot, drawer
  * trigger → menuToggleSlot.
  * Cookie-only locale — URL never changes.
  * className="app-header" keeps the grid-area hook (globals.css) + light/dark
@@ -128,9 +129,9 @@ function DashboardHeader({ title, breadcrumbs, user, actions, onMenu }: Dashboar
     <div className="flex items-center gap-2 ml-auto shrink-0">
       {actions}
       {user}
-      <HeaderProfileDropdown />
       <LanguageSwitcher compact />
       <ThemeToggleDefault />
+      <HeaderProfileDropdown />
     </div>
   );
 
@@ -154,8 +155,8 @@ function DashboardHeader({ title, breadcrumbs, user, actions, onMenu }: Dashboar
  *   here by design)
  * - inner grid, row 1: kit Header (shape=rounded, NATIVE radius) full-width
  *   across both columns → brand + OrganizationSwitcher + breadcrumbs/title
- *   leading, actions + user +
- *   HeaderProfileDropdown + LanguageSwitcher + ThemeToggleDefault trailing;
+ *   leading, actions + user + LanguageSwitcher + ThemeToggleDefault +
+ *   HeaderProfileDropdown trailing (profile last, at the right edge);
  *   sticky pinning is app-owned in globals.css `.app-header`
  *   (kit 0.25.9 removed the sticky wrapper — no flatten, grid-area only)
  * - inner grid, row 2: Sidebar.tsx → plain 300px grid cell (nav only, brand

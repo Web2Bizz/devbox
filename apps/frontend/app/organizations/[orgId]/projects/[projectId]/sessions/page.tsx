@@ -1,11 +1,9 @@
 'use client';
 
-import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useI18n } from '@/i18n';
+import { SessionsTab } from '@/components/projects/sessions-tab/sessions-tab';
 
-function SubPage({ title }: { title: string }) {
-  const { t } = useI18n();
+export default function NestedSessionsPage() {
   const params = useParams();
   const pick = (k: string) => {
     const v = params?.[k];
@@ -13,23 +11,19 @@ function SubPage({ title }: { title: string }) {
   };
   const orgId = pick('orgId');
   const projectId = pick('projectId');
+
+  if (!orgId || !projectId) {
+    return (
+      <div className="grid gap-2">
+        <h1 className="text-2xl font-semibold">Sessions</h1>
+      </div>
+    );
+  }
+
   return (
     <div className="grid gap-2">
-      <nav aria-label={t.nav.sections} className="text-muted-foreground flex items-center gap-1 text-sm">
-        <Link href={`/organizations/${orgId}/projects/${projectId}`} className="hover:underline">
-          {projectId}
-        </Link>
-        <span aria-hidden="true">/</span>
-        <span aria-current="page">{title}</span>
-      </nav>
-      <h1 className="text-2xl font-semibold">{title}</h1>
-      <p className="text-muted-foreground text-sm">
-        Scoped to /organizations/{orgId}/projects/{projectId}. Secrets stay masked; merge is backend-only.
-      </p>
+      <h1 className="text-2xl font-semibold">Sessions</h1>
+      <SessionsTab projectId={projectId} orgId={orgId} />
     </div>
   );
-}
-
-export default function NestedSessionsPage() {
-  return <SubPage title="Sessions" />;
 }

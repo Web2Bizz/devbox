@@ -45,8 +45,8 @@ Header кита (`shape=rounded`, default `sharp`!) несёт `sm:rounded-xl` �
 Бренд-шкала CLI (5 стопов, horizontal 90deg — как заголовок CLI,
 `apps/cli/src/ui/screens/home/constants.ts` `HOME_TITLE_STOPS`)
 живёт только в `--brand-1..5`. Всё остальное ссылается семантически:
-`--accent: var(--brand-3)`, `--gradient-brand`, `--filter-logo-glow`,
-утилиты `.text-gradient-brand` / `.logo-glow` / `.shadow-brand-glow`.
+`--accent: var(--brand-3)`, `--gradient-brand`, утилита
+`.text-gradient-brand`.
 
 | Токен                | Значение              | Роль                                                        |
 | -------------------- | --------------------- | ----------------------------------------------------------- |
@@ -56,7 +56,6 @@ Header кита (`shape=rounded`, default `sharp`!) несёт `sm:rounded-xl` �
 | `--brand-4`          | `#8B3DFF`             | градиент, стоп 75% (фиолетовый)                             |
 | `--brand-5`          | `#2E9BFF`             | градиент, стоп 100% (сине-голубой)                          |
 | `--gradient-brand`   | `linear-gradient(90deg, 5 стопов)` | бренд-градиент (текст, кнопки `primaryBrand`)   |
-| `--filter-logo-glow` | `drop-shadow(... rgb(233 58 107 / 0.25))` | свечение логотипа (dark: `/ 0.45`)     |
 
 Primary = `--brand-3` `#E93A6B` (средний розовый стоп): единственный
 насыщенный стоп шкалы с пригодным контрастом белого текста и на светлом,
@@ -235,7 +234,7 @@ Header. Только `var()`-ссылки; hex — только в `:root` / `.d
 ## 6. Бренд
 
 `SidebarBrand` (`src/components/layout/Sidebar/Sidebar.tsx`: `Image`
-`/logo.png` 36 `priority` + `.logo-glow`, `Rush Code` в
+`/logo.png` 36 `priority`, `Rush Code` в
 `.text-gradient-brand`, `t.nav.console`) — единый источник.
 
 - Header `leadingSlot`: `<SidebarBrand />` + (title/breadcrumbs, если есть).

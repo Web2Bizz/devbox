@@ -53,7 +53,7 @@ function AcceptInviteInner() {
     return (
       <div className="grid gap-3">
         <h1 className="text-2xl font-semibold">
-          {t.orgs.inviteAccepted} <span className="text-gradient-brand">…</span>
+          {t.orgs.inviteAccepted} <span className="text-foreground">…</span>
         </h1>
         <ProjectDetailSkeleton />
       </div>

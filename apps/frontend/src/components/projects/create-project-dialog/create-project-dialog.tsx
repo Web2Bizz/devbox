@@ -133,7 +133,7 @@ export function CreateProjectDialog({
           <Button
             type="submit"
             form="create-project-form"
-            variant="primaryBrand"
+            variant="default"
             disabled={busy || !isValid}
           >
             {busy ? t.projects.create.creating : t.projects.create.submit}

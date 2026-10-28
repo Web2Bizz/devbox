@@ -253,6 +253,7 @@ export const en: Dictionary = {
     create: 'New session',
     open: 'Open',
     abort: 'Abort',
+    untitled: 'Untitled session',
     stop: 'Stop',
     emptyAll: 'No sessions yet — create the first one.',
     emptyRunning: 'No running sessions — busy sessions will appear here.',

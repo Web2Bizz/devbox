@@ -78,7 +78,7 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
         </Field>
       </CardContent>
       <CardFooter className="grid gap-3">
-        <Button type="submit" variant="primaryBrand" disabled={!isValid || mutation.isPending} className="w-full">
+        <Button type="submit" variant="default" disabled={!isValid || mutation.isPending} className="w-full">
           {mutation.isPending ? t.auth.signingIn : t.auth.signIn}
         </Button>
       </CardFooter>
@@ -156,7 +156,7 @@ function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
         </Field>
       </CardContent>
       <CardFooter className="grid gap-3">
-        <Button type="submit" variant="primaryBrand" disabled={!isValid || mutation.isPending} className="w-full">
+        <Button type="submit" variant="default" disabled={!isValid || mutation.isPending} className="w-full">
           {mutation.isPending ? t.auth.signingUp : t.auth.signUp}
         </Button>
       </CardFooter>

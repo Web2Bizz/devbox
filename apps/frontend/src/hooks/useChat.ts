@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { opencode, toErrorMessage } from '../api/opencode-client';
+import { opencode, ensureOpencodeAuth, projectScope, toErrorMessage } from '../api/opencode-client';
 import type { OpencodeEvent } from '../api/opencode-client';
 import { useI18n } from '../i18n';
 
@@ -14,9 +14,9 @@ export type ChatMessage = {
 export type UseChatOptions = {
   /** Existing opencode session to scope the chat to (session = chat). */
   sessionId?: string;
-  /** Opencode working directory, forwarded as `?directory=`. */
+  /** Opencode working directory, forwarded as `?directory=` (backend-ignored). */
   directory?: string;
-  /** Rush Code project id (prj-*) — UI-only until backend maps project → directory. */
+  /** Rush Code project id (prj-*) — forwarded as `?projectId=` (backend-gated, C4). */
   projectId?: string;
 };
 
@@ -45,8 +45,75 @@ function newId(): string {
   }
 }
 
-/** Session id carried by an SSE payload, when the event is session-scoped. */
+/**
+ * Map a `session.messages` payload to chat rows.
+ *
+ * Primary shape is the flat v2 `SessionMessage`
+ * (`{ id, type: 'user' | 'assistant' | …, text?/content? }` — user/system/
+ * synthetic carry `text`, assistant carries `content: [{ type: 'text',
+ * text }]`); the legacy `{ info: Message, parts: Part[] }` envelope is
+ * kept as a fallback because the backend mirror still serves the legacy
+ * `/session/*` namespace (see opencode.controller.ts listMessages).
+ * Non-assistant roles render as user rows (same as before); entries
+ * without displayable text (shell/compaction/…) are skipped.
+ */
+function toChatMessages(data: unknown): ChatMessage[] {
+  if (!Array.isArray(data)) return [];
+  const next: ChatMessage[] = [];
+  for (const entry of data) {
+    if (!entry || typeof entry !== 'object') continue;
+    const e = entry as {
+      id?: unknown;
+      type?: unknown;
+      text?: unknown;
+      content?: unknown;
+      info?: { id?: unknown; role?: unknown };
+      parts?: unknown;
+    };
+    // Flat v2 SessionMessage (has a top-level `type`, no `info`).
+    if (typeof e.type === 'string' && e.info === undefined) {
+      const id = typeof e.id === 'string' ? e.id : newId();
+      const role = e.type === 'assistant' ? 'assistant' : 'user';
+      let text = '';
+      if (typeof e.text === 'string') {
+        text = e.text;
+      } else if (Array.isArray(e.content)) {
+        text = (e.content as Array<{ type?: unknown; text?: unknown }>)
+          .filter((p) => p.type === 'text' && typeof p.text === 'string')
+          .map((p) => p.text as string)
+          .join('\n\n');
+      }
+      if (!text) continue;
+      next.push({ id, role, text });
+      continue;
+    }
+    // Legacy `{ info, parts }` envelope (backend mirror passthrough).
+    const role = e.info?.role === 'assistant' ? 'assistant' : 'user';
+    const text = Array.isArray(e.parts)
+      ? (e.parts as Array<{ type?: unknown; text?: unknown }>)
+        .filter((p) => p?.type === 'text')
+        .map((p) => (typeof p.text === 'string' ? p.text : ''))
+        .join('\n\n')
+      : '';
+    if (!text) continue;
+    next.push({ id: typeof e.info?.id === 'string' ? e.info.id : newId(), role, text });
+  }
+  return next;
+}
+
+/** Session id carried by an SSE payload, when the event is session-scoped.
+ * v1 frames nest under `payload.properties`; native v2 `Event` frames are
+ * flat (`{ type, properties: { sessionID, … } }`) — both shapes are read,
+ * v2 first (see dist/v2/gen/types.gen.d.ts `Event*` types). */
 function eventSessionId(ev: OpencodeEvent): string | null {
+  const flat = (ev as { properties?: unknown }).properties as
+    | { sessionID?: unknown; part?: { sessionID?: unknown }; info?: { sessionID?: unknown } }
+    | undefined;
+  if (flat && typeof flat === 'object') {
+    if (typeof flat.sessionID === 'string') return flat.sessionID;
+    if (flat.part && typeof flat.part.sessionID === 'string') return flat.part.sessionID;
+    if (flat.info && typeof flat.info.sessionID === 'string') return flat.info.sessionID;
+  }
   const payload = (ev as { payload?: unknown }).payload as
     | { type?: string; properties?: Record<string, unknown> }
     | undefined;
@@ -61,8 +128,21 @@ function eventSessionId(ev: OpencodeEvent): string | null {
   return null;
 }
 
-/** Text delta carried by `message.part.updated` (absolute text fallback). */
+/** Text delta carried by `message.part.updated` (absolute text fallback).
+ * v2 servers send `message.part.delta` (`properties.delta`) or full-part
+ * `message.part.updated` (`properties.part`) — both flat, no `payload`. */
 function eventDelta(ev: OpencodeEvent): string | null {
+  const flat = ev as {
+    type?: string;
+    properties?: { delta?: unknown; part?: { type?: unknown; text?: unknown; id?: unknown } };
+  };
+  if (flat.type === 'message.part.delta' && typeof flat.properties?.delta === 'string' && flat.properties.delta) {
+    return flat.properties.delta;
+  }
+  if (flat.type === 'message.part.updated') {
+    const part = flat.properties?.part;
+    if (part?.type === 'text' && typeof part.text === 'string' && part.text) return part.text;
+  }
   const payload = (ev as { payload?: unknown }).payload as
     | { type?: string; properties?: Record<string, unknown> }
     | undefined;
@@ -95,16 +175,17 @@ function formatError(e: unknown, fallback: string): string {
  *   one session).
  * - Scoped: `useChat({ sessionId, directory, projectId })` — the chat is
  *   bound to an existing session from the start: history loads via
- *   `session.messages({ path: { id: sessionId } })` (same mapping as
+ *   `session.messages({ sessionID })` (same mapping as
  *   `reload()`), `send()` prompts that session directly (no `create()`),
  *   `stop()`/`reload()` target it. `directory` (positional or option) is
- *   still forwarded as `?directory=`; `projectId` stays UI-only until the
- *   backend maps project id → directory server-side.
+ *   still forwarded as `?directory=` (backend-ignored); `projectId` travels
+ *   as `?projectId=` via the shared `projectScope()` helper on every
+ *   session call (missing → honest 400 PROJECT_REQUIRED as error state).
  *
  * - `send(text)` appends the user row immediately, then
  *   `session.prompt({ parts: [{ type: 'text', text }] })`; the assistant row
  *   is appended from the prompt response parts (`type === 'text'`).
- * - Live deltas: a `global.event()` SSE subscription (self-healing backoff
+ * - Live deltas: an `event.subscribe()` SSE subscription (self-healing backoff
  *   1s → 15s, same as useOpencodeEvents) filters `message.part.updated` by
  *   the current session id and accumulates `streamingText` until the prompt
  *   resolves.
@@ -127,6 +208,12 @@ export function useChat(
     typeof directoryOrOptions === 'string'
       ? optionsArg?.sessionId
       : (directoryOrOptions?.sessionId ?? optionsArg?.sessionId);
+  // C4: projectId rides every session call as `?projectId=` (projectScope);
+  // event.subscribe stays global (no project key — see SSE effect below).
+  const projectId =
+    typeof directoryOrOptions === 'string'
+      ? optionsArg?.projectId
+      : (directoryOrOptions?.projectId ?? optionsArg?.projectId);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streamingText, setStreamingText] = useState('');
   const [loading, setLoading] = useState(() => Boolean(initialSessionId));
@@ -150,7 +237,7 @@ export function useChat(
     let disposed = false;
     let ctrl: AbortController | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
-    let sub: Awaited<ReturnType<typeof opencode.global.event>> | null = null;
+    let sub: Awaited<ReturnType<typeof opencode.event.subscribe>> | null = null;
     // Absolute-text fallback: track the last emitted length per part so a
     // full-text (no-delta) frame only appends its growth.
     const partLens = new Map<string, number>();
@@ -171,7 +258,7 @@ export function useChat(
       sub = null;
       ctrl = new AbortController();
       try {
-        const next = await opencode.global.event({ signal: ctrl.signal });
+        const next = await opencode.event.subscribe(undefined, { signal: ctrl.signal });
         if (disposed || ctrl.signal.aborted) {
           await next.stream.return(undefined).catch(() => null);
           return;
@@ -185,15 +272,24 @@ export function useChat(
             const ev = raw as OpencodeEvent;
             const sid = eventSessionId(ev);
             if (!sid || sid !== sessionIdRef.current) continue;
+            // v1 nests under `payload`, v2 is flat (`type`/`properties`).
+            const flat = ev as {
+              type?: string;
+              properties?: { part?: { id?: string }; delta?: unknown };
+            };
             const payload = (ev as { payload?: { type?: string } }).payload;
-            if (payload?.type !== 'message.part.updated') continue;
-            const props = (ev as unknown as {
-              payload: { part?: { id?: string }; delta?: unknown };
-            }).payload;
+            const frameType = flat.type ?? payload?.type;
+            if (frameType !== 'message.part.updated' && frameType !== 'message.part.delta') {
+              continue;
+            }
+            const props = (flat.properties ?? payload) as unknown as {
+              part?: { id?: string };
+              delta?: unknown;
+            } | undefined;
             const delta = eventDelta(ev);
-            if (!delta) continue;
+            if (!delta || !props) continue;
             if (typeof props.delta === 'string' && props.delta) {
-              setStreamingText((prev) => prev + props.delta);
+              setStreamingText((prev) => prev + (props.delta as string));
             } else {
               // Absolute text without delta — append growth only.
               const partId =
@@ -244,31 +340,18 @@ export function useChat(
     setError(null);
     setLoading(true);
     opencode.session
-      .messages(
-        directory
-          ? { path: { id: initialSessionId }, query: { directory } }
-          : { path: { id: initialSessionId } },
-      )
+      .messages({
+        sessionID: initialSessionId,
+        ...(directory ? { directory } : {}),
+        ...projectScope(projectId),
+      })
       .then((res) => {
         if (cancelled) return;
         if (res.error !== undefined || res.data === undefined) {
           setError(formatError(res.error, t.errors.unexpected));
           return;
         }
-        const next: ChatMessage[] = [];
-        for (const entry of res.data) {
-          const role = entry.info?.role === 'assistant' ? 'assistant' : 'user';
-          const text = (entry.parts ?? [])
-            .filter(
-              (p): p is Extract<typeof p, { type: 'text' }> =>
-                (p as { type?: string }).type === 'text',
-            )
-            .map((p) => (p as { text?: string }).text ?? '')
-            .join('\n\n');
-          if (!text) continue;
-          next.push({ id: entry.info?.id ?? newId(), role, text });
-        }
-        setMessages(next);
+        setMessages(toChatMessages(res.data));
       })
       .catch((e: unknown) => {
         if (cancelled || (e as Error)?.name === 'AbortError') return;
@@ -281,7 +364,7 @@ export function useChat(
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialSessionId, directory]);
+  }, [initialSessionId, directory, projectId]);
 
   // Abort any in-flight prompt on unmount (SSE cleanup lives above).
   useEffect(
@@ -294,9 +377,10 @@ export function useChat(
 
   const ensureSession = useCallback(async (): Promise<string> => {
     if (sessionIdRef.current) return sessionIdRef.current;
-    const res = await opencode.session.create(
-      directory ? { body: {}, query: { directory } } : { body: {} },
-    );
+    const res = await opencode.session.create({
+      ...(directory ? { directory } : {}),
+      ...projectScope(projectId),
+    });
     if (res.error !== undefined || res.data === undefined) {
       throw res.error ?? new Error('Unexpected error');
     }
@@ -308,7 +392,7 @@ export function useChat(
       // Fresh session — deltas accumulate from zero.
       setStreamingText('');
     }
-  }, [directory]);
+  }, [directory, projectId]);
 
   const send = useCallback(
     async (text: string) => {
@@ -321,15 +405,19 @@ export function useChat(
       const userMsg: ChatMessage = { id: newId(), role: 'user', text: trimmed };
       setMessages((prev) => [...prev, userMsg]);
       try {
+        await ensureOpencodeAuth();
         const sessionId = await ensureSession();
         const ctrl = new AbortController();
         promptCtrlRef.current = ctrl;
-        const res = await opencode.session.prompt({
-          path: { id: sessionId },
-          body: { parts: [{ type: 'text', text: trimmed }] },
-          ...(directory ? { query: { directory } } : {}),
-          signal: ctrl.signal,
-        });
+        const res = await opencode.session.prompt(
+          {
+            sessionID: sessionId,
+            parts: [{ type: 'text', text: trimmed }],
+            ...(directory ? { directory } : {}),
+            ...projectScope(projectId),
+          },
+          { signal: ctrl.signal },
+        );
         if (ctrl.signal.aborted) return;
         if (res.error !== undefined || res.data === undefined) {
           setError(formatError(res.error, t.errors.unexpected));
@@ -361,7 +449,7 @@ export function useChat(
         setSending(false);
       }
     },
-    [directory, ensureSession, t],
+    [directory, projectId, ensureSession, t],
   );
 
   const stop = useCallback(() => {
@@ -370,9 +458,11 @@ export function useChat(
     const sessionId = sessionIdRef.current;
     if (sessionId) {
       void opencode.session
-        .abort(
-          directory ? { path: { id: sessionId }, query: { directory } } : { path: { id: sessionId } },
-        )
+        .abort({
+          sessionID: sessionId,
+          ...(directory ? { directory } : {}),
+          ...projectScope(projectId),
+        })
         .catch(() => null);
     }
     // Keep the partial stream as the assistant answer so nothing is lost.
@@ -383,7 +473,7 @@ export function useChat(
     }
     sendingRef.current = false;
     setSending(false);
-  }, [directory]);
+  }, [directory, projectId]);
 
   const reload = useCallback(() => {
     setError(null);
@@ -396,30 +486,17 @@ export function useChat(
     }
     setLoading(true);
     opencode.session
-      .messages(
-        directory
-          ? { path: { id: sessionId }, query: { directory } }
-          : { path: { id: sessionId } },
-      )
+      .messages({
+        sessionID: sessionId,
+        ...(directory ? { directory } : {}),
+        ...projectScope(projectId),
+      })
       .then((res) => {
         if (res.error !== undefined || res.data === undefined) {
           setError(formatError(res.error, t.errors.unexpected));
           return;
         }
-        const next: ChatMessage[] = [];
-        for (const entry of res.data) {
-          const role = entry.info?.role === 'assistant' ? 'assistant' : 'user';
-          const text = (entry.parts ?? [])
-            .filter(
-              (p): p is Extract<typeof p, { type: 'text' }> =>
-                (p as { type?: string }).type === 'text',
-            )
-            .map((p) => (p as { text?: string }).text ?? '')
-            .join('\n\n');
-          if (!text) continue;
-          next.push({ id: entry.info?.id ?? newId(), role, text });
-        }
-        setMessages(next);
+        setMessages(toChatMessages(res.data));
       })
       .catch((e: unknown) => {
         setError(formatError(e, t.errors.unexpected));
@@ -429,7 +506,7 @@ export function useChat(
         attemptRef.current = 0;
         setNonce((n) => n + 1);
       });
-  }, [directory, t]);
+  }, [directory, projectId, t]);
 
   return {
     messages,

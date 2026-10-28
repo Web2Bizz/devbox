@@ -25,8 +25,9 @@ function toPercent(used: number, limit: number): number {
 
 function toneClass(pct: number): string {
   if (pct > 85) return '[&>div]:bg-destructive [&_[data-slot=progress-indicator]]:bg-destructive';
-  if (pct >= 60) return '[&>div]:bg-amber-500 [&_[data-slot=progress-indicator]]:bg-amber-500';
-  return '[&>div]:bg-emerald-500 [&_[data-slot=progress-indicator]]:bg-emerald-500';
+  if (pct >= 60)
+    return '[&>div]:bg-accent-secondary [&_[data-slot=progress-indicator]]:bg-accent-secondary';
+  return '[&>div]:bg-primary [&_[data-slot=progress-indicator]]:bg-primary';
 }
 
 export function UsageSection() {

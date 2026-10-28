@@ -2,6 +2,15 @@
 
 import { ApiClientError } from '../../api/client';
 import { formatApiErrorWithId } from '../../lib/format-error';
+import { SessionExpiredError } from '../../lib/session-expired';
+
+/**
+ * Re-exported from the shared client module (`lib/session-expired.ts`) so
+ * the feature-local API surface stays unchanged while there is exactly ONE
+ * `SessionExpiredError` class in the client — the class identity is what
+ * `instanceof` checks (retry guards, error mapping) rely on.
+ */
+export { SessionExpiredError };
 
 export type UsageStrings = {
   sessionExpired: string;
@@ -20,13 +29,6 @@ export type UsageStatus =
       diagnostic: string;
       shortId: string;
     };
-
-export class SessionExpiredError extends Error {
-  constructor() {
-    super('session-expired');
-    this.name = 'SessionExpiredError';
-  }
-}
 
 export function isMissingKeyError(e: unknown): boolean {
   return e instanceof ApiClientError && e.status === 404 && e.code === 'opencode_key_missing';

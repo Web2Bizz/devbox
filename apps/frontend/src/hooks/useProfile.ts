@@ -6,6 +6,7 @@ import { ApiClientError, api } from '../api/client';
 import type { AuthUser } from '@rush-code/contracts';
 import { formatApiError } from '../lib/format-error';
 import { getValidAccessToken, refreshAccessToken } from '../lib/auth-store';
+import { SessionExpiredError } from '../lib/session-expired';
 import { PROFILE_QUERY_KEY } from './query-keys';
 import type { Profile } from '../lib/types';
 import { useI18n } from '../i18n';
@@ -35,19 +36,6 @@ function toProfile(user: AuthUser & { limits?: Profile['limits'] }): Profile {
 function splitName(name: string): { firstName: string; lastName: string } {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   return { firstName: parts[0] ?? '', lastName: parts.slice(1).join(' ') || (parts[0] ?? '') };
-}
-
-/**
- * Dead-session marker — thrown when both tokens are gone (no backend
- * envelope to throw). Mapped to `t.errors.sessionExpired` in `useMemo`
- * outside `queryFn`, so the fetch itself stays locale-free: language
- * switches neither refetch nor re-render identity consumers.
- */
-class SessionExpiredError extends Error {
-  constructor() {
-    super('session-expired');
-    this.name = 'SessionExpiredError';
-  }
 }
 
 /**

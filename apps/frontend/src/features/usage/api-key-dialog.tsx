@@ -151,7 +151,7 @@ export function ApiKeyDialog({
           <Button
             type="submit"
             form="limits-key-form"
-            variant="primaryBrand"
+            variant="default"
             disabled={saving || apiKey.trim().length === 0}
           >
             {saving ? t.limits.saving : t.limits.save}

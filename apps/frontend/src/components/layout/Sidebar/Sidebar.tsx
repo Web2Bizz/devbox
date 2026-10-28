@@ -21,7 +21,7 @@ export type SidebarNavItem = {
  * Brand row: logo PNG + Rush Code wordmark + console subtitle.
  * Rendered in the Header leadingSlot (desktop + mobile) and as a fallback
  * at the top of the mobile drawer. Brand tokens live in globals.css
- * (`.text-gradient-brand` / `.logo-glow`).
+ * (`.text-gradient-brand`).
  */
 export function SidebarBrand() {
   const { t } = useI18n();
@@ -33,11 +33,10 @@ export function SidebarBrand() {
         alt="Rush Code"
         width={36}
         height={36}
-        className="logo-glow"
         priority
       />
       <div>
-        <p className="text-gradient-brand text-lg font-semibold leading-none">
+        <p className="text-foreground text-lg font-semibold leading-none">
           Rush Code
         </p>
         <p className="text-muted-foreground text-sm">{t.nav.console}</p>
@@ -97,8 +96,20 @@ export function SidebarNav({ onNavigate, items }: { onNavigate?: () => void; ite
     { href: '/brokers', label: t.nav.brokers },
   ] as const;
 
-  const isActive = (href: string) =>
+  const matches = (href: string) =>
     pathname === href || pathname.startsWith(`${href}/`);
+
+  const bestActiveHref = (
+    [
+      ...NAV.map((item) => item.href),
+      ...EXPANDABLE.flatMap((group) => group.items?.map((sub) => sub.href) ?? []),
+      ...FLAT_EXTRA.map((item) => item.href),
+    ] as string[]
+  )
+    .filter(matches)
+    .sort((a, b) => b.length - a.length)[0];
+
+  const isActive = (href: string) => href === bestActiveHref;
 
   return (
       <nav aria-label={t.nav.sections} className="flex flex-col gap-1 w-full">

@@ -1,11 +1,9 @@
 import type { ReactNode } from 'react';
-import Link from 'next/link';
 import { DashboardShell } from '@/components/dashboard-shell';
 
 /**
  * Project shell layout: sidebar only inside a project.
- * SidebarNav gets project-scoped items; org switcher carries orgId;
- * breadcrumbs org → project; exit → /organizations/[orgId].
+ * SidebarNav gets project-scoped items; org switcher carries orgId.
  * data-shell="dashboard" (guard matrix: project = auth shell).
  */
 export const dynamic = 'force-dynamic';
@@ -27,24 +25,7 @@ export default async function ProjectShellLayout({
     { href: `${base}/registry`, label: 'Registry' },
   ];
   return (
-    <DashboardShell
-      sidebarItems={items}
-      header={{
-        breadcrumbs: [
-          { label: 'Organizations', href: '/organizations' },
-          { label: orgId, href: `/organizations/${encodeURIComponent(orgId)}` },
-          { label: projectId },
-        ],
-        actions: (
-          <Link
-            href={`/organizations/${encodeURIComponent(orgId)}`}
-            className="text-sm underline underline-offset-4"
-          >
-            Exit to organization
-          </Link>
-        ),
-      }}
-    >
+    <DashboardShell sidebarItems={items}>
       <div data-shell="dashboard" data-project-shell={`${orgId}/${projectId}`}>
         {children}
       </div>

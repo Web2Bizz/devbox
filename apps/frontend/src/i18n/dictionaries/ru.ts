@@ -253,6 +253,7 @@ export const ru: Dictionary = {
     create: 'Новая сессия',
     open: 'Открыть',
     abort: 'Прервать',
+    untitled: 'Сессия без названия',
     stop: 'Остановить',
     emptyAll: 'Сессий пока нет — создайте первую.',
     emptyRunning: 'Нет запущенных сессий — busy-сессии появятся здесь.',

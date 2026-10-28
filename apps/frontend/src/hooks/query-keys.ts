@@ -44,12 +44,20 @@ export const aiProvidersQueryKey = (directory?: string) =>
   ['ai-providers', directory ?? 'all'] as const;
 
 /**
- * GET /api/opencode/session — live opencode session list.
- * Nullish directory maps to the shared `'all'` scope so the
- * default view has one stable cache entry (`??`, empty string stays as-is).
+ * GET /api/v1/sessions — project-scoped session list.
+ * `projectId` nullish maps to the shared `'none'` scope so hooks without
+ * a project share one stable empty entry (`??`, empty string stays as-is).
  */
-export const opencodeSessionsQueryKey = (directory?: string) =>
-  ['opencode-sessions', directory ?? 'all'] as const;
+export const sessionsQueryKey = (projectId?: string) =>
+  ['sessions', projectId ?? 'none'] as const;
+
+/**
+ * @deprecated Use `sessionsQueryKey(projectId)` — the canonical
+ * GET /api/v1/sessions key. Kept as an alias so old
+ * `opencodeSessionsQueryKey(directory)` imports keep compiling;
+ * directory scope is backend-ignored (project jail wins).
+ */
+export const opencodeSessionsQueryKey = sessionsQueryKey;
 
 /**
  * GET /api/opencode/session/:id/message — live session thread.

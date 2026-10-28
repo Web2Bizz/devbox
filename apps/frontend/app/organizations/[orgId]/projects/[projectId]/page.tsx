@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { Alert, AlertDescription, AlertTitle, Badge } from '@web2bizz/ui/components';
@@ -55,13 +54,6 @@ export default function NestedProjectPage() {
 
   return (
     <div className="grid gap-4">
-      <nav aria-label={t.nav.sections} className="text-muted-foreground flex items-center gap-1 text-sm">
-        <Link href="/organizations" className="hover:underline">{t.nav.organizations}</Link>
-        <span aria-hidden="true">/</span>
-        <Link href={`/organizations/${orgId}`} className="hover:underline">{orgId}</Link>
-        <span aria-hidden="true">/</span>
-        <span aria-current="page">{project.name}</span>
-      </nav>
       {project.corrupted && (
         <Alert variant="destructive">
           <AlertTitle>{t.projects.brokenTitle}</AlertTitle>

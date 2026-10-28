@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { opencode, toErrorMessage } from '../api/opencode-client';
+import { opencode, projectScope, toErrorMessage } from '../api/opencode-client';
 import { useI18n } from '../i18n';
 
 type MessagesData = NonNullable<
@@ -23,12 +23,17 @@ export type UseOpencodeChatResult = {
  * Session messages + send through the backend reverse-proxy (same sdk).
  * `send` posts `{ parts: [{ type: 'text', text }] }` to
  * `/api/opencode/session/:id/message` and refreshes the list afterwards.
- * Pass `directory` to scope both reads and sends with `?directory=`
- * (same projectId → directory contract as useOpencodeSessions).
+ * Pass `directory` to scope reads/sends with `?directory=`
+ * (backend-ignored) and `projectId` for the C4 `?projectId=` gate
+ * (missing → honest 400 PROJECT_REQUIRED as error state) — both ride the
+ * shared `projectScope()` helper. No live callers yet (ChatSection uses
+ * useChat); the signature stays positional `(sessionId, directory?,
+ * projectId?)` so future project tabs pick it up without reshaping.
  */
 export function useOpencodeChat(
   sessionId: string | null,
   directory?: string,
+  projectId?: string,
 ): UseOpencodeChatResult {
   const { t } = useI18n();
   const [messages, setMessages] = useState<OpencodeChatMessage[]>([]);
@@ -49,9 +54,12 @@ export function useOpencodeChat(
     setError(null);
     opencode.session
       .messages(
-        directory
-          ? { path: { id: sessionId }, query: { directory }, signal: ctrl.signal }
-          : { path: { id: sessionId }, signal: ctrl.signal },
+        {
+          sessionID: sessionId,
+          ...(directory ? { directory } : {}),
+          ...projectScope(projectId),
+        },
+        { signal: ctrl.signal },
       )
       .then((res) => {
         if (cancelled) return;
@@ -74,7 +82,7 @@ export function useOpencodeChat(
       cancelled = true;
       ctrl.abort();
     };
-  }, [sessionId, directory, nonce, t]);
+  }, [sessionId, directory, projectId, nonce, t]);
 
   const reload = useCallback(() => setNonce((n) => n + 1), []);
 
@@ -85,9 +93,10 @@ export function useOpencodeChat(
       setError(null);
       try {
         const res = await opencode.session.prompt({
-          path: { id: sessionId },
-          body: { parts: [{ type: 'text', text }] },
-          ...(directory ? { query: { directory } } : {}),
+          sessionID: sessionId,
+          parts: [{ type: 'text', text }],
+          ...(directory ? { directory } : {}),
+          ...projectScope(projectId),
         });
         if (res.error !== undefined || res.data === undefined) {
           const formatted = toErrorMessage(res.error);
@@ -102,7 +111,7 @@ export function useOpencodeChat(
         setSending(false);
       }
     },
-    [sessionId, directory, t],
+    [sessionId, directory, projectId, t],
   );
 
   return {

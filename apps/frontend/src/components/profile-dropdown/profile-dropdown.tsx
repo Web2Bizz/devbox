@@ -2,9 +2,12 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { AuthorizedUserProfile, UnauthorizedUserProfile } from '@web2bizz/ui/widgets';
 import { signOutAndRedirect } from '../../lib/auth-store';
 import { useHeaderProfile } from '../../hooks/useProfile';
+import { USAGE_QUERY_KEY } from '../../hooks/query-keys';
+import { fetchUsage, toUsagePanelData, usageRetry } from '../../hooks/useUsage';
 import { LOCALE_COOKIE, isLocale } from '../../i18n';
 import { en } from '../../i18n/dictionaries/en';
 import { ru } from '../../i18n/dictionaries/ru';
@@ -29,6 +32,17 @@ import type { Dictionary } from '../../i18n/dictionaries/types';
  * NOTE: desktop kit ProfileDropdown.Action is a plain function component in
  * DropdownMenuItem asChild — Slot drops role=menuitem/roving tabindex/item
  * refs, Arrow-roving crashes Radix focusFirst on null (kit follow-up).
+ * Name split + mobile fallback: kit `ProfileDropdownUser` is
+ * { name, surname } — displayName joins both, initials take name[0].
+ * Backend gives a single "First Last" string, so split it into
+ * first/last (single word → last = ''). Kit shows its name-span only
+ * on md+ (`hidden md:grid` inside the trigger), so the external
+ * `md:hidden` span below covers <md without duplicating on desktop.
+ * Usage panel: header-safe observer on the shared USAGE_QUERY_KEY cache
+ * (same key/queryFn/staleTime/retry as useUsage — no extra GET, shared
+ * entry). Locale-free: `select: toUsagePanelData` maps daily ← daily ??
+ * rolling, weekly ← weekly (missing → undefined, kit hides the panel);
+ * usage errors are ignored so the dropdown always renders.
  */
 
 /** Reads the stored locale (cookie-only i18n) without subscribing to it. */
@@ -47,6 +61,16 @@ export function HeaderProfileDropdown() {
     setUserMenu(readStoredUserMenu());
   }, []);
   const { profile, loading } = useHeaderProfile();
+  const { data: usagePanelData, isLoading: usageIsLoading } = useQuery({
+    queryKey: USAGE_QUERY_KEY,
+    queryFn: fetchUsage,
+    staleTime: 10_000,
+    placeholderData: (prev) => prev,
+    retry: usageRetry,
+    select: toUsagePanelData,
+  });
+  const usagePanel = usagePanelData ?? undefined;
+  const usageLoading = usageIsLoading && !usagePanelData;
   const router = useRouter();
 
   const handleSignOut = useCallback(() => {
@@ -55,6 +79,11 @@ export function HeaderProfileDropdown() {
     void signOutAndRedirect({ router });
   }, [router]);
   const handleLogin = useCallback(() => router.push('/login'), [router]);
+
+  const parts = profile?.name.trim().split(/\s+/) ?? [];
+  const first = parts[0] ?? '';
+  const last = parts.slice(1).join(' ');
+  const displayName = [first, last].filter(Boolean).join(' ');
 
   if (loading) {
     return <div role="status" aria-busy="true" aria-label="Loading" className="h-8 w-8 animate-pulse rounded-md bg-muted" />;
@@ -65,11 +94,16 @@ export function HeaderProfileDropdown() {
   }
 
   return (
-    <AuthorizedUserProfile
-      user={{ name: profile.name, email: profile.email }}
-      onLogout={handleSignOut}
-      profileHref="/profile"
-      labels={{ noEmail: userMenu.noEmail, profile: userMenu.profile, logout: userMenu.signOut }}
-    />
+    <div className="flex min-w-0 items-center gap-2">
+      <AuthorizedUserProfile
+        user={{ name: first, surname: last || undefined, email: profile.email }}
+        onLogout={handleSignOut}
+        profileHref="/profile"
+        labels={{ noEmail: userMenu.noEmail, profile: userMenu.profile, logout: userMenu.signOut }}
+        usage={usagePanel}
+        isUsageLoading={usageLoading}
+      />
+      <span className="truncate text-sm font-medium md:hidden">{displayName}</span>
+    </div>
   );
 }

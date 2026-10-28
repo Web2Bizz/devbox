@@ -121,7 +121,7 @@ export function CreateOrganizationDialog({
           <Button
             type="submit"
             form="create-org-form"
-            variant="primaryBrand"
+            variant="default"
             disabled={busy || !isValid}
           >
             {busy ? t.orgs.create.creating : t.orgs.create.submit}

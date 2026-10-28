@@ -8,20 +8,22 @@ import {
   Button,
   Separator,
 } from '@web2bizz/ui/components';
-import type { Session } from '@opencode-ai/sdk/client';
+import type { Session } from '@opencode-ai/sdk/v2/client';
 import { EmptyState, ErrorState, LoadingState } from '../../states';
 import { useOpencodeSessions } from '../../../hooks/useOpencodeSessions';
+import { projectSessionPath } from '../../../lib/navigation';
 import { useI18n } from '../../../i18n';
 
 /**
  * Sessions tab for /projects/[id] — full session list scoped to a project.
  *
  * Data: useOpencodeSessions list/create/abort through the backend
- * reverse-proxy (`/api/opencode`, sdk 1.18.33). `directory` (opencode
- * working directory) is forwarded as `?directory=`; omit it for the full
- * list. Rush Code `projectId` (prj-*) stays UI-only until the backend maps
- * project id → directory server-side, but it scopes navigation:
- * Open (and post-create) routes to the session chat at
+ * reverse-proxy (`/api/opencode`, sdk 1.18.33). `projectId` (Rush Code
+ * prj-*, required prop) travels as `?projectId=` on every call — the
+ * backend gates it (C4, missing → 400) and maps it to the jailed content
+ * dir server-side; `directory` still rides as `?directory=` but the
+ * backend ignores it. Navigation stays project-scoped: Open (and
+ * post-create) routes to the session chat at
  * `/projects/[id]/sessions/[sessionId]` (session = chat).
  *
  * List: linear ul/li + Separator (DESIGN §6, no Card), scroll owned by
@@ -50,18 +52,26 @@ function SessionRow({
   onAbort: () => void;
 }) {
   const { t } = useI18n();
+  const noId = !s.id;
+  const updatedAt = s.time?.updated;
+  const updatedDate = updatedAt ? new Date(updatedAt) : null;
+  const hasValidDate = updatedDate !== null && !Number.isNaN(updatedDate.getTime());
   return (
     <div className="flex flex-col gap-2 py-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <p className="truncate text-sm font-medium">
-            {s.title || s.id.slice(0, 8)}
+            {s.title || (s.id ? s.id.slice(0, 8) : t.opencode.untitled)}
           </p>
-          <code className="font-mono text-[0.85em] break-all text-muted-foreground text-xs">{s.id}</code>
+          {s.id ? (
+            <code className="font-mono text-[0.85em] break-all text-muted-foreground text-xs">{s.id}</code>
+          ) : null}
         </div>
-        <Badge color="info" variant="soft">
-          {new Date(s.time.updated).toLocaleString()}
-        </Badge>
+        {hasValidDate && updatedDate ? (
+          <Badge color="info" variant="soft">
+            {updatedDate.toLocaleString()}
+          </Badge>
+        ) : null}
       </div>
       {opened && (
         <div className="grid gap-1">
@@ -78,7 +88,7 @@ function SessionRow({
           variant="outline"
           size="sm"
           onClick={onOpen}
-          disabled={rowDisabled}
+          disabled={rowDisabled || noId}
         >
           {t.opencode.open}
         </Button>
@@ -94,7 +104,7 @@ function SessionRow({
           variant="outline"
           size="sm"
           onClick={onAbort}
-          disabled={aborting || rowDisabled}
+          disabled={aborting || rowDisabled || noId}
         >
           {aborting ? t.common.loading : t.opencode.abort}
         </Button>
@@ -106,10 +116,12 @@ function SessionRow({
 
 export function SessionsTab({
   projectId,
+  orgId,
   directory,
   disabled = false,
 }: {
   projectId: string;
+  orgId?: string;
   directory?: string;
   disabled?: boolean;
 }) {
@@ -124,16 +136,20 @@ export function SessionsTab({
     creating,
     abort,
     abortingId,
-  } = useOpencodeSessions(directory);
+  } = useOpencodeSessions({ directory, projectId });
   const [openedId, setOpenedId] = useState<string | null>(null);
   const parentRef = useRef<HTMLDivElement>(null);
 
-  // Server-side scoping via `?directory=` (see useOpencodeSessions); without
-  // a directory the backend returns the full list.
+  // Server-side scoping via `?projectId=` (see useOpencodeSessions);
+  // `?directory=` still rides along but the backend ignores it.
   const visible = sessions;
 
   const openSessionChat = (sessionId: string) => {
-    router.push(`/projects/${projectId}/sessions/${sessionId}`);
+    router.push(
+      orgId
+        ? projectSessionPath(orgId, projectId, sessionId)
+        : `/projects/${projectId}/sessions/${sessionId}`,
+    );
   };
 
   const handleCreateAndOpen = async () => {

@@ -12,7 +12,7 @@ export type ChatSectionProps = {
   sessionId?: string;
   /** Opencode working directory, forwarded as `?directory=`. */
   directory?: string;
-  /** Rush Code project id (prj-*) — UI-only until backend maps project → directory. */
+  /** Rush Code project id (prj-*) — forwarded as `?projectId=` (backend-gated, C4). */
   projectId?: string;
 };
 

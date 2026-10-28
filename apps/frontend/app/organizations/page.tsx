@@ -45,7 +45,7 @@ export default function OrganizationsPage() {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">
-            {t.orgs.titleA} <span className="text-gradient-brand">{t.orgs.titleB}</span>
+            {t.orgs.titleA} <span className="text-foreground">{t.orgs.titleB}</span>
           </h1>
           <p className="text-muted-foreground text-sm">{t.orgs.subtitle}</p>
         </div>
@@ -59,7 +59,7 @@ export default function OrganizationsPage() {
             onCreate={handleCreate}
             creating={creating}
             trigger={
-              <Button variant="primaryBrand" size="sm">
+              <Button variant="default" size="sm">
                 {t.orgs.createTrigger}
               </Button>
             }

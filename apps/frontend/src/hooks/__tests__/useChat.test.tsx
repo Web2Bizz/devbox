@@ -20,14 +20,14 @@ const sessionCreateMock = mock(async (_opts?: unknown) => ({
   data: { id: 'ses-1' },
   error: undefined,
 }));
-let promptImpl: (opts?: any) => Promise<any> = async (_opts?: any) => ({
+let promptImpl: (opts?: any, options?: any) => Promise<any> = async (_opts?: any) => ({
   data: {
     info: { id: 'msg-assistant-1' },
     parts: [{ type: 'text', text: 'hello back' }],
   },
   error: undefined,
 });
-const promptMock = mock((opts?: any) => promptImpl(opts));
+const promptMock = mock((opts?: any, options?: any) => promptImpl(opts, options));
 const sessionAbortMock = mock(async (_opts?: unknown) => ({
   data: true,
   error: undefined,
@@ -60,8 +60,16 @@ mock.module('../../api/opencode-client', () => ({
       abort: sessionAbortMock,
       messages: messagesMock,
     },
+    // v2 client surface the hooks use: `event.subscribe(params, options)`
+    // (SSE). `global.event` is kept for shape parity, unused by useChat.
+    event: { subscribe: eventMock },
     global: { event: eventMock },
   },
+  // Mirrors the real helper (C4 `?projectId=` via the `$query_` escape
+  // hatch — the generated sdk drops unknown flat keys): keeps param
+  // assertions on `sessionID`/`directory` exact while letting hooks spread
+  // the scope key like production.
+  projectScope: (projectId?: string) => (projectId ? { $query_projectId: projectId } : {}),
   toErrorMessage: (e: unknown) => {
     if (typeof e === 'string') return e;
     if (e instanceof Error) return e.message;
@@ -70,6 +78,7 @@ mock.module('../../api/opencode-client', () => ({
     }
     return 'Unexpected error';
   },
+  ensureOpencodeAuth: async () => {},
 }));
 
 const { cleanup, renderHook, act } = await import('@testing-library/react');
@@ -113,9 +122,9 @@ describe('useChat', () => {
 
   test('stop-abort: stop() cancels the in-flight prompt and clears sending', async () => {
     const signalBox: { current: AbortSignal | null } = { current: null };
-    promptImpl = (opts?: any) =>
+    promptImpl = (_opts?: any, options?: any) =>
       new Promise((_, reject) => {
-        signalBox.current = (opts?.signal as AbortSignal | undefined) ?? null;
+        signalBox.current = (options?.signal as AbortSignal | undefined) ?? null;
         signalBox.current?.addEventListener('abort', () => {
           const err = new Error('aborted');
           err.name = 'AbortError';
@@ -155,12 +164,8 @@ describe('useChat', () => {
   test('error+retry: prompt failure surfaces, reload() clears and refetches', async () => {
     promptImpl = async (_opts?: any) => ({ data: undefined, error: { message: 'boom' } });
     messagesImplHolder.fn = async (_opts?: any) => ({
-      data: [
-        {
-          info: { id: 'm1', role: 'user' },
-          parts: [{ type: 'text', text: 'hi' }],
-        },
-      ],
+      // Flat v2 SessionMessage (user carries `text`).
+      data: [{ id: 'm1', type: 'user', text: 'hi', time: { created: 1 } }],
       error: undefined,
     });
 
@@ -202,14 +207,14 @@ describe('useChat', () => {
 
   test('scoped: useChat({ sessionId }) loads history without create()', async () => {
     messagesImplHolder.fn = async (_opts?: any) => ({
+      // Flat v2 SessionMessage: user → `text`, assistant → `content`.
       data: [
+        { id: 'm1', type: 'user', text: 'scoped hi', time: { created: 1 } },
         {
-          info: { id: 'm1', role: 'user' },
-          parts: [{ type: 'text', text: 'scoped hi' }],
-        },
-        {
-          info: { id: 'm2', role: 'assistant' },
-          parts: [{ type: 'text', text: 'scoped hello back' }],
+          id: 'm2',
+          type: 'assistant',
+          content: [{ type: 'text', id: 'p1', text: 'scoped hello back' }],
+          time: { created: 2 },
         },
       ],
       error: undefined,
@@ -224,10 +229,8 @@ describe('useChat', () => {
     });
 
     expect(messagesMock).toHaveBeenCalled();
-    const call = messagesMock.mock.calls[0]?.[0] as
-      | { path?: { id?: string } }
-      | undefined;
-    expect(call?.path?.id).toBe('ses-99');
+    const call = messagesMock.mock.calls[0]?.[0] as { sessionID?: string } | undefined;
+    expect(call?.sessionID).toBe('ses-99');
     expect(sessionCreateMock).not.toHaveBeenCalled();
     expect(result.current.sessionId).toBe('ses-99');
     expect(result.current.loading).toBe(false);
@@ -242,12 +245,7 @@ describe('useChat', () => {
 
   test('scoped: send() prompts the bound session without create()', async () => {
     messagesImplHolder.fn = async (_opts?: any) => ({
-      data: [
-        {
-          info: { id: 'm1', role: 'user' },
-          parts: [{ type: 'text', text: 'before' }],
-        },
-      ],
+      data: [{ id: 'm1', type: 'user', text: 'before', time: { created: 1 } }],
       error: undefined,
     });
 
@@ -268,10 +266,8 @@ describe('useChat', () => {
 
     expect(sessionCreateMock).not.toHaveBeenCalled();
     expect(promptMock).toHaveBeenCalledTimes(1);
-    const promptCall = promptMock.mock.calls[0]?.[0] as
-      | { path?: { id?: string } }
-      | undefined;
-    expect(promptCall?.path?.id).toBe('ses-77');
+    const promptCall = promptMock.mock.calls[0]?.[0] as { sessionID?: string } | undefined;
+    expect(promptCall?.sessionID).toBe('ses-77');
     expect(result.current.messages.length).toBe(3);
     expect(result.current.messages[1]).toMatchObject({ role: 'user', text: 'follow-up' });
     expect(result.current.messages[2]).toMatchObject({

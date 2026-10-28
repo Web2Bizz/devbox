@@ -22,6 +22,7 @@ import type {
   RegistryCatalogResponse,
   SendChatResponse,
   Session,
+  SessionsResponse,
   UpdateMemberRoleInput as UpdateMemberRoleRequest,
   UpdateOrganizationInput as UpdateOrganizationRequest,
 } from '@rush-code/contracts';
@@ -160,14 +161,44 @@ export const api = {
   // server is unreachable the backend answers 503 EXTERNAL_UNAVAILABLE
   // («сервис временно недоступен, повторите позже») with Retry-After —
   // surfaced here as ApiClientError (no mock payloads, never 200).
-  getSession: () => requestV1<Session>('/session'),
-  getMessages: (sessionId: string) =>
-    requestV1<MessagesResponse>(`/messages?sessionId=${encodeURIComponent(sessionId)}`),
-  sendChat: (message: string, sessionId?: string) =>
-    requestV1<SendChatResponse>('/chat', {
-      method: 'POST',
-      body: JSON.stringify({ message, sessionId }),
-    }),
+  // C4: every route requires `?projectId` (backend gates BEFORE any
+  // upstream call — missing → 400 PROJECT_REQUIRED, strangers → 404).
+  // The param stays optional client-side so legacy callers compile; omit
+  // it only where no project context exists (the backend 400 then
+  // surfaces honestly as ApiClientError, never masked).
+  getSession: (projectId?: string) =>
+    requestV1<Session>(`/session${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`),
+  // Canonical session list without the word opencode: GET /api/v1/sessions
+  // (project-scoped like getSession — missing projectId → 400
+  // PROJECT_REQUIRED; 200 is always live upstream Session[], 503
+  // EXTERNAL_UNAVAILABLE when the opencode server is unreachable).
+  // Only /api/v1 — never unversioned /api/sessions (404 by convention).
+  // Split: list/reload go through here; create/abort stay on the SDK
+  // /api/opencode/session mirror (see useOpencodeSessions).
+  // Auth: the endpoint is JWT-guarded (backend @ReqUser) — the caller
+  // passes the access token and it travels as `authorization: Bearer`,
+  // same contract as api.me / api.listOrgProjects. Without the header
+  // the backend answers an honest 401 (no anonymous session list).
+  listSessions: (accessToken: string, projectId?: string, opts?: { signal?: AbortSignal }) =>
+    requestV1<SessionsResponse>(
+      `/sessions${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`,
+      {
+        headers: { authorization: `Bearer ${accessToken}` },
+        ...(opts?.signal ? { signal: opts.signal } : {}),
+      },
+    ),
+  getMessages: (sessionId: string, projectId?: string) =>
+    requestV1<MessagesResponse>(
+      `/messages?sessionId=${encodeURIComponent(sessionId)}${projectId ? `&projectId=${encodeURIComponent(projectId)}` : ''}`,
+    ),
+  sendChat: (message: string, sessionId?: string, projectId?: string) =>
+    requestV1<SendChatResponse>(
+      `/chat${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ message, sessionId }),
+      },
+    ),
   // Docker-registry surface: 200 always means live upstream /v2/_catalog
   // data. Unconfigured/unreachable answers 503 EXTERNAL_UNAVAILABLE
   // («сервис временно недоступен, повторите позже») with Retry-After —

@@ -33,7 +33,8 @@ export type UseAiProvidersResult = {
  */
 async function fetchAiProviders(directory?: string, signal?: AbortSignal): Promise<AiProvider[]> {
   const res = await opencode.config.providers(
-    directory ? { query: { directory }, signal } : { signal },
+    directory ? { directory } : undefined,
+    signal ? { signal } : undefined,
   );
   if (res.error !== undefined || res.data === undefined) {
     throw new Error(toErrorMessage(res.error));

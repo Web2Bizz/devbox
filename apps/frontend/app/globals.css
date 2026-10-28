@@ -31,15 +31,8 @@
   --accent-secondary: var(--brand-2);
   --on-accent: #ffffff;
 
-  --gradient-brand: linear-gradient(
-    90deg,
-    var(--brand-1) 0%,
-    var(--brand-2) 25%,
-    var(--brand-3) 50%,
-    var(--brand-4) 75%,
-    var(--brand-5) 100%
-  );
-  --gradient-brand-primary: var(--gradient-brand);
+  --gradient-brand: none;
+  --gradient-brand-primary: none;
   --gradient-accent-soft-start: rgb(233 58 107 / 0.14);
   --gradient-accent-soft-end: rgb(46 155 255 / 0.2);
 
@@ -49,9 +42,6 @@
 
   /* Затемнение под мобильным drawer (`.app-sidebar-overlay`) — scrim. */
   --overlay-scrim: rgb(0 0 0 / 0.5);
-
-  --shadow-brand-glow: 0 8px 12px rgb(233 58 107 / 0.25);
-  --filter-logo-glow: drop-shadow(0 8px 12px rgb(233 58 107 / 0.25));
 }
 
 .dark {
@@ -65,49 +55,27 @@
   --accent-secondary: var(--brand-2);
   --on-accent: #ffffff;
 
-  --gradient-brand: linear-gradient(
-    90deg,
-    var(--brand-1) 0%,
-    var(--brand-2) 25%,
-    var(--brand-3) 50%,
-    var(--brand-4) 75%,
-    var(--brand-5) 100%
-  );
-  --gradient-brand-primary: var(--gradient-brand);
+  --gradient-brand: none;
+  --gradient-brand-primary: none;
   --gradient-accent-soft-start: rgb(233 58 107 / 0.22);
   --gradient-accent-soft-end: rgb(46 155 255 / 0.28);
 
   --shadow-glow-line-color-accent: rgb(233 58 107 / 0.45);
   --shadow-glow-blur-color-accent: rgb(233 58 107 / 0.3);
   --glow-accent-16: rgb(233 58 107 / 0.24);
-
-  --shadow-brand-glow: 0 8px 24px rgb(233 58 107 / 0.45);
-  --filter-logo-glow: drop-shadow(0 8px 16px rgb(233 58 107 / 0.45));
 }
 
 /* ---- Brand utilities (semantic refs only, no hex) ---- */
 
 /* Gradient text for outline icons / wordmarks */
 .text-gradient-brand {
-  background: var(--gradient-brand);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  background: none;
+  color: inherit;
 }
 
 /* Gradient surface (swatches, badges, hero bands) */
 .bg-gradient-brand {
-  background: var(--gradient-brand);
-}
-
-/* Logo glow per spec (feDropShadow equivalent for the PNG logo) */
-.logo-glow {
-  filter: var(--filter-logo-glow);
-}
-
-/* Brand glow shadow for cards / buttons */
-.shadow-brand-glow {
-  box-shadow: var(--shadow-brand-glow);
+  background: none;
 }
 
 .page {
@@ -144,3 +112,4 @@ body:has([data-shell='dashboard']) {
 [data-content] :is([data-slot='card']) {
   border-radius: var(--radius-md);
 }
+

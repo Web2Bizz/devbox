@@ -120,7 +120,7 @@ export default function ProfilePage() {
                 </p>
               </Field>
               <div className="flex gap-2">
-                <Button type="submit" variant="primaryBrand" disabled={saving}>
+                <Button type="submit" variant="default" disabled={saving}>
                   {saving ? t.profile.saving : t.profile.saveChanges}
                 </Button>
                 <Button type="button" variant="outline" onClick={reload} disabled={saving || loading}>

@@ -253,6 +253,7 @@ export type Dictionary = {
     create: string;
     open: string;
     abort: string;
+    untitled: string;
     stop: string;
     emptyAll: string;
     emptyRunning: string;

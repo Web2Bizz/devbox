@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useState } from 'react';
-import { Alert, AlertDescription, AlertTitle, Button } from '@web2bizz/ui/components';
+import { Alert, AlertDescription, AlertTitle, Button, Card, CardDescription, CardHeader, CardTitle } from '@web2bizz/ui/components';
 import { DashboardShell } from '@/components/dashboard-shell';
 import { EmptyState, ErrorState, LoadingState } from '@/components/states';
 import { CreateProjectDialog } from '@/components/projects/create-project-dialog';
@@ -13,7 +13,7 @@ import { useI18n } from '@/i18n';
 
 /**
  * Route: /organizations/[orgId] — org overview inside DashboardShell
- * (Header + Sidebar + Content, sidebarItems/breadcrumbs like ProjectShellLayout).
+ * (Sidebar + Content, sidebarItems like ProjectShellLayout, no header).
  * Org overview + nested project list + create (orgId forced).
  * data-shell="dashboard" (auth shell).
  */
@@ -39,29 +39,8 @@ export default function OrganizationDetailPage() {
   const sidebarItems = orgId ? [{ href: base, label: 'Overview' }] : undefined;
 
   return (
-    <DashboardShell
-      sidebarItems={sidebarItems}
-      header={{
-        breadcrumbs: [
-          { label: t.nav.organizations, href: '/organizations' },
-          { label: organization?.name ?? orgId ?? '' },
-        ],
-        actions: (
-          <Link href="/organizations" className="text-sm underline underline-offset-4">
-            {t.orgs.back}
-          </Link>
-        ),
-      }}
-    >
+    <DashboardShell sidebarItems={sidebarItems}>
       <div className="w-full max-w-none m-0 px-0 py-2" data-shell="dashboard">
-      <nav aria-label={t.nav.sections} className="text-muted-foreground mb-3 flex items-center gap-1 text-sm">
-        <Link href="/organizations" className="hover:underline">
-          {t.nav.organizations}
-        </Link>
-        <span aria-hidden="true">/</span>
-        <span aria-current="page">{organization?.name ?? orgId}</span>
-      </nav>
-
       {orgLoading && <LoadingState rows={2} />}
       {orgError && !orgLoading && <ErrorState message={orgError} />}
 
@@ -86,7 +65,7 @@ export default function OrganizationDetailPage() {
             onCreate={handleCreate}
             creating={creating}
             trigger={
-              <Button variant="primaryBrand" size="sm" aria-label={t.projects.createTrigger}>
+              <Button variant="default" size="sm" aria-label={t.projects.createTrigger}>
                 {t.projects.createTrigger}
               </Button>
             }
@@ -106,18 +85,23 @@ export default function OrganizationDetailPage() {
       {isEmpty && <EmptyState title={t.projects.emptyTitle} description={t.projects.emptyDesc} />}
 
       {!loading && !error && !isEmpty && (
-        <ul className="grid gap-2">
+        <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(18rem,1fr))] items-stretch mb-6">
           {projects.map((p) => (
-            <li key={p.id}>
-              <Link
-                href={`/organizations/${orgId}/projects/${p.id}`}
-                className="underline underline-offset-4 text-sm"
-              >
-                {p.name}
-              </Link>
-            </li>
+            <Link
+              key={p.id}
+              href={`/organizations/${orgId}/projects/${p.id}`}
+              aria-label={p.name}
+              className="block h-full rounded-[var(--radius-md)] focus-visible:outline-2 focus-visible:outline-offset-2"
+            >
+              <Card variant="default" className="h-full">
+                <CardHeader>
+                  <CardTitle>{p.name}</CardTitle>
+                  {p.description && <CardDescription>{p.description}</CardDescription>}
+                </CardHeader>
+              </Card>
+            </Link>
           ))}
-        </ul>
+        </div>
       )}
       <div className="mt-6">
         <Link href="/organizations" className="text-muted-foreground text-sm hover:underline">

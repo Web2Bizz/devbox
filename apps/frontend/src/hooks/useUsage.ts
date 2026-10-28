@@ -32,7 +32,7 @@ export type UseUsageResult = {
   refetch: () => void;
 };
 
-async function fetchUsage(): Promise<OpencodeUsage> {
+export async function fetchUsage(): Promise<OpencodeUsage> {
   const token = await getValidAccessToken();
   if (!token) throw new SessionExpiredError();
   try {
@@ -48,13 +48,36 @@ async function fetchUsage(): Promise<OpencodeUsage> {
   }
 }
 
-function usageRetry(failureCount: number, error: unknown): boolean {
+export function usageRetry(failureCount: number, error: unknown): boolean {
   if (error instanceof SessionExpiredError) return false;
   if (error instanceof ApiClientError) {
     if (error.status === 404 && error.code === 'opencode_key_missing') return false;
     if (error.status === 401) return false;
   }
   return failureCount < 1;
+}
+
+export type UsagePanelData = {
+  dailyTokensUsed?: number;
+  dailyTokensLimit?: number;
+  weeklyTokensUsed?: number;
+  weeklyTokensLimit?: number;
+};
+
+/**
+ * Maps live `OpencodeUsage` to the kit usage-panel props.
+ * Daily ← `daily ?? rolling` (Zen 5-hour window), weekly ← `weekly`.
+ * Returns `undefined` when neither bucket is present so the kit panel
+ * stays hidden; never sets `isUnlimited` (absent in `OpencodeUsage`).
+ */
+export function toUsagePanelData(usage: OpencodeUsage | null | undefined): UsagePanelData | undefined {
+  const d = usage?.daily ?? usage?.rolling;
+  const w = usage?.weekly;
+  if (!d && !w) return undefined;
+  return {
+    ...(d && { dailyTokensUsed: d.used, dailyTokensLimit: d.limit }),
+    ...(w && { weeklyTokensUsed: w.used, weeklyTokensLimit: w.limit }),
+  };
 }
 
 export function useUsage(): UseUsageResult {

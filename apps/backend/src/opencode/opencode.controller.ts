@@ -27,8 +27,8 @@ import type { Request as ExpressRequest, Response as ExpressResponse } from 'exp
 // there, while the legacy `/session`, `/event`, `/config/providers`
 // root answers SPA text/html (SDK throws `Server responded with
 // text/html`). `session.create` already goes through the v2 namespace
-// (`client.v2.session.create` → POST /api/session, minimal `{}` body —
-// the legacy POST /session answers 405). Writes without a v2 equivalent
+// (`client.v2.session.create` → POST /api/session, body carries the gated
+// project's `location.directory` — the legacy POST /session answers 405). Writes without a v2 equivalent
 // (update/delete/fork/prompt/prompt_async/command/shell, status, abort,
 // global.event)
 // stay on the legacy `Session2`/`Config2`/`Event`/`Global` surface —
@@ -429,28 +429,38 @@ export class OpencodeController {
   @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async createSession(
     @ReqUser() identity: RequestIdentity,
-    @Body() body: { title?: string; parentID?: string } = {},
+    @Body() _body: { title?: string; parentID?: string } = {},
     @Query('projectId') projectId?: string,
     @Query('directory') _directory?: string,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<Session> {
     const cid = correlationId ?? '';
     const userId = identity.id;
-    // C4: project gate first (v2 create takes no directory — the gate is
-    // the binding; client ?directory ignored).
-    await this.requireProjectDir(projectId, userId, cid);
+    // C4: project gate first. The gated jailed project dir becomes the
+    // session LOCATION for the upstream create: v2 POST /api/session
+    // requires a JSON object body — an empty body is rejected upstream
+    // (400 `Expected object`) and additionally stripped by the pinned sdk
+    // transport (stripEmptySlots), so a non-empty `location` is both the
+    // correct scoping and the payload the request actually needs. No dir
+    // from the gate → the gate error propagates (fail-closed: no cwd or
+    // default path is ever sent as a location).
+    const projectDir = await this.requireProjectDir(projectId, userId, cid);
     const client = await this.sdk.create(userId, cid);
     try {
       // v2 namespace (POST /api/session): the legacy POST /session answers
-      // 405, so create goes through `client.v2.session.create` with a minimal
-      // `{}` body (all v2 fields optional: id/agent/model/location). The
-      // external signature keeps `body`/`?directory` for stability — neither
-      // is forwarded upstream (v2 takes no directory query). The envelope is
+      // 405, so create goes through `client.v2.session.create`. The body
+      // carries only `location` — the v2 create accepts id/agent/model/
+      // location and nothing else. The external signature keeps `_body`/
+      // `?directory` for stability — neither is forwarded upstream (client
+      // ?directory is ignored; the gate binds the jail). The envelope is
       // `{ data: SessionV2Info }` — unwrap .data and pass through minimally
       // (frontend navigates by .id; numeric `time` is Date-parseable).
-      void body;
-      void _directory;
-      const res = await client.v2.session.create({});
+      // TODO(card 4): title/parentID теряются @opencode-ai/sdk 1.18.33 —
+      // v2 session.create sends only id/agent/model/location; forwarding
+      // the rest needs a transport below the generated sdk.
+      const res = await client.v2.session.create({
+        location: { directory: projectDir },
+      });
       if (this.isUpstreamOk(res.data, res.error)) {
         return res.data.data as unknown as Session;
       }

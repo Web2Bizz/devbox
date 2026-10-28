@@ -15,6 +15,10 @@
  *   EXTERNAL_UNAUTHORIZED instead — a distinct code and NO Retry-After
  *   (the C4 project gate + the workspace jail are patched in that phase so
  *   the request really reaches the upstream);
+ * - a v2 stand stub phase (gate/jail patched): POST session forwards the
+ *   gated project jail as the body `location.directory` — an empty body
+ *   dies at the 2.x server with 400 `Expected object` (the pinned sdk
+ *   strips empty bodies), and the stub mirrors that rule;
  * - session/message/provider routes are project-scoped (C4): every call
  *   carries ?projectId past the Bearer guard; the gate denies with the same
  *   503 envelope here (no DB in this suite); missing projectId → 400
@@ -100,6 +104,85 @@ function startUnauthorizedUpstream(): Promise<{
       resolve({
         server,
         url: `http://127.0.0.1:${port}`,
+        close: () => new Promise<void>((done) => server.close(() => done())),
+      });
+    });
+  });
+}
+
+/** Jailed dir the workspace-path prototype stub returns in this suite. */
+const E2E_PROJECT_DIR = '/tmp/rush-code-e2e-project';
+
+/**
+ * Stub of the v2 stand for the session-create phase: POST /api/session
+ * mirrors the real 2.2.0 server — an empty/absent JSON body (or one without
+ * `location.directory`) → 400 `Expected object` (`Payload`), a
+ * location-carrying body → 200 `{ data: SessionV2Info }`. Every create
+ * attempt is captured (content-type + parsed body). Everything else is the
+ * SPA text/html catch-all of the real server.
+ */
+function startV2StandStub(): Promise<{
+  server: Server;
+  url: string;
+  paths: string[];
+  creates: Array<{ contentType: string | null; body: unknown }>;
+  close: () => Promise<void>;
+}> {
+  const paths: string[] = [];
+  const creates: Array<{ contentType: string | null; body: unknown }> = [];
+  return new Promise((resolve) => {
+    const server = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (c: Buffer) => chunks.push(c));
+      req.on('end', () => {
+        const path = (req.url ?? '').split('?')[0];
+        paths.push(path);
+        const raw = Buffer.concat(chunks).toString('utf8');
+        const json = (status: number, obj: unknown): void => {
+          res.writeHead(status, { 'content-type': 'application/json' });
+          res.end(JSON.stringify(obj));
+        };
+        if (req.method === 'POST' && path === '/api/session') {
+          let parsed: unknown = null;
+          try {
+            parsed = raw.length > 0 ? (JSON.parse(raw) as unknown) : null;
+          } catch {
+            parsed = null;
+          }
+          creates.push({
+            contentType: req.headers['content-type'] ?? null,
+            body: parsed,
+          });
+          const location = (parsed as { location?: { directory?: unknown } } | null)?.location;
+          if (!parsed || !location || typeof location.directory !== 'string') {
+            // Exactly what the live 2.2.0 server does for a stripped/empty
+            // body — the pre-fix `{}` request died right here with a 400.
+            json(400, { _tag: 'InvalidRequestError', message: 'Expected object', kind: 'Payload' });
+            return;
+          }
+          json(200, {
+            data: {
+              id: 'ses_e2e_location',
+              title: '',
+              directory: location.directory,
+              projectID: 'proj-e2e',
+              time: { created: 1, updated: 1 },
+            },
+          });
+          return;
+        }
+        // SPA catch-all — never a liveness signal.
+        res.writeHead(200, { 'content-type': 'text/html' });
+        res.end('<!doctype html><html></html>');
+      });
+    });
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address() as AddressInfo;
+      resolve({
+        server,
+        url: `http://127.0.0.1:${port}`,
+        paths,
+        creates,
         close: () => new Promise<void>((done) => server.close(() => done())),
       });
     });
@@ -295,6 +378,55 @@ async function main(): Promise<void> {
       } finally {
         process.env.OPENCODE_URL = 'http://127.0.0.1:9';
         await unauthorized.close();
+      }
+
+      // --- v2 stand stub: gated session location ---------------------------
+      // POST /api/opencode/session must forward the GATED project jail as
+      // the v2 body `location.directory` — an empty/absent body dies at the
+      // live 2.2.0 server with 400 `Expected object` (and the pinned sdk
+      // strips empty bodies entirely), so the stub mirrors that rule and
+      // the check asserts the captured create carried the jail dir. The
+      // C4 gate + workspace jail are patched on the PROTOTYPES (no
+      // Postgres here) so the request really reaches the stub.
+      const stand = await startV2StandStub();
+      process.env.OPENCODE_URL = stand.url;
+      try {
+        const { OrganizationsService } = await import('../organizations/organizations.service');
+        const { WorkspacePathService } = await import('../workspaces/workspace-path.service');
+        (
+          OrganizationsService.prototype as unknown as { assertProjectAccessById: unknown }
+        ).assertProjectAccessById = async () => ({ ownerId: E2E_USER_ID, orgIds: [] });
+        const pathsProto = WorkspacePathService.prototype as unknown as Record<string, unknown>;
+        pathsProto.resolveUserStrict = async () => ({ absRepo: E2E_PROJECT_DIR });
+        pathsProto.realStrictRoot = async () => '/tmp/rush-code-e2e-root';
+        pathsProto.assertInsideJail = async (abs: string) => abs;
+
+        await check(
+          'POST /api/opencode/session forwards gated location.directory',
+          `/api/opencode/session?projectId=${E2E_PROJECT_ID}`,
+          json({ title: 'e2e-location' }),
+          200,
+          (_res, body) => {
+            assert.equal((body as { id?: string }).id, 'ses_e2e_location');
+          },
+        );
+        {
+          const create = stand.creates.at(-1);
+          assert.ok(create, 'stub captured the create request');
+          assert.ok(
+            (create.contentType ?? '').toLowerCase().includes('application/json'),
+            `content-type was ${create.contentType}`,
+          );
+          const sent = create.body as { location?: { directory?: unknown } } | null;
+          assert.equal(
+            sent?.location?.directory,
+            E2E_PROJECT_DIR,
+            `create body must carry the gated jail as location.directory (got ${JSON.stringify(create.body)})`,
+          );
+        }
+      } finally {
+        process.env.OPENCODE_URL = 'http://127.0.0.1:9';
+        await stand.close();
       }
     }
   } finally {

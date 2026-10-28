@@ -11,11 +11,12 @@
  *   surface (503 EXTERNAL_UNAVAILABLE + Retry-After 30 + correlationId)
  *   instead of silently passing. Never logs secrets (URLs carry
  *   credentials — only reachability outcomes are logged).
- * - `applyTestMigrations(url)` — applies drizzle/0001..0007 in order
- *   (idempotent IF NOT EXISTS) so the suite starts from a known schema.
+ * - `applyTestMigrations(url)` — applies the active Drizzle migration set in
+ *   drizzle-rebuild so the suite starts from the code-first schema.
  */
-import { readFileSync } from "node:fs";
 import { join as joinPath } from "node:path";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Pool } from "pg";
 
 export type TestDbMode = "live" | "unreachable";
@@ -67,24 +68,13 @@ export async function resolveTestDb(preferredUrl: string): Promise<TestDb> {
   return { mode: "unreachable", url: UNREACHABLE_TEST_DB_URL };
 }
 
-const MIGRATION_FILES = [
-  "0001_projects.sql",
-  "0002_github_installations.sql",
-  "0003_users.sql",
-  "0004_organizations.sql",
-  "0005_user_opencode_keys.sql",
-  "0006_user_opencode_keys_key_id.sql",
-  "0007_organization_invites.sql",
-];
-
-/** Locates apps/backend/drizzle from src/ or dist/ layouts (CJS __dirname). */
+/** Locates apps/backend/drizzle-rebuild from src/ or dist/ layouts. */
 function drizzleDir(): string {
-  return joinPath(__dirname, "..", "..", "drizzle");
+  return joinPath(__dirname, "..", "..", "drizzle-rebuild");
 }
 
 /**
- * Applies drizzle/0001..0007 in file order (node-pg runs multi-statement
- * scripts in one query; files are IF NOT EXISTS idempotent).
+ * Applies the active drizzle-rebuild migrations through Drizzle's migrator.
  */
 export async function applyTestMigrations(url: string): Promise<void> {
   const dir = drizzleDir();
@@ -93,10 +83,12 @@ export async function applyTestMigrations(url: string): Promise<void> {
     connectionTimeoutMillis: 8000,
   });
   try {
-    for (const file of MIGRATION_FILES) {
-      const sqlText = readFileSync(joinPath(dir, file), "utf8");
-      await pool.query(sqlText);
-    }
+    const db = drizzle(pool);
+    await migrate(db, {
+      migrationsFolder: dir,
+      migrationsTable: "__drizzle_migrations_code_first",
+      migrationsSchema: "drizzle",
+    });
   } finally {
     await pool.end().catch(() => undefined);
   }

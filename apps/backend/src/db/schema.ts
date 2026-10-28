@@ -10,14 +10,15 @@
  *   GitHub installation (unique installation_id), linked to our userId
  *   (nullable until users table exists; MVP resolves a mock userId from
  *   the x-user-id header / ?userId query).
- * - organizations / organization_members / projects_and_organizations:
- *   orgs epic (0004) — see the block above those tables for the
- *   single-maintainer partial-unique rationale.
+ * - organizations / organization_members: orgs epic (0004); projects belong
+ *   to an organization through projects.org_id (1:1). The former M2M table
+ *   was removed by migration 0008.
  *
  * Strict Postgres runtime (ProjectsService / GithubInstallationsService /
  * UsersService hit these tables only — no memory fallback); the tables are
- * the durable contract applied via drizzle/000N_*.sql (`drizzle-kit migrate`
- * in production).
+ * the durable contract whose code-first source is this schema and whose
+ * active migrations live in drizzle-rebuild/ (`drizzle-kit migrate` in
+ * production).
  */
 import { sql } from "drizzle-orm";
 import {
@@ -26,7 +27,6 @@ import {
   index,
   jsonb,
   pgTable,
-  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -172,9 +172,9 @@ export type GithubInstallationRow = typeof githubInstallations.$inferSelect;
  *   the org outlives its creator (a maintainer keeps administering it).
  * - organization_members: membership (org_id, user_id, role maintainer|user).
  *   Unique (org_id, user_id); role is CHECK-constrained in SQL.
- * - projects_and_organizations: M2M link project_id ↔ org_id (composite PK,
- *   both sides CASCADE — deleting a project or an org drops only the link
- *   rows; the counterpart survives).
+ * - projects: organization ownership is represented by projects.org_id
+ *   (1:1); the former projects_and_organizations M2M table was removed by
+ *   migration 0008.
  *
  * Single-maintainer constraint (partial unique index):
  *   CREATE UNIQUE INDEX ... ON organization_members (org_id)
@@ -260,34 +260,5 @@ export const organizationInvites = pgTable(
 
 export type OrganizationInviteRow = typeof organizationInvites.$inferSelect;
 
-/**
- * M2M projects_and_organizations — REMOVED (1:1 model: projects.org_id).
- * Kept as a deprecated stub so old imports fail closed loudly; the table
- * itself is dropped by drizzle/0008 (see migration report column).
- * Do not use — assertProjectBelongsToOrg is the only association check.
- */
-export const projectsAndOrganizations = pgTable(
-  "projects_and_organizations",
-  {
-    projectId: uuid("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
-    orgId: uuid("org_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
-  },
-  (t) => [
-    primaryKey({
-      columns: [t.projectId, t.orgId],
-      name: "projects_and_organizations_pkey",
-    }),
-  ],
-);
-
 export type OrganizationRow = typeof organizations.$inferSelect;
 export type OrganizationMemberRow = typeof organizationMembers.$inferSelect;
-export type ProjectsAndOrganizationsRow =
-  typeof projectsAndOrganizations.$inferSelect;

@@ -35,7 +35,7 @@ const sessionInfo = (id: string) => ({
   status: { type: 'idle' as const },
 });
 
-const createMock = mock(async (_body?: unknown) => sessionInfo('ses-1'));
+const createMock = mock(async (_body?: unknown, _opts?: unknown) => sessionInfo('ses-1'));
 let sendImpl: (projectId: string, sessionId: string, text: string, opts?: unknown) => Promise<unknown> =
   async (_p, _s, text) => ({
     id: 'msg-q1',
@@ -74,7 +74,7 @@ const streamMock = mock((projectId: string, signal: AbortSignal) => makeStream(p
 
 mock.module('../../api/sessions-client', () => ({
   ensureSessionAuth: async () => {},
-  createSession: (body: unknown) => createMock(body),
+  createSession: (body: unknown, opts?: unknown) => createMock(body, opts),
   sendSessionMessage: (p: string, s: string, text: string, opts?: unknown) =>
     sendMock(p, s, text, opts),
   listSessionMessages: (p: string, s: string) => messagesMock(p, s),
@@ -310,5 +310,66 @@ describe('useChat (domain)', () => {
     expect(sendMock).not.toHaveBeenCalled();
     expect(createMock).not.toHaveBeenCalled();
     expect(result.current.error).toContain('project-scoped');
+  });
+
+  test('streaming: non-text deltas skipped, delta+snapshot interleave without duplication', async () => {
+    const { result } = renderHook(() => useChat({ ...PROJECT }));
+    await settle();
+
+    act(() => {
+      void result.current.send('hello');
+    });
+    const thinking = {
+      id: 'evt-think',
+      type: 'message.part.delta',
+      data: {
+        sessionID: 'ses-1',
+        messageID: 'msg-1',
+        partID: 'prt-1',
+        field: 'thinking',
+        delta: 'NOT CHAT',
+      },
+      session: 'ses-1',
+    };
+    pushFrames([
+      thinking,
+      delta('ses-1', 'Hel'),
+      updated('ses-1', 'Hello', 'prt-1'),
+      delta('ses-1', ' world'),
+      idle('ses-1'),
+    ]);
+    await settle(16);
+
+    expect(result.current.sending).toBe(false);
+    expect(result.current.messages.length).toBe(2);
+    expect(result.current.messages[1]).toMatchObject({ role: 'assistant', text: 'Hello world' });
+  });
+
+  test('model: picked model rides lazy create + prompt, survives reload', async () => {
+    const picked = { providerID: 'prov-openai', id: 'model-m' };
+    const { result } = renderHook(() => useChat({ ...PROJECT }));
+    await settle();
+
+    act(() => {
+      result.current.setModel(picked);
+    });
+    act(() => {
+      void result.current.send('hi');
+    });
+    pushFrames([delta('ses-1', 'yo'), idle('ses-1')]);
+    await settle(16);
+
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(createMock.mock.calls[0]?.[1]).toMatchObject({ model: picked });
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    expect(sendMock.mock.calls[0]?.[3]).toMatchObject({ model: picked });
+    expect(result.current.model).toMatchObject(picked);
+
+    act(() => {
+      result.current.reload();
+    });
+    await settle();
+    // reload refetches history + redials SSE — the picked model persists.
+    expect(result.current.model).toMatchObject(picked);
   });
 });

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { SessionMessage, SessionStreamFrame } from '@rush-code/contracts';
+import type { SessionInfoModel, SessionMessage, SessionStreamFrame } from '@rush-code/contracts';
 import {
   sessionMessagePartDeltaFrameSchema,
   sessionMessagePartUpdatedFrameSchema,
@@ -40,7 +40,10 @@ export type UseChatResult = {
   isEmpty: boolean;
   /** Active session id (initial option or lazily created). */
   sessionId: string | null;
-  send: (text: string) => Promise<void>;
+  /** Model picked for the next prompt (survives reload; null = runner default). */
+  model: SessionInfoModel | null;
+  setModel: (model: SessionInfoModel | null) => void;
+  send: (text: string, opts?: { model?: SessionInfoModel }) => Promise<void>;
   stop: () => void;
   reload: () => void;
 };
@@ -85,8 +88,8 @@ function toChatMessages(rows: SessionMessage[]): ChatMessage[] {
  * the answer finished.
  */
 type FrameText =
-  | { kind: 'delta'; text: string; partId: string }
-  | { kind: 'snapshot'; text: string; partId: string }
+  | { kind: 'delta'; text: string; partId: string; messageId: string }
+  | { kind: 'snapshot'; text: string; partId: string | null }
   | { kind: 'idle' }
   | null;
 
@@ -94,7 +97,17 @@ function frameText(frame: SessionStreamFrame): FrameText {
   if (frame.type === 'message.part.delta') {
     const parsed = sessionMessagePartDeltaFrameSchema.safeParse(frame);
     if (!parsed.success) return null;
-    return { kind: 'delta', text: parsed.data.data.delta, partId: parsed.data.data.partID };
+    // Only text-field deltas render as chat: the runner also streams
+    // deltas for non-text fields (thinking/reasoning internals) — those
+    // are not chat text and are skipped, never appended.
+    if (parsed.data.data.field !== 'text') return null;
+    if (!parsed.data.data.delta) return null;
+    return {
+      kind: 'delta',
+      text: parsed.data.data.delta,
+      partId: parsed.data.data.partID,
+      messageId: parsed.data.data.messageID,
+    };
   }
   if (frame.type === 'message.part.updated') {
     const parsed = sessionMessagePartUpdatedFrameSchema.safeParse(frame);
@@ -110,7 +123,7 @@ function frameText(frame: SessionStreamFrame): FrameText {
     return {
       kind: 'snapshot',
       text: part.text,
-      partId: typeof part.id === 'string' ? part.id : 'default',
+      partId: typeof part.id === 'string' && part.id ? part.id : null,
     };
   }
   if (frame.type === 'session.idle') return { kind: 'idle' };
@@ -177,6 +190,9 @@ export function useChat(options?: UseChatOptions): UseChatResult {
   const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
   const [sessionId, setSessionId] = useState<string | null>(initialSessionId ?? null);
+  // Model picked for the next prompt (null = runner default). Plain state —
+  // survives reload() (reload only refetches history + redials SSE).
+  const [model, setModel] = useState<SessionInfoModel | null>(null);
 
   const sessionIdRef = useRef<string | null>(initialSessionId ?? null);
   const promptCtrlRef = useRef<AbortController | null>(null);
@@ -246,14 +262,38 @@ export function useChat(options?: UseChatOptions): UseChatResult {
             continue;
           }
           if (ft.kind === 'delta') {
-            partLens.set(ft.partId, (partLens.get(ft.partId) ?? 0) + ft.text.length);
+            // Part ids are runner-unique (prt_*), so the part key alone
+            // dedups delta↔snapshot interleaving within and across messages.
+            const key = `${ft.messageId}:${ft.partId}`;
+            partLens.set(key, (partLens.get(key) ?? 0) + ft.text.length);
             append(ft.text);
             continue;
           }
-          // Snapshot: append only the growth beyond what was emitted.
-          const seen = partLens.get(ft.partId) ?? 0;
+          // Snapshot: append only the growth beyond what was emitted. An
+          // id-less snapshot cannot key reliably — attribute it to the
+          // single live part when there is exactly one, otherwise append
+          // only text never seen before (dedup against the whole stream so
+          // a re-sent full snapshot never double-flushes).
+          if (ft.partId === null) {
+            if (partLens.size === 1) {
+              const first = [...partLens.entries()][0];
+              if (first && ft.text.length > first[1]) {
+                partLens.set(first[0], ft.text.length);
+                append(ft.text.slice(first[1]));
+              }
+            } else if (
+              !streamingRef.current.endsWith(ft.text) &&
+              !streamingRef.current.includes(ft.text)
+            ) {
+              append(ft.text);
+            }
+            continue;
+          }
+          const matches = [...partLens.entries()].filter(([k]) => k.endsWith(`:${ft.partId}`));
+          const seen = matches.length > 0 ? Math.max(...matches.map(([, v]) => v)) : 0;
           if (ft.text.length > seen) {
-            partLens.set(ft.partId, ft.text.length);
+            const target = matches.length === 1 && matches[0] ? matches[0][0] : `:${ft.partId}`;
+            partLens.set(target, ft.text.length);
             append(ft.text.slice(seen));
           }
         }
@@ -321,25 +361,33 @@ export function useChat(options?: UseChatOptions): UseChatResult {
     [],
   );
 
-  const ensureSession = useCallback(async (): Promise<string> => {
-    if (sessionIdRef.current) return sessionIdRef.current;
-    if (!projectId) throw projectGateError();
-    const created = await createSession({ projectId });
-    sessionIdRef.current = created.id;
-    setSessionId(created.id);
-    // Fresh session — deltas accumulate from zero.
-    resetStream();
-    return created.id;
-  }, [projectId, resetStream]);
+  const ensureSession = useCallback(
+    async (modelOverride?: SessionInfoModel | null): Promise<string> => {
+      if (sessionIdRef.current) return sessionIdRef.current;
+      if (!projectId) throw projectGateError();
+      const effective = modelOverride ?? model;
+      const created = await createSession(
+        { projectId },
+        effective ? { model: effective } : {},
+      );
+      sessionIdRef.current = created.id;
+      setSessionId(created.id);
+      // Fresh session — deltas accumulate from zero.
+      resetStream();
+      return created.id;
+    },
+    [projectId, resetStream, model],
+  );
 
   const send = useCallback(
-    async (text: string) => {
+    async (text: string, opts?: { model?: SessionInfoModel }) => {
       const trimmed = text.trim();
       if (!trimmed || sendingRef.current) return;
       if (!projectId) {
         setError(formatError(projectGateError(), t.errors.unexpected));
         return;
       }
+      const effective = opts?.model ?? model;
       sendingRef.current = true;
       setSending(true);
       setError(null);
@@ -348,12 +396,15 @@ export function useChat(options?: UseChatOptions): UseChatResult {
       setMessages((prev) => [...prev, userMsg]);
       try {
         await ensureSessionAuth();
-        const sid = await ensureSession();
+        const sid = await ensureSession(effective);
         const ctrl = new AbortController();
         promptCtrlRef.current = ctrl;
         // The POST only queues the prompt; the answer streams over events
         // and `sending` clears on the session.idle frame (or stop()).
-        await sendSessionMessage(projectId, sid, trimmed, { signal: ctrl.signal });
+        await sendSessionMessage(projectId, sid, trimmed, {
+          signal: ctrl.signal,
+          ...(effective ? { model: effective } : {}),
+        });
       } catch (e: unknown) {
         if ((e as Error)?.name === 'AbortError') return;
         setError(formatError(e, t.errors.unexpected));
@@ -363,7 +414,7 @@ export function useChat(options?: UseChatOptions): UseChatResult {
         promptCtrlRef.current = null;
       }
     },
-    [projectId, ensureSession, resetStream, t],
+    [projectId, ensureSession, resetStream, t, model],
   );
 
   const stop = useCallback(() => {
@@ -421,6 +472,8 @@ export function useChat(options?: UseChatOptions): UseChatResult {
     error,
     isEmpty: !loading && !error && messages.length === 0 && !streamingText,
     sessionId,
+    model,
+    setModel,
     send,
     stop,
     reload,

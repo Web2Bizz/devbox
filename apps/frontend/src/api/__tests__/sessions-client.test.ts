@@ -256,4 +256,23 @@ describe('sessions-client domain boundary', () => {
     })().catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
   });
+
+  test('sessionEventStream: multi-line data: chunk joins into one frame (no stream death)', async () => {
+    const sse = [
+      'data: {"id":"e1","type":"message.part.delta",\n',
+      'data: "data":{"sessionID":"ses_1","messageID":"m","partID":"p","field":"text","delta":"Hi"},"session":"ses_1"}\n\n',
+    ].join('');
+    globalThis.fetch = (async () =>
+      new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } })) as unknown as typeof fetch;
+    const ctrl = new AbortController();
+    const frames = [];
+    for await (const frame of sessionEventStream(PROJECT, ctrl.signal)) {
+      frames.push(frame);
+      if (frames.length === 1) break;
+    }
+    ctrl.abort();
+    expect(frames.length).toBe(1);
+    expect(frames[0]?.type).toBe('message.part.delta');
+    expect(frames[0]?.session).toBe('ses_1');
+  });
 });

@@ -4,6 +4,7 @@ import { SessionExpiredError } from '../lib/session-expired';
 import type {
   CreateSessionRequest,
   SessionInfo,
+  SessionInfoModel,
   SessionInterruptResult,
   SessionMessage,
   SessionRunStatusMap,
@@ -74,8 +75,13 @@ export function getSessionStatuses(
   return withAuth((token) => api.getSessionStatuses(token, projectId, opts));
 }
 
-export function createSession(body: CreateSessionRequest): Promise<SessionInfo> {
-  return withAuth((token) => api.createSession(token, body));
+export function createSession(
+  body: CreateSessionRequest,
+  opts?: { model?: SessionInfoModel },
+): Promise<SessionInfo> {
+  return withAuth((token) =>
+    api.createSession(token, opts?.model ? { ...body, model: opts.model } : body),
+  );
 }
 
 export function listSessionMessages(
@@ -90,10 +96,15 @@ export function sendSessionMessage(
   projectId: string,
   sessionId: string,
   text: string,
-  opts?: { signal?: AbortSignal },
+  opts?: { signal?: AbortSignal; model?: SessionInfoModel },
 ): Promise<SessionMessage> {
   return withAuth((token) =>
-    api.sendSessionMessage(token, sessionId, { projectId, text }, opts),
+    api.sendSessionMessage(
+      token,
+      sessionId,
+      opts?.model ? { projectId, text, model: opts.model } : { projectId, text },
+      opts?.signal ? { signal: opts.signal } : {},
+    ),
   );
 }
 
@@ -165,14 +176,22 @@ export async function* sessionEventStream(
         const chunk = buffer.slice(0, idx);
         buffer = buffer.slice(idx + 2);
         idx = buffer.indexOf('\n\n');
+        // One SSE dispatch may carry its payload on several `data:` lines
+        // (chunked JSON) — join them with '\n' into ONE payload and parse
+        // once. Parsing line-by-line broke multi-line JSON (throw → stream
+        // death → lost deltas); lines without `data:` are heartbeat
+        // framing and stay skipped.
+        const dataLines: string[] = [];
         for (const line of chunk.split('\n')) {
           if (!line.startsWith('data:')) continue;
-          const payload = line.slice(5).trim();
-          if (!payload) continue;
-          const parsed: unknown = JSON.parse(payload);
-          const frame = sessionStreamFrameSchema.parse(parsed);
-          yield frame;
+          dataLines.push(line.slice(5).trim());
         }
+        if (dataLines.length === 0) continue;
+        const payload = dataLines.join('\n');
+        if (!payload) continue;
+        const parsed: unknown = JSON.parse(payload);
+        const frame = sessionStreamFrameSchema.parse(parsed);
+        yield frame;
       }
     }
   } finally {

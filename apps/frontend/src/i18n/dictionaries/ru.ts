@@ -190,7 +190,7 @@ export const ru: Dictionary = {
   aiProviders: {
     titleA: 'AI-провайдеры',
     titleB: 'хаб',
-    subtitle: 'Живые провайдеры через backend reverse-proxy (/api/opencode/config/providers). Переключатель — локальный.',
+    subtitle: 'Живые провайдеры проекта через доменный API бэкенда (/api/sessions/providers). Переключатель — локальный.',
     doneTitle: 'Готово',
     emptyTitle: 'Нет провайдеров',
     emptyDesc: 'Подключите первый AI-провайдер, чтобы увидеть его здесь.',
@@ -238,8 +238,8 @@ export const ru: Dictionary = {
     npmDesc: 'Живой реестр npm-пакетов с поиском по скопу.',
   },
   sessions: {
-    streamTitle: 'Живой поток opencode',
-    streamSubtitle: 'SSE через backend reverse-proxy (/api/opencode/global/event).',
+    streamTitle: 'Живой поток сессий',
+    streamSubtitle: 'SSE через доменный API бэкенда (/api/sessions/events).',
     connecting: 'Подключаемся…',
     live: 'В эфире',
     reconnecting: 'Переподключаемся…',
@@ -247,7 +247,7 @@ export const ru: Dictionary = {
     eventsEmpty: 'Событий пока нет — отправьте сообщение или подождите активности.',
     reconnect: 'Переподключить',
     sessionsTitle: 'Сессии',
-    sessionsDesc: 'Живые opencode-сессии через backend reverse-proxy (фильтр ?directory=, когда задан).',
+    sessionsDesc: 'Живые сессии проекта через доменный API бэкенда (scope по projectId — рабочую директорию джейлит сервер).',
     runningTitle: 'Запущенные сессии',
     runningDesc: 'Активные busy-сессии — обновляются из SSE-потока.',
     create: 'Новая сессия',

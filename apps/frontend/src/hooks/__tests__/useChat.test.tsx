@@ -48,7 +48,8 @@ const messagesImplHolder: { fn: (projectId: string, sessionId: string) => Promis
   fn: async () => [],
 };
 const messagesMock = mock((p: string, s: string) => messagesImplHolder.fn(p, s));
-const abortMock = mock(async (_projectId: string, _sessionId: string) => {});
+// Domain interrupt answer per the artifact SessionInterruptResponse.
+const abortMock = mock(async (_projectId: string, _sessionId: string) => ({ interrupted: true }));
 
 // A live-bus stand-in: the generator starts at mount and blocks until
 // frames arrive (pushed by the test after send()), mirroring a real SSE —
@@ -77,7 +78,7 @@ mock.module('../../api/sessions-client', () => ({
   sendSessionMessage: (p: string, s: string, text: string, opts?: unknown) =>
     sendMock(p, s, text, opts),
   listSessionMessages: (p: string, s: string) => messagesMock(p, s),
-  abortSession: (p: string, s: string) => abortMock(p, s),
+  interruptSession: (p: string, s: string) => abortMock(p, s),
   sessionEventStream: (projectId: string, signal: AbortSignal) => streamMock(projectId, signal),
   toErrorMessage: (e: unknown) => {
     if (typeof e === 'string') return e;

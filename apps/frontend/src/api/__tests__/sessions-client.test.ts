@@ -9,7 +9,9 @@
  * PROJECT_REQUIRED / 404 not_found never map to SessionExpiredError), the
  * 401 flow (one silent refresh retry; spent refresh → SessionExpiredError;
  * no session → SessionExpiredError without network), send body exactly
- * {projectId,text}, provider envelope unwrap + drift, and the SSE frame
+ * {projectId,text}, the domain interrupt (body {projectId}, answer
+ * {interrupted} parsed, drift loud) and the domain provider inventory
+ * (required rows parse, non-contract members stripped), and the SSE frame
  * parser (data: frames → SessionStreamFrame, heartbeats skipped, malformed
  * frame throws).
  */
@@ -44,7 +46,8 @@ mock.module('../../lib/auth-store', () => ({
 // import below.
 import { ApiClientError } from '../client';
 const {
-  fetchRunnerProviders,
+  interruptSession,
+  listSessionProviders,
   listSessions,
   sendSessionMessage,
   sessionEventStream,
@@ -176,13 +179,46 @@ describe('sessions-client domain boundary', () => {
     expect(JSON.parse(String(init.body))).toEqual({ projectId: PROJECT, text: 'hi' });
   });
 
-  test('fetchRunnerProviders: v2 envelope {data:[...]} unwrapped; drift fails loud', async () => {
-    stubs = [{ status: 200, body: { location: {}, data: [{ id: 'p1', name: 'One' }] } }];
-    const rows = await fetchRunnerProviders({ projectId: PROJECT });
-    expect(rows).toEqual([{ id: 'p1', name: 'One' }]);
+  test('interruptSession: domain POST with {projectId} body, answer {interrupted} parsed', async () => {
+    stubs = [{ status: 200, body: { interrupted: false } }];
+    const res = await interruptSession(PROJECT, 'ses_1');
+    expect(res).toEqual({ interrupted: false });
+    const init = calls[0]?.init as RequestInit;
+    expect(init.method).toBe('POST');
+    expect(calls[0]?.url).toContain('/api/sessions/ses_1/interrupt');
+    expect(JSON.parse(String(init.body))).toEqual({ projectId: PROJECT });
 
-    stubs = [{ status: 200, body: { nonsense: true } }];
-    const err = await fetchRunnerProviders({ projectId: PROJECT }).catch((e: unknown) => e);
+    // Drift: interrupted missing is a contract bug, never a default to false.
+    stubs = [{ status: 200, body: {} }];
+    const err = await interruptSession(PROJECT, 'ses_1').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiClientError);
+    expect((err as ApiClientError).code).toBe('shape_mismatch');
+  });
+
+  test('listSessionProviders: domain rows parsed; credential-bearing extras dropped, drift fails loud', async () => {
+    // zod strips non-contract members (settings/headers never reach the UI),
+    // the required fields still parse.
+    stubs = [
+      {
+        status: 200,
+        body: [
+          {
+            id: 'p1',
+            name: 'One',
+            activation: 'enabled',
+            package: '@p/one',
+            headers: { authorization: 'should-never-travel' },
+          },
+        ],
+      },
+    ];
+    const rows = await listSessionProviders(PROJECT);
+    expect(rows).toEqual([{ id: 'p1', name: 'One', activation: 'enabled', package: '@p/one' }]);
+    expect(JSON.stringify(rows)).not.toContain('should-never-travel');
+    expect(calls[0]?.url).toContain(`/api/sessions/providers?projectId=${PROJECT}`);
+
+    stubs = [{ status: 200, body: [{ id: 'p1', name: 'One', activation: 'weird', package: '' }] }];
+    const err = await listSessionProviders(PROJECT).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ApiClientError);
     expect((err as ApiClientError).code).toBe('shape_mismatch');
   });

@@ -190,7 +190,7 @@ export const en: Dictionary = {
   aiProviders: {
     titleA: 'AI providers',
     titleB: 'hub',
-    subtitle: 'Live providers via the backend reverse-proxy (/api/opencode/config/providers). Toggle is local-only.',
+    subtitle: 'Live provider inventory for this project via the backend domain API (/api/sessions/providers). Toggle is local-only.',
     doneTitle: 'Done',
     emptyTitle: 'No providers',
     emptyDesc: 'Connect your first AI provider to see it here.',
@@ -238,8 +238,8 @@ export const en: Dictionary = {
     npmDesc: 'Live npm package registry with scope search.',
   },
   sessions: {
-    streamTitle: 'Live opencode stream',
-    streamSubtitle: 'SSE via the backend reverse-proxy (/api/opencode/global/event).',
+    streamTitle: 'Live session stream',
+    streamSubtitle: 'SSE via the backend domain API (/api/sessions/events).',
     connecting: 'Connecting…',
     live: 'Live',
     reconnecting: 'Reconnecting…',
@@ -247,7 +247,7 @@ export const en: Dictionary = {
     eventsEmpty: 'No events yet — send a message or wait for activity.',
     reconnect: 'Reconnect',
     sessionsTitle: 'Sessions',
-    sessionsDesc: 'Live opencode sessions via the backend reverse-proxy (scoped by ?directory= when set).',
+    sessionsDesc: 'Live project sessions via the backend domain API (scoped by projectId — the server jails the working directory).',
     runningTitle: 'Running sessions',
     runningDesc: 'Live busy sessions — auto-refreshes from the SSE stream.',
     create: 'New session',

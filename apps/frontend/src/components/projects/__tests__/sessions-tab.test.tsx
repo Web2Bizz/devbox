@@ -24,12 +24,15 @@ mock.module('next/navigation', () => ({
 }));
 
 const iso = (ms: number) => new Date(ms).toISOString();
+// uuid projectId — the contract declares format: uuid and the boundary
+// schema is z.uuid(); fixtures must stay contract-valid.
+const PRJ = '123e4567-e89b-12d3-a456-426614174090';
 const sessionInfo = (id: string, title: string | null) => ({
   id,
   title,
   createdAt: iso(1700000000000),
-  directory: '/srv/projects/prj-web',
-  projectId: 'prj-web',
+  directory: `/srv/projects/${PRJ}`,
+  projectId: PRJ,
   model: null,
   status: { type: 'idle' as const },
 });
@@ -82,7 +85,7 @@ afterEach(() => {
 function renderTab() {
   return render(
     <I18nProvider>
-      <SessionsTab projectId="prj-web" />
+      <SessionsTab projectId="123e4567-e89b-12d3-a456-426614174090" />
     </I18nProvider>,
   );
 }
@@ -95,7 +98,7 @@ describe('SessionsTab navigation', () => {
     expect(openButtons.length).toBe(2);
     await user.click(openButtons[0]);
     expect(pushMock).toHaveBeenCalledTimes(1);
-    expect(pushMock).toHaveBeenCalledWith('/projects/prj-web/sessions/ses-1');
+    expect(pushMock).toHaveBeenCalledWith('/projects/123e4567-e89b-12d3-a456-426614174090/sessions/ses-1');
   });
 
   test('create() success routes to the new session chat', async () => {
@@ -106,7 +109,7 @@ describe('SessionsTab navigation', () => {
     // create() is async — wait a tick for the push.
     await screen.findByText('first');
     expect(createMock).toHaveBeenCalledTimes(1);
-    expect(pushMock).toHaveBeenCalledWith('/projects/prj-web/sessions/ses-new');
+    expect(pushMock).toHaveBeenCalledWith('/projects/123e4567-e89b-12d3-a456-426614174090/sessions/ses-new');
   });
 
   test('details row renders the real domain fields (Q6: directory from the server)', async () => {
@@ -118,11 +121,13 @@ describe('SessionsTab navigation', () => {
       await screen.findByText(
         (_content, node) =>
           node?.nodeName === 'CODE' &&
-          node.textContent === 'directory: /srv/projects/prj-web',
+          node.textContent === 'directory: /srv/projects/123e4567-e89b-12d3-a456-426614174090',
       ),
     ).toBeTruthy();
     const projectIdCodes = await screen.findAllByText(
-      (_content, node) => node?.nodeName === 'CODE' && node.textContent === 'projectId: prj-web',
+      (_content, node) =>
+        node?.nodeName === 'CODE' &&
+        node.textContent === 'projectId: 123e4567-e89b-12d3-a456-426614174090',
     );
     expect(projectIdCodes.length).toBeGreaterThan(0);
   });

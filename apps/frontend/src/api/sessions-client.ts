@@ -4,8 +4,10 @@ import { SessionExpiredError } from '../lib/session-expired';
 import type {
   CreateSessionRequest,
   SessionInfo,
+  SessionInterruptResult,
   SessionMessage,
   SessionRunStatusMap,
+  SessionRunnerProvider,
   SessionStreamFrame,
 } from '@rush-code/contracts';
 import { sessionStreamFrameSchema } from '@rush-code/contracts';
@@ -15,9 +17,9 @@ import { sessionStreamFrameSchema } from '@rush-code/contracts';
  *
  * The frontend knows NOTHING about the underlying session runner: every
  * call goes through the product contract (`@rush-code/contracts` types,
- * boundaries enforced in ./client via parseBoundary), never an sdk, never
- * the deprecated `/api/opencode/*` aliases — except the two documented
- * exceptions in ./client (interrupt + provider inventory, TODO(card 6)).
+ * boundaries enforced in ./client via parseBoundary). As of card 6 the
+ * two former mirror-alias exceptions (interrupt, provider inventory) are
+ * domain routes too — no deprecated transport remains anywhere.
  *
  * Auth (unchanged semantics from the pre-domain client):
  * - `withAuth` resolves the access token through `getValidAccessToken`
@@ -96,36 +98,31 @@ export function sendSessionMessage(
 }
 
 /**
- * Interrupt — TODO(card 6): no domain route yet, rides the deprecated
- * mirror alias (see api.abortSession). Best-effort at the callers (stop()
- * keeps the partial answer locally regardless of the outcome).
+ * Interrupt a running session (POST /api/sessions/{id}/interrupt).
+ * The domain answer {interrupted} is honest data: false means the session
+ * was idle (no-op), never an error. Best-effort at the callers — stop()
+ * keeps the partial answer locally regardless of the outcome.
  */
-export function abortSession(projectId: string, sessionId: string): Promise<void> {
-  return withAuth((token) => api.abortSession(token, sessionId, projectId));
+export function interruptSession(
+  projectId: string,
+  sessionId: string,
+): Promise<SessionInterruptResult> {
+  return withAuth((token) => api.interruptSession(token, sessionId, { projectId }));
 }
 
 /**
- * Provider inventory — TODO(card 6): no domain route yet, rides the
- * deprecated mirror alias (see api.providers). The answer is the runner's
- * provider-list envelope passed through as-is (unknown by contract, nothing
- * invented): `fetchRunnerProviders` only unwraps it to an array of records
- * when the wire really carries one.
+ * Provider inventory for the project (GET /api/sessions/providers) —
+ * domain rows are the REQUIRED subset of the artifact Provider.Info
+ * (id/name/activation/package), boundary-parsed in ./client. Credential-
+ * bearing upstream members (settings/headers/body) never reach the
+ * browser — the server projects them away, the client trusts nothing
+ * unvalidated.
  */
-export async function fetchRunnerProviders(query?: {
-  projectId?: string;
-  directory?: string;
-  signal?: AbortSignal;
-}): Promise<Record<string, unknown>[]> {
-  const res = await withAuth((token) => api.providers(token, query));
-  if (Array.isArray(res)) return res as Record<string, unknown>[];
-  const rows = (res as { data?: unknown } | null)?.data;
-  if (Array.isArray(rows)) return rows as Record<string, unknown>[];
-  throw new ApiClientError({
-    code: 'shape_mismatch',
-    message: 'contract mismatch on GET providers: no provider list in the answer',
-    status: 0,
-    correlationId: 'client',
-  });
+export function listSessionProviders(
+  projectId: string,
+  opts?: { signal?: AbortSignal },
+): Promise<SessionRunnerProvider[]> {
+  return withAuth((token) => api.listSessionProviders(token, projectId, opts));
 }
 
 /**

@@ -8,7 +8,7 @@ import {
 } from '@rush-code/contracts';
 import { ApiClientError } from '../api/client';
 import {
-  abortSession,
+  interruptSession,
   createSession,
   ensureSessionAuth,
   listSessionMessages,
@@ -161,9 +161,10 @@ function projectGateError(): ApiClientError {
  *   the growth of its absolute snapshot (part-keyed).
  * - Cancel: `stop()` commits the partial stream as the assistant answer so
  *   nothing is lost and fires a best-effort server interrupt
- *   (TODO(card 6): no domain interrupt route yet — abortSession rides the
- *   deprecated mirror alias). Unmount aborts the in-flight queue POST and
- *   closes the SSE stream via the AbortController signal.
+ *   (POST /api/sessions/{id}/interrupt — the domain route; an idle session
+ *   answers interrupted=false, never an error). Unmount aborts the
+ *   in-flight queue POST and closes the SSE stream via the AbortController
+ *   signal.
  */
 export function useChat(options?: UseChatOptions): UseChatResult {
   const { t } = useI18n();
@@ -370,8 +371,8 @@ export function useChat(options?: UseChatOptions): UseChatResult {
     promptCtrlRef.current = null;
     const sid = sessionIdRef.current;
     if (sid && projectId) {
-      // Best-effort server interrupt; TODO(card 6) alias (see above).
-      void abortSession(projectId, sid).catch(() => null);
+      // Best-effort server interrupt (idle answers interrupted=false).
+      void interruptSession(projectId, sid).catch(() => null);
     }
     // Keep the partial stream as the assistant answer so nothing is lost.
     const partial = streamingRef.current;

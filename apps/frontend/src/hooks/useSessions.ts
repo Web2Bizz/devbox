@@ -2,13 +2,13 @@
 
 import { useCallback, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { SessionInfo, SessionRunStatusMap } from '@rush-code/contracts';
+import type { SessionInfo, SessionInterruptResult, SessionRunStatusMap } from '@rush-code/contracts';
 import { ApiClientError } from '../api/client';
 import {
-  abortSession,
   createSession,
   ensureSessionAuth,
   getSessionStatuses,
+  interruptSession,
   listSessions,
   toErrorMessage,
 } from '../api/sessions-client';
@@ -32,12 +32,14 @@ export type UseSessionsResult = {
 };
 
 /**
- * No retry on terminal auth states (dead session / session 401 — a retry
- * would only hammer /api/sessions); one retry otherwise (shared-client
- * contract). shape_mismatch is a contract bug — a refetch cannot fix it,
- * no retry either.
+ * Domain session query retry policy — the single source for every
+ * /api/sessions* React Query hook (useSessions/useSessionMessages).
+ * No retry on terminal auth states (dead session / honest 401 — a retry
+ * would only hammer /api/sessions) and none on shape_mismatch (a contract
+ * bug — a refetch cannot fix it); one retry otherwise (shared-client
+ * contract).
  */
-function sessionsRetry(failureCount: number, error: unknown): boolean {
+export function sessionsRetry(failureCount: number, error: unknown): boolean {
   if (error instanceof ApiClientError && error.status === 401) return false;
   if (error instanceof SessionExpiredError) return false;
   if (error instanceof ApiClientError && error.code === 'shape_mismatch') return false;
@@ -159,10 +161,10 @@ export function useSessions(options?: UseSessionsOptions): UseSessionsResult {
     },
   });
 
-  // TODO(card 6): interrupt has no domain route yet — abort rides the
-  // deprecated mirror alias (api.abortSession), removed with the alias.
-  const abortMutation = useMutation<void, unknown, string>({
-    mutationFn: async (id: string): Promise<void> => {
+  // Interrupt rides the domain route (POST /api/sessions/{id}/interrupt);
+  // {interrupted:false} (idle no-op) is an honest success, not an error.
+  const abortMutation = useMutation<SessionInterruptResult, unknown, string>({
+    mutationFn: async (id: string): Promise<SessionInterruptResult> => {
       if (!projectId) {
         throw new ApiClientError({
           code: 'PROJECT_REQUIRED',
@@ -172,7 +174,7 @@ export function useSessions(options?: UseSessionsOptions): UseSessionsResult {
         });
       }
       await ensureSessionAuth();
-      return abortSession(projectId, id);
+      return interruptSession(projectId, id);
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey });

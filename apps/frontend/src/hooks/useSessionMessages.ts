@@ -9,6 +9,7 @@ import { formatApiError } from '../lib/format-error';
 import { SessionExpiredError } from '../lib/session-expired';
 import { useI18n } from '../i18n';
 import { sessionMessagesQueryKey } from './query-keys';
+import { sessionsRetry } from './useSessions';
 
 export type UseSessionMessagesResult = {
   messages: SessionMessage[];
@@ -77,7 +78,9 @@ export function useSessionMessages(
     enabled: Boolean(sessionId && projectId),
     staleTime: 30_000,
     placeholderData: (prev) => prev,
-    retry: 1,
+    // Same policy as useSessions: no retries on 401/SessionExpiredError/
+    // shape_mismatch, one retry otherwise.
+    retry: sessionsRetry,
   });
 
   const queryErrorText = useMemo(() => {

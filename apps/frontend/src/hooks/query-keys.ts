@@ -36,12 +36,13 @@ export const REGISTRIES_QUERY_KEY = ['registries'] as const;
 export const NPM_QUERY_KEY = ['npm', 'status'] as const;
 
 /**
- * GET /api/opencode/config/providers — per-directory provider list.
- * Nullish directory maps to the shared `'all'` scope so the
- * default view has one stable cache entry (`??`, empty string stays as-is).
+ * GET /api/sessions/providers — project-scoped provider inventory.
+ * `projectId` nullish maps to the shared `'none'` scope so hooks without
+ * a project share one stable cache entry (`??`, empty string stays as-is)
+ * — same convention as the other session keys.
  */
-export const aiProvidersQueryKey = (directory?: string) =>
-  ['ai-providers', directory ?? 'all'] as const;
+export const aiProvidersQueryKey = (projectId?: string) =>
+  ['ai-providers', projectId ?? 'none'] as const;
 
 /**
  * GET /api/sessions — project-scoped domain session list.

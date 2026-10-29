@@ -28,15 +28,20 @@ import type {
 import {
   sessionInfoListSchema,
   sessionInfoSchema,
+  sessionInterruptResultSchema,
   sessionMessageListSchema,
   sessionMessageSchema,
   sessionRunStatusMapSchema,
+  sessionRunnerProviderListSchema,
 } from '@rush-code/contracts';
 import type {
   CreateSessionRequest,
+  InterruptSessionRequest,
   SessionInfo,
+  SessionInterruptResult,
   SessionMessage,
   SessionRunStatusMap,
+  SessionRunnerProvider,
   SendMessageRequest,
 } from '@rush-code/contracts';
 
@@ -336,29 +341,40 @@ export const api = {
     }
     return res;
   },
-  // ── TODO(card 6): the two deliberate exceptions riding the deprecated
-  // /api/opencode/* mirror because the domain contract does not cover them
-  // yet: session interrupt (abort below) and provider inventory (providers
-  // below). Both mirror routes stay working aliases until card 6 — the ONLY
-  // place the frontend touches them; nothing here imports an sdk. ──
-  abortSession: async (accessToken: string, sessionId: string, projectId: string) => {
-    await request<unknown>(
-      `/api/opencode/session/${encodeURIComponent(sessionId)}/abort?projectId=${encodeURIComponent(projectId)}`,
-      { method: 'POST', headers: { authorization: `Bearer ${accessToken}` } },
-    );
-  },
-  providers: async (
+  // ── Domain interrupt + provider inventory (card 6) — the last two
+  // surfaces that used the deprecated mirror alias are now domain routes:
+  // POST /api/sessions/:id/interrupt and GET /api/sessions/providers.
+  // No mirror transport remains anywhere in the frontend. ──
+  interruptSession: async (
     accessToken: string,
-    opts?: { projectId?: string; directory?: string; signal?: AbortSignal },
-  ): Promise<unknown> => {
-    const q = new URLSearchParams();
-    if (opts?.projectId) q.set('projectId', opts.projectId);
-    if (opts?.directory) q.set('directory', opts.directory);
-    return request<unknown>(`/api/opencode/config/providers${q.toString() ? `?${q.toString()}` : ''}`, {
-      headers: { authorization: `Bearer ${accessToken}` },
-      ...(opts?.signal ? { signal: opts.signal } : {}),
-    });
-  },
+    sessionId: string,
+    body: InterruptSessionRequest,
+  ): Promise<SessionInterruptResult> =>
+    parseBoundary(
+      'POST /api/sessions/:id/interrupt',
+      sessionInterruptResultSchema,
+      await request<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/interrupt`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify(body),
+      }),
+    ),
+  listSessionProviders: async (
+    accessToken: string,
+    projectId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<SessionRunnerProvider[]> =>
+    parseBoundary(
+      'GET /api/sessions/providers',
+      sessionRunnerProviderListSchema,
+      await request<unknown>(
+        `/api/sessions/providers?projectId=${encodeURIComponent(projectId)}`,
+        {
+          headers: { authorization: `Bearer ${accessToken}` },
+          ...(opts?.signal ? { signal: opts.signal } : {}),
+        },
+      ),
+    ),
   getMessages: (sessionId: string, projectId?: string) =>
     requestV1<MessagesResponse>(
       `/messages?sessionId=${encodeURIComponent(sessionId)}${projectId ? `&projectId=${encodeURIComponent(projectId)}` : ''}`,

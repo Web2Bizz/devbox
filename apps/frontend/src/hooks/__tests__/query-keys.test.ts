@@ -2,7 +2,7 @@
  * query-keys — centralized React Query cache identity (P0 single source).
  *
  * Covers: frozen key shapes (profile/usage/registries/npm), aiProviders
- * scope (`?? 'all'`, empty string stays), re-export identity (same
+ * scope (`?? 'none'`, empty string stays), re-export identity (same
  * reference as the source hook module, no duplication drift), stability
  * (same input → deep-equal key).
  */
@@ -38,8 +38,8 @@ describe('query-keys', () => {
   });
 
   test('aiProviders scope: nullish → all, empty string stays', () => {
-    expect(aiProvidersQueryKey()).toEqual(['ai-providers', 'all']);
-    expect(aiProvidersQueryKey(undefined)).toEqual(['ai-providers', 'all']);
+    expect(aiProvidersQueryKey()).toEqual(['ai-providers', 'none']);
+    expect(aiProvidersQueryKey(undefined)).toEqual(['ai-providers', 'none']);
     expect(aiProvidersQueryKey('/proj/web')).toEqual(['ai-providers', '/proj/web']);
     // `??` (not `||`): empty string is a real scope, stays as-is.
     expect(aiProvidersQueryKey('')).toEqual(['ai-providers', '']);

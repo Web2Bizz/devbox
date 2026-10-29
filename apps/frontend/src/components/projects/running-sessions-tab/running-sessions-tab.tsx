@@ -29,8 +29,9 @@ function streamColor(status: string) {
  * useSessionEvents (domain SSE, backoff 1s→15s, project-scoped), which
  * triggers a list+status reload on `session.*` frames; between frames the
  * rows' own derived status overlays the (possibly stale) map.
- * Abort is best-effort via useSessions (TODO(card 6): interrupt domain
- * route). Navigation/props: `projectId` required — no `?directory=`.
+ * Abort is best-effort via useSessions → the domain interrupt route
+ * (POST /api/sessions/{id}/interrupt; idle answers interrupted=false).
+ * Navigation/props: `projectId` required — no `?directory=`.
  *
  * List: linear ul/li + Separator (DESIGN §6, no Card), scroll owned by
  * the list container (max-h dvh + overflow-y-auto, overscroll-contain),

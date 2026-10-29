@@ -1,17 +1,17 @@
 /**
- * useAiProviders — provider list via the domain client facade
- * (api/sessions-client fetchRunnerProviders; TODO(card 6): no domain
- * providers route yet — the facade rides the deprecated mirror alias, the
- * hook never knows). P2 migration contract preserved.
+ * useAiProviders — provider inventory via the DOMAIN route
+ * (api/sessions-client listSessionProviders → GET /api/sessions/providers;
+ * rows are the contract SessionRunnerProvider subset: id/name/activation/
+ * package — boundary-parsed in api/client).
  *
- * Covers: success (providers land, no skeleton flash), empty (isEmpty),
- * directory scope (queryKey per directory, `?? 'all'`), toggle
- * (setQueryData flip, no extra GET), configure (setQueryData + notice +
- * error dismiss, no extra GET), 503 (error surfaces, bounded retry),
- * 404/403 (bounded retry, loading false, error surfaces), envelope drift
- * (no provider list in the answer → error surfaces, never empty success),
- * reload (invalidate refetches, no skeleton flash), dismiss (clears error
- * + notice locally, no refetch).
+ * Covers: success (providers land with mapped fields from domain rows,
+ * activation:'disabled' → enabled:false), empty (isEmpty), project scope
+ * (queryKey per projectId, `?? 'none'`), no projectId → honest
+ * PROJECT_REQUIRED without network, toggle (setQueryData flip, no extra
+ * GET), configure (setQueryData + notice + error dismiss, no extra GET),
+ * 503 (error surfaces, bounded retry), 404/403 (bounded retry, loading
+ * false, error surfaces), reload (invalidate refetches, no skeleton
+ * flash), dismiss (clears error + notice locally, no refetch).
  */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { GlobalRegistrator } from '@happy-dom/global-registrator';
@@ -22,27 +22,18 @@ try {
   // bun runs test files in one process — second register() throws, ignore.
 }
 
+// Domain rows per @rush-code/contracts SessionRunnerProvider.
 const PROVIDERS = [
-  {
-    id: 'openai',
-    name: 'OpenAI',
-    source: 'api',
-    env: ['OPENAI_API_KEY'],
-    models: { 'gpt-4o': {}, 'gpt-4o-mini': {} },
-  },
-  {
-    id: 'anthropic',
-    name: '',
-    source: 'api',
-    env: [],
-    models: { 'claude-3': {} },
-  },
+  { id: 'prov-openai', name: 'OpenAI', activation: 'enabled', package: '@pproviders/openai' },
+  { id: 'prov-anthropic', name: '', activation: 'disabled', package: '' },
 ];
 
-let providersImpl: (query?: { projectId?: string; directory?: string }) => Promise<unknown> =
+const PROJECT = '123e4567-e89b-12d3-a456-426614174090';
+
+let providersImpl: (projectId: string, opts?: { signal?: AbortSignal }) => Promise<unknown> =
   async () => PROVIDERS;
-const providersMock = mock((query?: { projectId?: string; directory?: string }) =>
-  providersImpl(query),
+const providersMock = mock((projectId: string, opts?: { signal?: AbortSignal }) =>
+  providersImpl(projectId, opts),
 );
 
 function toErrorMessageLocal(error: unknown): string {
@@ -57,8 +48,8 @@ function toErrorMessageLocal(error: unknown): string {
 }
 
 mock.module('../../api/sessions-client', () => ({
-  fetchRunnerProviders: (query?: { projectId?: string; directory?: string; signal?: AbortSignal }) =>
-    providersMock(query),
+  listSessionProviders: (projectId: string, opts?: { signal?: AbortSignal }) =>
+    providersMock(projectId, opts),
   toErrorMessage: toErrorMessageLocal,
 }));
 
@@ -92,9 +83,8 @@ async function settle(rounds = 6) {
 // The query keeps `retry: 1` with the client's exponential retryDelay
 // (first retry at ~1000ms) — the ERROR state materializes only after the
 // retry budget is spent. Wait it out honestly (the previous version of
-// this file asserted error/loading inside the retry window and was red on
-// base — pre-existing, not weakened here: asserts got STRICTER: exact
-// attempt count, terminal error state).
+// this file asserted inside the retry window and was red on base — asserts
+// got STRICTER: exact attempt count, terminal error state).
 async function settleRetryBudget() {
   await act(async () => {
     await new Promise((r) => setTimeout(r, 1300));
@@ -103,29 +93,32 @@ async function settleRetryBudget() {
 }
 
 describe('useAiProviders', () => {
-  test('success: providers land with mapped fields, no error', async () => {
-    const { result } = renderHook(() => useAiProviders(), { wrapper });
+  test('success: domain rows land with mapped fields, no error', async () => {
+    const { result } = renderHook(() => useAiProviders(PROJECT), { wrapper });
     await settle();
 
     expect(providersMock).toHaveBeenCalledTimes(1);
+    expect(providersMock.mock.calls[0]?.[0]).toBe(PROJECT);
     expect(result.current.loading).toBe(false);
     expect(result.current.error).toBeNull();
     expect(result.current.providers.length).toBe(2);
     expect(result.current.providers[0]).toMatchObject({
-      id: 'openai',
+      id: 'prov-openai',
       name: 'OpenAI',
+      description: '@pproviders/openai',
       enabled: true,
       status: 'connected',
-      modelsCount: 2,
+      modelsCount: 0,
     });
-    // Empty name falls back to id.
-    expect(result.current.providers[1].name).toBe('anthropic');
+    // Empty name falls back to id; activation:'disabled' → enabled:false.
+    expect(result.current.providers[1].name).toBe('prov-anthropic');
+    expect(result.current.providers[1].enabled).toBe(false);
     expect(result.current.isEmpty).toBe(false);
   });
 
   test('empty: zero providers → isEmpty without error', async () => {
     providersImpl = async () => [];
-    const { result } = renderHook(() => useAiProviders(), { wrapper });
+    const { result } = renderHook(() => useAiProviders(PROJECT), { wrapper });
     await settle();
 
     expect(result.current.loading).toBe(false);
@@ -133,35 +126,34 @@ describe('useAiProviders', () => {
     expect(result.current.isEmpty).toBe(true);
   });
 
-  test('directory scope: query carries directory, key splits per scope', async () => {
-    const seen: Array<unknown> = [];
-    providersImpl = async (query) => {
-      seen.push(query?.directory);
-      return PROVIDERS;
-    };
-    const { result } = renderHook(() => useAiProviders('/proj/web'), { wrapper });
+  test('project scope: key splits per projectId, `?? none` for nullish', async () => {
+    const { result } = renderHook(() => useAiProviders(PROJECT), { wrapper });
     await settle();
-
-    expect(providersMock).toHaveBeenCalledTimes(1);
-    const call = providersMock.mock.calls[0]?.[0] as { directory?: string } | undefined;
-    expect(call?.directory).toBe('/proj/web');
     expect(result.current.providers.length).toBe(2);
-    // Key identity: nullish → 'all', empty string stays as-is.
-    expect(aiProvidersQueryKey()).toEqual(['ai-providers', 'all']);
-    expect(aiProvidersQueryKey(undefined)).toEqual(['ai-providers', 'all']);
+    // Key identity: nullish → 'none', empty string stays as-is.
+    expect(aiProvidersQueryKey()).toEqual(['ai-providers', 'none']);
+    expect(aiProvidersQueryKey(undefined)).toEqual(['ai-providers', 'none']);
     expect(aiProvidersQueryKey('')).toEqual(['ai-providers', '']);
-    expect(aiProvidersQueryKey('/proj/web')).toEqual(['ai-providers', '/proj/web']);
-    expect(seen).toEqual(['/proj/web']);
+    expect(aiProvidersQueryKey(PROJECT)).toEqual(['ai-providers', PROJECT]);
+  });
+
+  test('no projectId: honest PROJECT_REQUIRED before any network', async () => {
+    const { result } = renderHook(() => useAiProviders(), { wrapper });
+    await settleRetryBudget();
+
+    expect(providersMock).not.toHaveBeenCalled();
+    expect(result.current.loading).toBe(false);
+    expect(result.current.error).toContain('projectId is required');
   });
 
   test('toggle: setQueryData flips enabled, no extra GET', async () => {
-    const { result } = renderHook(() => useAiProviders(), { wrapper });
+    const { result } = renderHook(() => useAiProviders(PROJECT), { wrapper });
     await settle();
     expect(providersMock).toHaveBeenCalledTimes(1);
     expect(result.current.providers[0].enabled).toBe(true);
 
     act(() => {
-      result.current.toggle('openai');
+      result.current.toggle('prov-openai');
     });
 
     expect(result.current.providers[0].enabled).toBe(false);
@@ -169,7 +161,7 @@ describe('useAiProviders', () => {
     expect(providersMock).toHaveBeenCalledTimes(1);
 
     act(() => {
-      result.current.toggle('openai');
+      result.current.toggle('prov-openai');
     });
     expect(result.current.providers[0].enabled).toBe(true);
     expect(providersMock).toHaveBeenCalledTimes(1);
@@ -179,7 +171,7 @@ describe('useAiProviders', () => {
     providersImpl = async () => {
       throw new Error('boom');
     };
-    const { result } = renderHook(() => useAiProviders(), { wrapper });
+    const { result } = renderHook(() => useAiProviders(PROJECT), { wrapper });
     await settleRetryBudget();
     expect(result.current.error).not.toBeNull();
 
@@ -192,7 +184,7 @@ describe('useAiProviders', () => {
     expect(result.current.error).toBeNull();
 
     act(() => {
-      result.current.configure('openai');
+      result.current.configure('prov-openai');
     });
 
     expect(result.current.providers[0].enabled).toBe(true);
@@ -205,7 +197,7 @@ describe('useAiProviders', () => {
     providersImpl = async () => {
       throw new Error('upstream down');
     };
-    const { result } = renderHook(() => useAiProviders(), { wrapper });
+    const { result } = renderHook(() => useAiProviders(PROJECT), { wrapper });
     await settleRetryBudget();
 
     expect(result.current.loading).toBe(false);
@@ -223,7 +215,7 @@ describe('useAiProviders', () => {
         (err as unknown as Record<string, unknown>).status = status;
         throw err;
       };
-      const scoped = renderHook(() => useAiProviders(`scope-${status}`), { wrapper });
+      const scoped = renderHook(() => useAiProviders(`${PROJECT}-${status}`), { wrapper });
       await settleRetryBudget();
 
       expect(scoped.result.current.loading).toBe(false);
@@ -241,7 +233,7 @@ describe('useAiProviders', () => {
     providersImpl = async () => {
       throw new Error('upstream down');
     };
-    const { result } = renderHook(() => useAiProviders(), { wrapper });
+    const { result } = renderHook(() => useAiProviders(PROJECT), { wrapper });
     await settleRetryBudget();
     expect(result.current.error).not.toBeNull();
     const callsBefore = providersMock.mock.calls.length;
@@ -256,7 +248,4 @@ describe('useAiProviders', () => {
     await settle();
     expect(providersMock.mock.calls.length).toBe(callsBefore);
   });
-
-  // NOTE: envelope unwrap + shape_mismatch live in api/sessions-client
-  // (fetchRunnerProviders) — covered really in api/__tests__/sessions-client.test.ts.
 });

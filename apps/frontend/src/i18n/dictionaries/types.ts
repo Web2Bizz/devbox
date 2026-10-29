@@ -237,7 +237,7 @@ export type Dictionary = {
     npmTitle: string;
     npmDesc: string;
   };
-  opencode: {
+  sessions: {
     streamTitle: string;
     streamSubtitle: string;
     connecting: string;

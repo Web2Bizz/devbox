@@ -3,26 +3,26 @@
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import type { SessionInfo } from '@rush-code/contracts';
 import {
   Badge,
   Button,
   Separator,
 } from '@web2bizz/ui/components';
-import type { Session } from '@opencode-ai/sdk/v2/client';
 import { EmptyState, ErrorState, LoadingState } from '../../states';
-import { useOpencodeSessions } from '../../../hooks/useOpencodeSessions';
+import { useSessions } from '../../../hooks/useSessions';
 import { projectSessionPath } from '../../../lib/navigation';
 import { useI18n } from '../../../i18n';
 
 /**
  * Sessions tab for /projects/[id] — full session list scoped to a project.
  *
- * Data: useOpencodeSessions list/create/abort through the backend
- * reverse-proxy (`/api/opencode`, sdk 1.18.33). `projectId` (Rush Code
- * prj-*, required prop) travels as `?projectId=` on every call — the
- * backend gates it (C4, missing → 400) and maps it to the jailed content
- * dir server-side; `directory` still rides as `?directory=` but the
- * backend ignores it. Navigation stays project-scoped: Open (and
+ * Data: useSessions (domain /api/sessions* contract — rows are
+ * `SessionInfo`: real `directory` + `projectId` from the server, nullable
+ * `title`/`model`, ISO `createdAt`). `projectId` (required prop) travels
+ * on every call and the backend gates it (C4, missing → 400) — there is
+ * no `?directory=` anymore: the server jails every route to the project
+ * content dir itself. Navigation stays project-scoped: Open (and
  * post-create) routes to the session chat at
  * `/projects/[id]/sessions/[sessionId]` (session = chat).
  *
@@ -42,7 +42,7 @@ function SessionRow({
   onToggleDetails,
   onAbort,
 }: {
-  s: Session;
+  s: SessionInfo;
   opened: boolean;
   aborting: boolean;
   showSeparator: boolean;
@@ -52,31 +52,29 @@ function SessionRow({
   onAbort: () => void;
 }) {
   const { t } = useI18n();
-  const noId = !s.id;
-  const updatedAt = s.time?.updated;
-  const updatedDate = updatedAt ? new Date(updatedAt) : null;
-  const hasValidDate = updatedDate !== null && !Number.isNaN(updatedDate.getTime());
+  const createdAt = new Date(s.createdAt);
+  const hasValidDate = !Number.isNaN(createdAt.getTime());
   return (
     <div className="flex flex-col gap-2 py-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <p className="truncate text-sm font-medium">
-            {s.title || (s.id ? s.id.slice(0, 8) : t.opencode.untitled)}
+            {s.title || (s.id ? s.id.slice(0, 8) : t.sessions.untitled)}
           </p>
           {s.id ? (
             <code className="font-mono text-[0.85em] break-all text-muted-foreground text-xs">{s.id}</code>
           ) : null}
         </div>
-        {hasValidDate && updatedDate ? (
+        {hasValidDate ? (
           <Badge color="info" variant="soft">
-            {updatedDate.toLocaleString()}
+            {createdAt.toLocaleString()}
           </Badge>
         ) : null}
       </div>
       {opened && (
         <div className="grid gap-1">
           <code className="font-mono text-[0.85em] break-all text-muted-foreground text-xs">
-            projectID: {s.projectID}
+            projectId: {s.projectId}
           </code>
           <code className="font-mono text-[0.85em] break-all text-muted-foreground text-xs">
             directory: {s.directory}
@@ -88,9 +86,9 @@ function SessionRow({
           variant="outline"
           size="sm"
           onClick={onOpen}
-          disabled={rowDisabled || noId}
+          disabled={rowDisabled}
         >
-          {t.opencode.open}
+          {t.sessions.open}
         </Button>
         <Button
           variant="outline"
@@ -104,9 +102,9 @@ function SessionRow({
           variant="outline"
           size="sm"
           onClick={onAbort}
-          disabled={aborting || rowDisabled || noId}
+          disabled={aborting || rowDisabled}
         >
-          {aborting ? t.common.loading : t.opencode.abort}
+          {aborting ? t.common.loading : t.sessions.abort}
         </Button>
       </div>
       {showSeparator && <Separator className="mt-3" />}
@@ -117,12 +115,10 @@ function SessionRow({
 export function SessionsTab({
   projectId,
   orgId,
-  directory,
   disabled = false,
 }: {
   projectId: string;
   orgId?: string;
-  directory?: string;
   disabled?: boolean;
 }) {
   const { t } = useI18n();
@@ -136,12 +132,11 @@ export function SessionsTab({
     creating,
     abort,
     abortingId,
-  } = useOpencodeSessions({ directory, projectId });
+  } = useSessions({ projectId });
   const [openedId, setOpenedId] = useState<string | null>(null);
   const parentRef = useRef<HTMLDivElement>(null);
 
-  // Server-side scoping via `?projectId=` (see useOpencodeSessions);
-  // `?directory=` still rides along but the backend ignores it.
+  // Server-side scoping via projectId (C4 gate — see useSessions).
   const visible = sessions;
 
   const openSessionChat = (sessionId: string) => {
@@ -175,7 +170,7 @@ export function SessionsTab({
             onClick={() => void handleCreateAndOpen()}
             disabled={creating || disabled}
           >
-            {creating ? t.common.loading : t.opencode.create}
+            {creating ? t.common.loading : t.sessions.create}
           </Button>
           <Button variant="outline" size="sm" onClick={reload} disabled={disabled}>
             {t.common.refresh}
@@ -188,12 +183,12 @@ export function SessionsTab({
 
         {!loading && !error && visible.length === 0 && (
           <EmptyState
-            title={t.opencode.sessionsTitle}
-            description={t.opencode.emptyAll}
+            title={t.sessions.sessionsTitle}
+            description={t.sessions.emptyAll}
             {...(disabled
               ? {}
               : {
-                  actionLabel: t.opencode.create,
+                  actionLabel: t.sessions.create,
                   onAction: () => void handleCreateAndOpen(),
                 })}
           />

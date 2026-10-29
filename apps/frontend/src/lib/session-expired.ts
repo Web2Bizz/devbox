@@ -9,7 +9,7 @@
  * endpoint checks `error instanceof SessionExpiredError` to stop the
  * React Query retry loop and to pick the translated message. A per-hook
  * copy would silently break those `instanceof` checks across modules
- * (`useProfile`, `useUsage`/features-usage, `useOpencodeSessions`).
+ * (`useProfile`, `useUsage`/features-usage, `useSessions`).
  *
  * Stays a plain `Error` with `name === 'SessionExpiredError'` and
  * `message === 'session-expired'` — the shape the existing tests and

@@ -1,8 +1,21 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { opencode, ensureOpencodeAuth, projectScope, toErrorMessage } from '../api/opencode-client';
-import type { OpencodeEvent } from '../api/opencode-client';
+import type { SessionMessage, SessionStreamFrame } from '@rush-code/contracts';
+import {
+  sessionMessagePartDeltaFrameSchema,
+  sessionMessagePartUpdatedFrameSchema,
+} from '@rush-code/contracts';
+import { ApiClientError } from '../api/client';
+import {
+  abortSession,
+  createSession,
+  ensureSessionAuth,
+  listSessionMessages,
+  sendSessionMessage,
+  sessionEventStream,
+  toErrorMessage,
+} from '../api/sessions-client';
 import { useI18n } from '../i18n';
 
 export type ChatMessage = {
@@ -12,11 +25,9 @@ export type ChatMessage = {
 };
 
 export type UseChatOptions = {
-  /** Existing opencode session to scope the chat to (session = chat). */
+  /** Existing session to scope the chat to (session = chat). */
   sessionId?: string;
-  /** Opencode working directory, forwarded as `?directory=` (backend-ignored). */
-  directory?: string;
-  /** Rush Code project id (prj-*) — forwarded as `?projectId=` (backend-gated, C4). */
+  /** Rush Code project uuid — the C4 gate on every domain call. */
   projectId?: string;
 };
 
@@ -46,117 +57,63 @@ function newId(): string {
 }
 
 /**
- * Map a `session.messages` payload to chat rows.
- *
- * Primary shape is the flat v2 `SessionMessage`
- * (`{ id, type: 'user' | 'assistant' | …, text?/content? }` — user/system/
- * synthetic carry `text`, assistant carries `content: [{ type: 'text',
- * text }]`); the legacy `{ info: Message, parts: Part[] }` envelope is
- * kept as a fallback because the backend mirror still serves the legacy
- * `/session/*` namespace (see opencode.controller.ts listMessages).
- * Non-assistant roles render as user rows (same as before); entries
- * without displayable text (shell/compaction/…) are skipped.
+ * Domain thread rows → chat rows. `SessionMessage` is the normalized
+ * server projection (boundary-parsed in api/client): rows whose variant
+ * carries no chat text (shell/compaction/…) come as `text: null` and are
+ * skipped — nothing is invented client-side.
  */
-function toChatMessages(data: unknown): ChatMessage[] {
-  if (!Array.isArray(data)) return [];
+function toChatMessages(rows: SessionMessage[]): ChatMessage[] {
   const next: ChatMessage[] = [];
-  for (const entry of data) {
-    if (!entry || typeof entry !== 'object') continue;
-    const e = entry as {
-      id?: unknown;
-      type?: unknown;
-      text?: unknown;
-      content?: unknown;
-      info?: { id?: unknown; role?: unknown };
-      parts?: unknown;
-    };
-    // Flat v2 SessionMessage (has a top-level `type`, no `info`).
-    if (typeof e.type === 'string' && e.info === undefined) {
-      const id = typeof e.id === 'string' ? e.id : newId();
-      const role = e.type === 'assistant' ? 'assistant' : 'user';
-      let text = '';
-      if (typeof e.text === 'string') {
-        text = e.text;
-      } else if (Array.isArray(e.content)) {
-        text = (e.content as Array<{ type?: unknown; text?: unknown }>)
-          .filter((p) => p.type === 'text' && typeof p.text === 'string')
-          .map((p) => p.text as string)
-          .join('\n\n');
-      }
-      if (!text) continue;
-      next.push({ id, role, text });
-      continue;
-    }
-    // Legacy `{ info, parts }` envelope (backend mirror passthrough).
-    const role = e.info?.role === 'assistant' ? 'assistant' : 'user';
-    const text = Array.isArray(e.parts)
-      ? (e.parts as Array<{ type?: unknown; text?: unknown }>)
-        .filter((p) => p?.type === 'text')
-        .map((p) => (typeof p.text === 'string' ? p.text : ''))
-        .join('\n\n')
-      : '';
-    if (!text) continue;
-    next.push({ id: typeof e.info?.id === 'string' ? e.info.id : newId(), role, text });
+  for (const row of rows) {
+    if (row.text === null) continue;
+    next.push({
+      id: row.id,
+      role: row.type === 'assistant' ? 'assistant' : 'user',
+      text: row.text,
+    });
   }
   return next;
 }
 
-/** Session id carried by an SSE payload, when the event is session-scoped.
- * v1 frames nest under `payload.properties`; native v2 `Event` frames are
- * flat (`{ type, properties: { sessionID, … } }`) — both shapes are read,
- * v2 first (see dist/v2/gen/types.gen.d.ts `Event*` types). */
-function eventSessionId(ev: OpencodeEvent): string | null {
-  const flat = (ev as { properties?: unknown }).properties as
-    | { sessionID?: unknown; part?: { sessionID?: unknown }; info?: { sessionID?: unknown } }
-    | undefined;
-  if (flat && typeof flat === 'object') {
-    if (typeof flat.sessionID === 'string') return flat.sessionID;
-    if (flat.part && typeof flat.part.sessionID === 'string') return flat.part.sessionID;
-    if (flat.info && typeof flat.info.sessionID === 'string') return flat.info.sessionID;
-  }
-  const payload = (ev as { payload?: unknown }).payload as
-    | { type?: string; properties?: Record<string, unknown> }
-    | undefined;
-  if (!payload || typeof payload !== 'object') return null;
-  const props = payload.properties;
-  if (!props || typeof props !== 'object') return null;
-  if (typeof props.sessionID === 'string') return props.sessionID;
-  const part = props.part as { sessionID?: unknown } | undefined;
-  if (part && typeof part.sessionID === 'string') return part.sessionID;
-  const info = props.info as { sessionID?: unknown } | undefined;
-  if (info && typeof info.sessionID === 'string') return info.sessionID;
-  return null;
-}
+/**
+ * Chat text carried by one stream frame, when the variant is a text
+ * mutation: `message.part.delta` (append `data.delta`) or
+ * `message.part.updated` (absolute snapshot `data.part.text`). Both are
+ * parsed with the narrow contract schemas — a frame that does not match
+ * its variant schema is NOT this signal and is skipped (safeParse, never
+ * a cast). `session.idle` (scope: top-level `session`) tells the caller
+ * the answer finished.
+ */
+type FrameText =
+  | { kind: 'delta'; text: string; partId: string }
+  | { kind: 'snapshot'; text: string; partId: string }
+  | { kind: 'idle' }
+  | null;
 
-/** Text delta carried by `message.part.updated` (absolute text fallback).
- * v2 servers send `message.part.delta` (`properties.delta`) or full-part
- * `message.part.updated` (`properties.part`) — both flat, no `payload`. */
-function eventDelta(ev: OpencodeEvent): string | null {
-  const flat = ev as {
-    type?: string;
-    properties?: { delta?: unknown; part?: { type?: unknown; text?: unknown; id?: unknown } };
-  };
-  if (flat.type === 'message.part.delta' && typeof flat.properties?.delta === 'string' && flat.properties.delta) {
-    return flat.properties.delta;
+function frameText(frame: SessionStreamFrame): FrameText {
+  if (frame.type === 'message.part.delta') {
+    const parsed = sessionMessagePartDeltaFrameSchema.safeParse(frame);
+    if (!parsed.success) return null;
+    return { kind: 'delta', text: parsed.data.data.delta, partId: parsed.data.data.partID };
   }
-  if (flat.type === 'message.part.updated') {
-    const part = flat.properties?.part;
-    if (part?.type === 'text' && typeof part.text === 'string' && part.text) return part.text;
+  if (frame.type === 'message.part.updated') {
+    const parsed = sessionMessagePartUpdatedFrameSchema.safeParse(frame);
+    if (!parsed.success) return null;
+    // part internals (type/text/id) are variant-owned passthrough — the
+    // envelope proves `part` is an object, the text fields stay guarded.
+    const part = parsed.data.data.part as {
+      type?: unknown;
+      text?: unknown;
+      id?: unknown;
+    };
+    if (part.type !== 'text' || typeof part.text !== 'string' || !part.text) return null;
+    return {
+      kind: 'snapshot',
+      text: part.text,
+      partId: typeof part.id === 'string' ? part.id : 'default',
+    };
   }
-  const payload = (ev as { payload?: unknown }).payload as
-    | { type?: string; properties?: Record<string, unknown> }
-    | undefined;
-  if (payload?.type !== 'message.part.updated') return null;
-  const props = payload.properties as
-    | { delta?: unknown; part?: { type?: unknown; text?: unknown } }
-    | undefined;
-  if (!props) return null;
-  if (typeof props.delta === 'string' && props.delta) return props.delta;
-  // Some servers send the full part text without a delta — the caller
-  // appends only when it grows (handled by length check in the subscriber).
-  if (props.part?.type === 'text' && typeof props.part.text === 'string') {
-    return props.part.text;
-  }
+  if (frame.type === 'session.idle') return { kind: 'idle' };
   return null;
 }
 
@@ -165,55 +122,53 @@ function formatError(e: unknown, fallback: string): string {
   return formatted === 'Unexpected error' ? fallback : formatted;
 }
 
+function projectGateError(): ApiClientError {
+  // Honest client-side gate — the domain route answers the same fixed
+  // PROJECT_REQUIRED 400. Never a default project, never an anonymous
+  // global call. Surfaced as a value (never thrown from effect bodies).
+  return new ApiClientError({
+    code: 'PROJECT_REQUIRED',
+    message: 'projectId is required — session routes are project-scoped',
+    status: 400,
+    correlationId: 'client',
+  });
+}
+
 /**
- * Chat over the backend reverse-proxy (`<NEXT_PUBLIC_API_URL>/api/opencode`,
- * same @opencode-ai/sdk 1.18.33 as the backend).
+ * Chat over the domain contract (`/api/sessions*`, api/sessions-client) —
+ * the frontend knows nothing about the underlying runner.
+ *
+ * Deliberately stays on `useEffect`, NOT React Query: streaming/SSE live
+ * deltas do not fit the query cache (AGENTS.md streaming exception — the
+ * justification comment lives here by contract).
  *
  * Two modes (session = chat):
- * - Unscoped (legacy): `useChat()` or `useChat(directory)` — session is
- *   created lazily on the first `send()` via `session.create()` (one chat =
- *   one session).
- * - Scoped: `useChat({ sessionId, directory, projectId })` — the chat is
- *   bound to an existing session from the start: history loads via
- *   `session.messages({ sessionID })` (same mapping as
- *   `reload()`), `send()` prompts that session directly (no `create()`),
- *   `stop()`/`reload()` target it. `directory` (positional or option) is
- *   still forwarded as `?directory=` (backend-ignored); `projectId` travels
- *   as `?projectId=` via the shared `projectScope()` helper on every
- *   session call (missing → honest 400 PROJECT_REQUIRED as error state).
+ * - Lazy: `useChat({ projectId })` — the session is created on the first
+ *   `send()` via `POST /api/sessions` (one chat = one session).
+ * - Scoped: `useChat({ sessionId, projectId })` — bound to an existing
+ *   session: history loads via `GET /api/sessions/{id}/messages`,
+ *   `send()` queues that session directly (no create).
  *
- * - `send(text)` appends the user row immediately, then
- *   `session.prompt({ parts: [{ type: 'text', text }] })`; the assistant row
- *   is appended from the prompt response parts (`type === 'text'`).
- * - Live deltas: an `event.subscribe()` SSE subscription (self-healing backoff
- *   1s → 15s, same as useOpencodeEvents) filters `message.part.updated` by
- *   the current session id and accumulates `streamingText` until the prompt
- *   resolves.
- * - Cancel: `stop()` aborts the in-flight prompt (`AbortController` +
- *   `session.abort()` server-side); unmount aborts the prompt AND closes
- *   the SSE stream via BOTH `AbortController.signal` and `stream.return()`.
+ * - `send(text)` appends the user row, queues the prompt via
+ *   `POST /api/sessions/{id}/messages` (the answer does NOT come from this
+ *   response — it streams over events), and stays `sending` until the
+ *   session's `session.idle` frame commits the streamed text as the
+ *   assistant row.
+ * - Live deltas: `GET /api/sessions/events` SSE subscription (self-healing
+ *   backoff 1s → 15s, same as useSessionEvents), scoped by the frame's
+ *   top-level `session` field (never an upstream id name at the domain
+ *   layer); `message.part.delta` appends, `message.part.updated` appends
+ *   the growth of its absolute snapshot (part-keyed).
+ * - Cancel: `stop()` commits the partial stream as the assistant answer so
+ *   nothing is lost and fires a best-effort server interrupt
+ *   (TODO(card 6): no domain interrupt route yet — abortSession rides the
+ *   deprecated mirror alias). Unmount aborts the in-flight queue POST and
+ *   closes the SSE stream via the AbortController signal.
  */
-export function useChat(
-  directoryOrOptions?: string | UseChatOptions,
-  optionsArg?: UseChatOptions,
-): UseChatResult {
+export function useChat(options?: UseChatOptions): UseChatResult {
   const { t } = useI18n();
-  // Backward-compat: positional `directory` string still works;
-  // object form adds scoped `{ sessionId, directory, projectId }`.
-  const directory =
-    typeof directoryOrOptions === 'string'
-      ? (optionsArg?.directory ?? directoryOrOptions)
-      : (directoryOrOptions?.directory ?? optionsArg?.directory);
-  const initialSessionId =
-    typeof directoryOrOptions === 'string'
-      ? optionsArg?.sessionId
-      : (directoryOrOptions?.sessionId ?? optionsArg?.sessionId);
-  // C4: projectId rides every session call as `?projectId=` (projectScope);
-  // event.subscribe stays global (no project key — see SSE effect below).
-  const projectId =
-    typeof directoryOrOptions === 'string'
-      ? optionsArg?.projectId
-      : (directoryOrOptions?.projectId ?? optionsArg?.projectId);
+  const initialSessionId = options?.sessionId;
+  const projectId = options?.projectId;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streamingText, setStreamingText] = useState('');
   const [loading, setLoading] = useState(() => Boolean(initialSessionId));
@@ -225,22 +180,44 @@ export function useChat(
   const sessionIdRef = useRef<string | null>(initialSessionId ?? null);
   const promptCtrlRef = useRef<AbortController | null>(null);
   const sendingRef = useRef(false);
+  // streamingRef is the accumulator of truth (the SSE loop appends to it
+  // synchronously); `streamingText` state mirrors it for rendering.
   const streamingRef = useRef('');
   const attemptRef = useRef(0);
 
-  useEffect(() => {
-    streamingRef.current = streamingText;
-  }, [streamingText]);
+  const resetStream = useCallback(() => {
+    streamingRef.current = '';
+    setStreamingText('');
+  }, []);
 
-  // Live SSE deltas for the active session (self-healing backoff).
+  // Live SSE deltas + idle finalization for the active session
+  // (self-healing backoff).
   useEffect(() => {
+    if (!projectId) return;
     let disposed = false;
     let ctrl: AbortController | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
-    let sub: Awaited<ReturnType<typeof opencode.event.subscribe>> | null = null;
-    // Absolute-text fallback: track the last emitted length per part so a
-    // full-text (no-delta) frame only appends its growth.
+    // Absolute-snapshot fallback: track the last emitted length per part so
+    // a full-text (no-delta) frame only appends its growth.
     const partLens = new Map<string, number>();
+
+    const append = (text: string): void => {
+      streamingRef.current += text;
+      setStreamingText(streamingRef.current);
+    };
+
+    // session.idle for the bound session — the queued answer is done:
+    // commit whatever streamed and clear `sending`.
+    const finalize = (): void => {
+      if (!sendingRef.current) return;
+      const partial = streamingRef.current;
+      if (partial) {
+        setMessages((prev) => [...prev, { id: newId(), role: 'assistant', text: partial }]);
+      }
+      resetStream();
+      sendingRef.current = false;
+      setSending(false);
+    };
 
     const scheduleReconnect = () => {
       if (disposed) return;
@@ -254,61 +231,35 @@ export function useChat(
     const connect = async () => {
       if (disposed) return;
       ctrl?.abort();
-      await sub?.stream.return(undefined).catch(() => null);
-      sub = null;
       ctrl = new AbortController();
+      const active = ctrl;
       try {
-        const next = await opencode.event.subscribe(undefined, { signal: ctrl.signal });
-        if (disposed || ctrl.signal.aborted) {
-          await next.stream.return(undefined).catch(() => null);
-          return;
-        }
-        const active = next;
-        sub = active;
-        attemptRef.current = 0;
-        try {
-          for await (const raw of active.stream) {
-            if (disposed || ctrl.signal.aborted) break;
-            const ev = raw as OpencodeEvent;
-            const sid = eventSessionId(ev);
-            if (!sid || sid !== sessionIdRef.current) continue;
-            // v1 nests under `payload`, v2 is flat (`type`/`properties`).
-            const flat = ev as {
-              type?: string;
-              properties?: { part?: { id?: string }; delta?: unknown };
-            };
-            const payload = (ev as { payload?: { type?: string } }).payload;
-            const frameType = flat.type ?? payload?.type;
-            if (frameType !== 'message.part.updated' && frameType !== 'message.part.delta') {
-              continue;
-            }
-            const props = (flat.properties ?? payload) as unknown as {
-              part?: { id?: string };
-              delta?: unknown;
-            } | undefined;
-            const delta = eventDelta(ev);
-            if (!delta || !props) continue;
-            if (typeof props.delta === 'string' && props.delta) {
-              setStreamingText((prev) => prev + (props.delta as string));
-            } else {
-              // Absolute text without delta — append growth only.
-              const partId =
-                typeof props.part?.id === 'string' ? props.part.id : 'default';
-              const seen = partLens.get(partId) ?? 0;
-              if (delta.length > seen) {
-                partLens.set(partId, delta.length);
-                const growth = delta.slice(seen);
-                setStreamingText((prev) => prev + growth);
-              }
-            }
+        for await (const frame of sessionEventStream(projectId, active.signal)) {
+          if (disposed || active.signal.aborted) break;
+          const sid = sessionIdRef.current;
+          if (!sid || frame.session !== sid) continue;
+          const ft = frameText(frame);
+          if (!ft) continue;
+          if (ft.kind === 'idle') {
+            finalize();
+            continue;
           }
-        } finally {
-          await active.stream.return(undefined).catch(() => null);
-          if (sub === active) sub = null;
+          if (ft.kind === 'delta') {
+            partLens.set(ft.partId, (partLens.get(ft.partId) ?? 0) + ft.text.length);
+            append(ft.text);
+            continue;
+          }
+          // Snapshot: append only the growth beyond what was emitted.
+          const seen = partLens.get(ft.partId) ?? 0;
+          if (ft.text.length > seen) {
+            partLens.set(ft.partId, ft.text.length);
+            append(ft.text.slice(seen));
+          }
         }
+        if (disposed || active.signal.aborted) return;
         scheduleReconnect();
       } catch (e: unknown) {
-        if (disposed || (e as Error)?.name === 'AbortError' || ctrl?.signal.aborted) return;
+        if (disposed || (e as Error)?.name === 'AbortError' || active.signal.aborted) return;
         setError(formatError(e, t.errors.unexpected));
         scheduleReconnect();
       }
@@ -321,37 +272,31 @@ export function useChat(
       disposed = true;
       ctrl?.abort();
       if (timer) clearTimeout(timer);
-      const pending = sub;
-      sub = null;
-      void pending?.stream.return(undefined).catch(() => null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nonce, t]);
+  }, [nonce, projectId, t]);
 
   // Scoped mode: bind to the given sessionId + load its history
-  // (same entry → ChatMessage mapping as reload()).
+  // (same rows → ChatMessage mapping as reload()).
   useEffect(() => {
     if (!initialSessionId) return;
     let cancelled = false;
     sessionIdRef.current = initialSessionId;
     setSessionId(initialSessionId);
-    setStreamingText('');
+    resetStream();
     setMessages([]);
     setError(null);
+    if (!projectId) {
+      // Honest gate, no request fired (same contract as the backend 400).
+      setLoading(false);
+      setError(formatError(projectGateError(), t.errors.unexpected));
+      return;
+    }
     setLoading(true);
-    opencode.session
-      .messages({
-        sessionID: initialSessionId,
-        ...(directory ? { directory } : {}),
-        ...projectScope(projectId),
-      })
-      .then((res) => {
+    listSessionMessages(projectId, initialSessionId)
+      .then((rows) => {
         if (cancelled) return;
-        if (res.error !== undefined || res.data === undefined) {
-          setError(formatError(res.error, t.errors.unexpected));
-          return;
-        }
-        setMessages(toChatMessages(res.data));
+        setMessages(toChatMessages(rows));
       })
       .catch((e: unknown) => {
         if (cancelled || (e as Error)?.name === 'AbortError') return;
@@ -364,9 +309,9 @@ export function useChat(
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialSessionId, directory, projectId]);
+  }, [initialSessionId, projectId]);
 
-  // Abort any in-flight prompt on unmount (SSE cleanup lives above).
+  // Abort any in-flight queue POST on unmount (SSE cleanup lives above).
   useEffect(
     () => () => {
       promptCtrlRef.current?.abort();
@@ -377,126 +322,84 @@ export function useChat(
 
   const ensureSession = useCallback(async (): Promise<string> => {
     if (sessionIdRef.current) return sessionIdRef.current;
-    const res = await opencode.session.create({
-      ...(directory ? { directory } : {}),
-      ...projectScope(projectId),
-    });
-    if (res.error !== undefined || res.data === undefined) {
-      throw res.error ?? new Error('Unexpected error');
-    }
-    sessionIdRef.current = res.data.id;
-    setSessionId(res.data.id);
-    partReset();
-    return res.data.id;
-    function partReset() {
-      // Fresh session — deltas accumulate from zero.
-      setStreamingText('');
-    }
-  }, [directory, projectId]);
+    if (!projectId) throw projectGateError();
+    const created = await createSession({ projectId });
+    sessionIdRef.current = created.id;
+    setSessionId(created.id);
+    // Fresh session — deltas accumulate from zero.
+    resetStream();
+    return created.id;
+  }, [projectId, resetStream]);
 
   const send = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
       if (!trimmed || sendingRef.current) return;
+      if (!projectId) {
+        setError(formatError(projectGateError(), t.errors.unexpected));
+        return;
+      }
       sendingRef.current = true;
       setSending(true);
       setError(null);
-      setStreamingText('');
+      resetStream();
       const userMsg: ChatMessage = { id: newId(), role: 'user', text: trimmed };
       setMessages((prev) => [...prev, userMsg]);
       try {
-        await ensureOpencodeAuth();
-        const sessionId = await ensureSession();
+        await ensureSessionAuth();
+        const sid = await ensureSession();
         const ctrl = new AbortController();
         promptCtrlRef.current = ctrl;
-        const res = await opencode.session.prompt(
-          {
-            sessionID: sessionId,
-            parts: [{ type: 'text', text: trimmed }],
-            ...(directory ? { directory } : {}),
-            ...projectScope(projectId),
-          },
-          { signal: ctrl.signal },
-        );
-        if (ctrl.signal.aborted) return;
-        if (res.error !== undefined || res.data === undefined) {
-          setError(formatError(res.error, t.errors.unexpected));
-          return;
-        }
-        const parts = (res.data.parts ?? []) as Array<{
-          type?: string;
-          text?: unknown;
-        }>;
-        const answer = parts
-          .filter((p) => p.type === 'text' && typeof p.text === 'string')
-          .map((p) => p.text as string)
-          .join('\n\n');
-        const fallbackStream = streamingRef.current;
-        const finalText = answer || fallbackStream;
-        if (finalText) {
-          setMessages((prev) => [
-            ...prev,
-            { id: res.data.info?.id ?? newId(), role: 'assistant', text: finalText },
-          ]);
-        }
-        setStreamingText('');
+        // The POST only queues the prompt; the answer streams over events
+        // and `sending` clears on the session.idle frame (or stop()).
+        await sendSessionMessage(projectId, sid, trimmed, { signal: ctrl.signal });
       } catch (e: unknown) {
         if ((e as Error)?.name === 'AbortError') return;
         setError(formatError(e, t.errors.unexpected));
-      } finally {
-        promptCtrlRef.current = null;
         sendingRef.current = false;
         setSending(false);
+      } finally {
+        promptCtrlRef.current = null;
       }
     },
-    [directory, projectId, ensureSession, t],
+    [projectId, ensureSession, resetStream, t],
   );
 
   const stop = useCallback(() => {
     promptCtrlRef.current?.abort();
     promptCtrlRef.current = null;
-    const sessionId = sessionIdRef.current;
-    if (sessionId) {
-      void opencode.session
-        .abort({
-          sessionID: sessionId,
-          ...(directory ? { directory } : {}),
-          ...projectScope(projectId),
-        })
-        .catch(() => null);
+    const sid = sessionIdRef.current;
+    if (sid && projectId) {
+      // Best-effort server interrupt; TODO(card 6) alias (see above).
+      void abortSession(projectId, sid).catch(() => null);
     }
     // Keep the partial stream as the assistant answer so nothing is lost.
     const partial = streamingRef.current;
     if (partial) {
       setMessages((prev) => [...prev, { id: newId(), role: 'assistant', text: partial }]);
-      setStreamingText('');
     }
+    resetStream();
     sendingRef.current = false;
     setSending(false);
-  }, [directory, projectId]);
+  }, [projectId, resetStream]);
 
   const reload = useCallback(() => {
     setError(null);
-    const sessionId = sessionIdRef.current;
-    if (!sessionId) {
+    const sid = sessionIdRef.current;
+    if (!sid) {
       // No session yet — just redial the SSE stream.
       attemptRef.current = 0;
       setNonce((n) => n + 1);
       return;
     }
+    if (!projectId) {
+      setError(formatError(projectGateError(), t.errors.unexpected));
+      return;
+    }
     setLoading(true);
-    opencode.session
-      .messages({
-        sessionID: sessionId,
-        ...(directory ? { directory } : {}),
-        ...projectScope(projectId),
-      })
-      .then((res) => {
-        if (res.error !== undefined || res.data === undefined) {
-          setError(formatError(res.error, t.errors.unexpected));
-          return;
-        }
-        setMessages(toChatMessages(res.data));
+    listSessionMessages(projectId, sid)
+      .then((rows) => {
+        setMessages(toChatMessages(rows));
       })
       .catch((e: unknown) => {
         setError(formatError(e, t.errors.unexpected));
@@ -506,7 +409,8 @@ export function useChat(
         attemptRef.current = 0;
         setNonce((n) => n + 1);
       });
-  }, [directory, projectId, t]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, t]);
 
   return {
     messages,

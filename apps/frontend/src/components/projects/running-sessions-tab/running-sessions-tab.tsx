@@ -1,17 +1,16 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import type { SessionInfo } from '@rush-code/contracts';
 import {
   Badge,
   Button,
   Separator,
 } from '@web2bizz/ui/components';
-import type { Session, SessionStatus } from '@opencode-ai/sdk/v2/client';
-import { opencode, projectScope, toErrorMessage } from '../../../api/opencode-client';
 import { EmptyState, ErrorState, LoadingState } from '../../states';
-import { useOpencodeEvents } from '../../../hooks/useOpencodeEvents';
-import { useOpencodeSessions } from '../../../hooks/useOpencodeSessions';
+import { useSessionEvents } from '../../../hooks/useSessionEvents';
+import { useSessions } from '../../../hooks/useSessions';
 import { useI18n } from '../../../i18n';
 
 function streamColor(status: string) {
@@ -23,12 +22,15 @@ function streamColor(status: string) {
 /**
  * Running tab for /projects/[id] — busy sessions only.
  *
- * Reuses useOpencodeSessions list + abort (both carry `?projectId=`, see
- * SessionsTab); liveness comes from useOpencodeEvents (SSE backoff 1s→15s,
- * global — no project key) which triggers a list reload on session.*
- * frames, plus a one-shot `session.status()` map for the busy/retry
- * filter. `projectId` also rides the status call as `?projectId=` (C4
- * gate); `?directory=` still rides along but the backend ignores it.
+ * Data is the domain surface (see useSessions): the list + the derived
+ * busy/idle `statusMap` from GET /api/sessions/status (a working source —
+ * the old runner status surface was never served by the current runtime,
+ * which made the filter permanently empty). Liveness comes from
+ * useSessionEvents (domain SSE, backoff 1s→15s, project-scoped), which
+ * triggers a list+status reload on `session.*` frames; between frames the
+ * rows' own derived status overlays the (possibly stale) map.
+ * Abort is best-effort via useSessions (TODO(card 6): interrupt domain
+ * route). Navigation/props: `projectId` required — no `?directory=`.
  *
  * List: linear ul/li + Separator (DESIGN §6, no Card), scroll owned by
  * the list container (max-h dvh + overflow-y-auto, overscroll-contain),
@@ -42,27 +44,26 @@ function RunningSessionRow({
   rowDisabled = false,
   onAbort,
 }: {
-  s: Session;
+  s: SessionInfo;
   aborting: boolean;
   showSeparator: boolean;
   rowDisabled?: boolean;
   onAbort: () => void;
 }) {
   const { t } = useI18n();
-  const noId = !s.id;
   return (
     <div className="flex flex-col gap-2 py-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <p className="truncate text-sm font-medium">
-            {s.title || (s.id ? s.id.slice(0, 8) : t.opencode.untitled)}
+            {s.title || (s.id ? s.id.slice(0, 8) : t.sessions.untitled)}
           </p>
           {s.id ? (
             <code className="font-mono text-[0.85em] break-all text-muted-foreground text-xs">{s.id}</code>
           ) : null}
         </div>
         <Badge color="success" variant="soft">
-          {t.opencode.live}
+          {t.sessions.live}
         </Badge>
       </div>
       <div className="flex flex-wrap items-center gap-2">
@@ -70,9 +71,9 @@ function RunningSessionRow({
           variant="outline"
           size="sm"
           onClick={onAbort}
-          disabled={aborting || rowDisabled || noId}
+          disabled={aborting || rowDisabled}
         >
-          {aborting ? t.common.loading : t.opencode.stop}
+          {aborting ? t.common.loading : t.sessions.stop}
         </Button>
       </div>
       {showSeparator && <Separator className="mt-3" />}
@@ -82,74 +83,41 @@ function RunningSessionRow({
 
 export function RunningSessionsTab({
   projectId,
-  directory,
   disabled = false,
 }: {
   projectId: string;
-  directory?: string;
   disabled?: boolean;
 }) {
   const { t } = useI18n();
-  const { sessions, loading, error, reload, abort, abortingId } = useOpencodeSessions({
-    directory,
+  const { sessions, statusMap, loading, error, reload, abort, abortingId } = useSessions({
     projectId,
   });
-  const { events, status, reconnect } = useOpencodeEvents();
-  const [statusMap, setStatusMap] = useState<Record<string, SessionStatus>>({});
-  const [statusError, setStatusError] = useState<string | null>(null);
+  const { events, status, reconnect } = useSessionEvents(projectId);
   const parentRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    const ctrl = new AbortController();
-    opencode.session
-      .status(
-        { ...(directory ? { directory } : {}), ...projectScope(projectId) },
-        { signal: ctrl.signal },
-      )
-      .then((res) => {
-        if (cancelled) return;
-        if (res.error !== undefined || res.data === undefined) {
-          setStatusError(toErrorMessage(res.error));
-          return;
-        }
-        setStatusMap(res.data as Record<string, SessionStatus>);
-        setStatusError(null);
-      })
-      .catch((e: unknown) => {
-        if (cancelled || (e as Error)?.name === 'AbortError') return;
-        setStatusError(toErrorMessage(e));
-      });
-    return () => {
-      cancelled = true;
-      ctrl.abort();
-    };
-  }, [directory, projectId]);
-
-  // SSE session.* frames trigger a list reload; the busy/retry filter reads
-  // the status map (server-scoped via `?directory=` when set).
-  const lastType =
-    events.length > 0 ? (events[events.length - 1] as { type?: string }).type ?? '' : '';
+  // Live `session.*` frames trigger a list+status reload (the transient
+  // retry state exists in the event stream only, never in the map).
+  const lastType = events.length > 0 ? events[events.length - 1].type : '';
   useEffect(() => {
     if (lastType.startsWith('session.')) reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events.length]);
 
-  // Busy/retry filter from the status map (server-scoped via `?projectId=`
-  // when set; `?directory=` still rides along but the backend ignores it).
+  // Busy filter: the derived status map, overlaid by the row's own status
+  // while the map query has no entry yet (same server-computed source).
   const running = sessions.filter((s) => {
-    const st = statusMap[s.id];
-    return st?.type === 'busy' || (st as { type?: string })?.type === 'retry';
+    const st = statusMap[s.id] ?? s.status;
+    return st.type === 'busy' || st.type === 'retry';
   });
 
   const statusLabel =
     status === 'live'
-      ? t.opencode.live
+      ? t.sessions.live
       : status === 'connecting'
-        ? t.opencode.connecting
+        ? t.sessions.connecting
         : status === 'reconnecting'
-          ? t.opencode.reconnecting
-          : t.opencode.error;
+          ? t.sessions.reconnecting
+          : t.sessions.error;
 
   const virtualizer = useVirtualizer({
     count: running.length,
@@ -169,7 +137,7 @@ export function RunningSessionsTab({
           </Badge>
           {status !== 'live' && (
             <Button variant="outline" size="sm" onClick={reconnect} disabled={disabled}>
-              {t.opencode.reconnect}
+              {t.sessions.reconnect}
             </Button>
           )}
           <Button variant="outline" size="sm" onClick={reload} disabled={disabled}>
@@ -179,18 +147,16 @@ export function RunningSessionsTab({
 
         {loading && <LoadingState rows={2} />}
 
-        {!loading && (error ?? statusError) && (
-          <ErrorState message={(error ?? statusError) as string} onRetry={reload} />
-        )}
+        {!loading && error && <ErrorState message={error} onRetry={reload} />}
 
-        {!loading && !error && !statusError && running.length === 0 && (
+        {!loading && !error && running.length === 0 && (
           <EmptyState
-            title={t.opencode.runningTitle}
-            description={t.opencode.emptyRunning}
+            title={t.sessions.runningTitle}
+            description={t.sessions.emptyRunning}
           />
         )}
 
-        {!loading && !error && !statusError && running.length > 0 && (
+        {!loading && !error && running.length > 0 && (
           <div
             ref={parentRef}
             className="overflow-y-auto overscroll-contain"

@@ -237,7 +237,7 @@ export const ru: Dictionary = {
     npmTitle: 'Npm-пакеты',
     npmDesc: 'Живой реестр npm-пакетов с поиском по скопу.',
   },
-  opencode: {
+  sessions: {
     streamTitle: 'Живой поток opencode',
     streamSubtitle: 'SSE через backend reverse-proxy (/api/opencode/global/event).',
     connecting: 'Подключаемся…',

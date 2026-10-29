@@ -44,25 +44,21 @@ export const aiProvidersQueryKey = (directory?: string) =>
   ['ai-providers', directory ?? 'all'] as const;
 
 /**
- * GET /api/v1/sessions — project-scoped session list.
+ * GET /api/sessions — project-scoped domain session list.
  * `projectId` nullish maps to the shared `'none'` scope so hooks without
  * a project share one stable empty entry (`??`, empty string stays as-is).
  */
 export const sessionsQueryKey = (projectId?: string) =>
   ['sessions', projectId ?? 'none'] as const;
 
-/**
- * @deprecated Use `sessionsQueryKey(projectId)` — the canonical
- * GET /api/v1/sessions key. Kept as an alias so old
- * `opencodeSessionsQueryKey(directory)` imports keep compiling;
- * directory scope is backend-ignored (project jail wins).
- */
-export const opencodeSessionsQueryKey = sessionsQueryKey;
+/** GET /api/sessions/status — derived busy/idle map, same scope rule. */
+export const sessionStatusQueryKey = (projectId?: string) =>
+  ['sessions', 'status', projectId ?? 'none'] as const;
 
 /**
- * GET /api/opencode/session/:id/message — live session thread.
- * `sessionId` null maps to the `'none'` scope so hooks without a session
- * share one stable empty entry instead of one entry per null render.
+ * GET /api/sessions/{id}/messages — project-scoped session thread.
+ * `sessionId`/`projectId` nulls map to stable `'none'` scopes (same
+ * convention as above — one entry per real scope, never one per render).
  */
-export const opencodeMessagesQueryKey = (sessionId: string | null, directory?: string) =>
-  ['opencode-messages', sessionId ?? 'none', directory ?? 'all'] as const;
+export const sessionMessagesQueryKey = (sessionId: string | null, projectId?: string) =>
+  ['session-messages', sessionId ?? 'none', projectId ?? 'none'] as const;

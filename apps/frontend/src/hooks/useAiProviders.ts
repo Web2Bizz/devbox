@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { opencode, toErrorMessage } from '../api/opencode-client';
+import { fetchRunnerProviders, toErrorMessage } from '../api/sessions-client';
 import { formatApiError } from '../lib/format-error';
 import type { AiProvider } from '../lib/types';
 import { useI18n } from '../i18n';
@@ -21,38 +21,43 @@ export type UseAiProvidersResult = {
 };
 
 /**
- * Shared fetch — GET /api/opencode/config/providers without auth (the
- * backend reverse-proxy injects server-side auth; nothing auth-related
- * travels in the browser bundle). Throws a plain Error carrying the sdk
- * message on `{ error }` tuples (never formats beyond the message);
- * `formatApiError + t` mapping lives in `useMemo` in `useAiProviders`.
- * Module-level (no `t` closure) so concurrent mounts share one cache
- * entry AND one queryFn identity per directory scope — dedup to a single
- * GET /config/providers. Query cancellation arrives via the `signal`
- * argument (no local AbortController).
+ * Shared fetch — the provider list. TODO(card 6): the domain contract has
+ * no provider inventory route yet, so this rides the deprecated
+ * /api/opencode/config/providers mirror through api/sessions-client
+ * (fetchRunnerProviders → ./client api.providers) — one of the two
+ * documented alias exceptions; nothing here imports an sdk. The answer is
+ * the runner's provider envelope unwrapped to rows by the facade; per row
+ * only `id`/`name` are proven by the wire contract (the rest are legacy
+ * extras read through typeof guards, never invented). The access gate is
+ * JWT (`authorization: Bearer` via withAuth, never an runner key, the
+ * token is never logged). `formatApiError + t` mapping lives in `useMemo`
+ * in `useAiProviders`. Module-level (no `t` closure) so concurrent mounts
+ * share one cache entry AND one queryFn identity per directory scope.
+ * Query cancellation arrives via the `signal` argument (no local
+ * AbortController).
  */
 async function fetchAiProviders(directory?: string, signal?: AbortSignal): Promise<AiProvider[]> {
-  const res = await opencode.config.providers(
-    directory ? { directory } : undefined,
-    signal ? { signal } : undefined,
-  );
-  if (res.error !== undefined || res.data === undefined) {
-    throw new Error(toErrorMessage(res.error));
-  }
-  return (res.data.providers ?? []).map((p) => ({
-    id: p.id,
-    name: p.name || p.id,
-    description: `${p.source}${p.env?.length ? ` · ${p.env.join(', ')}` : ''}`,
-    enabled: true,
-    status: 'connected' as const,
-    modelsCount: Object.keys(p.models ?? {}).length,
-  }));
+  const rows = await fetchRunnerProviders({ directory, ...(signal ? { signal } : {}) });
+  return rows.map((p) => {
+    const id = typeof p.id === 'string' ? p.id : '';
+    const source = typeof p.source === 'string' ? p.source : '';
+    const env = Array.isArray(p.env) ? p.env.filter((e): e is string => typeof e === 'string') : [];
+    const models = p.models && typeof p.models === 'object' ? Object.keys(p.models).length : 0;
+    return {
+      id,
+      name: typeof p.name === 'string' && p.name ? p.name : id,
+      description: `${source}${env.length ? ` · ${env.join(', ')}` : ''}`,
+      enabled: true,
+      status: 'connected' as const,
+      modelsCount: models,
+    };
+  });
 }
 
 /**
- * Live provider list hook — GET /api/opencode/config/providers via
- * TanStack Query (contract unchanged: UseAiProvidersResult shape is
- * frozen, only the body swaps useEffect+nonce → useQuery).
+ * Live provider list hook — TanStack Query (contract unchanged:
+ * UseAiProvidersResult shape is frozen, only the body swaps useEffect+nonce
+ * → useQuery).
  * - Cache: aiProvidersQueryKey(directory) (P0 single source, `?? 'all'`
  *   scope so the default view has one stable entry), staleTime 60s
  *   (provider list is quasi-static — longer than the shared 30s

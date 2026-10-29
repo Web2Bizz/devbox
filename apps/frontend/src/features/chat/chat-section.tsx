@@ -8,11 +8,9 @@ import { useChat } from '../../hooks/useChat';
 import { useI18n } from '../../i18n';
 
 export type ChatSectionProps = {
-  /** Existing opencode session to scope the chat to (session = chat). */
+  /** Existing session to scope the chat to (session = chat). */
   sessionId?: string;
-  /** Opencode working directory, forwarded as `?directory=`. */
-  directory?: string;
-  /** Rush Code project id (prj-*) — forwarded as `?projectId=` (backend-gated, C4). */
+  /** Rush Code project uuid — the C4 gate on every domain call. */
   projectId?: string;
 };
 
@@ -20,8 +18,9 @@ export type ChatSectionProps = {
  * Chat feature section — thin composition over `useChat` + kit rows.
  *
  * Layers (AGENTS.md): page owns `<ChatSection />`, business state lives in
- * `hooks/useChat` (prompt/SSE/abort/reload over the backend reverse-proxy
- * `/api/opencode`, same sdk as the backend), rows/composer are generic
+ * `hooks/useChat` (prompt/SSE/abort/reload over the domain /api/sessions*
+ * contract — the frontend knows nothing about the underlying runner),
+ * rows/composer are generic
  * `components/chat/*`. No `entities/`/`shared/` — no new deprecated
  * re-exports. Flat Content (§7): linear section, no Card wrappers.
  *
@@ -30,10 +29,10 @@ export type ChatSectionProps = {
  * empty via `ChatWindow` empty copy. STOP keeps the partial stream as the
  * assistant answer (see `useChat.stop`).
  */
-export function ChatSection({ sessionId, directory, projectId }: ChatSectionProps) {
+export function ChatSection({ sessionId, projectId }: ChatSectionProps) {
   const { t } = useI18n();
   const [aborting, setAborting] = useState(false);
-  const chat = useChat({ sessionId, directory, projectId });
+  const chat = useChat({ sessionId, projectId });
   const { messages, streamingText, loading, sending, error, isEmpty, send, stop, reload } = chat;
 
   const handleSend = (text: string) => send(text);

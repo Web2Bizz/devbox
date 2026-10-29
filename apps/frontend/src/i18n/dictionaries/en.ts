@@ -237,7 +237,7 @@ export const en: Dictionary = {
     npmTitle: 'Npm packages',
     npmDesc: 'Live npm package registry with scope search.',
   },
-  opencode: {
+  sessions: {
     streamTitle: 'Live opencode stream',
     streamSubtitle: 'SSE via the backend reverse-proxy (/api/opencode/global/event).',
     connecting: 'Connecting…',

@@ -72,6 +72,7 @@ export const createSessionRequestSchema = z.object({
   projectId: z.uuid({ error: 'Field "projectId" is required' }),
   title: z.string().min(1).max(200).optional(),
   parentID: z.string().min(1).max(200).optional(),
+  model: sessionInfoModelSchema.optional(),
 }) satisfies z.ZodType<CreateSessionRequest>;
 
 export type CreateSessionInput = z.infer<typeof createSessionRequestSchema>;
@@ -95,6 +96,7 @@ export const sessionMessageListSchema = z.array(sessionMessageSchema) satisfies 
 export const sendMessageRequestSchema = z.object({
   projectId: z.uuid({ error: 'Field "projectId" is required' }),
   text: z.string({ error: 'Field "text" is required' }).min(1),
+  model: sessionInfoModelSchema.optional(),
 }) satisfies z.ZodType<SendMessageRequest>;
 
 /** SSE frame envelope of GET /api/sessions/events — the variant payload

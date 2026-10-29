@@ -263,7 +263,7 @@ export class SessionsService {
 
   /**
    * POST /api/sessions — create in the gated jail, honestly forwarding
-   * title/parentID. The body is built non-empty ({location} always present)
+   * title/parentID/model. The body is built non-empty ({location} always present)
    * because the 2.x create endpoint rejects a missing JSON object; it rides
    * fetchWithRetry (not the sdk) because the pinned generated create()
    * silently drops every field except id/agent/model/location.
@@ -275,6 +275,13 @@ export class SessionsService {
     const payload: Record<string, unknown> = { location: { directory: project.directory } };
     if (body.title !== undefined) payload.title = body.title;
     if (body.parentID !== undefined) payload.parentID = body.parentID;
+    if (body.model !== undefined) {
+      payload.model = {
+        id: body.model.id,
+        providerID: body.model.providerID,
+        ...(body.model.variant !== undefined ? { variant: body.model.variant } : {}),
+      };
+    }
     const headers: Record<string, string> = {
       ...serveBasicAuthHeader(),
       'content-type': 'application/json',
@@ -374,8 +381,10 @@ export class SessionsService {
    * /session/{id}/message surface the mirror still rides is not served by
    * 2.x). `text` is the prompt's only required payload field (artifact
    * requestBody); files/agents/skills/delivery stay unexposed until a
-   * consumer exists. The 200 `Session.Inbox.User` receipt is projected to
-   * the domain message form (queued user row).
+   * consumer exists. `model` (same SessionInfoModel ref as on create) rides
+   * the same prompt body when provided — without it the body is text-only
+   * and the runner keeps the session model. The 200 `Session.Inbox.User`
+   * receipt is projected to the domain message form (queued user row).
    */
   async sendMessage(
     userId: string,
@@ -393,9 +402,17 @@ export class SessionsService {
     };
     if (cid) headers['x-correlation-id'] = cid;
     try {
+      const promptBody: Record<string, unknown> = { text: body.text };
+      if (body.model !== undefined) {
+        promptBody.model = {
+          id: body.model.id,
+          providerID: body.model.providerID,
+          ...(body.model.variant !== undefined ? { variant: body.model.variant } : {}),
+        };
+      }
       const res = await this.opencode.fetchWithRetry(
         `${this.opencode.dialUrl()}/api/session/${encodeURIComponent(sessionId)}/prompt`,
-        { method: 'POST', headers, body: JSON.stringify({ text: body.text }) },
+        { method: 'POST', headers, body: JSON.stringify(promptBody) },
         { operation: 'sessionPrompt' },
       );
       if (!res.ok) {

@@ -52,6 +52,12 @@ export type CreateSessionRequest = {
   title?: string;
   /** parent session id when forking under an existing session */
   parentID?: string;
+  /**
+   * Model to run the session on (upstream `Model.Ref` shape, reused as
+   * SessionInfoModel — never a duplicate). Optional: without it the runner
+   * picks its server default (nothing invented client-side).
+   */
+  model?: SessionInfoModel;
 };
 
 /**
@@ -99,11 +105,14 @@ export type SessionMessageList = SessionMessage[];
  * POST /api/sessions/{id}/messages body — the domain chat prompt. `text`
  * mirrors the v2 prompt's only required payload field (files/agents/skills/
  * metadata/delivery are upstream-optional and no UI consumes them yet —
- * deliberately not exposed until there is a consumer).
+ * deliberately not exposed until there is a consumer). `model` is the same
+ * SessionInfoModel ref as on create (never a duplicate); without it the
+ * runner keeps the session model (nothing invented client-side).
  */
 export type SendMessageRequest = {
   projectId: string;
   text: string;
+  model?: SessionInfoModel;
 };
 
 /**

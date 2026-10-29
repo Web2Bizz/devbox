@@ -557,6 +557,16 @@ async function main(): Promise<void> {
       assert.equal(sent.parentID, 'ses_alpha');
     }
 
+    await check('POST /api/sessions forwards model (upstream Model.Ref verbatim)', '/api/sessions', jsonBody({ projectId: E2E_PROJECT_ID, model: { id: 'model-m', providerID: 'prov-openai' } }), 200, (_res, body) => {
+      assert.equal((body as Record<string, unknown>).id, 'ses_created');
+    });
+    {
+      const create = stand.creates.at(-1);
+      assert.ok(create, 'stub captured the model create');
+      assert.deepEqual((create.body as { model?: unknown }).model, { id: 'model-m', providerID: 'prov-openai' });
+      assert.ok(create.basicAuth, 'Basic auth header really sent');
+    }
+
     await check('POST /api/sessions {} → 400 bad_request (body zod)', '/api/sessions', jsonBody({}), 400, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'bad_request');
     });
@@ -666,6 +676,16 @@ async function main(): Promise<void> {
       assert.equal(prompt.url, '/api/session/ses_alpha/prompt');
       assert.deepEqual(prompt.body, { text: 'hi domain' });
       assert.ok((prompt.contentType ?? '').includes('application/json'), 'json content-type');
+      assert.ok(prompt.basicAuth, 'Basic auth header really sent');
+    }
+
+    await check('POST messages forwards model in the prompt body', '/api/sessions/ses_alpha/messages', jsonBody({ projectId: E2E_PROJECT_ID, text: 'hi model', model: { id: 'model-m', providerID: 'prov-openai', variant: 'v1' } }), 200, (_res, body) => {
+      assert.equal((body as Record<string, unknown>).text, 'hi model');
+    });
+    {
+      const prompt = stand.prompts.at(-1);
+      assert.ok(prompt, 'stub captured the model prompt');
+      assert.deepEqual(prompt.body, { text: 'hi model', model: { id: 'model-m', providerID: 'prov-openai', variant: 'v1' } });
       assert.ok(prompt.basicAuth, 'Basic auth header really sent');
     }
 

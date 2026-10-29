@@ -3472,7 +3472,9 @@ components:
       description: >-
         POST /api/sessions body — projectId is required (sessions are
         project-scoped); title/parentID are honestly forwarded to the runtime
-        create (the deprecated mirror could not forward them).
+        create (the deprecated mirror could not forward them). model is the
+        SessionInfoModel ref (upstream Model.Ref shape); without it the
+        runner picks its server default.
       properties:
         projectId:
           type: string
@@ -3485,6 +3487,9 @@ components:
           type: string
           minLength: 1
           maxLength: 200
+        model:
+          allOf:
+            - $ref: '#/components/schemas/SessionInfoModel'
     SessionRunStatus:
       description: >-
         Runtime status snapshot of one session: busy while the server reports
@@ -3526,7 +3531,9 @@ components:
       description: >-
         POST /api/sessions/{id}/messages body — text mirrors the session
         runner prompt's only required payload field; files/agents/skills/delivery stay unexposed
-        until a consumer exists (nothing invented).
+        until a consumer exists (nothing invented). model is the
+        SessionInfoModel ref (same as on create); without it the runner
+        keeps the session model.
       properties:
         projectId:
           type: string
@@ -3534,6 +3541,9 @@ components:
         text:
           type: string
           minLength: 1
+        model:
+          allOf:
+            - $ref: '#/components/schemas/SessionInfoModel'
     SessionStreamFrame:
       type: object
       required: [id, type, data]

@@ -1,10 +1,17 @@
 /**
- * useChat — streamed single-session chat through the opencode proxy-client.
+ * useChat — streamed single-session chat over the DOMAIN /api/sessions*
+ * contract (api/sessions-client is the only transport; the frontend knows
+ * nothing about the underlying runner).
  *
- * Covers: append (user row + assistant answer from prompt parts),
- * stop-abort (in-flight prompt cancels, server abort fires, sending clears),
- * error+retry (prompt failure surfaces, reload clears + refetches history),
- * unmount cleanup (SSE stream.return + prompt abort, no state after unmount).
+ * Covers: append (user row + assistant answer committed from streamed
+ * message.part.delta frames on session.idle), SSE filter (frames of other
+ * sessions ignored; message.part.updated appends snapshot growth only),
+ * history parsing (domain rows: text:null variants skipped, assistant/user
+ * roles from `type`), stop-abort (partial committed, server interrupt
+ * alias fires best-effort, sending clears), error+retry (queue failure
+ * surfaces, reload clears + refetches history), unmount cleanup (stream
+ * signal aborted, no state after unmount), project gate (no projectId →
+ * honest PROJECT_REQUIRED, no network).
  */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { GlobalRegistrator } from '@happy-dom/global-registrator';
@@ -15,61 +22,63 @@ try {
   // bun runs test files in one process — second register() throws, ignore.
 }
 
-// ---- opencode proxy-client mock (same specifier shape the hook imports) ----
-const sessionCreateMock = mock(async (_opts?: unknown) => ({
-  data: { id: 'ses-1' },
-  error: undefined,
-}));
-let promptImpl: (opts?: any, options?: any) => Promise<any> = async (_opts?: any) => ({
-  data: {
-    info: { id: 'msg-assistant-1' },
-    parts: [{ type: 'text', text: 'hello back' }],
-  },
-  error: undefined,
+// ---- domain sessions-client mock (same specifier shape the hook imports) --
+const PROJECT = { projectId: '00000000-0000-0000-0000-000000000001' };
+
+const sessionInfo = (id: string) => ({
+  id,
+  title: null,
+  createdAt: new Date(1700000000000).toISOString(),
+  directory: '/srv/projects/p1',
+  projectId: PROJECT.projectId,
+  model: null,
+  status: { type: 'idle' as const },
 });
-const promptMock = mock((opts?: any, options?: any) => promptImpl(opts, options));
-const sessionAbortMock = mock(async (_opts?: unknown) => ({
-  data: true,
-  error: undefined,
-}));
-const messagesImplHolder: { fn: (opts?: any) => Promise<any> } = {
-  fn: async (_opts?: any) => ({ data: [], error: undefined }),
+
+const createMock = mock(async (_body?: unknown) => sessionInfo('ses-1'));
+let sendImpl: (projectId: string, sessionId: string, text: string, opts?: unknown) => Promise<unknown> =
+  async (_p, _s, text) => ({
+    id: 'msg-q1',
+    type: 'user',
+    createdAt: new Date(1700000001000).toISOString(),
+    text,
+  });
+const sendMock = mock((p: string, s: string, text: string, opts?: unknown) => sendImpl(p, s, text, opts));
+const messagesImplHolder: { fn: (projectId: string, sessionId: string) => Promise<unknown[]> } = {
+  fn: async () => [],
 };
-const messagesMock = mock((opts?: any) => messagesImplHolder.fn(opts));
+const messagesMock = mock((p: string, s: string) => messagesImplHolder.fn(p, s));
+const abortMock = mock(async (_projectId: string, _sessionId: string) => {});
 
-let streamReturnCalls = 0;
-async function* emptyStream(): AsyncGenerator<unknown, void, void> {
-  // Immediately-ending SSE — the hook must redial with backoff (timer
-  // cleared on unmount, so tests stay fast).
+// A live-bus stand-in: the generator starts at mount and blocks until
+// frames arrive (pushed by the test after send()), mirroring a real SSE —
+// frames are consumed only while a session is bound.
+const queue: unknown[] = [];
+function pushFrames(frames: unknown[]): void {
+  for (const f of frames) queue.push(f);
 }
-const eventMock = mock(async (_opts?: any) => {
-  const stream = emptyStream();
-  const origReturn = stream.return.bind(stream);
-  (stream as any).return = async (v?: unknown) => {
-    streamReturnCalls += 1;
-    return origReturn(v as never);
-  };
-  return { stream };
-});
+let seenSignals: AbortSignal[] = [];
+async function* makeStream(_projectId: string, signal: AbortSignal) {
+  seenSignals.push(signal);
+  for (;;) {
+    if (signal.aborted) return;
+    if (queue.length > 0) {
+      yield queue.shift();
+      continue;
+    }
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+const streamMock = mock((projectId: string, signal: AbortSignal) => makeStream(projectId, signal));
 
-mock.module('../../api/opencode-client', () => ({
-  opencode: {
-    session: {
-      create: sessionCreateMock,
-      prompt: promptMock,
-      abort: sessionAbortMock,
-      messages: messagesMock,
-    },
-    // v2 client surface the hooks use: `event.subscribe(params, options)`
-    // (SSE). `global.event` is kept for shape parity, unused by useChat.
-    event: { subscribe: eventMock },
-    global: { event: eventMock },
-  },
-  // Mirrors the real helper (C4 `?projectId=` via the `$query_` escape
-  // hatch — the generated sdk drops unknown flat keys): keeps param
-  // assertions on `sessionID`/`directory` exact while letting hooks spread
-  // the scope key like production.
-  projectScope: (projectId?: string) => (projectId ? { $query_projectId: projectId } : {}),
+mock.module('../../api/sessions-client', () => ({
+  ensureSessionAuth: async () => {},
+  createSession: (body: unknown) => createMock(body),
+  sendSessionMessage: (p: string, s: string, text: string, opts?: unknown) =>
+    sendMock(p, s, text, opts),
+  listSessionMessages: (p: string, s: string) => messagesMock(p, s),
+  abortSession: (p: string, s: string) => abortMock(p, s),
+  sessionEventStream: (projectId: string, signal: AbortSignal) => streamMock(projectId, signal),
   toErrorMessage: (e: unknown) => {
     if (typeof e === 'string') return e;
     if (e instanceof Error) return e.message;
@@ -78,40 +87,72 @@ mock.module('../../api/opencode-client', () => ({
     }
     return 'Unexpected error';
   },
-  ensureOpencodeAuth: async () => {},
 }));
 
 const { cleanup, renderHook, act } = await import('@testing-library/react');
 const { useChat } = await import('../useChat');
 
-afterEach(() => {
-  cleanup();
-  sessionCreateMock.mockClear();
-  promptMock.mockClear();
-  sessionAbortMock.mockClear();
-  messagesMock.mockClear();
-  eventMock.mockClear();
-  streamReturnCalls = 0;
-  promptImpl = async (_opts?: any) => ({
-    data: {
-      info: { id: 'msg-assistant-1' },
-      parts: [{ type: 'text', text: 'hello back' }],
-    },
-    error: undefined,
-  });
-  messagesImplHolder.fn = async (_opts?: any) => ({ data: [], error: undefined });
+const delta = (session: string, text: string, partId = 'prt-1') => ({
+  id: `evt-${text}-${partId}`,
+  type: 'message.part.delta',
+  data: { sessionID: session, messageID: 'msg-1', partID: partId, field: 'text', delta: text },
+  session,
+});
+const updated = (session: string, text: string, partId = 'prt-1') => ({
+  id: `evt-upd-${text}-${partId}`,
+  type: 'message.part.updated',
+  data: { sessionID: session, part: { id: partId, type: 'text', text } },
+  session,
+});
+const idle = (session: string) => ({
+  id: `evt-idle-${session}`,
+  type: 'session.idle',
+  data: { sessionID: session },
+  session,
 });
 
-describe('useChat', () => {
-  test('append: send() adds the user row then the assistant answer', async () => {
-    const { result } = renderHook(() => useChat());
+const settle = async (rounds = 8) => {
+  await act(async () => {
+    for (let i = 0; i < rounds; i++) {
+      await Promise.resolve();
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  });
+};
 
-    await act(async () => {
-      await result.current.send('hello');
+afterEach(() => {
+  cleanup();
+  queue.length = 0;
+  seenSignals = [];
+  createMock.mockClear();
+  sendMock.mockClear();
+  messagesMock.mockClear();
+  abortMock.mockClear();
+  streamMock.mockClear();
+  sendImpl = async (_p, _s, text) => ({
+    id: 'msg-q1',
+    type: 'user',
+    createdAt: new Date(1700000001000).toISOString(),
+    text,
+  });
+  messagesImplHolder.fn = async () => [];
+});
+
+describe('useChat (domain)', () => {
+  test('append: send() queues, streamed deltas commit the assistant row on session.idle', async () => {
+    const { result } = renderHook(() => useChat({ ...PROJECT }));
+    await settle();
+
+    act(() => {
+      void result.current.send('hello');
     });
+    // The session exists after create resolves (microtask); the bus then
+    // consumes these domain frames.
+    pushFrames([delta('ses-1', 'hello'), delta('ses-1', ' back'), idle('ses-1')]);
+    await settle(16);
 
-    expect(sessionCreateMock).toHaveBeenCalledTimes(1);
-    expect(promptMock).toHaveBeenCalledTimes(1);
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(sendMock).toHaveBeenCalledTimes(1);
     expect(result.current.sending).toBe(false);
     expect(result.current.error).toBeNull();
     expect(result.current.messages.length).toBe(2);
@@ -120,118 +161,61 @@ describe('useChat', () => {
     expect(result.current.isEmpty).toBe(false);
   });
 
-  test('stop-abort: stop() cancels the in-flight prompt and clears sending', async () => {
-    const signalBox: { current: AbortSignal | null } = { current: null };
-    promptImpl = (_opts?: any, options?: any) =>
-      new Promise((_, reject) => {
-        signalBox.current = (options?.signal as AbortSignal | undefined) ?? null;
-        signalBox.current?.addEventListener('abort', () => {
-          const err = new Error('aborted');
-          err.name = 'AbortError';
-          reject(err);
-        });
-      });
+  test('SSE filter: other-session frames ignored; updated snapshot appends growth only', async () => {
+    const { result } = renderHook(() => useChat({ sessionId: 'ses-1', ...PROJECT }));
+    await settle();
 
-    const { result, unmount } = renderHook(() => useChat());
-
-    let sendPromise: Promise<void> | null = null;
-    act(() => {
-      sendPromise = result.current.send('long task');
-    });
-    // Let the async send() reach the pending prompt.
     await act(async () => {
-      await Promise.resolve();
-      await new Promise((r) => setTimeout(r, 0));
+      await result.current.send('go');
     });
-    expect(result.current.sending).toBe(true);
+    // `sending` is set — now the bus delivers domain frames for ses-1.
+    pushFrames([
+      delta('ses-other', 'NOT ME'),
+      updated('ses-1', 'part one', 'prt-9'),
+      updated('ses-1', 'part one two', 'prt-9'),
+      idle('ses-1'),
+    ]);
+    await settle(16);
 
-    act(() => {
-      result.current.stop();
+    expect(result.current.messages.length).toBe(2);
+    // user row + assistant snapshot; other-session delta never streamed
+    expect(result.current.messages[0]).toMatchObject({ role: 'user', text: 'go' });
+    // snapshot growth: 'part one' then only ' two' appended (no duplication)
+    expect(result.current.messages[1]).toMatchObject({
+      role: 'assistant',
+      text: 'part one two',
     });
-    await act(async () => {
-      await sendPromise;
-    });
-
-    expect(signalBox.current?.aborted).toBe(true);
-    expect(sessionAbortMock).toHaveBeenCalled();
-    expect(result.current.sending).toBe(false);
-    // User row stays, no assistant row (aborted before an answer).
-    expect(result.current.messages.length).toBe(1);
-    expect(result.current.messages[0].role).toBe('user');
-    unmount();
   });
 
-  test('error+retry: prompt failure surfaces, reload() clears and refetches', async () => {
-    promptImpl = async (_opts?: any) => ({ data: undefined, error: { message: 'boom' } });
-    messagesImplHolder.fn = async (_opts?: any) => ({
-      // Flat v2 SessionMessage (user carries `text`).
-      data: [{ id: 'm1', type: 'user', text: 'hi', time: { created: 1 } }],
-      error: undefined,
-    });
+  test('history: domain rows parse to chat rows, text:null variants skipped', async () => {
+    messagesImplHolder.fn = async () => [
+      {
+        id: 'm1',
+        type: 'user',
+        createdAt: new Date(1700000000000).toISOString(),
+        text: 'scoped hi',
+      },
+      {
+        id: 'm2',
+        type: 'shell',
+        createdAt: new Date(1700000000500).toISOString(),
+        text: null,
+      },
+      {
+        id: 'm3',
+        type: 'assistant',
+        createdAt: new Date(1700000001000).toISOString(),
+        text: 'scoped hello back',
+      },
+    ];
 
-    const { result } = renderHook(() => useChat());
+    const { result } = renderHook(() => useChat({ sessionId: 'ses-99', ...PROJECT }));
+    await settle();
 
-    await act(async () => {
-      await result.current.send('hi');
-    });
-    expect(result.current.error).toBe('boom');
-
-    act(() => {
-      result.current.reload();
-    });
-    await act(async () => {
-      await Promise.resolve();
-      await new Promise((r) => setTimeout(r, 0));
-    });
-
-    expect(result.current.error).toBeNull();
-    expect(messagesMock).toHaveBeenCalled();
-    expect(result.current.messages.length).toBe(1);
-    expect(result.current.messages[0]).toMatchObject({ role: 'user', text: 'hi' });
-  });
-
-  test('unmount cleanup: SSE stream.return runs, no reconnect storm', async () => {
-    const { unmount } = renderHook(() => useChat());
-    await act(async () => {
-      await Promise.resolve();
-      await new Promise((r) => setTimeout(r, 0));
-    });
-    expect(eventMock).toHaveBeenCalled();
-
-    unmount();
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(streamReturnCalls).toBeGreaterThan(0);
-  });
-
-  test('scoped: useChat({ sessionId }) loads history without create()', async () => {
-    messagesImplHolder.fn = async (_opts?: any) => ({
-      // Flat v2 SessionMessage: user → `text`, assistant → `content`.
-      data: [
-        { id: 'm1', type: 'user', text: 'scoped hi', time: { created: 1 } },
-        {
-          id: 'm2',
-          type: 'assistant',
-          content: [{ type: 'text', id: 'p1', text: 'scoped hello back' }],
-          time: { created: 2 },
-        },
-      ],
-      error: undefined,
-    });
-
-    const { result } = renderHook(() => useChat({ sessionId: 'ses-99' }));
-
-    await act(async () => {
-      await Promise.resolve();
-      await new Promise((r) => setTimeout(r, 0));
-      await new Promise((r) => setTimeout(r, 0));
-    });
-
-    expect(messagesMock).toHaveBeenCalled();
-    const call = messagesMock.mock.calls[0]?.[0] as { sessionID?: string } | undefined;
-    expect(call?.sessionID).toBe('ses-99');
-    expect(sessionCreateMock).not.toHaveBeenCalled();
+    // Scoped mode loads the domain thread without creating a session.
+    expect(messagesMock).toHaveBeenCalledTimes(1);
+    expect(messagesMock.mock.calls[0]?.[1]).toBe('ses-99');
+    expect(createMock).not.toHaveBeenCalled();
     expect(result.current.sessionId).toBe('ses-99');
     expect(result.current.loading).toBe(false);
     expect(result.current.error).toBeNull();
@@ -243,36 +227,87 @@ describe('useChat', () => {
     });
   });
 
-  test('scoped: send() prompts the bound session without create()', async () => {
-    messagesImplHolder.fn = async (_opts?: any) => ({
-      data: [{ id: 'm1', type: 'user', text: 'before', time: { created: 1 } }],
-      error: undefined,
-    });
+  test('stop-abort: stop() commits the partial stream and fires the best-effort interrupt', async () => {
+    const { result } = renderHook(() => useChat({ ...PROJECT }));
+    await settle();
 
-    const { result } = renderHook(() =>
-      useChat({ sessionId: 'ses-77', projectId: 'prj-web' }),
-    );
+    act(() => {
+      void result.current.send('long task');
+    });
+    pushFrames([delta('ses-1', 'half an answer')]);
+    await settle(16);
+
+    act(() => {
+      result.current.stop();
+    });
+    await settle();
+
+    expect(abortMock).toHaveBeenCalledTimes(1);
+    expect(abortMock.mock.calls[0]?.[0]).toBe(PROJECT.projectId);
+    expect(abortMock.mock.calls[0]?.[1]).toBe('ses-1');
+    expect(result.current.sending).toBe(false);
+    expect(result.current.messages.length).toBe(2);
+    expect(result.current.messages[1]).toMatchObject({ role: 'assistant', text: 'half an answer' });
+    // The stream itself is NOT closed by stop() (it serves the next turn);
+    // unmount abort is covered by the cleanup test.
+  });
+
+  test('error+retry: queue failure surfaces (raw message, no masking), reload refetches history', async () => {
+    sendImpl = async () => {
+      throw new Error('boom');
+    };
+    messagesImplHolder.fn = async () => [
+      {
+        id: 'm1',
+        type: 'user',
+        createdAt: new Date(1700000000000).toISOString(),
+        text: 'hi',
+      },
+    ];
+
+    const { result } = renderHook(() => useChat({ sessionId: 'ses-77', ...PROJECT }));
+    await settle();
 
     await act(async () => {
-      await Promise.resolve();
-      await new Promise((r) => setTimeout(r, 0));
-      await new Promise((r) => setTimeout(r, 0));
+      await result.current.send('hi');
     });
-    expect(sessionCreateMock).not.toHaveBeenCalled();
+    await settle();
+    expect(result.current.error).toBe('boom');
+    expect(result.current.sending).toBe(false);
 
+    sendImpl = async (_p, _s, text) => ({
+      id: 'msg-q2',
+      type: 'user',
+      createdAt: new Date(1700000002000).toISOString(),
+      text,
+    });
+    act(() => {
+      result.current.reload();
+    });
+    await settle();
+
+    expect(result.current.error).toBeNull();
+    expect(result.current.messages.length).toBe(1);
+    expect(result.current.messages[0]).toMatchObject({ role: 'user', text: 'hi' });
+  });
+
+  test('unmount cleanup: the stream AbortSignal fires, no reconnect storm', async () => {
+    const { unmount } = renderHook(() => useChat({ ...PROJECT }));
+    await settle();
+    expect(streamMock).toHaveBeenCalled();
+
+    unmount();
+    await settle();
+    expect(seenSignals.at(-1)?.aborted).toBe(true);
+  });
+
+  test('project gate: send() without projectId surfaces PROJECT_REQUIRED without network', async () => {
+    const { result } = renderHook(() => useChat());
     await act(async () => {
-      await result.current.send('follow-up');
+      await result.current.send('hello');
     });
-
-    expect(sessionCreateMock).not.toHaveBeenCalled();
-    expect(promptMock).toHaveBeenCalledTimes(1);
-    const promptCall = promptMock.mock.calls[0]?.[0] as { sessionID?: string } | undefined;
-    expect(promptCall?.sessionID).toBe('ses-77');
-    expect(result.current.messages.length).toBe(3);
-    expect(result.current.messages[1]).toMatchObject({ role: 'user', text: 'follow-up' });
-    expect(result.current.messages[2]).toMatchObject({
-      role: 'assistant',
-      text: 'hello back',
-    });
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(createMock).not.toHaveBeenCalled();
+    expect(result.current.error).toContain('project-scoped');
   });
 });

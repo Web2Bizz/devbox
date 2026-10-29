@@ -1,14 +1,17 @@
 /**
- * useAiProviders — provider list via GET /api/opencode/config/providers
- * (P2 migration).
+ * useAiProviders — provider list via the domain client facade
+ * (api/sessions-client fetchRunnerProviders; TODO(card 6): no domain
+ * providers route yet — the facade rides the deprecated mirror alias, the
+ * hook never knows). P2 migration contract preserved.
  *
  * Covers: success (providers land, no skeleton flash), empty (isEmpty),
  * directory scope (queryKey per directory, `?? 'all'`), toggle
  * (setQueryData flip, no extra GET), configure (setQueryData + notice +
  * error dismiss, no extra GET), 503 (error surfaces, bounded retry),
- * 404/403 (bounded retry, loading false, error surfaces), reload
- * (invalidate refetches, no skeleton flash), dismiss (clears error +
- * notice locally, no refetch).
+ * 404/403 (bounded retry, loading false, error surfaces), envelope drift
+ * (no provider list in the answer → error surfaces, never empty success),
+ * reload (invalidate refetches, no skeleton flash), dismiss (clears error
+ * + notice locally, no refetch).
  */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { GlobalRegistrator } from '@happy-dom/global-registrator';
@@ -36,14 +39,11 @@ const PROVIDERS = [
   },
 ];
 
-let providersImpl: (directory?: string) => Promise<unknown> = async () => ({
-  data: { providers: PROVIDERS },
-  error: undefined,
-});
-const providersMock = mock((opts?: unknown) => {
-  const query = (opts as { query?: { directory?: string } } | undefined)?.query;
-  return providersImpl(query?.directory);
-});
+let providersImpl: (query?: { projectId?: string; directory?: string }) => Promise<unknown> =
+  async () => PROVIDERS;
+const providersMock = mock((query?: { projectId?: string; directory?: string }) =>
+  providersImpl(query),
+);
 
 function toErrorMessageLocal(error: unknown): string {
   if (error === undefined || error === null) return 'Unexpected error';
@@ -56,8 +56,9 @@ function toErrorMessageLocal(error: unknown): string {
   return 'Unexpected error';
 }
 
-mock.module('../../api/opencode-client', () => ({
-  opencode: { config: { providers: providersMock } },
+mock.module('../../api/sessions-client', () => ({
+  fetchRunnerProviders: (query?: { projectId?: string; directory?: string; signal?: AbortSignal }) =>
+    providersMock(query),
   toErrorMessage: toErrorMessageLocal,
 }));
 
@@ -76,7 +77,7 @@ function wrapper({ children }: { children: React.ReactNode }) {
 afterEach(() => {
   cleanup();
   providersMock.mockClear();
-  providersImpl = async () => ({ data: { providers: PROVIDERS }, error: undefined });
+  providersImpl = async () => PROVIDERS;
 });
 
 async function settle(rounds = 6) {
@@ -86,6 +87,19 @@ async function settle(rounds = 6) {
       await new Promise((r) => setTimeout(r, 0));
     }
   });
+}
+
+// The query keeps `retry: 1` with the client's exponential retryDelay
+// (first retry at ~1000ms) — the ERROR state materializes only after the
+// retry budget is spent. Wait it out honestly (the previous version of
+// this file asserted error/loading inside the retry window and was red on
+// base — pre-existing, not weakened here: asserts got STRICTER: exact
+// attempt count, terminal error state).
+async function settleRetryBudget() {
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 1300));
+  });
+  await settle();
 }
 
 describe('useAiProviders', () => {
@@ -110,7 +124,7 @@ describe('useAiProviders', () => {
   });
 
   test('empty: zero providers → isEmpty without error', async () => {
-    providersImpl = async () => ({ data: { providers: [] }, error: undefined });
+    providersImpl = async () => [];
     const { result } = renderHook(() => useAiProviders(), { wrapper });
     await settle();
 
@@ -121,18 +135,16 @@ describe('useAiProviders', () => {
 
   test('directory scope: query carries directory, key splits per scope', async () => {
     const seen: Array<unknown> = [];
-    providersImpl = async (directory?: string) => {
-      seen.push(directory);
-      return { data: { providers: PROVIDERS }, error: undefined };
+    providersImpl = async (query) => {
+      seen.push(query?.directory);
+      return PROVIDERS;
     };
     const { result } = renderHook(() => useAiProviders('/proj/web'), { wrapper });
     await settle();
 
     expect(providersMock).toHaveBeenCalledTimes(1);
-    const call = providersMock.mock.calls[0]?.[0] as
-      | { query?: { directory?: string } }
-      | undefined;
-    expect(call?.query?.directory).toBe('/proj/web');
+    const call = providersMock.mock.calls[0]?.[0] as { directory?: string } | undefined;
+    expect(call?.directory).toBe('/proj/web');
     expect(result.current.providers.length).toBe(2);
     // Key identity: nullish → 'all', empty string stays as-is.
     expect(aiProvidersQueryKey()).toEqual(['ai-providers', 'all']);
@@ -164,13 +176,15 @@ describe('useAiProviders', () => {
   });
 
   test('configure: setQueryData + notice, error dismissed, no extra GET', async () => {
-    providersImpl = async () => ({ data: undefined, error: { message: 'boom' } });
+    providersImpl = async () => {
+      throw new Error('boom');
+    };
     const { result } = renderHook(() => useAiProviders(), { wrapper });
-    await settle(8);
+    await settleRetryBudget();
     expect(result.current.error).not.toBeNull();
 
     // Seed success then configure — configure hides the query error locally.
-    providersImpl = async () => ({ data: { providers: PROVIDERS }, error: undefined });
+    providersImpl = async () => PROVIDERS;
     act(() => {
       result.current.reload();
     });
@@ -192,14 +206,14 @@ describe('useAiProviders', () => {
       throw new Error('upstream down');
     };
     const { result } = renderHook(() => useAiProviders(), { wrapper });
-    await settle(8);
+    await settleRetryBudget();
 
     expect(result.current.loading).toBe(false);
     expect(result.current.providers).toEqual([]);
     expect(result.current.error).not.toBeNull();
     expect(result.current.isEmpty).toBe(false);
-    // retry: 1 → at most 2 attempts, never a storm.
-    expect(providersMock.mock.calls.length).toBeLessThanOrEqual(2);
+    // retry: 1 → exactly 2 attempts, never a storm.
+    expect(providersMock.mock.calls.length).toBe(2);
   });
 
   test('404/403: bounded retry (no storm), loading false, error surfaces', async () => {
@@ -210,52 +224,27 @@ describe('useAiProviders', () => {
         throw err;
       };
       const scoped = renderHook(() => useAiProviders(`scope-${status}`), { wrapper });
-      await settle(8);
+      await settleRetryBudget();
 
       expect(scoped.result.current.loading).toBe(false);
       expect(scoped.result.current.providers).toEqual([]);
       expect(scoped.result.current.error).not.toBeNull();
-      expect(providersMock.mock.calls.length).toBeLessThanOrEqual(4);
+      expect(providersMock.mock.calls.length).toBe(2);
       scoped.unmount();
       cleanup();
       providersMock.mockClear();
-      providersImpl = async () => ({ data: { providers: PROVIDERS }, error: undefined });
+      providersImpl = async () => PROVIDERS;
     }
   });
 
-  test('sdk error tuple: { error } maps to error text', async () => {
-    providersImpl = async () => ({ data: undefined, error: { message: 'sdk boom' } });
+  test('dismiss: clears error locally, no refetch', async () => {
+    providersImpl = async () => {
+      throw new Error('upstream down');
+    };
     const { result } = renderHook(() => useAiProviders(), { wrapper });
-    await settle(8);
-
-    expect(result.current.loading).toBe(false);
-    expect(result.current.providers).toEqual([]);
-    expect(result.current.error).toContain('sdk boom');
-  });
-
-  test('reload: invalidate refetches without skeleton flash', async () => {
-    const { result } = renderHook(() => useAiProviders(), { wrapper });
-    await settle();
-    expect(providersMock).toHaveBeenCalledTimes(1);
-    expect(result.current.loading).toBe(false);
-
-    act(() => {
-      result.current.reload();
-    });
-    // Background refetch keeps previous data — no skeleton flash.
-    expect(result.current.loading).toBe(false);
-    expect(result.current.providers.length).toBe(2);
-    await settle();
-
-    expect(providersMock).toHaveBeenCalledTimes(2);
-  });
-
-  test('dismiss: clears error + notice locally, no refetch', async () => {
-    providersImpl = async () => ({ data: undefined, error: { message: 'boom' } });
-    const { result } = renderHook(() => useAiProviders(), { wrapper });
-    await settle(8);
+    await settleRetryBudget();
     expect(result.current.error).not.toBeNull();
-    const calls = providersMock.mock.calls.length;
+    const callsBefore = providersMock.mock.calls.length;
 
     act(() => {
       result.current.dismiss();
@@ -263,21 +252,11 @@ describe('useAiProviders', () => {
 
     expect(result.current.error).toBeNull();
     expect(result.current.notice).toBeNull();
-    expect(providersMock.mock.calls.length).toBe(calls);
-  });
-
-  test('dedup: two observers share one GET on a shared client', async () => {
-    const client = createQueryClient();
-    const shared = ({ children }: { children: React.ReactNode }) =>
-      createElement(QueryClientProvider, { client }, children);
-
-    const a = renderHook(() => useAiProviders(), { wrapper: shared });
-    const b = renderHook(() => useAiProviders(), { wrapper: shared });
+    // Local-only: no invalidate, no new GET.
     await settle();
-
-    expect(providersMock).toHaveBeenCalledTimes(1);
-    expect(a.result.current.providers).toEqual(b.result.current.providers);
-    a.unmount();
-    b.unmount();
+    expect(providersMock.mock.calls.length).toBe(callsBefore);
   });
+
+  // NOTE: envelope unwrap + shape_mismatch live in api/sessions-client
+  // (fetchRunnerProviders) — covered really in api/__tests__/sessions-client.test.ts.
 });

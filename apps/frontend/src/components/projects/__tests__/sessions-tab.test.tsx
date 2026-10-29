@@ -1,9 +1,10 @@
 /**
- * SessionsTab — navigation (session = chat).
+ * SessionsTab — navigation (session = chat) + domain rows.
  *
  * Covers: Open routes to /projects/[id]/sessions/[sessionId],
  * create() success routes to the new session chat, virtualized list
- * keeps row content (title/id) for 100+ rows path.
+ * keeps row content (title/id) for 100+ rows path, details row renders
+ * the real domain fields (directory/projectId come from the server — Q6).
  */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { GlobalRegistrator } from '@happy-dom/global-registrator';
@@ -22,34 +23,25 @@ mock.module('next/navigation', () => ({
   usePathname: () => '/',
 }));
 
-const createMock = mock(async () => ({
-  id: 'ses-new',
-  projectID: 'prj-1',
-  directory: '/tmp',
-  title: 'new',
-  time: { created: Date.now(), updated: Date.now() },
-}));
+const iso = (ms: number) => new Date(ms).toISOString();
+const sessionInfo = (id: string, title: string | null) => ({
+  id,
+  title,
+  createdAt: iso(1700000000000),
+  directory: '/srv/projects/prj-web',
+  projectId: 'prj-web',
+  model: null,
+  status: { type: 'idle' as const },
+});
+
+const createMock = mock(async (_title?: string) => sessionInfo('ses-new', 'new'));
 const abortMock = mock(async (_id: string) => {});
 const reloadMock = mock(() => {});
 
-mock.module('../../../hooks/useOpencodeSessions', () => ({
-  useOpencodeSessions: () => ({
-    sessions: [
-      {
-        id: 'ses-1',
-        projectID: 'prj-1',
-        directory: '/tmp',
-        title: 'first',
-        time: { created: 1, updated: Date.now() },
-      },
-      {
-        id: 'ses-2',
-        projectID: 'prj-1',
-        directory: '/tmp',
-        title: '',
-        time: { created: 2, updated: Date.now() },
-      },
-    ],
+mock.module('../../../hooks/useSessions', () => ({
+  useSessions: () => ({
+    sessions: [sessionInfo('ses-1', 'first'), sessionInfo('ses-2', null)],
+    statusMap: {},
     loading: false,
     error: null,
     reload: reloadMock,
@@ -115,5 +107,23 @@ describe('SessionsTab navigation', () => {
     await screen.findByText('first');
     expect(createMock).toHaveBeenCalledTimes(1);
     expect(pushMock).toHaveBeenCalledWith('/projects/prj-web/sessions/ses-new');
+  });
+
+  test('details row renders the real domain fields (Q6: directory from the server)', async () => {
+    renderTab();
+    const user = userEvent.setup();
+    const reveals = await screen.findAllByRole('button', { name: 'Reveal' });
+    await user.click(reveals[0]);
+    expect(
+      await screen.findByText(
+        (_content, node) =>
+          node?.nodeName === 'CODE' &&
+          node.textContent === 'directory: /srv/projects/prj-web',
+      ),
+    ).toBeTruthy();
+    const projectIdCodes = await screen.findAllByText(
+      (_content, node) => node?.nodeName === 'CODE' && node.textContent === 'projectId: prj-web',
+    );
+    expect(projectIdCodes.length).toBeGreaterThan(0);
   });
 });

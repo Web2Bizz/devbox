@@ -37,7 +37,10 @@ function loadSdk(): Promise<SdkModule> {
  *   against the server root, so no `/api` suffix is appended here — that
  *   would double-prefix `/api/*` into `/api/api/*` (see dist/v2/gen/sdk.gen.js
  *   `url:` fields: `/session`, `/event`, `/global/event` alongside
- *   `/api/session`, `/api/event`, `/api/health`).
+ *   `/api/session`, `/api/event`, `/api/health` — that last one is an sdk
+ *   surface inventory only: the 2.x server does NOT serve `/api/health`
+ *   (404); our liveness is `GET /api/info` — see
+ *   `OpencodeService.checkConnectivity`).
  * - Auth is the SERVER password: `Authorization: Basic
  *   base64("opencode:<OPENCODE_PASSWORD>")` from env (v2 canonical,
  *   username `opencode`). No per-user DB Bearer on this path — the stand
@@ -53,8 +56,10 @@ function loadSdk(): Promise<SdkModule> {
  * - The sdk speaks the upstream opencode OpenAPI directly
  *   (legacy `GET /session`, `POST /session/{sessionID}/message`,
  *   `GET /global/event` SSE plus the v2 namespace `GET /api/session`,
- *   `POST /session/{sessionID}/prompt_async`, `GET /api/event` SSE,
- *   `GET /api/health` — path params use `sessionID` with a capital D);
+ *   `POST /session/{sessionID}/prompt_async`, `GET /api/event` SSE, and the
+ *   sdk's `GET /api/health` binding — which the 2.x server does not serve;
+ *   it is NOT our health path, liveness goes through `GET /api/info`.
+ *   Path params use `sessionID` with a capital D);
  *   `OpencodeController` mirrors those paths under `/api/opencode/*` so the
  *   frontend can use the SAME sdk against the backend base URL with no new
  *   contracts.

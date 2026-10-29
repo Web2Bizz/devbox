@@ -1,7 +1,7 @@
 {
  "source": "GET http://127.0.0.1:4097/openapi.json (opencode serve, local 2.x stand; Basic-auth trimmed — only paths/schemas used by contracts/openapi.yaml mirror + domain routes are kept)",
  "version": "2.2.0",
- "capturedAt": "2026-10-29T14:04:31.621841+00:00",
+ "capturedAt": "2026-10-29T14:44:30.623068+00:00",
  "capturedFrom": "opencode server v2.2.0 (GET /api/info version), stand from apps/backend/.env OPENCODE_URL",
  "note": "Provenance artifact for OpencodeSession/SessionStatus/Event wire shapes (cards 3-4). Resolved upstream renames vs the pinned sdk 1.18.33: FileDiff.path -> FileDiff.Info.file; RevertState.diff removed in 2.2.0; Location.PublicRef has no workspaceID; Session.Info.title is NOT required.",
  "openapi": "3.1",
@@ -4075,6 +4075,57 @@
    "V2EventEncoded": {
     "type": "string",
     "contentMediaType": "application/json"
+   }
+  }
+ },
+ "eventFrames": {
+  "note": "GET /api/event SSE frames: the spec types the frame payload as V2EventEncoded — an opaque `type: string, contentMediaType: application/json` (kept verbatim above). The decoded object shapes below come from the pinned @opencode-ai/sdk v2 types.gen union (the union the generated client parses V2EventEncoded into) and were confirmed by a live read-only capture (server.connected carries {id, type, data}). Variants listed are the ones the domain /api/sessions/events translation documents; the upstream union is much larger and NOT mirrored variant-by-variant (envelope-only, card 3 decision).",
+  "frameShape": {
+   "id": "string",
+   "metadata": "object? (optional)",
+   "type": "string (variant discriminator)",
+   "durable": "{aggregateID, seq, version}? (durable variants only)",
+   "location": "LocationRef? (location-scoped variants)",
+   "data": "variant-owned payload"
+  },
+  "usedVariants": {
+   "message.part.updated": {
+    "sessionID": "string",
+    "part": "object"
+   },
+   "message.part.delta": {
+    "sessionID": "string",
+    "messageID": "string",
+    "partID": "string",
+    "field": "string",
+    "delta": "string"
+   },
+   "session.updated": {
+    "sessionID": "string",
+    "info": "Session.Info"
+   },
+   "session.deleted": {
+    "sessionID": "string",
+    "info": "Session.Info"
+   },
+   "session.idle": {
+    "sessionID": "string"
+   },
+   "session.error": {
+    "sessionID": "string?",
+    "error": "object?"
+   },
+   "permission.asked": {
+    "id": "string",
+    "sessionID": "string",
+    "permission": "string",
+    "patterns": "string[]",
+    "metadata": "object"
+   },
+   "permission.replied": {
+    "sessionID": "string",
+    "requestID": "string",
+    "reply": "once|always|reject"
    }
   }
  }

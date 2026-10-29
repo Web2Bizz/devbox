@@ -32,3 +32,5 @@ export * from './opencode-session/opencode-session';
 export * from './opencode-session/opencode-session.schema';
 export * from './opencode-event/opencode-event';
 export * from './opencode-event/opencode-event.schema';
+export * from './sessions/sessions';
+export * from './sessions/sessions.schema';

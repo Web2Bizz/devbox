@@ -1926,10 +1926,142 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+  /api/sessions:
+    get:
+      summary: List project sessions (domain shape; runtime status derived from the live session runner)
+      operationId: listSessionsDomain
+      tags: [sessions]
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          description: Owning project uuid — the C4 gate; missing answers 400 PROJECT_REQUIRED (fail-closed, never a global listing).
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: domain sessions (always an array; empty when the project has none)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SessionInfo'
+        '400':
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or the session runner rejected the request (code EXTERNAL_BAD_REQUEST) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: session runner unreachable (code EXTERNAL_UNAVAILABLE, Retry-After) or it refused our credentials (code EXTERNAL_UNAUTHORIZED, no Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    post:
+      summary: Create a project session (domain shape; title/parentID forwarded honestly)
+      operationId: createSessionDomain
+      tags: [sessions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+      responses:
+        '200':
+          description: created domain session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionInfo'
+        '400':
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate), invalid body (code bad_request — our zod) or the session runner rejected the payload (code EXTERNAL_BAD_REQUEST) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: session runner unreachable (code EXTERNAL_UNAVAILABLE, Retry-After) or it refused our credentials (code EXTERNAL_UNAUTHORIZED, no Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/sessions/status:
+    get:
+      summary: Runtime status map for project sessions (sessionId → busy/idle snapshot; retry lives on the event stream)
+      operationId: sessionStatusDomain
+      tags: [sessions]
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          description: Owning project uuid — the C4 gate; missing answers 400 PROJECT_REQUIRED.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: sessionId → status map derived from the live runner state (the 2.x server exposes no status-list path; the legacy one the mirror proxies is not served)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionRunStatusMap'
+        '400':
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or the session runner rejected the request (code EXTERNAL_BAD_REQUEST) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: session runner unreachable (code EXTERNAL_UNAVAILABLE, Retry-After) or it refused our credentials (code EXTERNAL_UNAUTHORIZED, no Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
   /api/opencode/session:
     get:
       summary: List sessions (sdk → opencode server; outages 503, upstream/gate request errors answer honest 4xx)
       operationId: opencodeListSessions
+      deprecated: true
       tags: [opencode]
       parameters:
         - name: directory
@@ -1973,6 +2105,7 @@ paths:
     post:
       summary: Create session (sdk → opencode server; outages 503, upstream/gate request errors answer honest 4xx)
       operationId: opencodeCreateSession
+      deprecated: true
       tags: [opencode]
       parameters:
         - name: directory
@@ -2026,6 +2159,7 @@ paths:
     get:
       summary: Get session status (sdk → opencode server; outages 503, gate/validation errors answer honest 4xx)
       operationId: opencodeSessionStatus
+      deprecated: true
       tags: [opencode]
       parameters:
         - name: directory
@@ -2068,6 +2202,7 @@ paths:
     get:
       summary: Get session (sdk → opencode server; outages 503, upstream/gate request errors answer honest 4xx)
       operationId: opencodeGetSession
+      deprecated: true
       tags: [opencode]
       parameters:
         - name: id
@@ -2114,6 +2249,7 @@ paths:
     delete:
       summary: Delete session (sdk → opencode server; outages 503, gate/validation errors answer honest 4xx)
       operationId: opencodeDeleteSession
+      deprecated: true
       tags: [opencode]
       parameters:
         - name: id
@@ -2165,6 +2301,7 @@ paths:
     patch:
       summary: Update session (sdk → opencode server; outages 503, gate/validation errors answer honest 4xx)
       operationId: opencodeUpdateSession
+      deprecated: true
       tags: [opencode]
       parameters:
         - name: id
@@ -2218,6 +2355,7 @@ paths:
     get:
       summary: List session messages (sdk → opencode server; outages 503, upstream/gate request errors answer honest 4xx)
       operationId: opencodeListMessages
+      deprecated: true
       tags: [opencode]
       parameters:
         - name: id
@@ -2286,6 +2424,7 @@ paths:
     post:
       summary: Send session message (sdk → opencode server; outages 503, gate/validation errors answer honest 4xx)
       operationId: opencodePrompt
+      deprecated: true
       tags: [opencode]
       parameters:
         - name: id
@@ -2340,6 +2479,7 @@ paths:
     get:
       summary: Get session message (sdk → opencode server; outages 503, upstream/gate request errors answer honest 4xx)
       operationId: opencodeGetMessage
+      deprecated: true
       tags: [opencode]
       parameters:
         - name: id
@@ -2393,6 +2533,7 @@ paths:
     post:
       summary: Send async session message, return immediately (sdk → opencode server; outages 503, gate/validation errors answer honest 4xx)
       operationId: opencodePromptAsync
+      deprecated: true
       tags: [opencode]
       parameters:
         - name: id
@@ -2442,6 +2583,7 @@ paths:
     post:
       summary: Send command to session (sdk → opencode server; outages 503, gate/validation errors answer honest 4xx)
       operationId: opencodeRunCommand
+      deprecated: true
       tags: [opencode]
       parameters:
         - name: id
@@ -2496,6 +2638,7 @@ paths:
     post:
       summary: Run shell command in session (sdk → opencode server; outages 503, gate/validation errors answer honest 4xx)
       operationId: opencodeRunShell
+      deprecated: true
       tags: [opencode]
       parameters:
         - name: id
@@ -2550,6 +2693,7 @@ paths:
     post:
       summary: Fork session (sdk → opencode server; outages 503, gate/validation errors answer honest 4xx)
       operationId: opencodeForkSession
+      deprecated: true
       tags: [opencode]
       parameters:
         - name: id
@@ -2603,6 +2747,7 @@ paths:
     post:
       summary: Abort session (sdk → opencode server; outages 503, gate/validation errors answer honest 4xx)
       operationId: opencodeAbortSession
+      deprecated: true
       tags: [opencode]
       parameters:
         - name: id
@@ -2651,6 +2796,7 @@ paths:
     get:
       summary: List providers (sdk → opencode server; outages 503, upstream/gate request errors answer honest 4xx)
       operationId: opencodeListProviders
+      deprecated: true
       tags: [opencode]
       parameters:
         - name: directory
@@ -2694,6 +2840,7 @@ paths:
     get:
       summary: Subscribe to legacy global events (SSE re-stream of GlobalEvent frames, 503 when unreachable)
       operationId: opencodeStreamEvents
+      deprecated: true
       tags: [opencode]
       responses:
         '200':
@@ -2720,6 +2867,7 @@ paths:
     get:
       summary: Opencode server liveness (synthesized from v2 GET /api/info, 503 when unreachable)
       operationId: opencodeGlobalHealth
+      deprecated: true
       tags: [opencode]
       responses:
         '200':
@@ -2744,6 +2892,7 @@ paths:
     get:
       summary: Subscribe to opencode v2 events (SSE re-stream of flat event frames, 503 when unreachable)
       operationId: opencodeStreamLegacyEvents
+      deprecated: true
       tags: [opencode]
       parameters:
         - name: directory
@@ -2997,6 +3146,79 @@ components:
       properties:
         title:
           type: string
+    SessionInfoModel:
+      type: object
+      required: [id, providerID]
+      description: Model attached to a session (translated from the runtime model ref; null on the session row until set).
+      properties:
+        id:
+          type: string
+        providerID:
+          type: string
+        variant:
+          type: string
+    SessionInfo:
+      type: object
+      required: [id, title, createdAt, directory, projectId, model, status]
+      description: >-
+        Domain session row (GET/POST /api/sessions) — OUR shape, stable while
+        the runtime behind it changes: title/model are explicitly nullable
+        (a fresh session carries neither), createdAt is ISO-8601 (the runtime
+        keeps epoch millis; the backend converts), directory is the jailed
+        project path the session works in, projectId is OUR uuid (bound by
+        the access gate, not the runtime's internal project hash).
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        directory:
+          type: string
+        projectId:
+          type: string
+          format: uuid
+        model:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/SessionInfoModel'
+        status:
+          $ref: '#/components/schemas/SessionRunStatus'
+    CreateSessionRequest:
+      type: object
+      required: [projectId]
+      description: >-
+        POST /api/sessions body — projectId is required (sessions are
+        project-scoped); title/parentID are honestly forwarded to the runtime
+        create (the deprecated mirror could not forward them).
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        parentID:
+          type: string
+          minLength: 1
+          maxLength: 200
+    SessionRunStatus:
+      description: >-
+        Runtime status snapshot of one session: busy while the server reports
+        an active drain for it, idle otherwise. The transient retry state
+        (shape shared via the same union) is observable on the event stream
+        only — a REST snapshot never fakes it.
+      allOf:
+        - $ref: '#/components/schemas/OpencodeSessionStatus'
+    SessionRunStatusMap:
+      type: object
+      description: GET /api/sessions/status payload — sessionId → derived runtime status.
+      additionalProperties:
+        $ref: '#/components/schemas/SessionRunStatus'
     OpencodeLocationRef:
       type: object
       required: [directory]

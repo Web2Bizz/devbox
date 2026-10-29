@@ -2024,7 +2024,7 @@ paths:
                 $ref: '#/components/schemas/ApiError'
   /api/opencode/session/status:
     get:
-      summary: Get session status (sdk → opencode server; outages 503, upstream/gate request errors answer honest 4xx)
+      summary: Get session status (sdk → opencode server; outages 503, gate/validation errors answer honest 4xx)
       operationId: opencodeSessionStatus
       tags: [opencode]
       parameters:
@@ -2041,7 +2041,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/OpencodeSessionStatusMap'
         '400':
-          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or upstream rejected the request shape (code EXTERNAL_BAD_REQUEST, honest upstream 400 passthrough) — non-retryable, no Retry-After
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) — non-retryable, no Retry-After
           content:
             application/json:
               schema:
@@ -2112,7 +2112,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
     delete:
-      summary: Delete session (sdk → opencode server; outages 503, upstream/gate request errors answer honest 4xx)
+      summary: Delete session (sdk → opencode server; outages 503, gate/validation errors answer honest 4xx)
       operationId: opencodeDeleteSession
       tags: [opencode]
       parameters:
@@ -2139,13 +2139,13 @@ paths:
                     type: boolean
                     example: true
         '400':
-          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or upstream rejected the request shape (code EXTERNAL_BAD_REQUEST, honest upstream 400 passthrough) — non-retryable, no Retry-After
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) — non-retryable, no Retry-After
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '404':
-          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) or session absent upstream (code EXTERNAL_NOT_FOUND, honest upstream 404 passthrough) — non-retryable, no Retry-After
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
           content:
             application/json:
               schema:
@@ -2163,7 +2163,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
     patch:
-      summary: Update session (sdk → opencode server; outages 503, upstream/gate request errors answer honest 4xx)
+      summary: Update session (sdk → opencode server; outages 503, gate/validation errors answer honest 4xx)
       operationId: opencodeUpdateSession
       tags: [opencode]
       parameters:
@@ -2191,13 +2191,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/Session'
         '400':
-          description: missing projectId (code PROJECT_REQUIRED), invalid body (code bad_request — our zod) or upstream rejected the request shape (code EXTERNAL_BAD_REQUEST, honest upstream 400 passthrough) — non-retryable, no Retry-After
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or invalid body (code bad_request — our zod) — non-retryable, no Retry-After
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '404':
-          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) or session absent upstream (code EXTERNAL_NOT_FOUND, honest upstream 404 passthrough) — non-retryable, no Retry-After
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
           content:
             application/json:
               schema:
@@ -2216,7 +2216,7 @@ paths:
                 $ref: '#/components/schemas/ApiError'
   /api/opencode/session/{id}/message:
     get:
-      summary: List session messages (sdk → opencode server, 503 when unreachable)
+      summary: List session messages (sdk → opencode server; outages 503, upstream/gate request errors answer honest 4xx)
       operationId: opencodeListMessages
       tags: [opencode]
       parameters:
@@ -2259,6 +2259,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MessagesResponse'
+        '400':
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate), invalid query (code bad_request — our limit validation) or upstream rejected the request shape (code EXTERNAL_BAD_REQUEST, honest upstream 400 passthrough) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) or session absent upstream (code EXTERNAL_NOT_FOUND, honest upstream 404 passthrough) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '503':
           description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (code EXTERNAL_UNAUTHORIZED, no Retry-After)
           headers:
@@ -2272,7 +2284,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
     post:
-      summary: Send session message (sdk → opencode server, 503 when unreachable)
+      summary: Send session message (sdk → opencode server; outages 503, gate/validation errors answer honest 4xx)
       operationId: opencodePrompt
       tags: [opencode]
       parameters:
@@ -2301,7 +2313,13 @@ paths:
                 type: object
                 description: upstream session.prompt payload (live only)
         '400':
-          description: bad request (parts must be a non-empty array; command/shell required fields missing)
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or invalid body (code bad_request — our zod) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
           content:
             application/json:
               schema:
@@ -2320,7 +2338,7 @@ paths:
                 $ref: '#/components/schemas/ApiError'
   /api/opencode/session/{id}/message/{messageID}:
     get:
-      summary: Get session message (sdk → opencode server, 503 when unreachable)
+      summary: Get session message (sdk → opencode server; outages 503, upstream/gate request errors answer honest 4xx)
       operationId: opencodeGetMessage
       tags: [opencode]
       parameters:
@@ -2347,6 +2365,18 @@ paths:
               schema:
                 type: object
                 description: upstream session.message payload (live only)
+        '400':
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or upstream rejected the request shape (code EXTERNAL_BAD_REQUEST, honest upstream 400 passthrough) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) or session/message absent upstream (code EXTERNAL_NOT_FOUND, honest upstream 404 passthrough) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '503':
           description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (code EXTERNAL_UNAUTHORIZED, no Retry-After)
           headers:
@@ -2361,7 +2391,7 @@ paths:
                 $ref: '#/components/schemas/ApiError'
   /api/opencode/session/{id}/prompt_async:
     post:
-      summary: Send async session message, return immediately (sdk → opencode server, 503 when unreachable)
+      summary: Send async session message, return immediately (sdk → opencode server; outages 503, gate/validation errors answer honest 4xx)
       operationId: opencodePromptAsync
       tags: [opencode]
       parameters:
@@ -2385,7 +2415,13 @@ paths:
         '204':
           description: prompt accepted (live upstream only)
         '400':
-          description: bad request (parts must be a non-empty array)
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or invalid body (code bad_request — our zod) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
           content:
             application/json:
               schema:
@@ -2404,7 +2440,7 @@ paths:
                 $ref: '#/components/schemas/ApiError'
   /api/opencode/session/{id}/command:
     post:
-      summary: Send command to session (sdk → opencode server, 503 when unreachable)
+      summary: Send command to session (sdk → opencode server; outages 503, gate/validation errors answer honest 4xx)
       operationId: opencodeRunCommand
       tags: [opencode]
       parameters:
@@ -2433,7 +2469,13 @@ paths:
                 type: object
                 description: upstream session.command payload (live only)
         '400':
-          description: bad request (command + arguments are required)
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or invalid body (code bad_request — our zod) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
           content:
             application/json:
               schema:
@@ -2452,7 +2494,7 @@ paths:
                 $ref: '#/components/schemas/ApiError'
   /api/opencode/session/{id}/shell:
     post:
-      summary: Run shell command in session (sdk → opencode server, 503 when unreachable)
+      summary: Run shell command in session (sdk → opencode server; outages 503, gate/validation errors answer honest 4xx)
       operationId: opencodeRunShell
       tags: [opencode]
       parameters:
@@ -2481,7 +2523,13 @@ paths:
                 type: object
                 description: upstream session.shell payload (live only)
         '400':
-          description: bad request (agent + command are required)
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or invalid body (code bad_request — our zod) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
           content:
             application/json:
               schema:
@@ -2500,7 +2548,7 @@ paths:
                 $ref: '#/components/schemas/ApiError'
   /api/opencode/session/{id}/fork:
     post:
-      summary: Fork session (sdk → opencode server, 503 when unreachable)
+      summary: Fork session (sdk → opencode server; outages 503, gate/validation errors answer honest 4xx)
       operationId: opencodeForkSession
       tags: [opencode]
       parameters:
@@ -2527,6 +2575,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Session'
+        '400':
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or invalid body (code bad_request — our zod) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '503':
           description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (code EXTERNAL_UNAUTHORIZED, no Retry-After)
           headers:
@@ -2541,7 +2601,7 @@ paths:
                 $ref: '#/components/schemas/ApiError'
   /api/opencode/session/{id}/abort:
     post:
-      summary: Abort session (sdk → opencode server, 503 when unreachable)
+      summary: Abort session (sdk → opencode server; outages 503, gate/validation errors answer honest 4xx)
       operationId: opencodeAbortSession
       tags: [opencode]
       parameters:
@@ -2563,6 +2623,18 @@ paths:
               schema:
                 type: object
                 description: upstream session.abort payload (live only)
+        '400':
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '503':
           description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (code EXTERNAL_UNAUTHORIZED, no Retry-After)
           headers:
@@ -2577,7 +2649,7 @@ paths:
                 $ref: '#/components/schemas/ApiError'
   /api/opencode/config/providers:
     get:
-      summary: List providers (sdk → opencode server, 503 when unreachable)
+      summary: List providers (sdk → opencode server; outages 503, upstream/gate request errors answer honest 4xx)
       operationId: opencodeListProviders
       tags: [opencode]
       parameters:
@@ -2594,6 +2666,18 @@ paths:
               schema:
                 type: object
                 description: upstream config.providers payload (live only)
+        '400':
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or upstream rejected the request shape (code EXTERNAL_BAD_REQUEST, honest upstream 400 passthrough) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) or the location is unknown upstream (code EXTERNAL_NOT_FOUND, honest upstream 404 passthrough) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '503':
           description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (code EXTERNAL_UNAUTHORIZED, no Retry-After)
           headers:
@@ -2608,7 +2692,7 @@ paths:
                 $ref: '#/components/schemas/ApiError'
   /api/opencode/global/event:
     get:
-      summary: Subscribe to opencode events (SSE re-stream, 503 when unreachable)
+      summary: Subscribe to legacy global events (SSE re-stream of GlobalEvent frames, 503 when unreachable)
       operationId: opencodeStreamEvents
       tags: [opencode]
       responses:

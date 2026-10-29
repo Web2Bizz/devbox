@@ -272,6 +272,12 @@ export const ru: Dictionary = {
     assistant: 'Ассистент',
     sessionTitle: 'Чат сессии',
     sessionSubtitle: 'Привязанный чат — история и стриминг следуют за этой сессией.',
+    modelLabel: 'Модель',
+    modelProvider: 'Провайдер',
+    modelIdPlaceholder: 'ID модели (напр. claude-sonnet-4-5)…',
+    modelDefault: 'Дефолт раннера',
+    modelClear: 'Сбросить',
+    modelActive: 'Активная модель',
   },
   language: {
     label: 'Язык',

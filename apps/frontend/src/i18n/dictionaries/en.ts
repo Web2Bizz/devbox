@@ -272,6 +272,12 @@ export const en: Dictionary = {
     assistant: 'Assistant',
     sessionTitle: 'Session chat',
     sessionSubtitle: 'Scoped chat — history and streaming follow this session.',
+    modelLabel: 'Model',
+    modelProvider: 'Provider',
+    modelIdPlaceholder: 'Model id (e.g. claude-sonnet-4-5)…',
+    modelDefault: 'Runner default',
+    modelClear: 'Clear',
+    modelActive: 'Active model',
   },
   language: {
     label: 'Language',

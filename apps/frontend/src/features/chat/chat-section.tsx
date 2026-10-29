@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Button } from '@web2bizz/ui/components';
-import { ChatInput, ChatWindow } from '../../components/chat';
+import { ChatInput, ChatWindow, ModelSelector } from '../../components/chat';
 import { ErrorState } from '../../components/states';
 import { useChat } from '../../hooks/useChat';
 import { useI18n } from '../../i18n';
@@ -33,7 +33,19 @@ export function ChatSection({ sessionId, projectId }: ChatSectionProps) {
   const { t } = useI18n();
   const [aborting, setAborting] = useState(false);
   const chat = useChat({ sessionId, projectId });
-  const { messages, streamingText, loading, sending, error, isEmpty, send, stop, reload } = chat;
+  const {
+    messages,
+    streamingText,
+    loading,
+    sending,
+    error,
+    isEmpty,
+    model,
+    setModel,
+    send,
+    stop,
+    reload,
+  } = chat;
 
   const handleSend = (text: string) => send(text);
 
@@ -52,6 +64,7 @@ export function ChatSection({ sessionId, projectId }: ChatSectionProps) {
         {t.chat.title}
       </h2>
       <p className="text-muted-foreground text-sm">{t.chat.subtitle}</p>
+      <ModelSelector projectId={projectId} model={model} onChange={setModel} disabled={sending} />
       {error && isEmpty ? (
         <ErrorState message={error} onRetry={reload} retryLabel={t.chat.retry} />
       ) : (

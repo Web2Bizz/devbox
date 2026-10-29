@@ -272,6 +272,12 @@ export type Dictionary = {
     assistant: string;
     sessionTitle: string;
     sessionSubtitle: string;
+    modelLabel: string;
+    modelProvider: string;
+    modelIdPlaceholder: string;
+    modelDefault: string;
+    modelClear: string;
+    modelActive: string;
   };
   language: {
     label: string;

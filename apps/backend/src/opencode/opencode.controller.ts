@@ -58,13 +58,10 @@ import {
   type OpencodeShellInput,
 } from '../api/dto';
 import { fromStatus, fromUnknown } from '../common/external/external-error';
+import { relaySse, type SseSubscription } from '../common/sse-relay';
 
 /** Upstream cursor headers passed through on GET message lists (when present). */
 const CURSOR_PASSTHROUGH_HEADERS = ['x-next-cursor', 'link'] as const;
-
-type SseSubscription = {
-  stream: AsyncIterable<unknown> & { return?: (v?: unknown) => Promise<unknown> };
-};
 
 /**
  * OpenCode reverse-proxy (sdk-driven).
@@ -232,164 +229,31 @@ export class OpencodeController {
     return limit;
   }
 
-  private isAbortError(err: unknown): boolean {
-    if (!err || typeof err !== 'object') return false;
-    const e = err as { name?: unknown; code?: unknown; cause?: unknown };
-    if (e.name === 'AbortError') return true;
-    if (e.code === 20) return true;
-    // DOMException AbortError may be wrapped (e.g. in cause)
-    if (e.cause && typeof e.cause === 'object') {
-      const c = e.cause as { name?: unknown; code?: unknown };
-      if (c.name === 'AbortError' || c.code === 20) return true;
-    }
-    return false;
-  }
-
-  private async relaySse(
+  /**
+   * SSE re-stream — shared mechanics in common/sse-relay.ts (extracted
+   * unchanged; the domain /api/sessions/events route rides the same
+   * transport). Prefix/`[opencode]` log lines and error mapping are
+   * preserved 1:1 (opencode.e2e covers the down-probe 503 + headers).
+   */
+  private relaySse(
     operation: string,
     cid: string,
     req: ExpressRequest,
     res: ExpressResponse,
     subscribe: (signal: AbortSignal) => Promise<SseSubscription>,
   ): Promise<void> {
-    // Fail fast when upstream is unreachable. The sdk SSE client reconnects
-    // forever (its first `next()` never rejects while down), so without a
-    // probe a down upstream would answer 200 with an infinite silent stream
-    // instead of 503 EXTERNAL_UNAVAILABLE. The probe never throws and never
-    // logs secrets; only after it says up do we send SSE headers (a 200
-    // stream then carries live upstream frames only — no mock frames).
-    // NOTE: the sdk SSE path uses global fetch (not the ExternalClient
-    // transport), so liveness here is probe + downstream-close abort.
-    if ((await this.opencode.checkConnectivity()) === 'down') {
-      this.logger.warn(`[opencode] ${operation} upstream failed`, cid);
-      throw this.upstreamError(operation, new Error('unreachable'));
-    }
-    // AbortSignal reaches the sdk generator (options.signal) so a
-    // downstream disconnect stops the upstream fetch; backoff is capped so
-    // cleanup never hangs the handler. Retries stay unbounded while live
-    // (re-stream semantics across transient drops).
-    const upstream = new AbortController();
-    let sub: SseSubscription;
-    try {
-      sub = await subscribe(upstream.signal);
-    } catch (err) {
-      // Client went away before subscribe resolved: upstream.abort()
-      // surfaces here as AbortError — штатный disconnect, не 503.
-      if (this.isAbortError(err)) {
-        this.logger.debug('[opencode] client disconnected before subscribe', cid);
-        return;
-      }
-      this.logger.warn(`[opencode] ${operation} upstream failed`, cid);
-      this.logger.debug((err as Error).message, cid);
-      throw this.upstreamError(operation, err);
-    }
-    res.setHeader('content-type', 'text/event-stream');
-    res.setHeader('cache-control', 'no-cache, no-transform');
-    res.setHeader('connection', 'keep-alive');
-    res.setHeader('x-accel-buffering', 'no');
-    res.setHeader('x-correlation-id', cid || 'none');
-    res.flushHeaders();
-
-    let closed = false;
-    const onClose = (): void => {
-      if (closed) return;
-      closed = true;
-      try {
-        upstream.abort();
-      } catch {
-        /* abort is idempotent — never throws outward */
-      }
-    };
-    // upstream.abort() may throw DOMException AbortError synchronously
-    // inside EventEmitter emit — swallow it here so it never escapes as
-    // unhandledRejection (Bun prints it as line:127 onClose→emitCloseNT).
-    const onCloseSafe = (): void => {
-      try {
-        onClose();
-      } catch {
-        /* disconnect — noop */
-      }
-    };
-    req.on('close', onCloseSafe);
-    // Socket errors after disconnect would otherwise bubble as unhandled
-    // 'error' events on the request — swallow, close handler does cleanup.
-    req.on('error', () => {
-      /* downstream socket error — noop, handled via close */
+    return relaySse({
+      operation,
+      cid,
+      req,
+      res,
+      subscribe,
+      logger: this.logger,
+      prefix: '[opencode]',
+      probe: () => this.opencode.checkConnectivity(),
+      unreachableError: () => this.upstreamError(operation, new Error('unreachable')),
+      subscribeFailedError: (err) => this.upstreamError(operation, err),
     });
-
-    try {
-      const it = sub.stream[Symbol.asyncIterator]();
-      while (!closed && !req.destroyed) {
-        let next: IteratorResult<unknown>;
-        try {
-          next = await it.next();
-        } catch (err) {
-          // AbortError from the sdk generator on downstream disconnect —
-          // штатный disconnect, выходим молча без stack.
-          if (this.isAbortError(err) || closed) {
-            this.logger.debug('[opencode] client disconnected', cid);
-            break;
-          }
-          throw err;
-        }
-        if (next.done || closed || req.destroyed) break;
-        try {
-          res.write(`data: ${JSON.stringify(next.value)}\n\n`);
-        } catch (err) {
-          // Write after downstream close — то же, что disconnect.
-          if (this.isAbortError(err) || closed || req.destroyed) {
-            this.logger.debug('[opencode] client disconnected', cid);
-            break;
-          }
-          throw err;
-        }
-      }
-    } catch (err) {
-      // Mid-stream failure: status is already 200, just close the stream
-      // (message only, never secrets). AbortError — штатный disconnect.
-      if (this.isAbortError(err)) {
-        this.logger.debug('[opencode] client disconnected', cid);
-      } else {
-        this.logger.debug(`[opencode] event stream interrupted: ${(err as Error).message}`, cid);
-      }
-    } finally {
-      req.removeListener('close', onCloseSafe);
-      if (!closed) {
-        closed = true;
-        try {
-          upstream.abort();
-        } catch {
-          /* noop */
-        }
-      }
-      // Best-effort cancel: the sdk generator may sit out a reconnect
-      // backoff — bound the wait so the handler never hangs. AbortError
-      // from return() — штатный disconnect, глотаем молча.
-      await Promise.race([
-        (async (): Promise<void> => {
-          try {
-            await sub.stream.return?.(undefined);
-          } catch (err) {
-            if (!this.isAbortError(err)) {
-              /* non-abort cleanup errors are also best-effort — noop */
-            }
-          }
-        })(),
-        new Promise((resolve) => setTimeout(resolve, 1500)),
-      ]);
-    }
-    if (!req.destroyed && !res.writableEnded && !res.destroyed) {
-      try {
-        res.end();
-      } catch (err) {
-        if (!this.isAbortError(err)) {
-          this.logger.debug(
-            `[opencode] event stream end failed: ${(err as Error).message}`,
-            cid,
-          );
-        }
-      }
-    }
   }
 
   // --- sessions -----------------------------------------------------------

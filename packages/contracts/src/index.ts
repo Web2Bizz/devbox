@@ -28,3 +28,7 @@ export * from './opencode-key/opencode-key';
 export * from './opencode-key/opencode-key.schema';
 export * from './opencode/opencode';
 export * from './opencode/opencode.schema';
+export * from './opencode-session/opencode-session';
+export * from './opencode-session/opencode-session.schema';
+export * from './opencode-event/opencode-event';
+export * from './opencode-event/opencode-event.schema';

@@ -1945,7 +1945,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/Session'
+                  $ref: '#/components/schemas/OpencodeSession'
         '400':
           description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or upstream rejected the request shape (code EXTERNAL_BAD_REQUEST, honest upstream 400 passthrough) — non-retryable, no Retry-After
           content:
@@ -1997,7 +1997,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Session'
+                $ref: '#/components/schemas/OpencodeSession'
         '400':
           description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or upstream rejected the request shape (code EXTERNAL_BAD_REQUEST, honest upstream 400 passthrough) — non-retryable, no Retry-After
           content:
@@ -2035,12 +2035,11 @@ paths:
             type: string
       responses:
         '200':
-          description: live session status map
+          description: live session status map (upstream session.status passthrough)
           content:
             application/json:
               schema:
-                type: object
-                description: upstream session.status payload (live only)
+                $ref: '#/components/schemas/OpencodeSessionStatusMap'
         '400':
           description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or upstream rejected the request shape (code EXTERNAL_BAD_REQUEST, honest upstream 400 passthrough) — non-retryable, no Retry-After
           content:
@@ -2087,7 +2086,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Session'
+                $ref: '#/components/schemas/OpencodeSession'
         '400':
           description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or upstream rejected the request shape (code EXTERNAL_BAD_REQUEST, honest upstream 400 passthrough) — non-retryable, no Retry-After
           content:
@@ -2614,12 +2613,13 @@ paths:
       tags: [opencode]
       responses:
         '200':
-          description: text/event-stream of upstream GlobalEvent frames (live only)
+          description: >-
+            text/event-stream of upstream GlobalEvent frames ({directory, payload}
+            wrapper; the current 2.2.0 stand does not serve /global/event — card 4)
           content:
             text/event-stream:
               schema:
-                type: string
-                example: 'data: {"type":"session.created"}\n\n'
+                $ref: '#/components/schemas/OpencodeGlobalEvent'
         '503':
           description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (code EXTERNAL_UNAUTHORIZED, no Retry-After)
           headers:
@@ -2658,7 +2658,7 @@ paths:
                 $ref: '#/components/schemas/ApiError'
   /api/opencode/event:
     get:
-      summary: Subscribe to legacy opencode events (SSE re-stream, 503 when unreachable)
+      summary: Subscribe to opencode v2 events (SSE re-stream of flat event frames, 503 when unreachable)
       operationId: opencodeStreamLegacyEvents
       tags: [opencode]
       parameters:
@@ -2669,12 +2669,13 @@ paths:
             type: string
       responses:
         '200':
-          description: text/event-stream of upstream Event frames (live only)
+          description: >-
+            text/event-stream of flat v2 bus event frames (sdk-parsed envelope
+            relayed verbatim; see OpencodeEvent)
           content:
             text/event-stream:
               schema:
-                type: string
-                example: 'data: {"type":"session.created"}\n\n'
+                $ref: '#/components/schemas/OpencodeEvent'
         '503':
           description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (code EXTERNAL_UNAUTHORIZED, no Retry-After)
           headers:
@@ -2912,6 +2913,326 @@ components:
       properties:
         title:
           type: string
+    OpencodeLocationRef:
+      type: object
+      required: [directory]
+      additionalProperties: false
+      description: >-
+        Session location — jailed directory of the project. Verbatim upstream
+        `Location.PublicRef` passthrough (2.2.0 live spec; required field of
+        Session.Info.location). Rush Code adds no fields here.
+      properties:
+        directory:
+          type: string
+    OpencodeSessionModelRef:
+      type: object
+      required: [id, providerID]
+      additionalProperties: false
+      description: >-
+        Model reference attached to a session (upstream `Model.Ref` passthrough).
+        Distinct from OpencodeModelRef (prompt-body provider/model pair).
+      properties:
+        id:
+          type: string
+        providerID:
+          type: string
+        variant:
+          type: string
+    OpencodeSessionTokens:
+      type: object
+      required: [input, output, reasoning, cache]
+      additionalProperties: false
+      description: Token usage counters of a session (upstream `TokenUsage.Info` passthrough).
+      properties:
+        input:
+          type: number
+        output:
+          type: number
+        reasoning:
+          type: number
+        cache:
+          type: object
+          required: [read, write]
+          additionalProperties: false
+          properties:
+            read:
+              type: number
+            write:
+              type: number
+    OpencodeSessionTime:
+      type: object
+      required: [created, updated]
+      additionalProperties: false
+      description: >-
+        Session timestamps in epoch millis (upstream Session.Info.time). idle/viewed
+        exist on the live 2.2.0 spec and may be absent until the server sets them.
+      properties:
+        created:
+          type: number
+        updated:
+          type: number
+        idle:
+          type: number
+        viewed:
+          type: number
+        archived:
+          type: number
+    OpencodePermissionEffect:
+      type: string
+      enum: [allow, deny, ask]
+      description: Permission rule effect (upstream `Permission.Effect`).
+    OpencodePermissionRule:
+      type: object
+      required: [action, resource, effect]
+      additionalProperties: false
+      description: One rule of the session permissions ruleset (upstream `Permission.Rule`).
+      properties:
+        action:
+          type: string
+        resource:
+          type: string
+        effect:
+          $ref: '#/components/schemas/OpencodePermissionEffect'
+    OpencodeSessionForkBoundary:
+      type: object
+      required: [type, messageID]
+      additionalProperties: false
+      description: >-
+        Fork cut position (upstream `Session.ForkBoundary` — the anyOf of
+        before/through objects, identical shapes, collapsed to an enum here).
+      properties:
+        type:
+          type: string
+          enum: [before, through]
+        messageID:
+          type: string
+    OpencodeSessionFork:
+      type: object
+      required: [sessionID, boundary]
+      additionalProperties: false
+      description: Provenance of a forked session (upstream Session.Info.fork).
+      properties:
+        sessionID:
+          type: string
+        boundary:
+          $ref: '#/components/schemas/OpencodeSessionForkBoundary'
+    OpencodeFileDiff:
+      type: object
+      required: [file, patch, additions, deletions, status]
+      additionalProperties: false
+      description: File change row of a revert snapshot (upstream `FileDiff.Info`).
+      properties:
+        file:
+          type: string
+        patch:
+          type: string
+        additions:
+          type: integer
+          minimum: 0
+        deletions:
+          type: integer
+          minimum: 0
+        status:
+          type: string
+          enum: [added, deleted, modified]
+        more:
+          type: boolean
+          enum: [true]
+    OpencodeSessionRevert:
+      type: object
+      required: [messageID]
+      additionalProperties: false
+      description: Revert state attached to a session (upstream `Session.Revert`).
+      properties:
+        messageID:
+          type: string
+        partID:
+          type: string
+        snapshot:
+          type: string
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/OpencodeFileDiff'
+    OpencodeSession:
+      type: object
+      required: [id, projectID, cost, tokens, time, location]
+      additionalProperties: false
+      description: >-
+        Opencode session as the /api/opencode/* mirror answers: GET list item,
+        POST create, GET /{id} — VERBATIM upstream `Session.Info` passthrough
+        (2.2.0 live spec; the mirror only unwraps the {data}/{data,cursor}
+        envelopes and never re-maps fields). Everything outside the required
+        set appears only once the server sets it — a freshly created session
+        carries no `title` (verified by live probe).
+      properties:
+        id:
+          type: string
+        parentID:
+          type: string
+        projectID:
+          type: string
+        agent:
+          type: string
+        model:
+          $ref: '#/components/schemas/OpencodeSessionModelRef'
+        cost:
+          type: number
+        tokens:
+          $ref: '#/components/schemas/OpencodeSessionTokens'
+        outcome:
+          type: string
+          enum: [succeeded, failed, interrupted]
+        time:
+          $ref: '#/components/schemas/OpencodeSessionTime'
+        title:
+          type: string
+        subpath:
+          type: string
+        metadata:
+          type: object
+          description: free-form upstream metadata bag (Session.Metadata)
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/OpencodePermissionRule'
+        fork:
+          $ref: '#/components/schemas/OpencodeSessionFork'
+        revert:
+          $ref: '#/components/schemas/OpencodeSessionRevert'
+        location:
+          $ref: '#/components/schemas/OpencodeLocationRef'
+    OpencodeSessionStatusAction:
+      type: object
+      required: [reason, provider, title, message, label]
+      description: Retry action detail carried by a retry status (upstream session.status payload).
+      properties:
+        reason:
+          type: string
+        provider:
+          type: string
+        title:
+          type: string
+        message:
+          type: string
+        label:
+          type: string
+        link:
+          type: string
+    OpencodeSessionStatus:
+      description: >-
+        Live status of one session. Shape carried from the pinned
+        @opencode-ai/sdk v2 `SessionStatus` union — the 2.2.0 openapi.json
+        publishes no session-status schema, and the legacy GET /session/status
+        path our status route proxies is not served by the current stand
+        (SPA catch-all). Consumers must treat unknown type values as neither
+        busy nor idle.
+      oneOf:
+        - type: object
+          required: [type]
+          properties:
+            type:
+              type: string
+              enum: [idle]
+        - type: object
+          required: [type]
+          properties:
+            type:
+              type: string
+              enum: [busy]
+        - type: object
+          required: [type, attempt, message, next]
+          properties:
+            type:
+              type: string
+              enum: [retry]
+            attempt:
+              type: integer
+              minimum: 1
+            message:
+              type: string
+            next:
+              type: number
+              description: epoch millis of the next retry attempt
+            action:
+              $ref: '#/components/schemas/OpencodeSessionStatusAction'
+    OpencodeSessionStatusMap:
+      type: object
+      description: >-
+        GET /api/opencode/session/status payload — upstream session.status map
+        (sessionID → status) passthrough.
+      additionalProperties:
+        $ref: '#/components/schemas/OpencodeSessionStatus'
+    OpencodeEventDurable:
+      type: object
+      required: [aggregateID, seq, version]
+      description: Durable-seq marker some upstream event variants carry.
+      properties:
+        aggregateID:
+          type: string
+        seq:
+          type: number
+        version:
+          type: number
+    OpencodeEvent:
+      type: object
+      required: [id, type, data]
+      description: >-
+        Flat v2 bus event re-streamed by GET /api/opencode/event. The pinned
+        sdk `event.subscribe()` parses the upstream SSE envelope
+        {id?, event, data:JSON-string} away, and our relay writes the PARSED
+        event object as the downstream data: frame — so the downstream frame
+        is the flat event object itself (verified by live /api/event probe:
+        data: {"id":"evt_…","type":"server.connected","data":{}}; sdk
+        V2EventSubscribeResponses.200 = V2Event). `type` discriminates a large
+        upstream-owned variant union; per-variant data payloads pass through
+        as unknown records (mirroring every variant = card 4).
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        data:
+          type: object
+          description: per-type upstream payload (variant-owned, untouched)
+        metadata:
+          type: object
+        durable:
+          $ref: '#/components/schemas/OpencodeEventDurable'
+        location:
+          $ref: '#/components/schemas/OpencodeLocationRef'
+    OpencodeBusEvent:
+      type: object
+      required: [id, type, properties]
+      description: >-
+        Flat LEGACY bus event ({id, type, properties}) — shape of the pinned
+        sdk `Event` union members, carried inside GlobalEvent.payload below.
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        properties:
+          type: object
+          description: per-type upstream payload (variant-owned, untouched)
+    OpencodeGlobalEvent:
+      type: object
+      required: [directory, payload]
+      description: >-
+        Legacy global frame re-streamed by GET /api/opencode/global/event:
+        routing envelope ({directory, project?, workspace?}) wrapping a flat
+        bus event in `payload` — shape from the pinned sdk `GlobalEvent`.
+        The current 2.2.0 stand does NOT serve /global/event (SPA catch-all);
+        replacing this surface is card 4 scope.
+      properties:
+        directory:
+          type: string
+        project:
+          type: string
+        workspace:
+          type: string
+        payload:
+          $ref: '#/components/schemas/OpencodeBusEvent'
     OpencodeHealth:
       type: object
       required: [healthy, version]

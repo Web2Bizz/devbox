@@ -94,7 +94,7 @@ const checks: Array<{ name: string; run: () => void | Promise<void> }> = [
               () => null,
               (e: unknown) => e as ExternalServiceError,
             );
-        }).finally(restoreDoFetch);
+        });
 
         // Status/retry behavior unchanged: single attempt, honest 4xx code.
         assert.equal(counter.calls, 1);
@@ -143,7 +143,7 @@ const checks: Array<{ name: string; run: () => void | Promise<void> }> = [
               () => null,
               (e: unknown) => e as ExternalServiceError,
             );
-        }).finally(restoreDoFetch);
+        });
         assert.equal(counter.calls, 1);
         const causeLine = logged.find((l) => l.text.includes('[external] cause '));
         if (!causeLine) {

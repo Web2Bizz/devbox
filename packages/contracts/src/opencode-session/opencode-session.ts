@@ -23,6 +23,20 @@
  * this family is named `Opencode*` (same convention as OpencodeHealth /
  * OpencodeSessionUpdate) so one wire shape never has two names.
  * Types only — runtime validation lives in opencode-session.schema.ts.
+ *
+ * Provenance artifact: contracts/opencode-stand-2.2.0.json (live stand
+ * openapi.json filtered to the used paths/schemas — the authoritative
+ * shapes for every disputed field):
+ * - FileDiff.Info is {file, patch, additions, deletions, status, more?}:
+ *   the pinned sdk 1.18.33 FileDiff still names the field `path` —
+ *   upstream itself renamed path -> file by 2.2.0, the artifact is proof;
+ * - Session.Info.required = [id, projectID, cost, tokens, time, location]
+ *   — `title` is NOT required (absent on a fresh session, probe-verified);
+ * - Session.Info.time carries optional idle/viewed (epoch millis);
+ * - Session.Revert carries NO `diff` in 2.2.0 (sdk RevertState.diff was
+ *   dropped upstream);
+ * - Location.PublicRef = {directory} only — sdk LocationRef.workspaceID?
+ *   is not part of the published 2.2.0 location shape.
  */
 
 /** Session location — jailed directory of the project (upstream Location.PublicRef). */

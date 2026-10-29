@@ -3002,7 +3002,8 @@ components:
       required: [directory]
       additionalProperties: false
       description: >-
-        Session location — jailed directory of the project. Verbatim upstream
+        Session location — jailed directory of the project. Verbatim upstream (contracts/opencode-stand-2.2.0.json:
+        Location.PublicRef = {directory} only — no workspaceID in the published 2.x shape).
         `Location.PublicRef` passthrough (2.2.0 live spec; required field of
         Session.Info.location). Rush Code adds no fields here.
       properties:
@@ -3104,7 +3105,10 @@ components:
       type: object
       required: [file, patch, additions, deletions, status]
       additionalProperties: false
-      description: File change row of a revert snapshot (upstream `FileDiff.Info`).
+      description: >-
+        File change row of a revert snapshot (upstream `FileDiff.Info` — provenance
+        contracts/opencode-stand-2.2.0.json: field is `file`; the pinned sdk 1.18.33 still names it `path`,
+        upstream renamed it to `file` by 2.2.0).
       properties:
         file:
           type: string
@@ -3126,7 +3130,9 @@ components:
       type: object
       required: [messageID]
       additionalProperties: false
-      description: Revert state attached to a session (upstream `Session.Revert`).
+      description: >-
+        Revert state attached to a session (upstream `Session.Revert`; 2.2.0 dropped
+        the sdk 1.18.33 `diff` field — provenance contracts/opencode-stand-2.2.0.json).
       properties:
         messageID:
           type: string
@@ -3148,7 +3154,7 @@ components:
         (2.2.0 live spec; the mirror only unwraps the {data}/{data,cursor}
         envelopes and never re-maps fields). Everything outside the required
         set appears only once the server sets it — a freshly created session
-        carries no `title` (verified by live probe).
+        carries no `title` (provenance: contracts/opencode-stand-2.2.0.json, live probe).
       properties:
         id:
           type: string

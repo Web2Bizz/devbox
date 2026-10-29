@@ -2,14 +2,18 @@ import { z } from 'zod';
 
 import type {
   CreateSessionRequest,
+  InterruptSessionRequest,
   SendMessageRequest,
   SessionInfo,
   SessionInfoList,
   SessionInfoModel,
+  SessionInterruptResult,
   SessionMessage,
   SessionMessageList,
   SessionMessagePartDeltaFrame,
   SessionMessagePartUpdatedFrame,
+  SessionRunnerProvider,
+  SessionRunnerProviderList,
   SessionRunStatus,
   SessionRunStatusMap,
   SessionStreamFrame,
@@ -138,4 +142,36 @@ export const sessionMessagePartUpdatedFrameSchema = z.object({
   session: z.string().optional(),
 }) satisfies z.ZodType<SessionMessagePartUpdatedFrame>;
 
+/** POST /api/sessions/{id}/interrupt body — projectId is the gate uuid
+ * (strict like the YAML format: uuid; backend-generated, Q2 precedent). */
+export const interruptSessionRequestSchema = z.object({
+  projectId: z.uuid({ error: 'Field "projectId" is required' }),
+}) satisfies z.ZodType<InterruptSessionRequest>;
+
+/** SessionInterruptResult — artifact SessionInterruptResponse is exactly
+ * {interrupted: boolean} (additionalProperties:false); false is the idle
+ * no-op, an honest answer rather than an error. */
+export const sessionInterruptResultSchema = z.object({
+  interrupted: z.boolean({ error: 'Field "interrupted" is required' }),
+}) satisfies z.ZodType<SessionInterruptResult>;
+
+/** SessionRunnerProvider — the REQUIRED subset of the artifact
+ * Provider.Info (id/name/activation/package, enum values verbatim).
+ * settings/headers/body stay upstream: headers may carry auth material
+ * and the UI consumes none of them — never shipped to the browser. */
+export const sessionRunnerProviderSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  name: z.string({ error: 'Field "name" is required' }),
+  activation: z.enum(['auto', 'enabled', 'disabled'], {
+    error: 'Field "activation" must be one of auto|enabled|disabled',
+  }),
+  package: z.string({ error: 'Field "package" is required' }),
+}) satisfies z.ZodType<SessionRunnerProvider>;
+
+export const sessionRunnerProviderListSchema = z.array(sessionRunnerProviderSchema) satisfies z.ZodType<
+  SessionRunnerProviderList
+>;
+
 export type SendMessageInput = z.infer<typeof sendMessageRequestSchema>;
+
+export type InterruptSessionInput = z.infer<typeof interruptSessionRequestSchema>;

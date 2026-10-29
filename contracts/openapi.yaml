@@ -2057,6 +2057,61 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+  /api/sessions/providers:
+    get:
+      summary: List the project session-runner providers (required artifact subset; credential-bearing members are never projected)
+      operationId: listSessionProvidersDomain
+      tags: [sessions]
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          description: Owning project uuid — the C4 gate; missing answers 400 PROJECT_REQUIRED.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: domain provider rows (always an array; empty when the runner reports none)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SessionRunnerProvider'
+        '400':
+          description: >-
+            missing projectId (code PROJECT_REQUIRED, the C4 gate) or the session runner rejected the
+            request (code EXTERNAL_BAD_REQUEST, honest upstream 400 passthrough) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: >-
+            unknown project for this caller (code not_found, no existence leak — the C4 gate) or the
+            location is unknown upstream (code EXTERNAL_NOT_FOUND, honest upstream 404 passthrough) —
+            non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: >-
+            session runner unreachable (code EXTERNAL_UNAVAILABLE, Retry-After), it refused our
+            credentials (code EXTERNAL_UNAUTHORIZED, no Retry-After) or a provider row drifted off the
+            artifact REQUIRED set (code EXTERNAL_UNAVAILABLE — contract drift fails loud, never a
+            silently skipped row)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
   /api/sessions/{id}/messages:
     get:
       summary: List session messages (normalized domain rows; text projection of the runtime message union)
@@ -2167,6 +2222,63 @@ paths:
                 $ref: '#/components/schemas/ApiError'
         '503':
           description: session runner unreachable (code EXTERNAL_UNAVAILABLE, Retry-After), it refused our credentials (code EXTERNAL_UNAUTHORIZED, no Retry-After) or it reported a conflict (upstream 409 surfaces as a 503 with Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/sessions/{id}/interrupt:
+    post:
+      summary: 'Interrupt the active session execution (idle interruption is an honest no-op: interrupted=false)'
+      operationId: interruptSessionDomain
+      tags: [sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InterruptSessionRequest'
+      responses:
+        '200':
+          description: interrupted flag (false = the session was idle — honest data, never an error)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionInterruptResult'
+        '400':
+          description: >-
+            missing projectId (code PROJECT_REQUIRED, the C4 gate), invalid body (code bad_request — our
+            zod) or the session runner rejected the request shape (code EXTERNAL_BAD_REQUEST, honest
+            upstream 400 passthrough) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: >-
+            unknown project for this caller (code not_found, no existence leak — the C4 gate) or session
+            absent upstream (code EXTERNAL_NOT_FOUND, honest upstream 404 passthrough) — non-retryable,
+            no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: >-
+            session runner unreachable (code EXTERNAL_UNAVAILABLE, Retry-After), it refused our
+            credentials (code EXTERNAL_UNAUTHORIZED, no Retry-After) or its answer drifted off the
+            artifact interrupt shape (code EXTERNAL_UNAVAILABLE — contract drift fails loud)
           headers:
             Retry-After:
               description: seconds to wait before retrying
@@ -3444,6 +3556,47 @@ components:
         session:
           type: string
           description: hoisted session id when the variant carries one
+    InterruptSessionRequest:
+      type: object
+      required: [projectId]
+      description: >-
+        POST /api/sessions/{id}/interrupt body — projectId is the gate uuid. The runner's own
+        resume knob (provenance contracts/opencode-stand-2.2.0.json interrupt parameters) has
+        no UI consumer and is deliberately not exposed — nothing invented.
+      properties:
+        projectId:
+          type: string
+          format: uuid
+    SessionInterruptResult:
+      type: object
+      required: [interrupted]
+      description: >-
+        POST /api/sessions/{id}/interrupt answer — domain form of the artifact
+        SessionInterruptResponse ({interrupted} verbatim, contracts/opencode-stand-2.2.0.json
+        paths['/api/session/{sessionID}/interrupt']). false is the idle no-op: an honest
+        answer, never an error.
+      properties:
+        interrupted:
+          type: boolean
+    SessionRunnerProvider:
+      type: object
+      required: [id, name, activation, package]
+      description: >-
+        GET /api/sessions/providers row — the REQUIRED subset of the artifact Provider.Info
+        (contracts/opencode-stand-2.2.0.json components.schemas['Provider.Info']:
+        id/name/activation/package, activation enum verbatim). Optional and sensitive
+        Provider.Info members (settings/headers/body — headers can carry auth material) are
+        never projected to the browser and are not consumed by the UI.
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        activation:
+          type: string
+          enum: [auto, enabled, disabled]
+        package:
+          type: string
     OpencodeLocationRef:
       type: object
       required: [directory]

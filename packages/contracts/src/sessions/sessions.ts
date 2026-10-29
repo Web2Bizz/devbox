@@ -4,7 +4,9 @@
  *
  * Mirrors contracts/openapi.yaml components/schemas field-for-field:
  * SessionInfo, SessionInfoModel, SessionInfoList, CreateSessionRequest,
- * SessionRunStatus, SessionRunStatusMap.
+ * SessionRunStatus, SessionRunStatusMap, SessionMessage,
+ * SendMessageRequest, SessionStreamFrame, InterruptSessionRequest,
+ * SessionInterruptResult, SessionRunnerProvider.
  *
  * These shapes are OURS: the backend translates the opencode wire forms
  * into them and publishes stable names — `title`/`model` are explicitly
@@ -141,3 +143,44 @@ export type SessionMessagePartUpdatedFrame = SessionStreamFrame & {
     part: Record<string, unknown>;
   };
 };
+
+/**
+ * POST /api/sessions/{id}/interrupt body — projectId is the gate uuid.
+ * The runner's own resume knob (artifact interrupt parameters `resume`)
+ * has no UI consumer and is deliberately not exposed — nothing invented.
+ */
+export type InterruptSessionRequest = {
+  projectId: string;
+};
+
+/**
+ * POST /api/sessions/{id}/interrupt answer — domain form of the artifact's
+ * SessionInterruptResponse ({interrupted} verbatim, the only field the
+ * live 2.2.0 spec carries). `interrupted: false` is the idle no-op (the
+ * session was not running) — an honest answer, never an error.
+ * Provenance: contracts/opencode-stand-2.2.0.json
+ * paths['/api/session/{sessionID}/interrupt'] → SessionInterruptResponse.
+ */
+export type SessionInterruptResult = {
+  interrupted: boolean;
+};
+
+/**
+ * GET /api/sessions/providers row — the project's runner provider
+ * inventory. Fields are exactly the REQUIRED set of the artifact's
+ * Provider.Info (id/name/activation/package); optional and sensitive
+ * Provider.Info members (settings/headers/body — headers can carry auth
+ * material) are never shipped to the browser and not consumed by the UI.
+ * Provenance: contracts/opencode-stand-2.2.0.json paths['/api/provider']
+ * → components.schemas['Provider.Info'] (required subset).
+ */
+export type SessionRunnerProvider = {
+  id: string;
+  name: string;
+  /** artifact Provider.Info.activation enum */
+  activation: 'auto' | 'enabled' | 'disabled';
+  package: string;
+};
+
+/** GET /api/sessions/providers — provider inventory list. */
+export type SessionRunnerProviderList = SessionRunnerProvider[];

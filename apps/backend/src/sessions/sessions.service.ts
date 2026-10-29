@@ -402,13 +402,16 @@ export class SessionsService {
   /**
    * Translate one upstream v2 event frame into our domain SSE frame:
    * {id, type, data} passthrough + `session` hoisted from the variant's
-   * sessionID (three nesting locations the known variants use — same order
-   * the legacy client probed). Upstream top-level extras (metadata/durable/
-   * location) are NOT part of the domain frame and are dropped; `data`
-   * stays variant-owned (envelope-only decision from card 3 — the ~100-
-   * variant union is never invented here). Values pass through unstringified
-   * so a malformed upstream frame fails CLIENT-side parsing instead of
-   * being papered over with defaults.
+   * data.sessionID — provenance: artifact eventFrames.usedVariants carry
+   * sessionID at the data top level in EVERY session-scoped variant
+   * (message.part.*, session.*, permission.*); deeper part/info nesting is
+   * NOT spec'd (Session.Info carries `id`, not `sessionID`) and is never
+   * probed — no invented wire fields. Upstream top-level extras
+   * (metadata/durable/location) are NOT part of the domain frame and are
+   * dropped; `data` stays variant-owned (envelope-only decision from card
+   * 3 — the ~100-variant union is never invented here). Values pass through
+   * unstringified so a malformed upstream frame fails CLIENT-side parsing
+   * instead of being papered over with defaults.
    */
   private toStreamFrame(value: unknown): Record<string, unknown> {
     const frame = value as { id?: unknown; type?: unknown; data?: unknown } | null;
@@ -417,16 +420,7 @@ export class SessionsService {
         ? (frame.data as Record<string, unknown>)
         : {};
     const out: Record<string, unknown> = { id: frame?.id, type: frame?.type, data };
-    const part = data.part as { sessionID?: unknown } | undefined;
-    const info = data.info as { sessionID?: unknown } | undefined;
-    const session =
-      typeof data.sessionID === 'string'
-        ? data.sessionID
-        : typeof part?.sessionID === 'string'
-          ? part.sessionID
-          : typeof info?.sessionID === 'string'
-            ? info.sessionID
-            : undefined;
+    const session = typeof data.sessionID === 'string' ? data.sessionID : undefined;
     if (session) out.session = session;
     return out;
   }

@@ -8,6 +8,8 @@ import type {
   SessionInfoModel,
   SessionMessage,
   SessionMessageList,
+  SessionMessagePartDeltaFrame,
+  SessionMessagePartUpdatedFrame,
   SessionRunStatus,
   SessionRunStatusMap,
   SessionStreamFrame,
@@ -101,5 +103,39 @@ export const sessionStreamFrameSchema = z.object({
   data: z.record(z.string(), z.unknown()),
   session: z.string().optional(),
 }) satisfies z.ZodType<SessionStreamFrame>;
+
+/** message.part.delta — narrowed streaming-text frame. The field list is
+ * the artifact eventFrames.usedVariants['message.part.delta'] verbatim
+ * (sessionID/messageID/partID/field/delta, all strings) and REQUIRED by
+ * this check: a frame missing any of them is not this variant (safeParse,
+ * never a cast). Unknown extra keys inside data stay tolerated — the
+ * runner may enrich the payload, and value-add must not break the chat. */
+export const sessionMessagePartDeltaFrameSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  type: z.literal('message.part.delta'),
+  data: z.object({
+    sessionID: z.string({ error: 'Field "data.sessionID" is required' }).min(1),
+    messageID: z.string({ error: 'Field "data.messageID" is required' }).min(1),
+    partID: z.string({ error: 'Field "data.partID" is required' }).min(1),
+    field: z.string({ error: 'Field "data.field" is required' }),
+    delta: z.string({ error: 'Field "data.delta" is required' }),
+  }),
+  session: z.string().optional(),
+}) satisfies z.ZodType<SessionMessagePartDeltaFrame>;
+
+/** message.part.updated — narrowed absolute-part-snapshot frame. The field
+ * list is the artifact eventFrames.usedVariants['message.part.updated']
+ * verbatim (sessionID + part object); the part's inner keys (type/text/id)
+ * are variant-owned content the envelope does not mirror, so consumers
+ * still read them with typeof guards (see useSessionChat projections). */
+export const sessionMessagePartUpdatedFrameSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  type: z.literal('message.part.updated'),
+  data: z.object({
+    sessionID: z.string({ error: 'Field "data.sessionID" is required' }).min(1),
+    part: z.record(z.string(), z.unknown()),
+  }),
+  session: z.string().optional(),
+}) satisfies z.ZodType<SessionMessagePartUpdatedFrame>;
 
 export type SendMessageInput = z.infer<typeof sendMessageRequestSchema>;

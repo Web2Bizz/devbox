@@ -20,9 +20,9 @@
  * - POST /api/session/{id}/prompt → captures the body, answers the
  *   Session.Inbox.User receipt; 'conflict' mode answers 409 (retryable 503
  *   through the shared mapping);
- * - GET /api/event → four SSE frames (direct sessionID, upstream extras to
- *   drop, part-hoisted sessionID, no session) then heartbeats, tracking
- *   downstream close;
+ * - GET /api/event → four SSE frames (direct data.sessionID, upstream
+ *   top-level extras to drop, out-of-spec part-nesting that must NOT be
+ *   hoisted, no session) then heartbeats, tracking downstream close;
  * - POST /api/session → 400 on a missing location (like the real 2.x
  *   server), echo-create otherwise; 'reject' mode answers 400 with a planted
  *   secret to prove honest EXTERNAL_BAD_REQUEST + never-echo;
@@ -138,7 +138,7 @@ const EVENT_FRAMES: unknown[] = [
     location: { directory: '/tmp/somewhere' },
     data: { sessionID: 'ses_alpha', part: { id: 'prt_1', type: 'text', text: 'Hello' } },
   },
-  { id: 'evt_3', type: 'x.test.part-hoist', data: { part: { sessionID: 'ses_beta' } } },
+  { id: 'evt_3', type: 'x.test.nested-not-hoisted', data: { part: { sessionID: 'ses_beta' } } },
   { id: 'evt_4', type: 'x.test.no-session', data: {} },
 ];
 
@@ -615,8 +615,8 @@ async function main(): Promise<void> {
             delta: 'Hel',
           });
           assert.deepEqual(Object.keys(f2).sort(), ['data', 'id', 'session', 'type'], 'metadata/durable/location must be dropped');
-          assert.deepEqual(Object.keys(f3).sort(), ['data', 'id', 'session', 'type']);
-          assert.equal(f3.session, 'ses_beta', 'sessionID hoisted from data.part');
+          assert.deepEqual(Object.keys(f3).sort(), ['data', 'id', 'type']);
+          assert.equal(f3.session, undefined, 'out-of-spec data.part nesting must NOT be hoisted');
           assert.deepEqual(Object.keys(f4).sort(), ['data', 'id', 'type'], 'no-session frame must not carry session');
           assert.ok(!Object.keys(f1).includes('sessionID'), 'upstream name at top level');
           push('GET /api/sessions/events → domain frames (hoisted session, extras dropped)', null);

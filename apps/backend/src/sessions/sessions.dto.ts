@@ -13,6 +13,8 @@ export {
   type SessionInfoModel,
   type SessionMessage,
   type SessionMessageList,
+  type SessionMessagePartDeltaFrame,
+  type SessionMessagePartUpdatedFrame,
   type SessionRunStatus,
   type SessionRunStatusMap,
   type SessionStreamFrame,

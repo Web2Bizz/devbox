@@ -135,7 +135,7 @@ export class SessionsController {
   @ApiResponse({ status: 200, description: 'queued user message receipt (domain row)' })
   @ApiResponse({ status: 400, description: 'missing projectId (PROJECT_REQUIRED, the C4 gate), invalid body (bad_request — our zod) or the session runner rejected the payload shape (EXTERNAL_BAD_REQUEST) — no Retry-After', type: ApiErrorDto })
   @ApiResponse({ status: 404, description: 'unknown project for this caller (not_found, no existence leak — the C4 gate) or session absent upstream (EXTERNAL_NOT_FOUND) — no Retry-After', type: ApiErrorDto })
-  @ApiResponse({ status: 503, description: 'session runner unreachable (EXTERNAL_UNAVAILABLE, Retry-After), it refused our credentials (EXTERNAL_UNAUTHORIZED) or the session is busy (conflict surfaces as retryable 503)', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'session runner unreachable (EXTERNAL_UNAVAILABLE, Retry-After), it refused our credentials (EXTERNAL_UNAUTHORIZED) or the session is busy (upstream 409 surfaces as a 503 with Retry-After)', type: ApiErrorDto })
   async sendMessage(
     @ReqUser() identity: RequestIdentity,
     @Param('id') id: string,

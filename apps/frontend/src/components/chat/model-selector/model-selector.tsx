@@ -5,6 +5,17 @@ import type { SessionInfoModel } from '@rush-code/contracts';
 import { useI18n } from '../../../i18n';
 import { useAiProviders } from '../../../hooks/useAiProviders';
 
+/**
+ * Provider ids belonging to the OpenCode family (the runner's own inference
+ * endpoints, including the Go and Zen harnesses). Third-party providers
+ * (openrouter, cerebras, …) are intentionally excluded from the chat model
+ * picker — only opencode go/zen models are offered.
+ *
+ * Match is on the provider id (case-insensitive): the canonical ids are
+ * `opencode`, `opencode-go`, `opencode-zen`. Anything else is dropped.
+ */
+const OPENCODE_PROVIDER_RE = /^opencode(-go|-zen)?$/i;
+
 export type ModelSelectorProps = {
   /** Rush Code project uuid — scopes the domain provider inventory. */
   projectId?: string;
@@ -25,12 +36,18 @@ export type ModelSelectorProps = {
  * (lazy session create + prompt body); Clear falls back to the runner
  * default. Pure presentational state lives here; the effective model lives
  * in `useChat` (survives reload).
+ *
+ * Only OpenCode-family providers (opencode / opencode-go / opencode-zen)
+ * are offered — third-party providers are filtered out per the chat scope.
  */
 export function ModelSelector({ projectId, model, onChange, disabled }: ModelSelectorProps) {
   const { t } = useI18n();
   const { providers, loading } = useAiProviders(projectId);
   const [providerID, setProviderID] = useState(model?.providerID ?? '');
   const [modelId, setModelId] = useState(model?.id ?? '');
+
+  // Filter to OpenCode go/zen family only (see OPENCODE_PROVIDER_RE above).
+  const opencodeProviders = providers.filter((p) => OPENCODE_PROVIDER_RE.test(p.id));
 
   const apply = () => {
     const pid = providerID.trim();
@@ -53,7 +70,7 @@ export function ModelSelector({ projectId, model, onChange, disabled }: ModelSel
         aria-label={t.chat.modelProvider}
       >
         <option value="">{t.chat.modelDefault}</option>
-        {providers.map((p) => (
+        {opencodeProviders.map((p) => (
           <option key={p.id} value={p.id}>
             {p.name || p.id}
           </option>

@@ -5,13 +5,17 @@ import {
   Headers,
   HttpCode,
   HttpStatus,
+  Param,
   Post,
   Query,
+  Req,
+  Res,
   UseGuards,
   Version,
   VERSION_NEUTRAL,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { RequestIdentity } from '../auth/identity.service';
 import { ReqUser } from '../auth/req-user.decorator';
@@ -20,8 +24,11 @@ import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { ApiErrorDto } from '../api/dto';
 import {
   createSessionRequestSchema,
+  sendMessageRequestSchema,
   type CreateSessionInput,
+  type SendMessageInput,
   type SessionInfo,
+  type SessionMessage,
   type SessionRunStatusMap,
 } from './sessions.dto';
 import { SessionsService } from './sessions.service';
@@ -99,5 +106,60 @@ export class SessionsController {
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<SessionRunStatusMap> {
     return this.sessions.statusMap(identity.id, projectId, correlationId ?? '');
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get(':id/messages')
+  @Version(VERSION_NEUTRAL)
+  @ApiOperation({ summary: 'List session messages (normalized domain rows; text projection of the runtime message union)' })
+  @ApiResponse({ status: 200, description: 'normalized messages (always an array; empty when the session has none)' })
+  @ApiResponse({ status: 400, description: 'missing projectId (PROJECT_REQUIRED, the C4 gate), invalid query (bad_request — our limit validation) or the session runner rejected the request shape (EXTERNAL_BAD_REQUEST) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 404, description: 'unknown project for this caller (not_found, no existence leak — the C4 gate) or session/message absent upstream (EXTERNAL_NOT_FOUND) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'session runner unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or it refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
+  async messages(
+    @ReqUser() identity: RequestIdentity,
+    @Param('id') id: string,
+    @Query('projectId') projectId?: string,
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
+    @Headers('x-correlation-id') correlationId?: string,
+  ): Promise<SessionMessage[]> {
+    return this.sessions.listMessages(identity.id, id, projectId, limit, cursor, correlationId ?? '');
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/messages')
+  @Version(VERSION_NEUTRAL)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Send a session message (queues the prompt on the session runner; the reply streams over events)' })
+  @ApiResponse({ status: 200, description: 'queued user message receipt (domain row)' })
+  @ApiResponse({ status: 400, description: 'missing projectId (PROJECT_REQUIRED, the C4 gate), invalid body (bad_request — our zod) or the session runner rejected the payload shape (EXTERNAL_BAD_REQUEST) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 404, description: 'unknown project for this caller (not_found, no existence leak — the C4 gate) or session absent upstream (EXTERNAL_NOT_FOUND) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'session runner unreachable (EXTERNAL_UNAVAILABLE, Retry-After), it refused our credentials (EXTERNAL_UNAUTHORIZED) or the session is busy (conflict surfaces as retryable 503)', type: ApiErrorDto })
+  async sendMessage(
+    @ReqUser() identity: RequestIdentity,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(sendMessageRequestSchema)) body: SendMessageInput,
+    @Headers('x-correlation-id') correlationId?: string,
+  ): Promise<SessionMessage> {
+    return this.sessions.sendMessage(identity.id, id, body, correlationId ?? '');
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('events')
+  @Version(VERSION_NEUTRAL)
+  @ApiOperation({ summary: 'Live session events (SSE; domain frames {id, type, data, session?})' })
+  @ApiResponse({ status: 200, description: 'text/event-stream of domain SessionStreamFrame rows' })
+  @ApiResponse({ status: 400, description: 'missing projectId (PROJECT_REQUIRED, the C4 gate) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 404, description: 'unknown project for this caller (not_found, no existence leak — the C4 gate) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'session runner unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or it refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
+  async events(
+    @ReqUser() identity: RequestIdentity,
+    @Req() req: ExpressRequest,
+    @Res({ passthrough: false }) res: ExpressResponse,
+    @Query('projectId') projectId?: string,
+    @Headers('x-correlation-id') correlationId?: string,
+  ): Promise<void> {
+    await this.sessions.streamEvents(identity.id, projectId, correlationId ?? '', req, res);
   }
 }

@@ -5,10 +5,15 @@
  */
 export {
   createSessionRequestSchema,
+  sendMessageRequestSchema,
   type CreateSessionInput,
+  type SendMessageInput,
   type SessionInfo,
   type SessionInfoList,
   type SessionInfoModel,
+  type SessionMessage,
+  type SessionMessageList,
   type SessionRunStatus,
   type SessionRunStatusMap,
+  type SessionStreamFrame,
 } from '@rush-code/contracts';

@@ -15,12 +15,15 @@ import { relaySse } from '../common/sse-relay';
 import { fromStatus, fromUnknown } from '../common/external/external-error';
 import type {
   CreateSessionInput,
+  InterruptSessionInput,
   SendMessageInput,
   SessionInfo,
   SessionInfoModel,
+  SessionInterruptResult,
   SessionMessage,
   SessionRunStatus,
   SessionRunStatusMap,
+  SessionRunnerProvider,
 } from './sessions.dto';
 
 /**
@@ -62,6 +65,28 @@ type UpstreamInboxUser = {
   time: { created: number };
   payload?: { text?: string };
 };
+
+/**
+ * Upstream provider row — artifact Provider.Info. Only the fields the
+ * domain projection reads are typed; settings/headers/body stay unread
+ * (headers may carry auth material — never projected outward).
+ */
+type UpstreamProviderInfo = {
+  id?: unknown;
+  name?: unknown;
+  activation?: unknown;
+  package?: unknown;
+};
+
+/** v2 provider answer envelope (artifact GET /api/provider). */
+type UpstreamProviderEnvelope = { data?: unknown; location?: unknown };
+
+/** Activation gate as a real type predicate — plain boolean variables do
+ * not narrow union members under strictNullChecks. Provenance: artifact
+ * Provider.Info.activation enum. */
+function isProviderActivation(v: unknown): v is 'auto' | 'enabled' | 'disabled' {
+  return v === 'auto' || v === 'enabled' || v === 'disabled';
+}
 
 /**
  * SessionsService — the domain translation layer behind /api/sessions*.
@@ -462,5 +487,89 @@ export class SessionsService {
         }>,
       mapFrame: (value) => this.toStreamFrame(value),
     });
+  }
+
+  /**
+   * POST /api/sessions/{id}/interrupt — v2 interrupt (POST
+   * /api/session/{sessionID}/interrupt) via fetchWithRetry + Basic auth,
+   * the same transport the domain prompt rides (the pinned sdk still
+   * types interrupt as 204 void while the live 2.2.0 spec answers
+   * 200 {interrupted} — provenance: artifact interrupt path; fetch avoids
+   * the stale generated typing). No body: the artifact declares none.
+   * The `resume` query knob exists upstream but has no UI consumer —
+   * deliberately unexposed. The upstream {interrupted} is the honest
+   * domain answer (false = idle no-op, never an error).
+   */
+  async interrupt(
+    userId: string,
+    sessionId: string,
+    body: InterruptSessionInput,
+    cid: string,
+  ): Promise<SessionInterruptResult> {
+    await this.requireProject(body.projectId, userId, cid);
+    // Same real-user gate the prompt path asserts (this posts below the sdk).
+    this.auth.assertServeUser(userId, cid);
+    const headers: Record<string, string> = { ...serveBasicAuthHeader() };
+    if (cid) headers['x-correlation-id'] = cid;
+    try {
+      const res = await this.opencode.fetchWithRetry(
+        `${this.opencode.dialUrl()}/api/session/${encodeURIComponent(sessionId)}/interrupt`,
+        { method: 'POST', headers },
+        { operation: 'sessionInterrupt' },
+      );
+      if (!res.ok) {
+        await res.arrayBuffer().catch(() => null);
+        throw this.upstreamError('sessionInterrupt', new Error(`status_${res.status}`), res.status);
+      }
+      const json = (await res.json().catch(() => null)) as { interrupted?: unknown } | null;
+      if (!json || typeof json.interrupted !== 'boolean') {
+        throw this.upstreamError('sessionInterrupt', new Error('bad_interrupt_shape'));
+      }
+      this.logger.info('[sessions] interrupted', cid);
+      return { interrupted: json.interrupted };
+    } catch (err) {
+      this.logger.warn('[sessions] interrupt failed', cid);
+      this.logger.debug((err as Error).message, cid);
+      throw this.upstreamError('sessionInterrupt', err);
+    }
+  }
+
+  /**
+   * GET /api/sessions/providers — the project's runner provider inventory
+   * (v2 GET /api/provider in the gated jail, the same sdk call the mirror
+   * makes). The domain row is the REQUIRED artifact subset
+   * (Provider.Info: id/name/activation/package); settings/headers/body are
+   * never projected (headers can carry auth material; the UI consumes
+   * none of it). A row violating the required set fails loud — never a
+   * silently skipped or defaulted row.
+   */
+  async providers(userId: string, projectId: string | undefined, cid: string): Promise<SessionRunnerProvider[]> {
+    const project = await this.requireProject(projectId, userId, cid);
+    const client = await this.sdk.create(userId, cid);
+    try {
+      const res = await client.v2.provider.list({ location: { directory: project.directory } });
+      if (!this.isUpstreamOk(res.data, res.error)) {
+        throw this.upstreamError('sessionProviders', res.error, this.sdkStatus(res));
+      }
+      const env = res.data as unknown as UpstreamProviderEnvelope;
+      const rows = Array.isArray(env?.data) ? (env.data as UpstreamProviderInfo[]) : null;
+      if (!rows) throw this.upstreamError('sessionProviders', new Error('bad_providers_shape'));
+      return rows.map((p) => {
+        if (
+          typeof p.id !== 'string' ||
+          p.id.length === 0 ||
+          typeof p.name !== 'string' ||
+          typeof p.package !== 'string' ||
+          !isProviderActivation(p.activation)
+        ) {
+          throw this.upstreamError('sessionProviders', new Error('bad_provider_row'));
+        }
+        return { id: p.id, name: p.name, activation: p.activation, package: p.package };
+      });
+    } catch (err) {
+      this.logger.warn('[sessions] providers list failed', cid);
+      this.logger.debug((err as Error).message, cid);
+      throw this.upstreamError('sessionProviders', err);
+    }
   }
 }

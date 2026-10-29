@@ -17,6 +17,13 @@
  * - GET /api/session/ses_alpha/message → user(text)/assistant(content[])/
  *   shell(no text) rows; any other session → honest 404 SessionNotFound
  *   with a planted secret (never echoed);
+ * - GET /api/provider → {location,data:[Provider.Info rows]} with a planted
+ *   secret in settings/headers (the domain projection must drop them; the
+ *   jail location is captured); 'bad-provider' mode answers a row off the
+ *   artifact REQUIRED set;
+ * - POST /api/session/{id}/interrupt → captures the request (body must be
+ *   absent), answers the artifact {interrupted:true}; any other session →
+ *   honest 404 SessionNotFoundError with a planted secret;
  * - POST /api/session/{id}/prompt → captures the body, answers the
  *   Session.Inbox.User receipt; 'conflict' mode answers 409 (retryable 503
  *   through the shared mapping);
@@ -160,14 +167,18 @@ function startStandStub(): Promise<{
   creates: Captured[];
   prompts: Array<Captured & { url: string }>;
   eventConns: EventConn[];
-  setMode: (m: 'normal' | 'reject' | 'conflict') => void;
+  interrupts: Array<Captured & { url: string }>;
+  providerDirs: string[];
+  setMode: (m: 'normal' | 'reject' | 'conflict' | 'bad-provider') => void;
   close: () => Promise<void>;
 }> {
   const listDirs: string[] = [];
   const creates: Captured[] = [];
   const prompts: Array<Captured & { url: string }> = [];
   const eventConns: EventConn[] = [];
-  let mode: 'normal' | 'reject' | 'conflict' = 'normal';
+  const interrupts: Array<Captured & { url: string }> = [];
+  const providerDirs: string[] = [];
+  let mode: 'normal' | 'reject' | 'conflict' | 'bad-provider' = 'normal';
   return new Promise((resolve) => {
     const server = createServer((req, res) => {
       const chunks: Buffer[] = [];
@@ -235,6 +246,60 @@ function startStandStub(): Promise<{
               payload: { text: typeof text === 'string' ? text : '' },
               delivery: 'queue',
             },
+          });
+          return;
+        }
+        if (req.method === 'POST' && /^\/api\/session\/[^/]+\/interrupt$/.test(path)) {
+          const parsed = parseBody(raw);
+          interrupts.push({
+            contentType: req.headers['content-type'] ?? null,
+            body: parsed,
+            basicAuth: (req.headers.authorization ?? '').startsWith('Basic '),
+            url: path,
+          });
+          if (path === '/api/session/ses_alpha/interrupt') {
+            // Artifact SessionInterruptResponse: {interrupted} (true here;
+            // the stub really received the POST, proven by the capture).
+            json(200, { interrupted: true });
+            return;
+          }
+          json(404, {
+            _tag: 'SessionNotFoundError',
+            sessionID: path.split('/')[3],
+            message: 'Session not found',
+            token: UPSTREAM_SECRET,
+          });
+          return;
+        }
+        if (req.method === 'GET' && path === '/api/provider') {
+          providerDirs.push(query.get('location[directory]') ?? '');
+          if (mode === 'bad-provider') {
+            // Row violating the artifact REQUIRED set — the domain must fail
+            // loud (never skip/default a drifted row), never echo the secret.
+            json(200, { location: {}, data: [{ id: 'p', name: 'P', activation: 'enabled', token: UPSTREAM_SECRET }] });
+            return;
+          }
+          // rows carry settings/headers/body with a planted secret: the
+          // domain projection must drop every non-required member.
+          json(200, {
+            location: {},
+            data: [
+              {
+                id: 'prov-openai',
+                name: 'OpenAI',
+                activation: 'enabled',
+                package: '@ai-sdk/openai',
+                settings: { token: UPSTREAM_SECRET },
+                headers: { authorization: UPSTREAM_SECRET },
+                body: {},
+              },
+              {
+                id: 'prov-anthropic',
+                name: '',
+                activation: 'auto',
+                package: '',
+              },
+            ],
           });
           return;
         }
@@ -320,6 +385,8 @@ function startStandStub(): Promise<{
         creates,
         prompts,
         eventConns,
+        interrupts,
+        providerDirs,
         setMode: (m) => {
           mode = m;
         },
@@ -504,6 +571,51 @@ async function main(): Promise<void> {
     });
     stand.setMode('normal');
 
+    // --- providers & interrupt (card 6 domain routes) ----------------------
+    await check('GET /api/sessions/providers → required artifact subset only, jail location forwarded', '/api/sessions/providers?projectId=' + E2E_PROJECT_ID, undefined, 200, (_res, body) => {
+      const rows = body as unknown[];
+      assert.deepEqual(rows, [
+        { id: 'prov-openai', name: 'OpenAI', activation: 'enabled', package: '@ai-sdk/openai' },
+        { id: 'prov-anthropic', name: '', activation: 'auto', package: '' },
+      ]);
+      // settings/headers/body (planted secret) never leave the projection.
+      assert.ok(!JSON.stringify(rows).includes(UPSTREAM_SECRET), 'provider secret echoed outward');
+      assert.equal(stand.providerDirs.at(-1), JAIL_DIR, 'providers ran in the gated jail');
+    });
+
+    await check('GET providers w/o projectId → 400 PROJECT_REQUIRED', '/api/sessions/providers', undefined, 400, (_res, body) => {
+      assert.equal((body as { code?: string }).code, 'PROJECT_REQUIRED');
+    });
+
+    stand.setMode('bad-provider');
+    await check('provider row off the artifact REQUIRED set → fails loud (503), secret never echoed', '/api/sessions/providers?projectId=' + E2E_PROJECT_ID, undefined, 503, (_res, body) => {
+      assert.equal((body as { code?: string }).code, 'EXTERNAL_UNAVAILABLE');
+      assert.ok(!JSON.stringify(body).includes(UPSTREAM_SECRET), 'upstream secret echoed outward');
+    });
+    stand.setMode('normal');
+
+    await check('POST /api/sessions/{id}/interrupt → 200 {interrupted:true} (idle no-op is honest data, never an error)', '/api/sessions/ses_alpha/interrupt', jsonBody({ projectId: E2E_PROJECT_ID }), 200, (_res, body) => {
+      assert.deepEqual(body, { interrupted: true });
+    });
+    {
+      const intr = stand.interrupts.at(-1);
+      assert.ok(intr, 'stub captured the interrupt');
+      assert.equal(intr.url, '/api/session/ses_alpha/interrupt');
+      assert.equal(intr.body, null, 'artifact declares no body — none is sent');
+      assert.ok(intr.basicAuth, 'Basic auth header really sent');
+    }
+
+    await check('POST interrupt w/o projectId → 400 bad_request (body zod)', '/api/sessions/ses_alpha/interrupt', jsonBody({}), 400, (_res, body) => {
+      assert.equal((body as { code?: string }).code, 'bad_request');
+    });
+
+    await check('POST interrupt unknown session → honest 404 EXTERNAL_NOT_FOUND (no Retry-After, no echo)', '/api/sessions/ses_ghost/interrupt', jsonBody({ projectId: E2E_PROJECT_ID }), 404, (res, body) => {
+      const b = body as { code?: string };
+      assert.equal(b.code, 'EXTERNAL_NOT_FOUND');
+      assert.equal(res.headers.get('Retry-After'), null);
+      assert.ok(!JSON.stringify(body).includes(UPSTREAM_SECRET), 'upstream secret echoed outward');
+    });
+
     // --- messages ---------------------------------------------------------
     await check('GET /api/sessions/{id}/messages → text projection per variant', '/api/sessions/ses_alpha/messages?projectId=' + E2E_PROJECT_ID, undefined, 200, (_res, body) => {
       const rows = body as Array<Record<string, unknown>>;
@@ -665,6 +777,12 @@ async function main(): Promise<void> {
         await check('GET /api/sessions/{id}/messages stranger project → 404 not_found', '/api/sessions/ses_alpha/messages?projectId=' + E2E_PROJECT_ID, undefined, 404, (_res, body) => {
           assert.equal((body as { code?: string }).code, 'not_found');
         });
+        await check('GET providers stranger project → 404 not_found', '/api/sessions/providers?projectId=' + E2E_PROJECT_ID, undefined, 404, (_res, body) => {
+          assert.equal((body as { code?: string }).code, 'not_found');
+        });
+        await check('POST interrupt stranger project → 404 not_found', '/api/sessions/ses_alpha/interrupt', jsonBody({ projectId: E2E_PROJECT_ID }), 404, (_res, body) => {
+          assert.equal((body as { code?: string }).code, 'not_found');
+        });
       } finally {
         (
           OrganizationsService.prototype as unknown as { assertProjectAccessById: unknown }
@@ -692,6 +810,8 @@ async function main(): Promise<void> {
       assert.ok(paths['/api/sessions/status'], 'missing /api/sessions/status in swagger');
       assert.ok(paths['/api/sessions/{id}/messages'], 'missing /api/sessions/{id}/messages in swagger');
       assert.ok(paths['/api/sessions/events'], 'missing /api/sessions/events in swagger');
+      assert.ok(paths['/api/sessions/providers'], 'missing /api/sessions/providers in swagger');
+      assert.ok(paths['/api/sessions/{id}/interrupt'], 'missing /api/sessions/{id}/interrupt in swagger');
       assert.ok(paths['/api/sessions']?.get?.tags?.includes('sessions'), 'sessions tag missing');
       assert.equal(paths['/api/opencode/session']?.get?.deprecated, true, 'mirror GET not deprecated');
       assert.equal(paths['/api/opencode/session']?.post?.deprecated, true, 'mirror POST not deprecated');

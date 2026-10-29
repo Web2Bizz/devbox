@@ -24,12 +24,16 @@ import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { ApiErrorDto } from '../api/dto';
 import {
   createSessionRequestSchema,
+  interruptSessionRequestSchema,
   sendMessageRequestSchema,
   type CreateSessionInput,
+  type InterruptSessionInput,
   type SendMessageInput,
   type SessionInfo,
+  type SessionInterruptResult,
   type SessionMessage,
   type SessionRunStatusMap,
+  type SessionRunnerProvider,
 } from './sessions.dto';
 import { SessionsService } from './sessions.service';
 
@@ -108,6 +112,24 @@ export class SessionsController {
     return this.sessions.statusMap(identity.id, projectId, correlationId ?? '');
   }
 
+  // Literal one-segment routes (status/providers) are declared before the
+  // ':id/...' two-segment routes; keep that ordering when adding more.
+  @UseGuards(JwtAuthGuard)
+  @Get('providers')
+  @Version(VERSION_NEUTRAL)
+  @ApiOperation({ summary: 'List the project session-runner providers (required artifact subset; credential-bearing members are never projected)' })
+  @ApiResponse({ status: 200, description: 'domain provider rows (always an array; empty when the runner reports none)' })
+  @ApiResponse({ status: 400, description: 'missing projectId (PROJECT_REQUIRED, the C4 gate) or the session runner rejected the request (EXTERNAL_BAD_REQUEST) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 404, description: 'unknown project for this caller (not_found, no existence leak — the C4 gate) or the location is unknown upstream (EXTERNAL_NOT_FOUND) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'session runner unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or it refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
+  async providers(
+    @ReqUser() identity: RequestIdentity,
+    @Query('projectId') projectId?: string,
+    @Headers('x-correlation-id') correlationId?: string,
+  ): Promise<SessionRunnerProvider[]> {
+    return this.sessions.providers(identity.id, projectId, correlationId ?? '');
+  }
+
   @UseGuards(JwtAuthGuard)
   @Get(':id/messages')
   @Version(VERSION_NEUTRAL)
@@ -143,6 +165,24 @@ export class SessionsController {
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<SessionMessage> {
     return this.sessions.sendMessage(identity.id, id, body, correlationId ?? '');
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/interrupt')
+  @Version(VERSION_NEUTRAL)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Interrupt the active session execution (idle interruption is an honest no-op: interrupted=false)' })
+  @ApiResponse({ status: 200, description: 'interrupted: whether an active execution was really interrupted (false = idle no-op, never an error)' })
+  @ApiResponse({ status: 400, description: 'missing projectId (PROJECT_REQUIRED, the C4 gate), invalid body (bad_request — our zod) or the session runner rejected the request shape (EXTERNAL_BAD_REQUEST) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 404, description: 'unknown project for this caller (not_found, no existence leak — the C4 gate) or session absent upstream (EXTERNAL_NOT_FOUND) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'session runner unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or it refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
+  async interrupt(
+    @ReqUser() identity: RequestIdentity,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(interruptSessionRequestSchema)) body: InterruptSessionInput,
+    @Headers('x-correlation-id') correlationId?: string,
+  ): Promise<SessionInterruptResult> {
+    return this.sessions.interrupt(identity.id, id, body, correlationId ?? '');
   }
 
   @UseGuards(JwtAuthGuard)

@@ -227,9 +227,11 @@ async function main(): Promise<void> {
     await check('GET /api/messages → 404 not_found (legacy removed)', '/api/messages?sessionId=s1', undefined, 404, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'not_found');
     });
-    // Never-versioned plural alias: no /api/sessions handler by convention.
-    await check('GET /api/sessions → 404 not_found (never versioned)', '/api/sessions', undefined, 404, (_res, body) => {
-      assert.equal((body as { code?: string }).code, 'not_found');
+    // Domain sessions routes (card 4): /api/sessions is VERSION_NEUTRAL and
+    // project-scoped — with the Bearer but no projectId the C4 gate answers
+    // 400 PROJECT_REQUIRED (fail-closed; no global listing exists).
+    await check('GET /api/sessions → 400 PROJECT_REQUIRED (domain route, C4 gate)', '/api/sessions', undefined, 400, (_res, body) => {
+      assert.equal((body as { code?: string }).code, 'PROJECT_REQUIRED');
     });
     await check('POST /api/chat → 404 not_found (legacy removed)', '/api/chat', json({ message: 'hi' }), 404, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'not_found');
@@ -256,7 +258,12 @@ async function main(): Promise<void> {
       assert.ok(paths.includes('/api/v1/sessions'), `missing /api/v1/sessions in ${paths.join(',')}`);
       assert.ok(paths.includes('/api/v1/health'), `missing /api/v1/health in ${paths.join(',')}`);
       assert.ok(!paths.includes('/api/session'), `legacy /api/session must be gone, got ${paths.join(',')}`);
-      assert.ok(!paths.includes('/api/sessions'), `never-versioned /api/sessions must be gone, got ${paths.join(',')}`);
+      // Domain sessions routes (card 4) are intentional VERSION_NEUTRAL paths
+      // in this document — same contract presence as the /api/opencode/*
+      // mirror they deprecate (the removed legacy singular /api/session alias
+      // above must still stay gone).
+      assert.ok(paths.includes('/api/sessions'), `missing /api/sessions in ${paths.join(',')}`);
+      assert.ok(paths.includes('/api/sessions/status'), `missing /api/sessions/status in ${paths.join(',')}`);
     });
     await check('GET /swagger/v2.json has empty paths', '/swagger/v2.json', undefined, 200, (_res, body) => {
       assert.deepEqual((body as { paths?: unknown }).paths, {});

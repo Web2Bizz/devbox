@@ -11,6 +11,7 @@ import { OpencodeKeysModule } from './opencode-keys/opencode-keys.module';
 import { OrganizationsModule } from './organizations/organizations.module';
 import { ProjectsModule } from './projects/projects.module';
 import { ReposModule } from './repos/repos.module';
+import { SessionsModule } from './sessions/sessions.module';
 import { WorkspacesModule } from './workspaces/workspaces.module';
 import { AuthModule } from './auth/auth.module';
 import { validateConfigForNest } from './env';
@@ -33,6 +34,7 @@ import { validateConfigForNest } from './env';
     ProjectsModule,
     OrganizationsModule,
     ReposModule,
+    SessionsModule,
     AuthModule,
   ],
 })

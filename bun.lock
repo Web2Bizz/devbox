@@ -62,7 +62,6 @@
       "version": "0.1.0",
       "dependencies": {
         "@hookform/resolvers": "5.9.1",
-        "@opencode-ai/sdk": "1.18.33",
         "@rush-code/contracts": "workspace:*",
         "@tanstack/react-query": "^5.104.1",
         "@tanstack/react-virtual": "3.14.13",

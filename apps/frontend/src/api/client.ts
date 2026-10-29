@@ -22,9 +22,22 @@ import type {
   RegistryCatalogResponse,
   SendChatResponse,
   Session,
-  SessionsResponse,
   UpdateMemberRoleInput as UpdateMemberRoleRequest,
   UpdateOrganizationInput as UpdateOrganizationRequest,
+} from '@rush-code/contracts';
+import {
+  sessionInfoListSchema,
+  sessionInfoSchema,
+  sessionMessageListSchema,
+  sessionMessageSchema,
+  sessionRunStatusMapSchema,
+} from '@rush-code/contracts';
+import type {
+  CreateSessionRequest,
+  SessionInfo,
+  SessionMessage,
+  SessionRunStatusMap,
+  SendMessageRequest,
 } from '@rush-code/contracts';
 
 // Base URL resolution (Next.js App Router):
@@ -153,6 +166,30 @@ async function requestV1<T>(
   return request<T>(`${V1_PREFIX}${path}`, init, timeoutMs);
 }
 
+/**
+ * Boundary parse for the domain session contract: answers are checked
+ * against the @rush-code/contracts zod schemas and fail fast as
+ * ApiClientError('shape_mismatch') on a wire drift — the UI never renders
+ * a silently-cast unknown shape and never masks a contract bug.
+ */
+function parseBoundary<T>(path: string, schema: { parse(data: unknown): T }, value: unknown): T {
+  try {
+    return schema.parse(value);
+  } catch (e) {
+    // Only the offending field path goes into the message — never the
+    // received value (a drifted answer may carry upstream payloads we do
+    // not echo into the UI or logs).
+    const issue = (e as { issues?: Array<{ path?: unknown[] }> }).issues?.[0];
+    const where = issue?.path?.length ? `: ${issue.path.join('.')}` : '';
+    throw new ApiClientError({
+      code: 'shape_mismatch',
+      message: `contract mismatch on ${path}${where}`,
+      status: 0,
+      correlationId: 'client',
+    });
+  }
+}
+
 export const api = {
   baseUrl: BASE_URL,
   apiVersion: API_VERSION,
@@ -168,25 +205,160 @@ export const api = {
   // surfaces honestly as ApiClientError, never masked).
   getSession: (projectId?: string) =>
     requestV1<Session>(`/session${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`),
-  // Canonical session list without the word opencode: GET /api/v1/sessions
-  // (project-scoped like getSession — missing projectId → 400
-  // PROJECT_REQUIRED; 200 is always live upstream Session[], 503
-  // EXTERNAL_UNAVAILABLE when the opencode server is unreachable).
-  // Only /api/v1 — never unversioned /api/sessions (404 by convention).
-  // Split: list/reload go through here; create/abort stay on the SDK
-  // /api/opencode/session mirror (see useOpencodeSessions).
-  // Auth: the endpoint is JWT-guarded (backend @ReqUser) — the caller
-  // passes the access token and it travels as `authorization: Bearer`,
-  // same contract as api.me / api.listOrgProjects. Without the header
-  // the backend answers an honest 401 (no anonymous session list).
-  listSessions: (accessToken: string, projectId?: string, opts?: { signal?: AbortSignal }) =>
-    requestV1<SessionsResponse>(
-      `/sessions${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`,
-      {
+  // ── Domain sessions surface — GET/POST /api/sessions* (card 4 product
+  // contract). Unversioned ON PURPOSE: the backend serves these routes
+  // VERSION_NEUTRAL; the thin /api/v1/sessions (getSession-era) is a legacy
+  // surface — never route domain rows through it. JWT-guarded + C4 gate:
+  // projectId is REQUIRED here (missing → honest 400 PROJECT_REQUIRED
+  // ApiClientError, strangers → 404 not_found, runner outage → 503
+  // EXTERNAL_UNAVAILABLE — never masked, never defaulted). Every answer is
+  // parsed with a @rush-code/contracts boundary schema (parseBoundary):
+  // a wire drift fails fast as ApiClientError('shape_mismatch'), the UI
+  // never renders a silently-cast shape. Auth travels as
+  // `authorization: Bearer` (same contract as api.me), never a runner key.
+  listSessions: async (
+    accessToken: string,
+    projectId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<SessionInfo[]> =>
+    parseBoundary(
+      'GET /api/sessions',
+      sessionInfoListSchema,
+      await request<unknown>(
+        `/api/sessions?projectId=${encodeURIComponent(projectId)}`,
+        {
+          headers: { authorization: `Bearer ${accessToken}` },
+          ...(opts?.signal ? { signal: opts.signal } : {}),
+        },
+      ),
+    ),
+  createSession: async (accessToken: string, body: CreateSessionRequest) =>
+    parseBoundary(
+      'POST /api/sessions',
+      sessionInfoSchema,
+      await request<unknown>('/api/sessions', {
+        method: 'POST',
         headers: { authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify(body),
+      }),
+    ),
+  getSessionStatuses: async (
+    accessToken: string,
+    projectId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<SessionRunStatusMap> =>
+    parseBoundary(
+      'GET /api/sessions/status',
+      sessionRunStatusMapSchema,
+      await request<unknown>(
+        `/api/sessions/status?projectId=${encodeURIComponent(projectId)}`,
+        {
+          headers: { authorization: `Bearer ${accessToken}` },
+          ...(opts?.signal ? { signal: opts.signal } : {}),
+        },
+      ),
+    ),
+  listSessionMessages: async (
+    accessToken: string,
+    sessionId: string,
+    projectId: string,
+    opts?: { limit?: number; cursor?: string; signal?: AbortSignal },
+  ): Promise<SessionMessage[]> => {
+    const q = new URLSearchParams({ projectId });
+    if (opts?.limit !== undefined) q.set('limit', String(opts.limit));
+    if (opts?.cursor) q.set('cursor', opts.cursor);
+    return parseBoundary(
+      'GET /api/sessions/:id/messages',
+      sessionMessageListSchema,
+      await request<unknown>(
+        `/api/sessions/${encodeURIComponent(sessionId)}/messages?${q.toString()}`,
+        {
+          headers: { authorization: `Bearer ${accessToken}` },
+          ...(opts?.signal ? { signal: opts.signal } : {}),
+        },
+      ),
+    );
+  },
+  sendSessionMessage: async (
+    accessToken: string,
+    sessionId: string,
+    body: SendMessageRequest,
+    opts?: { signal?: AbortSignal },
+  ) =>
+    parseBoundary(
+      'POST /api/sessions/:id/messages',
+      sessionMessageSchema,
+      await request<unknown>(
+        `/api/sessions/${encodeURIComponent(sessionId)}/messages`,
+        {
+          method: 'POST',
+          headers: { authorization: `Bearer ${accessToken}` },
+          body: JSON.stringify(body),
+          ...(opts?.signal ? { signal: opts.signal } : {}),
+        },
+      ),
+    ),
+  // SSE transport exception: request() JSON-buffers the answer — the event
+  // stream must keep the Response open. Same headers/envelope pattern as
+  // request() (correlation id, ApiClientError on the pre-headers JSON
+  // answer: the backend answers an honest 503 EXTERNAL_UNAVAILABLE body
+  // BEFORE any text/event-stream header when the runner is down). No
+  // client-side timeout — the stream is long-lived; cancellation arrives
+  // via the caller's AbortSignal.
+  streamSessionEvents: async (
+    accessToken: string,
+    projectId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<Response> => {
+    const correlationId = crypto.randomUUID();
+    const res = await fetch(
+      `${BASE_URL}/api/sessions/events?projectId=${encodeURIComponent(projectId)}`,
+      {
+        method: 'GET',
+        headers: {
+          accept: 'text/event-stream',
+          authorization: `Bearer ${accessToken}`,
+          'x-correlation-id': correlationId,
+        },
         ...(opts?.signal ? { signal: opts.signal } : {}),
       },
-    ),
+    );
+    if (!res.ok) {
+      const data = (await res.json().catch(() => null)) as (ApiError & { error?: string }) | null;
+      const err = (data ?? {}) as Partial<ApiError>;
+      const headerId = res.headers.get('x-correlation-id');
+      throw new ApiClientError({
+        code: err.code ?? `http_${res.status}`,
+        message: err.message ?? `HTTP ${res.status}`,
+        status: res.status,
+        correlationId: err.correlationId ?? headerId ?? correlationId,
+      });
+    }
+    return res;
+  },
+  // ── TODO(card 6): the two deliberate exceptions riding the deprecated
+  // /api/opencode/* mirror because the domain contract does not cover them
+  // yet: session interrupt (abort below) and provider inventory (providers
+  // below). Both mirror routes stay working aliases until card 6 — the ONLY
+  // place the frontend touches them; nothing here imports an sdk. ──
+  abortSession: async (accessToken: string, sessionId: string, projectId: string) => {
+    await request<unknown>(
+      `/api/opencode/session/${encodeURIComponent(sessionId)}/abort?projectId=${encodeURIComponent(projectId)}`,
+      { method: 'POST', headers: { authorization: `Bearer ${accessToken}` } },
+    );
+  },
+  providers: async (
+    accessToken: string,
+    opts?: { projectId?: string; directory?: string; signal?: AbortSignal },
+  ): Promise<unknown> => {
+    const q = new URLSearchParams();
+    if (opts?.projectId) q.set('projectId', opts.projectId);
+    if (opts?.directory) q.set('directory', opts.directory);
+    return request<unknown>(`/api/opencode/config/providers${q.toString() ? `?${q.toString()}` : ''}`, {
+      headers: { authorization: `Bearer ${accessToken}` },
+      ...(opts?.signal ? { signal: opts.signal } : {}),
+    });
+  },
   getMessages: (sessionId: string, projectId?: string) =>
     requestV1<MessagesResponse>(
       `/messages?sessionId=${encodeURIComponent(sessionId)}${projectId ? `&projectId=${encodeURIComponent(projectId)}` : ''}`,

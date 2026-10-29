@@ -42,6 +42,7 @@ import { OrganizationsService } from '../organizations/organizations.service';
 import { ownerKeyOrThrow } from '../projects/projects.service';
 import { WorkspacePathService } from '../workspaces/workspace-path.service';
 import { OpencodeService } from './opencode.service';
+import { serveBasicAuthHeader } from '../opencode-keys/opencode-auth.service';
 import { AppLogger } from '../common/app-logger.service';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import {
@@ -81,9 +82,13 @@ const CURSOR_PASSTHROUGH_HEADERS = ['x-next-cursor', 'link'] as const;
  * `unauthorized`); upstream auth is the server Basic password
  * (OPENCODE_PASSWORD, unset → no header, upstream 401). There is NO
  * per-user DB Bearer and NO env token fallback on this path. GET
- * global/health stays anonymous (liveness probe, no auth sent) and is
- * SYNTHESIZED from the v2 liveness endpoint GET /api/info — the 2.x
- * upstream spec has no /global/health (the path answers the SPA index).
+ * global/health stays anonymous FROM THE BROWSER (no JwtAuthGuard —
+ * liveness probe) but the probe to the upstream carries the server
+ * Basic credentials like every other serve call — the live 2.x stand
+ * answers 401 to an anonymous /api/info; credentials are the backend's
+ * responsibility, not the caller's. The route is SYNTHESIZED from the v2
+ * liveness endpoint GET /api/info — the 2.x upstream spec has no
+ * /global/health (the path answers the SPA index).
  *
  * Project scope (Card C4): every session/message/provider route requires a
  * `?projectId` and gates through
@@ -922,9 +927,9 @@ export class OpencodeController {
 
   @Get('global/health')
   @Version(VERSION_NEUTRAL)
-  @ApiOperation({ summary: 'Opencode server liveness (synthesized from v2 GET /api/info, 503 when unreachable)', deprecated: true })
+  @ApiOperation({ summary: 'Opencode server liveness (synthesized from v2 GET /api/info with the server Basic credentials, 503 when unreachable)', deprecated: true })
   @ApiResponse({ status: 200, description: 'live upstream ({healthy: true, version}) — healthy is synthesized from a 2xx JSON /api/info answer (the 2.x upstream spec has no /global/health: it answers the SPA index)' })
-  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our server credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async globalHealth(
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<{ healthy: boolean; version: string }> {
@@ -943,11 +948,17 @@ export class OpencodeController {
     // fail-closed shape check is exactly `healthy===true && version:
     // string`). A 2xx that is not that JSON (SPA catch-all, proxy page) is
     // NOT healthy — it stays a 503 shape failure, never a masked 200.
+    //
+    // The browser-side route is anonymous (no JwtAuthGuard) — that does NOT
+    // make the upstream probe anonymous: the live 2.x stand requires Basic
+    // auth on /api/info (unset password → no header, upstream 401 stays the
+    // honest signal). Same pattern as every other serve call
+    // (sessions.service, OpencodeSdkClient.create, ProxyService.authHeaders).
     const cid = correlationId ?? '';
     try {
       const res = await this.opencode.fetchWithRetry(
         `${this.opencode.dialUrl()}/api/info`,
-        { method: 'GET' },
+        { method: 'GET', headers: { ...serveBasicAuthHeader() } },
         { operation: 'globalHealth' },
       );
       // The upstream answered non-2xx — the real status is known here (a raw

@@ -19,7 +19,10 @@
  *   gated project jail as the body `location.directory` (an empty body dies
  *   at the 2.x server with 400 `Expected object`), GET global/health is
  *   synthesized from GET /api/info ({healthy:true, version} — the 2.x spec
- *   has no health path), and request-level upstream failures answer honestly
+ *   has no health path) and the probe carries the server Basic credentials
+ *   (the route is anonymous FROM THE BROWSER, the upstream call is not: the
+ *   live stand answers 401 to an anonymous /api/info), and request-level
+ *   upstream failures answer honestly
  *   (400 → EXTERNAL_BAD_REQUEST, 404 → EXTERNAL_NOT_FOUND — 4xx, no
  *   Retry-After, never the 503 outage mask); AppLogger is captured for the
  *   whole phase (one-liner warn/error, planted upstream secret + Bearer
@@ -69,6 +72,17 @@ process.env.JWT_REFRESH_SECRET = 'e2e-refresh-secret-not-real-0123456789';
 process.env.JWT_ACCESS_TTL = '15m';
 process.env.JWT_REFRESH_TTL = '7d';
 process.env.AUTH_LEGACY_MOCK_FALLBACK = 'false';
+
+// Planted server Basic password for the stand stub (sessions.e2e pattern):
+// the live 2.x stand requires Basic auth on GET /api/info, so the
+// global/health probe must forward serveBasicAuthHeader() upstream —
+// an anonymous probe dies with 401 → EXTERNAL_UNAUTHORIZED (the live
+// incident). The value is NOT a real secret and must never appear in any
+// log line or response body (scanned after the stub phase). Down mode
+// only: the live respawn restores the caller's original env password.
+const E2E_BASIC_PASSWORD = 'e2e-opencode-basic-never-log-4f8c';
+const ORIGINAL_OPENCODE_PASSWORD = process.env.OPENCODE_PASSWORD;
+if (!LIVE_MODE) process.env.OPENCODE_PASSWORD = E2E_BASIC_PASSWORD;
 
 // Project id carried on every session/provider call (C4 ?projectId). No DB
 // here, so the gate denies with 503 EXTERNAL_UNAVAILABLE (never upstream).
@@ -126,23 +140,33 @@ const E2E_PROJECT_DIR = '/tmp/rush-code-e2e-project';
  *   body (or one without `location.directory`) → 400 `Expected object`
  *   (`Payload`), a location-carrying body → 200 `{ data: SessionV2Info }`.
  *   Every create attempt is captured (content-type + parsed body).
- * - GET /api/info → 200 JSON liveness (`{version, pid, …}` — no `healthy`).
+ * - GET /api/info → 200 JSON liveness (`{version, pid, …}` — no `healthy`),
+ *   but ONLY with the server Basic credentials (the live 2.x stand answers
+ *   401 `UnauthorizedError` JSON to an anonymous probe — the global/health
+ *   incident). Every probe is captured (`authOk` = exact expected header).
  * - GET /api/session/ses_missing → 404 NotFoundError.
  * - everything else → SPA text/html (the real 2.x catch-all behaviour).
  * - `setMode('reject')` forces POST /api/session → 400 (regression trigger
  *   for the honest EXTERNAL_BAD_REQUEST mapping).
+ * - `setMode('reject-auth')` forces GET /api/info → 401 JSON even with the
+ *   right credentials (the stand refused us: EXTERNAL_UNAUTHORIZED path).
+ * - `setMode('spa-info')` forces GET /api/info → 200 text/html (SPA
+ *   catch-all masking as a health answer — must stay a 503, never a 200).
  */
 function startV2StandStub(): Promise<{
   server: Server;
   url: string;
   paths: string[];
   creates: Array<{ contentType: string | null; body: unknown }>;
-  setMode: (mode: 'normal' | 'reject') => void;
+  infos: Array<{ authOk: boolean }>;
+  setMode: (mode: 'normal' | 'reject' | 'reject-auth' | 'spa-info') => void;
   close: () => Promise<void>;
 }> {
   const paths: string[] = [];
   const creates: Array<{ contentType: string | null; body: unknown }> = [];
-  let mode: 'normal' | 'reject' = 'normal';
+  const infos: Array<{ authOk: boolean }> = [];
+  let mode: 'normal' | 'reject' | 'reject-auth' | 'spa-info' = 'normal';
+  const expectedBasic = `Basic ${Buffer.from(`opencode:${E2E_BASIC_PASSWORD}`, 'utf8').toString('base64')}`;
   return new Promise((resolve) => {
     const server = createServer((req, res) => {
       const chunks: Buffer[] = [];
@@ -196,6 +220,21 @@ function startV2StandStub(): Promise<{
           return;
         }
         if (req.method === 'GET' && path === '/api/info') {
+          // The live 2.x stand gates /api/info behind Basic auth — mirror it
+          // exactly (anonymous/wrong credentials → 401 UnauthorizedError).
+          const authOk = req.headers['authorization'] === expectedBasic;
+          infos.push({ authOk });
+          if (mode === 'reject-auth' || !authOk) {
+            json(401, { _tag: 'UnauthorizedError', message: 'Authentication required' });
+            return;
+          }
+          if (mode === 'spa-info') {
+            // SPA catch-all masking as a health answer (stale gateway):
+            // 200 text/html — never a healthy signal.
+            res.writeHead(200, { 'content-type': 'text/html' });
+            res.end('<!doctype html><html></html>');
+            return;
+          }
           json(200, {
             version: '9.9.9-e2e',
             pid: 4242,
@@ -222,6 +261,7 @@ function startV2StandStub(): Promise<{
         url: `http://127.0.0.1:${port}`,
         paths,
         creates,
+        infos,
         setMode: (m) => {
           mode = m;
         },
@@ -499,6 +539,48 @@ async function main(): Promise<void> {
         );
         assert.ok(stand.paths.includes('/api/info'), 'probe must hit /api/info');
         assert.ok(!stand.paths.includes('/global/health'), '/global/health probed');
+        {
+          // Live-incident regression: the browser-side route is anonymous,
+          // but the PROBE carries the server Basic credentials — the live
+          // 2.x stand answers 401 to an anonymous /api/info (the pre-fix
+          // fetchWithRetry sent no header → 503 EXTERNAL_UNAUTHORIZED on a
+          // healthy stand).
+          const info = stand.infos.at(-1);
+          assert.ok(info, 'stub captured the /api/info probe');
+          assert.ok(info.authOk, 'global/health probe sends the server Basic credentials');
+        }
+
+        // The stand refuses even our server credentials (401 JSON): honest
+        // 503 EXTERNAL_UNAUTHORIZED — no Retry-After (repeating the same
+        // credentials cannot help), never masked as an outage.
+        stand.setMode('reject-auth');
+        await check(
+          'GET /api/opencode/global/health upstream 401 → 503 EXTERNAL_UNAUTHORIZED (no Retry-After)',
+          '/api/opencode/global/health',
+          undefined,
+          503,
+          (res, body) => {
+            const b = body as { code?: string; message?: string };
+            assert.equal(b.code, 'EXTERNAL_UNAUTHORIZED');
+            assert.notEqual(b.message, 'сервис временно недоступен, повторите позже');
+            assert.equal(res.headers.get('Retry-After'), null);
+            assert.ok(!JSON.stringify(body).includes(E2E_BASIC_PASSWORD), 'Basic password echoed outward');
+          },
+        );
+
+        // A 200 that is not the liveness JSON (SPA catch-all — the stale
+        // gateway shape) must NOT masquerade as healthy: stays 503.
+        stand.setMode('spa-info');
+        await check(
+          'GET /api/opencode/global/health SPA 200 html → 503, never masked healthy',
+          '/api/opencode/global/health',
+          undefined,
+          503,
+          (res, body) => {
+            assertUnavailable(body, res);
+          },
+        );
+        stand.setMode('normal');
 
         await check(
           'GET /api/opencode/session/:id upstream 404 → 404 EXTERNAL_NOT_FOUND (no Retry-After)',
@@ -543,6 +625,10 @@ async function main(): Promise<void> {
           }
           assert.ok(!text.includes(UPSTREAM_SECRET), `upstream secret leaked into ${method} log`);
           assert.ok(!text.includes('Bearer '), `authorization material leaked into ${method} log`);
+          // The planted Basic password is never logged (serveBasicAuthHeader
+          // values stay in the request headers only — same rule as the
+          // sessions.e2e scan).
+          assert.ok(!text.includes(E2E_BASIC_PASSWORD), `Basic password leaked into ${method} log`);
         }
         {
           const rejected = logged
@@ -573,7 +659,14 @@ async function main(): Promise<void> {
     console.log(`\nrespawning live phase against OPENCODE_LIVE_URL (value hidden)…`);
     const { spawnSync } = await import('node:child_process');
     const child = spawnSync(process.execPath, [process.argv[1]], {
-      env: { ...process.env, OPENCODE_E2E_MODE: 'live', OPENCODE_URL: LIVE_URL },
+      env: {
+        ...process.env,
+        OPENCODE_E2E_MODE: 'live',
+        OPENCODE_URL: LIVE_URL,
+        // The down phase planted E2E_BASIC_PASSWORD; the live stand speaks
+        // the caller's own credentials (unset → honest upstream 401).
+        OPENCODE_PASSWORD: ORIGINAL_OPENCODE_PASSWORD ?? '',
+      },
       stdio: 'inherit',
       timeout: 120000,
     });

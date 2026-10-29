@@ -18,7 +18,7 @@
  *   secrets scrubbed).
  */
 import { Injectable } from '@nestjs/common';
-import { AppLogger } from '../app-logger.service';
+import { AppLogger, serializeCause } from '../app-logger.service';
 import { validateEnv } from '../../env';
 import {
   ExternalServiceError,
@@ -159,9 +159,7 @@ export class ExternalClient {
         if (err.cause !== undefined) {
           this.logger.debug(
             `[external] cause service=${service} operation=${operation} code=${err.code} ` +
-              `detail=${String(
-                err.cause instanceof Error ? (err.cause.stack ?? err.cause.message) : err.cause,
-              ).slice(0, 2000)}`,
+              `detail=${serializeCause(err.cause).slice(0, 2000)}`,
             correlationId,
           );
         }
@@ -177,11 +175,7 @@ export class ExternalClient {
       );
       this.logger.debug(
         `[external] cause service=${service} operation=${operation} code=${normalized.code} ` +
-          `detail=${String(
-            normalized.cause instanceof Error
-              ? (normalized.cause.stack ?? normalized.cause.message)
-              : (normalized.cause ?? err),
-          ).slice(0, 2000)}`,
+          `detail=${serializeCause(normalized.cause ?? err).slice(0, 2000)}`,
         correlationId,
       );
       throw normalized;

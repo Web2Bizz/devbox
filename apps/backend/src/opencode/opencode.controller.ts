@@ -397,8 +397,10 @@ export class OpencodeController {
   @UseGuards(JwtAuthGuard)
   @Get('session')
   @Version(VERSION_NEUTRAL)
-  @ApiOperation({ summary: 'List sessions (sdk → opencode server, 503 when unreachable)' })
+  @ApiOperation({ summary: 'List sessions (sdk → opencode server; outages 503, upstream/gate request errors answer honest 4xx)' })
   @ApiResponse({ status: 200, description: 'live sessions' })
+  @ApiResponse({ status: 400, description: 'missing projectId (PROJECT_REQUIRED, the C4 gate) or upstream rejected the request shape (EXTERNAL_BAD_REQUEST) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 404, description: 'unknown project for this caller (not_found, no existence leak — the C4 gate) — no Retry-After', type: ApiErrorDto })
   @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async listSessions(
     @ReqUser() identity: RequestIdentity,
@@ -430,8 +432,10 @@ export class OpencodeController {
   @Post('session')
   @Version(VERSION_NEUTRAL)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Create session (sdk → opencode server, 503 when unreachable)' })
+  @ApiOperation({ summary: 'Create session (sdk → opencode server; outages 503, upstream/gate request errors answer honest 4xx)' })
   @ApiResponse({ status: 200, description: 'live session' })
+  @ApiResponse({ status: 400, description: 'missing projectId (PROJECT_REQUIRED, the C4 gate) or upstream rejected the request shape (EXTERNAL_BAD_REQUEST — e.g. payload the v2 create refuses) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 404, description: 'unknown project for this caller (not_found, no existence leak — the C4 gate) — no Retry-After', type: ApiErrorDto })
   @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async createSession(
     @ReqUser() identity: RequestIdentity,
@@ -481,8 +485,10 @@ export class OpencodeController {
   @UseGuards(JwtAuthGuard)
   @Get('session/status')
   @Version(VERSION_NEUTRAL)
-  @ApiOperation({ summary: 'Get session status (sdk → opencode server, 503 when unreachable)' })
+  @ApiOperation({ summary: 'Get session status (sdk → opencode server; outages 503, upstream/gate request errors answer honest 4xx)' })
   @ApiResponse({ status: 200, description: 'live session status map' })
+  @ApiResponse({ status: 400, description: 'missing projectId (PROJECT_REQUIRED, the C4 gate) or upstream rejected the request shape (EXTERNAL_BAD_REQUEST) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 404, description: 'unknown project for this caller (not_found, no existence leak — the C4 gate) — no Retry-After', type: ApiErrorDto })
   @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async sessionStatus(
     @ReqUser() identity: RequestIdentity,
@@ -510,8 +516,10 @@ export class OpencodeController {
   @UseGuards(JwtAuthGuard)
   @Get('session/:id')
   @Version(VERSION_NEUTRAL)
-  @ApiOperation({ summary: 'Get session (sdk → opencode server, 503 when unreachable)' })
+  @ApiOperation({ summary: 'Get session (sdk → opencode server; outages 503, upstream/gate request errors answer honest 4xx)' })
   @ApiResponse({ status: 200, description: 'live session' })
+  @ApiResponse({ status: 400, description: 'missing projectId (PROJECT_REQUIRED, the C4 gate) or upstream rejected the request shape (EXTERNAL_BAD_REQUEST) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 404, description: 'unknown project for this caller (not_found, no existence leak — the C4 gate) or session absent upstream (EXTERNAL_NOT_FOUND) — no Retry-After', type: ApiErrorDto })
   @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async getSession(
     @ReqUser() identity: RequestIdentity,
@@ -545,8 +553,10 @@ export class OpencodeController {
   @UseGuards(JwtAuthGuard)
   @Delete('session/:id')
   @Version(VERSION_NEUTRAL)
-  @ApiOperation({ summary: 'Delete session (sdk → opencode server, 503 when unreachable)' })
+  @ApiOperation({ summary: 'Delete session (sdk → opencode server; outages 503, upstream/gate request errors answer honest 4xx)' })
   @ApiResponse({ status: 200, description: 'deleted flag (live upstream only)' })
+  @ApiResponse({ status: 400, description: 'missing projectId (PROJECT_REQUIRED, the C4 gate) or upstream rejected the request shape (EXTERNAL_BAD_REQUEST) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 404, description: 'unknown project for this caller (not_found, no existence leak — the C4 gate) or session absent upstream (EXTERNAL_NOT_FOUND) — no Retry-After', type: ApiErrorDto })
   @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async deleteSession(
     @ReqUser() identity: RequestIdentity,
@@ -578,8 +588,10 @@ export class OpencodeController {
   @UseGuards(JwtAuthGuard)
   @Patch('session/:id')
   @Version(VERSION_NEUTRAL)
-  @ApiOperation({ summary: 'Update session (sdk → opencode server, 503 when unreachable)' })
+  @ApiOperation({ summary: 'Update session (sdk → opencode server; outages 503, upstream/gate request errors answer honest 4xx)' })
   @ApiResponse({ status: 200, description: 'live session' })
+  @ApiResponse({ status: 400, description: 'missing projectId (PROJECT_REQUIRED), invalid body (bad_request — our zod) or upstream rejected the request shape (EXTERNAL_BAD_REQUEST) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 404, description: 'unknown project for this caller (not_found, no existence leak — the C4 gate) or session absent upstream (EXTERNAL_NOT_FOUND) — no Retry-After', type: ApiErrorDto })
   @ApiResponse({ status: 503, description: 'opencode server unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or upstream refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async updateSession(
     @ReqUser() identity: RequestIdentity,

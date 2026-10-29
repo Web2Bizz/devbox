@@ -63,3 +63,81 @@ export type SessionRunStatus = OpencodeSessionStatus;
 export type SessionRunStatusMap = {
   [sessionId: string]: SessionRunStatus;
 };
+
+/**
+ * Domain session message (GET/POST /api/sessions/{id}/messages) — the
+ * NORMALIZED projection of the upstream `Session.Message.Info` union
+ * (provenance: contracts/opencode-stand-2.2.0.json Session.Message.*
+ * variants). Every field maps to an upstream source:
+ * - `id`   ← the union's required message id,
+ * - `type` ← the variant discriminator (user | assistant | system |
+ *   synthetic | shell | skill | idle | agent-switched | model-switched |
+ *   location-switched | compaction …; kept as a string — the variant set
+ *   is upstream-owned and grows),
+ * - `createdAt` ← the required `time.created` (epoch millis → ISO-8601),
+ * - `text` ← the plain-text rendering the chat UI consumes: `text` for
+ *   user/system/synthetic variants, `content[]` `text`-items joined for
+ *   assistant, null for every other variant (shell/skill/idle/… carry no
+ *   chat bubble; their non-consumed nesting is intentionally dropped).
+ */
+export type SessionMessage = {
+  id: string;
+  /** upstream variant discriminator — see the list in the type docs */
+  type: string;
+  /** ISO-8601 */
+  createdAt: string;
+  /** plain-text projection; null for non-text variants (never faked) */
+  text: string | null;
+};
+
+/** GET /api/sessions/{id}/messages — normalized message list. */
+export type SessionMessageList = SessionMessage[];
+
+/**
+ * POST /api/sessions/{id}/messages body — the domain chat prompt. `text`
+ * mirrors the v2 prompt's only required payload field (files/agents/skills/
+ * metadata/delivery are upstream-optional and no UI consumes them yet —
+ * deliberately not exposed until there is a consumer).
+ */
+export type SendMessageRequest = {
+  projectId: string;
+  text: string;
+};
+
+/**
+ * SSE frame emitted by GET /api/sessions/events (domain translation of the
+ * v2 event stream, provenance: artifact eventFrames — {id, type, data}
+ * flat frame). The backend re-keys the upstream `data.sessionID` to the
+ * top-level `session` so consumers never touch the upstream name; `data`
+ * itself is the variant-owned payload passed through untouched (the union
+ * is large and upstream-owned — envelope-only here, matching
+ * OpencodeEvent's stance).
+ */
+export type SessionStreamFrame = {
+  id: string;
+  type: string;
+  data: Record<string, unknown>;
+  /** hoisted from upstream data.sessionID when the variant carries one */
+  session?: string;
+};
+
+/** message.part.delta frame — the streaming text unit the chat renders. */
+export type SessionMessagePartDeltaFrame = SessionStreamFrame & {
+  type: "message.part.delta";
+  data: {
+    sessionID: string;
+    messageID: string;
+    partID: string;
+    field: string;
+    delta: string;
+  };
+};
+
+/** message.part.updated frame — absolute text snapshot of a part. */
+export type SessionMessagePartUpdatedFrame = SessionStreamFrame & {
+  type: "message.part.updated";
+  data: {
+    sessionID: string;
+    part: Record<string, unknown>;
+  };
+};

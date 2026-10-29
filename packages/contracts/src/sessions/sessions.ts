@@ -27,6 +27,13 @@ export type SessionInfoModel = {
   variant?: string;
 };
 
+/** Model available to the runner, listed by GET /api/sessions/models. */
+export type SessionModel = {
+  id: string;
+  name: string;
+  providerID: string;
+};
+
 /** One domain session row (GET /api/sessions items, POST /api/sessions result). */
 export type SessionInfo = {
   id: string;

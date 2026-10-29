@@ -56,6 +56,9 @@ export const sessionsQueryKey = (projectId?: string) =>
 export const sessionStatusQueryKey = (projectId?: string) =>
   ['sessions', 'status', projectId ?? 'none'] as const;
 
+export const sessionModelsQueryKey = (projectId?: string) =>
+  ['sessions', 'models', projectId ?? 'none'] as const;
+
 /**
  * GET /api/sessions/{id}/messages — project-scoped session thread.
  * `sessionId`/`projectId` nulls map to stable `'none'` scopes (same

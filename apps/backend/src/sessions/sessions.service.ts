@@ -589,4 +589,43 @@ export class SessionsService {
       throw this.upstreamError('sessionProviders', err);
     }
   }
+
+  /**
+   * GET /api/sessions/models — runner model inventory filtered to the
+   * OpenCode Go/Zen family (provider id opencode / opencode-go / opencode-zen).
+   */
+  async models(userId: string, projectId: string | undefined, cid: string): Promise<Array<{ id: string; name: string; providerID: string }>> {
+    const project = await this.requireProject(projectId, userId, cid);
+    const headers: Record<string, string> = { ...serveBasicAuthHeader() };
+    if (cid) headers['x-correlation-id'] = cid;
+    try {
+      const res = await this.opencode.fetchWithRetry(
+        `${this.opencode.dialUrl()}/api/model`,
+        { method: 'GET', headers },
+        { operation: 'sessionModels' },
+      );
+      if (!res.ok) {
+        await res.arrayBuffer().catch(() => null);
+        throw this.upstreamError('sessionModels', new Error(`status_${res.status}`), res.status);
+      }
+      const json = (await res.json()) as { data?: unknown };
+      const rows = Array.isArray(json?.data) ? (json.data as Array<Record<string, unknown>>) : null;
+      if (!rows) throw this.upstreamError('sessionModels', new Error('bad_models_shape'));
+      const out: Array<{ id: string; name: string; providerID: string }> = [];
+      for (const r of rows) {
+        const providerID = typeof r.providerID === 'string' ? r.providerID : '';
+        if (!['opencode', 'opencode-go', 'opencode-zen'].includes(providerID)) continue;
+        const modelID = typeof r.modelID === 'string' ? r.modelID : (typeof r.id === 'string' ? r.id : '');
+        const name = typeof r.name === 'string' ? r.name : modelID;
+        if (!modelID) throw this.upstreamError('sessionModels', new Error('bad_model_row'));
+        out.push({ id: modelID, name, providerID });
+      }
+      this.logger.info('[sessions] models listed', cid);
+      return out;
+    } catch (err) {
+      this.logger.warn('[sessions] models list failed', cid);
+      this.logger.debug((err as Error).message, cid);
+      throw this.upstreamError('sessionModels', err);
+    }
+  }
 }

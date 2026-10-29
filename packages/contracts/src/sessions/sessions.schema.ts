@@ -7,6 +7,7 @@ import type {
   SessionInfo,
   SessionInfoList,
   SessionInfoModel,
+  SessionModel,
   SessionInterruptResult,
   SessionMessage,
   SessionMessageList,
@@ -37,6 +38,16 @@ export const sessionInfoModelSchema = z.object({
   providerID: z.string({ error: 'Field "model.providerID" is required' }).min(1),
   variant: z.string().optional(),
 }) satisfies z.ZodType<SessionInfoModel>;
+
+export const sessionModelSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  name: z.string({ error: 'Field "name" is required' }),
+  providerID: z.string({ error: 'Field "providerID" is required' }).min(1),
+}) satisfies z.ZodType<SessionModel>;
+
+export const sessionModelListSchema = z.array(sessionModelSchema) satisfies z.ZodType<
+  SessionModel[]
+>;
 
 export const sessionInfoSchema = z.object({
   id: z.string({ error: 'Field "id" is required' }).min(1),

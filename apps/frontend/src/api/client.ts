@@ -33,6 +33,7 @@ import {
   sessionMessageSchema,
   sessionRunStatusMapSchema,
   sessionRunnerProviderListSchema,
+  sessionModelListSchema,
 } from '@rush-code/contracts';
 import type {
   CreateSessionRequest,
@@ -42,6 +43,7 @@ import type {
   SessionMessage,
   SessionRunStatusMap,
   SessionRunnerProvider,
+  SessionModel,
   SendMessageRequest,
 } from '@rush-code/contracts';
 
@@ -369,6 +371,22 @@ export const api = {
       sessionRunnerProviderListSchema,
       await request<unknown>(
         `/api/sessions/providers?projectId=${encodeURIComponent(projectId)}`,
+        {
+          headers: { authorization: `Bearer ${accessToken}` },
+          ...(opts?.signal ? { signal: opts.signal } : {}),
+        },
+      ),
+    ),
+  listSessionModels: async (
+    accessToken: string,
+    projectId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<SessionModel[]> =>
+    parseBoundary(
+      'GET /api/sessions/models',
+      sessionModelListSchema,
+      await request<unknown>(
+        `/api/sessions/models?projectId=${encodeURIComponent(projectId)}`,
         {
           headers: { authorization: `Bearer ${accessToken}` },
           ...(opts?.signal ? { signal: opts.signal } : {}),

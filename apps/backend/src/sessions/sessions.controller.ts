@@ -131,6 +131,19 @@ export class SessionsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Get('models')
+  @Version(VERSION_NEUTRAL)
+  @ApiOperation({ summary: 'List runner models filtered to the OpenCode Go/Zen family' })
+  @ApiResponse({ status: 200, description: 'domain model rows' })
+  async models(
+    @ReqUser() identity: RequestIdentity,
+    @Query('projectId') projectId?: string,
+    @Headers('x-correlation-id') correlationId?: string,
+  ): Promise<Array<{ id: string; name: string; providerID: string }>> {
+    return this.sessions.models(identity.id, projectId, correlationId ?? '');
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Get(':id/messages')
   @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'List session messages (normalized domain rows; text projection of the runtime message union)' })

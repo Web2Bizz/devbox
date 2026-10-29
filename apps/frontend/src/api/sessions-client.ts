@@ -9,6 +9,7 @@ import type {
   SessionMessage,
   SessionRunStatusMap,
   SessionRunnerProvider,
+  SessionModel,
   SessionStreamFrame,
 } from '@rush-code/contracts';
 import { sessionStreamFrameSchema } from '@rush-code/contracts';
@@ -134,6 +135,13 @@ export function listSessionProviders(
   opts?: { signal?: AbortSignal },
 ): Promise<SessionRunnerProvider[]> {
   return withAuth((token) => api.listSessionProviders(token, projectId, opts));
+}
+
+export function listSessionModels(
+  projectId: string,
+  opts?: { signal?: AbortSignal },
+): Promise<SessionModel[]> {
+  return withAuth((token) => api.listSessionModels(token, projectId, opts));
 }
 
 /**

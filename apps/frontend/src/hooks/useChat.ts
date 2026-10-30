@@ -406,8 +406,7 @@ export function useChat(options?: UseChatOptions): UseChatResult {
       if (!projectId) throw projectGateError();
       const effective = modelOverride ?? model;
       const created = await createSession(
-        { projectId },
-        effective ? { model: effective } : {},
+        { projectId, ...(effective ? { model: effective } : {}) },
       );
       sessionIdRef.current = created.id;
       setSessionId(created.id);

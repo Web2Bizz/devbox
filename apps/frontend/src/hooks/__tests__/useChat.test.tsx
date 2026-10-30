@@ -130,6 +130,30 @@ const execSucceeded = (session: string) => ({
   data: { sessionID: session },
   session,
 });
+const textStarted = (session: string) => ({
+  id: `evt-tstarted-${session}`,
+  type: 'session.text.started',
+  data: { sessionID: session },
+  session,
+});
+const textDeltaNative = (session: string, text: string) => ({
+  id: `evt-tdelta-${session}-${text}`,
+  type: 'session.text.delta',
+  data: { sessionID: session, delta: text },
+  session,
+});
+const textEndedNative = (session: string, text: string) => ({
+  id: `evt-tended-${session}`,
+  type: 'session.text.ended',
+  data: { sessionID: session, text },
+  session,
+});
+const stepEnded = (session: string) => ({
+  id: `evt-stepended-${session}`,
+  type: 'session.step.ended',
+  data: { sessionID: session },
+  session,
+});
 
 const settle = async (rounds = 8) => {
   await act(async () => {
@@ -193,6 +217,28 @@ describe('useChat (domain)', () => {
       textDelta('ses-1', ' back'),
       textEnded('ses-1', 'hello back'),
       execSucceeded('ses-1'),
+    ]);
+    await settle(16);
+
+    expect(result.current.sending).toBe(false);
+    expect(result.current.error).toBeNull();
+    expect(result.current.messages.length).toBe(2);
+    expect(result.current.messages[1]).toMatchObject({ role: 'assistant', text: 'hello back' });
+  });
+
+  test('append (live 2.2.3): session.text.delta + session.text.ended + step.ended commit assistant row', async () => {
+    const { result } = renderHook(() => useChat({ ...PROJECT }));
+    await settle();
+
+    act(() => {
+      void result.current.send('hello');
+    });
+    pushFrames([
+      textStarted('ses-1'),
+      textDeltaNative('ses-1', 'hello'),
+      textDeltaNative('ses-1', ' back'),
+      textEndedNative('ses-1', 'hello back'),
+      stepEnded('ses-1'),
     ]);
     await settle(16);
 
@@ -400,7 +446,7 @@ describe('useChat (domain)', () => {
     await settle(16);
 
     expect(createMock).toHaveBeenCalledTimes(1);
-    expect(createMock.mock.calls[0]?.[1]).toMatchObject({ model: picked });
+    expect(createMock.mock.calls[0]?.[0]).toMatchObject({ model: picked });
     expect(sendMock).toHaveBeenCalledTimes(1);
     expect(sendMock.mock.calls[0]?.[3]).toMatchObject({ model: picked });
     expect(result.current.model).toMatchObject(picked);

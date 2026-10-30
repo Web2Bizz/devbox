@@ -20,12 +20,12 @@
 ## Структура модулей (по факту на 2026-10-30)
 
 - `src/opencode/` — владелец opencode-транспорта: `opencode.controller.ts` (зеркало `/api/opencode/*`, deprecated), `opencode.service.ts` (`checkConnectivity` → `/api/info`, `fetchWithRetry`/`fetchWithTimeout`, `serveBasicAuthHeader` из `opencode-keys`), `opencode-client.ts` (SDK-обёртка), `opencode.module.ts`. `opencode.e2e.ts` — стенд-пробы.
-- `src/sessions/` — доменный контракт `/api/sessions*` (карточки 4–6): `sessions.controller.ts`, `sessions.service.ts` (трансляция + `relaySse` через `common/sse-relay.ts`), `sessions.dto.ts`, `sessions.module.ts`, `sessions.e2e.ts`.
+- `src/sessions/` — доменный контракт `/api/sessions*` (карточки 4–6): `sessions.controller.ts`, `sessions.service.ts` (трансляция runner-форм + relay SSE через `common/sse-relay.ts`), `sessions.dto.ts`, `sessions.module.ts`, `sessions.e2e.ts`. Маршруты: `GET/POST /`, `GET status|models|providers|events` (SSE), `GET/POST :id/messages`, `POST :id/interrupt`. Модель — только на create (prompt-body upstream `model` не принимает); `SessionInfo.model` — из `Model.Ref` лист-ответа.
 - `src/common/` — `app-logger.service.ts` (`serializeCause`), `external/external-client.ts` + `.spec.ts`, `external/external-error.ts`, `api-error.filter.ts`, `sse-relay.ts` (вынесенная механика SSE).
 - `src/api/` — `proxy.service.ts` (legacy зеркало).
 - `src/opencode-keys/` — per-user opencode-ключи, `opencode-auth.service.ts` (`serveBasicAuthHeader`), e2e-эталон скана секретов.
 - `src/contracts.ts` — deprecated-реэкспорт `@rush-code/contracts`.
-- `packages/contracts/src/` — 11 пар `entity.ts` + `entity.schema.ts` (`opencode-session/`, `opencode-event/`, `sessions/` добавлены карточками 3–4); `contracts/openapi.yaml` — источник правды.
+- `packages/contracts/src/` — 12 пар `entity.ts` + `entity.schema.ts` (`opencode-session/`, `opencode-event/`, `sessions/` добавлены карточками 3–6, включая `SessionModel` для `GET /api/sessions/models`); `contracts/openapi.yaml` — источник правды; `contracts/opencode-stand-2.2.0.json` — провенанс живой спеки.
 
 ## Конвенции (коротко)
 

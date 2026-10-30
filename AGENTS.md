@@ -14,13 +14,13 @@ package.json, не Nx-проект, вне bun workspaces).
 
 - Проект называется **Rush Code** (`rush-code`): корневой `package.json` `name: rush-code`, docker-registry `web2bizz/rush-code/<service>`, README `# Rush Code — monorepo`. Remote-репозиторий/GitHub и каталог на диске остаются `devbox` (переименование remote/path — отдельная задача, не делается молча).
 - Локальный стенд — строго по корневому `README.md` → `# Запуск → ## Локальный запуск` (и `## Production запуск`). Команды/порты/env-имена берутся оттуда, ничего не выдумывать; раздела/подраздела нет (или заголовки не совпали дословно) — fail-closed, работы прекращаются. README раздел `Запуск` правится только по явному требованию пользователя.
-- Имена pm2-процессов стенда: `rush-backend` (3100), `rush-frontend` (3001), `rush-opencode` (4097, изолированный `OPENCODE_CONFIG_DIR`), `contracts-watch`. `pm2 restart` — мутация, её делает человек; `bun run dev:backend`/`dev:frontend` идут через nx (`scripts/dev/with-env.ts` подхватывает `.env`).
+- Имена pm2-процессов стенда: `rush-backend` (3100), `rush-frontend` (3001), `rush-opencode` (4097, изолированный `OPENCODE_CONFIG_DIR`, запускается с `--cwd "$REPOS_ROOT"` — дефолтная локация раннера = каталог проектов, не корень репо), `contracts-watch`. `pm2 restart` — мутация, её делает человек; `bun run dev:backend`/`dev:frontend` идут через nx (`scripts/dev/with-env.ts` подхватывает `.env`).
 - pm2-ловушка окружения: `with-env.ts` отдаёт приоритет `process.env` над `.env`; стартуй pm2 с `env -u DATABASE_URL -u POSTGRES_* …` (как в README), иначе backend поднимется на чужой БД. `JWT_ACCESS_SECRET` опционален (без него эфемерный dev-секрет, сессии сбрасываются при рестарте); `JWT_REFRESH_SECRET` тоже эфемерный → refresh-токены инвалидируются при рестарте.
 - `REPOS_ROOT` — единственный источник storage; без него storage-чтения → 503 `EXTERNAL_UNAVAILABLE`, создание проектов → 500, boot продолжается с ERROR-логом. Никогда не читать/создавать `<cwd>/repos`.
 
 ## Общий пакет контрактов
 
-- `@rush-code/contracts` (`packages/contracts`, 0.1.0) — единый wire-контракт бэкенд↔фронт. 11 пар `entity.ts` + `entity.schema.ts` (health, session, repo-entry, api-error, auth, project, organization, opencode-key, opencode-session, opencode-event, sessions): типы + zod v4 boundary-схемы (Standard Schema, backend-verbatim ограничения), без рантайм-логики. `opencode-session`/`opencode-event`/`sessions` добавлены карточками 3–4 (доменный контракт `/api/sessions*`, `OpencodeSession`, `OpencodeEvent` mirror, `SessionInfo`, `SessionMessage`, `SessionStreamFrame`).
+- `@rush-code/contracts` (`packages/contracts`, 0.1.0) — единый wire-контракт бэкенд↔фронт. 12 пар `entity.ts` + `entity.schema.ts` (health, session, repo-entry, api-error, auth, project, organization, opencode-key, opencode, opencode-session, opencode-event, sessions): типы + zod v4 boundary-схемы (Standard Schema, backend-verbatim ограничения), без рантайм-логики. `opencode-session`/`opencode-event` — зеркальные wire-формы (карточка 3), `sessions` — доменный контракт `/api/sessions*` (`SessionInfo`, `SessionMessage`, `SessionStreamFrame`, `SessionRunnerProvider`, `SessionInterruptResult`, `SessionModel`) и его boundary-схемы.
 - `contracts/openapi.yaml` — источник правды wire-контракта: пакет зеркалит `components/schemas` поле-в-поле (Health.status enum `[ok]`, Project.scope optional и т.д.). Расхождение YAML ↔ пакет — баг пакета, не фича.
 - backend/frontend — bun workspaces (`workspace:*`, уже в `workspaces` корня + `tsconfig.base.json` paths). mobile — standalone npm: `file:../../packages/contracts` + `npm install --legacy-peer-deps` (см. `apps/mobile/AGENTS.md`) + резолв `metro.config.js` watchFolders/extraNodeModules + `tsconfig.json` paths.
 - `apps/backend/src/contracts.ts` и `apps/frontend/src/api/types.ts` — deprecated-реэкспорты (Forward-Only, на один релиз, новых экспортов не добавлять). `apps/frontend/src/lib/auth-schemas.ts` — такой же алиас; `apps/mobile/src/shared/api/backend-contracts.ts` — тонкий шим + `parseBackend*` fail-fast хелперы.
@@ -52,7 +52,7 @@ package.json, не Nx-проект, вне bun workspaces).
 
 ## Frontend — слои (apps/frontend)
 
-- `apps/frontend/AGENTS.md` отсутствует — правило слоёв живёт здесь.
+- Слои живут здесь (в прикладном `apps/frontend/AGENTS.md` — только Next.js-блок и уточнения границы, правила слоёв не дублировать).
 - Источники: `apps/frontend/tsconfig.json` (`@/*` → `./src/*`, `./app/*`;
   на 2026-10-20 `@/` использует только `app/(dashboard)/profile/page.tsx`
   (4 импорта), остальной код — на относительных),
@@ -85,9 +85,13 @@ package.json, не Nx-проект, вне bun workspaces).
 - Ключи — только из `src/hooks/query-keys.ts` (single source; пример:
   `sessionsQueryKey(projectId)` → `['sessions', projectId ?? 'none']`).
 - Исключение — streaming/SSE (`useChat`): остаётся на `useEffect`
-  (живые дельты `event.subscribe` + `session.prompt` с `AbortController`,
-  бэкофф 1s→15s) с комментом-обоснованием; на React Query не переносится
-  (wontfix — см. аудит Card3).
+  (живые дельты доменного SSE `GET /api/sessions/events` + очередь prompt
+  с `AbortController`, бэкофф 1s→15s) с комментом-обоснованием; на React
+  Query не переносится (wontfix — см. аудит Card3). Кадры стрима:
+  `session.text.delta`/`session.text.ended` (текст), финал хода —
+  `session.step.ended`/`session.execution.succeeded`; имена
+  `message.part.*`/`session.idle` — V1-наследие, в `frameText` оставлены
+  только как compat.
 
 ## Фолбэки запрещены по умолчанию
 
@@ -98,11 +102,12 @@ package.json, не Nx-проект, вне bun workspaces).
 
 ## OpenCode — граница backend/frontend (жёстко)
 
-- Фронтенд **ничего не должен знать об opencode**: никаких импортов `@opencode-ai/sdk` в `apps/frontend` (guard-тест `apps/frontend/src/__tests__/no-opencode-transport.test.ts` ловит регрессию в коде и комментариях), никаких путей `/api/opencode/*` в UI. Публичный доменный контракт — `/api/sessions*` (`GET/POST /api/sessions`, `status`, `messages`, `interrupt`, `providers`, `events` SSE) в `@rush-code/contracts` (`packages/contracts/src/sessions/`).
+- Фронтенд **ничего не должен знать об opencode**: никаких импортов `@opencode-ai/sdk` в `apps/frontend` (guard-тест `apps/frontend/src/__tests__/no-opencode-transport.test.ts` ловит регрессию в коде и комментариях), никаких путей `/api/opencode/*` в UI. Публичный доменный контракт — `/api/sessions*` (`GET/POST /api/sessions`, `status`, `models`, `messages`, `interrupt`, `providers`, `events` SSE) в `@rush-code/contracts` (`packages/contracts/src/sessions/`).
 - Бэкенд — единственный владелец opencode-транспорта. `/api/opencode/*` остаётся deprecated-алиасом на один релиз (Forward-Only); удаление — отдельная задача после релиза.
 - Liveness бэкенда — `GET /api/info` (2.x не имеет `/api/health`, `/health`/`/global/health` отдают SPA). `OpencodeService.checkConnectivity()` трактует `401+JSON` как `up` (liveness ≠ auth).
 - Upstream-вызовы бэкенда должны spread'ить `serveBasicAuthHeader()` (генератор единый, `opencode-auth.service.ts`); `fetchWithRetry`/`fetchWithTimeout` сами авторизацию не добавляют. `global/health` — исключение из правила «анонимен»: браузерный вход анонимен, upstream-проб идёт с серверным Basic.
 - `@opencode-ai/sdk@1.18.33` — V1-поколение: молча режет неизвестные ключи тела (`title`/`parentID` в `session.create`), `stripEmptySlots` убирает пустой `body`. Доменные маршруты обходят генератор через `fetchWithRetry` + `serveBasicAuthHeader` с **непустым** телом.
+- Модель пинится **созданием сессии**: `POST /api/session` принимает `model` (`Model.Ref`), prompt-body — **нет** (`additionalProperties:false`, live-подтверждено на 2.2.3: model в prompt → 400 или игнор). Раннер хранит модель на сессии (`Session.Info.model`); переключение живой сессии — upstream `POST /api/session/{id}/model` (доменного маршрута ещё нет). Провенанс всех спорных форм — `contracts/opencode-stand-2.2.0.json` (снапшот живой спеки; артефакт важнее протухших типов sdk).
 - Ошибки upstream не маскируются: `400/422` → `EXTERNAL_BAD_REQUEST`, `404` → `EXTERNAL_NOT_FOUND` (оба без `Retry-After`, `isRetryable:false`); реальный сбой/таймаут → `EXTERNAL_UNAVAILABLE`/503 + `Retry-After: 30`. `cause` сериализуется `serializeCause` (из `app-logger.service.ts`) — никогда `[object Object]`, только в `debug`, ≤2000.
 - `OpencodeService.fetchWithRetry` к upstream-`/api/info` для liveness идёт без Basic — это намеренно (401+JSON = up), не «копипаста-баг».
 

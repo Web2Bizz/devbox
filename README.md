@@ -265,8 +265,14 @@ backend пойдёт в дефолтный `4096`.
 ```bash
 mkdir -p "$HOME/.config/rush-opencode-stand"   # изолированный каталог вне репо
 OPENCODE_CONFIG_DIR="$HOME/.config/rush-opencode-stand" \
-  bun scripts/dev/with-env.ts pm2 start opencode --name rush-opencode -- serve --port 4097 --hostname 127.0.0.1
+  bun scripts/dev/with-env.ts pm2 start opencode --name rush-opencode --cwd "${REPOS_ROOT}" -- serve --port 4097 --hostname 127.0.0.1
 ```
+
+`--cwd` задаёт рабочий каталог opencode-стенда = `REPOS_ROOT` (где лежат
+проекты), чтобы дефолтная локация раннера совпадала с каталогом проектов,
+а не с корнем репо. `bun scripts/dev/with-env.ts` по-прежнему запускается
+из корня репо (ищет `.env` там), `--cwd` действует только на процесс
+`opencode`.
 
 Значения (в т.ч. пароль стенда) подхватывает `scripts/dev/with-env.ts` из
 `.env` — `source .env` не эквивалентно (shell-подстановка ломает пароли).

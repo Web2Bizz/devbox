@@ -113,7 +113,7 @@ function frameText(frame: SessionStreamFrame): FrameText {
     }
     return { kind: 'idle' };
   }
-  if (frame.type === 'session.execution.succeeded') {
+  if (frame.type === 'session.execution.succeeded' || frame.type === 'session.step.ended') {
     return { kind: 'idle' };
   }
   // legacy SDK-shape (kept for backward compat if backend ever switches):

@@ -276,6 +276,11 @@ export function useChat(options?: UseChatOptions): UseChatResult {
       try {
         for await (const frame of sessionEventStream(projectId, active.signal)) {
           if (disposed || active.signal.aborted) break;
+          // After stop() (user cancellation) no more frames should be
+          // committed — the partial answer is already saved and sending
+          // is cleared. Drop everything until the next send() (which
+          // resets sendingRef via resetStream + setSending(true)).
+          if (!sendingRef.current) continue;
           const sid = sessionIdRef.current;
           if (!sid || frame.session !== sid) continue;
           const ft = frameText(frame);

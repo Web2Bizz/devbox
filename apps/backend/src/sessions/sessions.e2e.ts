@@ -679,13 +679,15 @@ async function main(): Promise<void> {
       assert.ok(prompt.basicAuth, 'Basic auth header really sent');
     }
 
-    await check('POST messages forwards model in the prompt body', '/api/sessions/ses_alpha/messages', jsonBody({ projectId: E2E_PROJECT_ID, text: 'hi model', model: { id: 'model-m', providerID: 'prov-openai', variant: 'v1' } }), 200, (_res, body) => {
+    await check('POST messages forwards model in the prompt body (model pinned at create, not re-sent on prompt)', '/api/sessions/ses_alpha/messages', jsonBody({ projectId: E2E_PROJECT_ID, text: 'hi model', model: { id: 'model-m', providerID: 'prov-openai', variant: 'v1' } }), 200, (_res, body) => {
       assert.equal((body as Record<string, unknown>).text, 'hi model');
     });
     {
       const prompt = stand.prompts.at(-1);
       assert.ok(prompt, 'stub captured the model prompt');
-      assert.deepEqual(prompt.body, { text: 'hi model', model: { id: 'model-m', providerID: 'prov-openai', variant: 'v1' } });
+      // upstream /api/session/{id}/prompt does not accept `model` (additionalProperties:false)
+      // — the model is pinned at session creation time, so the prompt body is text-only.
+      assert.deepEqual(prompt.body, { text: 'hi model' });
       assert.ok(prompt.basicAuth, 'Basic auth header really sent');
     }
 

@@ -403,13 +403,13 @@ export class SessionsService {
     if (cid) headers['x-correlation-id'] = cid;
     try {
       const promptBody: Record<string, unknown> = { text: body.text };
-      if (body.model !== undefined) {
-        promptBody.model = {
-          id: body.model.id,
-          providerID: body.model.providerID,
-          ...(body.model.variant !== undefined ? { variant: body.model.variant } : {}),
-        };
-      }
+      // NOTE: upstream /api/session/{id}/prompt does NOT accept a `model`
+      // field (additionalProperties: false per contracts/opencode-stand-2.2.0.json).
+      // The model is pinned at session creation time (POST /api/session body
+      // accepts Model.Ref). Sending it here would be rejected (400) or
+      // silently ignored — never do it. `body.model` is accepted by the
+      // domain signature for backward compat but is intentionally dropped.
+      void body.model;
       const res = await this.opencode.fetchWithRetry(
         `${this.opencode.dialUrl()}/api/session/${encodeURIComponent(sessionId)}/prompt`,
         { method: 'POST', headers, body: JSON.stringify(promptBody) },

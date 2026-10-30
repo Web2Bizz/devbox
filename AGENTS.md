@@ -10,6 +10,38 @@ package.json, не Nx-проект, вне bun workspaces).
 `--legacy-peer-deps`), намеренно **вне bun workspaces**: ставится и запускается
 из своей директории, без `bun --filter`.
 
+## Архитектура
+
+```
+browser (Next :3001 dev)
+  └─ apps/frontend/src/api/client.ts — единственный fetch-слой (request/requestV1,
+     ApiClientError, BASE_URL, parseBoundary zod-схем; SSE-исключение streamSessionEvents)
+       └─ backend :3100
+            ├─ /api/sessions*  — ДОМЕННЫЙ контракт (VERSION_NEUTRAL): list/create/status/models
+            │                    /providers/:id/messages GET+POST/:id/interrupt/events (SSE)
+            ├─ /api/opencode/* — DEPRECATED зеркало (18 роутов, алиас на один релиз)
+            ├─ /api/v1/*, /api/auth/* — versioned v1 (тонкие контракты)
+            └─ opencode runner v2 (dev-стенд :4097; compose opencode:4096)
+                 ├─ @opencode-ai/sdk@1.18.33 (OpencodeSdkClient, dynamic import) — для полей,
+                 │    которые генератор НЕ режет
+                 └─ сырой fetchWithRetry + serveBasicAuthHeader (Basic opencode:<OPENCODE_PASSWORD>)
+                      — create/prompt/interrupt/model: sdk молча режет title/parentID/model/пустой body
+```
+
+- C4-гейт — один путь для всех domain-маршрутов и deprecated-зеркала: `projectId` +
+  `assertProjectAccessById` (404 без утечки существования, `projects/`/`organizations/`) +
+  jail `WorkspacePathService.resolveUserStrict`/`assertInsideJail` поверх `REPOS_ROOT`.
+- SSE-путь: runner `GET /api/event` → домен `GET /api/sessions/events` через общую механику
+  `common/sse-relay.ts` (probe до заголовков → 503, abort downstream, бэкофф). Кадры
+  `{id,type,data,session?}`, финал хода — `session.step.ended`/`session.execution.succeeded`.
+- Ошибки upstream: `400/422` → `EXTERNAL_BAD_REQUEST`, `404` → `EXTERNAL_NOT_FOUND`
+  (оба без `Retry-After`); реальный сбой/таймаут → 503 `EXTERNAL_UNAVAILABLE` + `Retry-After: 30`.
+- Контракты: `packages/contracts` — единственный источник типов для фронта;
+  `contracts/openapi.yaml` — источник правды wire; `contracts/opencode-stand-2.2.0.json` —
+  провенанс live-форм runner'а (артефакт важнее протухших типов sdk).
+- Инвариант «фронт не знает об opencode»: guard `apps/frontend/src/__tests__/no-opencode-transport.test.ts`
+  ловит любые `@opencode-ai/sdk`/`/api/opencode/*` в src+app+package.json, включая комментарии.
+
 ## Имя проекта и локальный стенд
 
 - Проект называется **Rush Code** (`rush-code`): корневой `package.json` `name: rush-code`, docker-registry `web2bizz/rush-code/<service>`, README `# Rush Code — monorepo`. Remote-репозиторий/GitHub и каталог на диске остаются `devbox` (переименование remote/path — отдельная задача, не делается молча).

@@ -15,6 +15,39 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 Этот файл хранит Next.js-блок выше + локальные уточнения границы ниже;
 правила слоёв/хуков — в корне.
 
+## Структура
+
+```
+app/            — маршруты Next (тонкая композиция: страница владеет <ФичаСекция/>)
+src/
+├─ api/
+│   ├─ client.ts — ЕДИНСТВЕННЫЙ fetch-слой: request()/requestV1(), BASE_URL из
+│   │   process.env.NEXT_PUBLIC_API_URL (verbatim), ApiClientError, x-correlation-id,
+│   │   parseBoundary zod-схемами (@rush-code/contracts), streamSessionEvents — SSE-исключение
+│   ├─ sessions-client.ts — доменный фасад /api/sessions*: withAuth (single-flight refresh,
+│   │   одна ротация на честный 401, spent → SessionExpiredError; 400/404 никогда не логаут),
+│   │   ensureSessionAuth, listSessions/createSession/getSessionStatuses/listSessionModels/
+│   │   listSessionProviders/listSessionMessages/sendSessionMessage/interruptSession/
+│   │   sessionEventStream/toErrorMessage
+│   └─ types.ts — deprecated-реэкспорт контрактов (своих типов не заводить)
+├─ hooks/ — useSessions, useSessionMessages, useSessionEvents, useChat (стриминг-исключение:
+│   useEffect+domain SSE, финал session.step.ended, stop() глушит кадры), useAiProviders,
+│   useProjects/useProject/useOrganizations/... ; query-keys.ts — ЕДИНСТВЕННЫЙ источник ключей
+├─ components/chat/ — chat-input, chat-message, chat-window, model-selector
+│   (единый dropdown моделей из GET /api/sessions/models; без provider-селектора)
+├─ features/ — chat/chat-section.tsx (тонкая сборка useChat+kit), usage/
+├─ lib/ — auth-store, format-error, session-expired, словари-схемы
+├─ i18n/ — en/ru/types (namespace t.sessions/t.chat)
+└─ __tests__/no-opencode-transport.test.ts — guard: запрет @opencode-ai/sdk и /api/opencode/*
+    в src+app+package.json (включая комментарии), ассерт покрытия против «молча проверяет 0»
+```
+
+### Цепочка чата
+
+`send` → `POST /api/sessions/:id/messages` (queued) → дельты по `events` SSE (scope по
+`frame.session`) → `session.step.ended` коммитит ответ. `stop()`: abort POST'а prompt'а +
+`POST /api/sessions/:id/interrupt` + partial-коммит + drop дальнейших кадров (`sendingRef`-гард).
+
 ## OpenCode-граница (жёстко)
 - Фронтенд **не импортирует `@opencode-ai/sdk`** и не ходит в `/api/opencode/*` — guard-тест `src/__tests__/no-opencode-transport.test.ts` ловит регрессию (включая комментарии). Доменный контракт — `/api/sessions*` (`@rush-code/contracts` `packages/contracts/src/sessions/`).
 - Всё опенкод-связанное обёрнуто в `src/api/sessions-client.ts` поверх единого `src/api/client.ts` (`request()`); SSE — документированное исключение `streamSessionEvents` (JSON-буферизации нет).

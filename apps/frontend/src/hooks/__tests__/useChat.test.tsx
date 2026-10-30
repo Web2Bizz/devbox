@@ -112,6 +112,25 @@ const idle = (session: string) => ({
   session,
 });
 
+const textDelta = (session: string, text: string) => ({
+  id: `evt-delta-${session}-${text}`,
+  type: 'session.text.delta',
+  data: { sessionID: session, delta: text },
+  session,
+});
+const textEnded = (session: string, text: string) => ({
+  id: `evt-ended-${session}`,
+  type: 'session.text.ended',
+  data: { sessionID: session, text },
+  session,
+});
+const execSucceeded = (session: string) => ({
+  id: `evt-exec-${session}`,
+  type: 'session.execution.succeeded',
+  data: { sessionID: session },
+  session,
+});
+
 const settle = async (rounds = 8) => {
   await act(async () => {
     for (let i = 0; i < rounds; i++) {
@@ -160,6 +179,27 @@ describe('useChat (domain)', () => {
     expect(result.current.messages[0]).toMatchObject({ role: 'user', text: 'hello' });
     expect(result.current.messages[1]).toMatchObject({ role: 'assistant', text: 'hello back' });
     expect(result.current.isEmpty).toBe(false);
+  });
+
+  test('append (native 2.2.0): session.text.delta + session.text.ended + execution.succeeded commit assistant row', async () => {
+    const { result } = renderHook(() => useChat({ ...PROJECT }));
+    await settle();
+
+    act(() => {
+      void result.current.send('hello');
+    });
+    pushFrames([
+      textDelta('ses-1', 'hello'),
+      textDelta('ses-1', ' back'),
+      textEnded('ses-1', 'hello back'),
+      execSucceeded('ses-1'),
+    ]);
+    await settle(16);
+
+    expect(result.current.sending).toBe(false);
+    expect(result.current.error).toBeNull();
+    expect(result.current.messages.length).toBe(2);
+    expect(result.current.messages[1]).toMatchObject({ role: 'assistant', text: 'hello back' });
   });
 
   test('SSE filter: other-session frames ignored; updated snapshot appends growth only', async () => {

@@ -90,10 +90,33 @@ function toChatMessages(rows: SessionMessage[]): ChatMessage[] {
 type FrameText =
   | { kind: 'delta'; text: string; partId: string; messageId: string }
   | { kind: 'snapshot'; text: string; partId: string | null }
+  | { kind: 'full'; text: string }
   | { kind: 'idle' }
   | null;
 
 function frameText(frame: SessionStreamFrame): FrameText {
+  // opencode 2.2.0 native stream (provenance: contracts/opencode-stand-2.2.0.json
+  // eventFrames.usedVariants): text deltas arrive as session.text.delta with
+  // data.delta, the complete text as session.text.ended with data.text, and
+  // session.execution.succeeded signals the end of the turn. These are the
+  // types the live runner actually emits — the legacy message.part.* /
+  // session.idle names do not exist on 2.2.0.
+  if (frame.type === 'session.text.delta') {
+    const data = frame.data as { delta?: unknown; sessionID?: unknown };
+    if (typeof data.delta !== 'string' || !data.delta) return null;
+    return { kind: 'delta', text: data.delta, partId: 'default', messageId: 'default' };
+  }
+  if (frame.type === 'session.text.ended') {
+    const data = frame.data as { text?: unknown };
+    if (typeof data.text === 'string' && data.text) {
+      return { kind: 'full', text: data.text };
+    }
+    return { kind: 'idle' };
+  }
+  if (frame.type === 'session.execution.succeeded') {
+    return { kind: 'idle' };
+  }
+  // legacy SDK-shape (kept for backward compat if backend ever switches):
   if (frame.type === 'message.part.delta') {
     const parsed = sessionMessagePartDeltaFrameSchema.safeParse(frame);
     if (!parsed.success) return null;
@@ -259,6 +282,22 @@ export function useChat(options?: UseChatOptions): UseChatResult {
           if (!ft) continue;
           if (ft.kind === 'idle') {
             finalize();
+            continue;
+          }
+          if (ft.kind === 'full') {
+            // Complete text of a block (opencode 2.2.0 session.text.ended).
+            // Ensure streamingRef has it: if deltas already captured it, no-op;
+            // otherwise append so a missed-delta block is not lost.
+            if (
+              !streamingRef.current.endsWith(ft.text) &&
+              !streamingRef.current.includes(ft.text)
+            ) {
+              append(ft.text);
+            } else if (streamingRef.current.length < ft.text.length && !streamingRef.current.endsWith(ft.text)) {
+              // partial capture: replace trailing with full text
+              streamingRef.current = ft.text;
+              setStreamingText(streamingRef.current);
+            }
             continue;
           }
           if (ft.kind === 'delta') {

@@ -19,9 +19,9 @@ import type {
   UpdateMemberRoleInput,
   UpdateOrganizationInput,
 } from "./dto";
-import { InvitesService } from "./invites.service";
-import { MembersService } from "./members.service";
-import { OrgGuardService } from "./org-guard.service";
+import { InvitesService } from "./modules/invites/invites.service";
+import { MembersService } from "./modules/members/members.service";
+import { OrganizationsGuard } from "./organizations.guard";
 import type {
   Organization,
   OrganizationInvite,
@@ -53,11 +53,13 @@ function isUuidKey(value: string): boolean {
  * fallback) with disk-backed org homes (orgs/<orgId>/.secrets).
  *
  * Owns org CRUD (`organizations`), project access (`projects.org_id`, the
- * 1:1 model) and the shared test seams. Membership lives in MembersService,
- * invites in InvitesService, the access gate in OrgGuardService (domain root
- * per CoC v2); the membership/invite methods below are one-line delegates
- * so the public API is unchanged. Pure helpers live in `utils/`
- * (uuid-v7, pg-error, organization-member) — SQL/tables are unchanged.
+ * 1:1 model) and the shared test seams. Membership lives in MembersService
+ * (MembersModule) and invites in InvitesService (InvitesModule) — nested
+ * modules under `organizations/modules/` per CoC §2; the access gate is
+ * OrganizationsGuard (domain root). The membership/invite methods below are
+ * one-line delegates so the public API is unchanged. Pure helpers live in
+ * `utils/` (uuid-v7, pg-error, organization-member) — SQL/tables are
+ * unchanged.
  *
  * Every method hits `organizations` / `organization_members` /
  * `organization_invites` (drizzle/0004 + 0007). Postgres outages funnel
@@ -87,7 +89,7 @@ export class OrganizationsService {
     private readonly db: DbService,
     private readonly paths: WorkspacePathService,
     private readonly users: UsersService,
-    private readonly guard: OrgGuardService,
+    private readonly guard: OrganizationsGuard,
     private readonly members: MembersService,
     private readonly invites: InvitesService,
   ) {}
@@ -477,8 +479,8 @@ export class OrganizationsService {
   }
 
   // --- Membership + invites: public API preserved via delegation ---------
-  // The implementations live at the domain root (MembersService /
-  // InvitesService) per CoC v2; signatures and return types are unchanged.
+  // The implementations live in the nested modules (MembersModule /
+  // InvitesModule, CoC §2); signatures and return types are unchanged.
 
   async listMembers(
     orgId: string,

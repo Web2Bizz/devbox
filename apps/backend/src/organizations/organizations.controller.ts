@@ -36,14 +36,19 @@ import {
   type UpdateMemberRoleInput,
   type UpdateOrganizationInput,
 } from "./dto";
+import { OrganizationsGuard } from "./organizations.guard";
 import { OrganizationsService } from "./organizations.service";
 
 /**
  * Organizations CRUD + membership + persistent single-use invites + project links.
  * Global 'api' prefix + URI versioning supply /api/v1 — controller
  * declares only the resource segment. Every route is Bearer-guarded
- * (JwtAuthGuard); the service enforces member-only reads (404 for
- * strangers) and maintainer-only mutations (403 for plain members).
+ * (JwtAuthGuard); the gated `:id` routes additionally run
+ * OrganizationsGuard (method-level: GET → member, mutations → maintainer),
+ * and the service enforces the same rules again (defense in depth).
+ * Routes without an org id (create, list, invite accept) and the two 410
+ * stubs are not gated — the stubs keep answering 410 to members and
+ * strangers alike.
  * Responses are private (`X-Robots-Tag: noindex` via NoIndexInterceptor).
  * Invites are uuidv7 rows with no TTL (single-use, replay → 404).
  * Swagger annotations mirror contracts/openapi.yaml (organizations section).
@@ -85,6 +90,7 @@ export class OrganizationsController {
   }
 
   @Get(":id")
+  @UseGuards(OrganizationsGuard)
   @ApiOperation({ summary: "Get organization by id (members only)" })
   @ApiResponse({ status: 200, type: OrganizationDto })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
@@ -99,6 +105,7 @@ export class OrganizationsController {
   }
 
   @Patch(":id")
+  @UseGuards(OrganizationsGuard)
   @ApiOperation({ summary: "Update organization settings (maintainer only)" })
   @ApiResponse({ status: 200, type: OrganizationDto })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
@@ -115,6 +122,7 @@ export class OrganizationsController {
   }
 
   @Delete(":id")
+  @UseGuards(OrganizationsGuard)
   @ApiOperation({ summary: "Delete organization (maintainer only, projects survive)" })
   @ApiResponse({ status: 204 })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
@@ -131,6 +139,7 @@ export class OrganizationsController {
   }
 
   @Get(":id/members")
+  @UseGuards(OrganizationsGuard)
   @ApiOperation({ summary: "List organization members (members only)" })
   @ApiResponse({ status: 200, type: [OrganizationMemberDto] })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
@@ -145,6 +154,7 @@ export class OrganizationsController {
   }
 
   @Post(":id/members")
+  @UseGuards(OrganizationsGuard)
   @ApiOperation({ summary: "Add organization member (maintainer only)" })
   @ApiResponse({ status: 201, type: OrganizationMemberDto })
   @ApiResponse({ status: 400, description: "bad request (validation)" })
@@ -163,6 +173,7 @@ export class OrganizationsController {
   }
 
   @Patch(":id/members/:userId")
+  @UseGuards(OrganizationsGuard)
   @ApiOperation({ summary: "Change member role (maintainer only)" })
   @ApiResponse({ status: 200, type: OrganizationMemberDto })
   @ApiResponse({ status: 400, description: "cannot demote the last maintainer (also validation)" })
@@ -182,6 +193,7 @@ export class OrganizationsController {
   }
 
   @Delete(":id/members/:userId")
+  @UseGuards(OrganizationsGuard)
   @ApiOperation({ summary: "Remove organization member (maintainer only, never the last maintainer)" })
   @ApiResponse({ status: 204 })
   @ApiResponse({ status: 400, description: "cannot remove the last maintainer (also validation)" })
@@ -200,6 +212,7 @@ export class OrganizationsController {
   }
 
   @Post(":id/invites")
+  @UseGuards(OrganizationsGuard)
   @ApiOperation({ summary: "Mint a persistent single-use invite (maintainer only, no TTL)" })
   @ApiResponse({ status: 201, type: OrganizationInviteDto })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })

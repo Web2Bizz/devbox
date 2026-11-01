@@ -38,6 +38,19 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
       assert.equal(id.length, 36);
     },
   },
+  {
+    name: "randomUuidV7 honours the timestamp argument (unix_ts_ms prefix)",
+    run: () => {
+      const a = randomUuidV7(Date.parse("2026-10-20T00:00:00.000Z"));
+      const b = randomUuidV7(Date.parse("2026-10-20T00:00:01.000Z"));
+      // Sort order follows the requested timestamps, not wall-clock time.
+      assert.ok(a < b, `expected ${a} < ${b}`);
+      const ts = (id: string): number =>
+        Number.parseInt(id.replace(/-/g, "").slice(0, 12), 16);
+      assert.equal(ts(a), Date.parse("2026-10-20T00:00:00.000Z"));
+      assert.equal(ts(b), Date.parse("2026-10-20T00:00:01.000Z"));
+    },
+  },
 ];
 
 async function main(): Promise<void> {

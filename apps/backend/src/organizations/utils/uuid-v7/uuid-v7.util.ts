@@ -1,25 +1,33 @@
-import { randomBytes } from "node:crypto";
+/**
+ * Shape of the Bun runtime global we rely on (Bun ≥ 1.4.2 implements
+ * RFC 9562 `Bun.randomUUIDv7(timestamp?)`). tsconfig pins `types: ["node"]`,
+ * so the Bun global is declared locally instead of pulling @types/bun.
+ */
+type BunRuntime = { randomUUIDv7(timestamp?: number | Date): string };
+
+/** The Bun global, resolved at call time (no silent fallback — backend runs on Bun). */
+function bunRuntime(): BunRuntime | null {
+  const runtime = (globalThis as { Bun?: Partial<BunRuntime> }).Bun;
+  return runtime && typeof runtime.randomUUIDv7 === "function"
+    ? (runtime as BunRuntime)
+    : null;
+}
 
 /**
  * RFC 9562 uuidv7 (unix_ts_ms + rand_a/rand_b) — time-ordered invite ids
- * with no extra dependency (Node 22 has no native v7 yet).
+ * straight from the runtime: `Bun.randomUUIDv7(nowMs)` (no extra dependency,
+ * no hand-rolled generator). Throws when the runtime lacks it — the backend
+ * runs on Bun, so a Node-only environment is a misconfiguration, not a case
+ * to paper over with a fallback.
  */
 export function randomUuidV7(nowMs = Date.now()): string {
-  const bytes = randomBytes(16);
-  const now = Math.floor(nowMs);
-  bytes[0] = Math.floor(now / 2 ** 40) & 0xff;
-  bytes[1] = Math.floor(now / 2 ** 32) & 0xff;
-  bytes[2] = Math.floor(now / 2 ** 24) & 0xff;
-  bytes[3] = Math.floor(now / 2 ** 16) & 0xff;
-  bytes[4] = Math.floor(now / 2 ** 8) & 0xff;
-  bytes[5] = now & 0xff;
-  bytes[6] = (bytes[6] & 0x0f) | 0x70;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  const hex = bytes.toString("hex");
-  return (
-    `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-` +
-    `${hex.slice(16, 20)}-${hex.slice(20)}`
-  );
+  const bun = bunRuntime();
+  if (!bun) {
+    throw new Error(
+      "randomUuidV7 requires the Bun runtime (Bun.randomUUIDv7) — the backend must run on Bun",
+    );
+  }
+  return bun.randomUUIDv7(Math.floor(nowMs));
 }
 
 /** uuidv7 shape (version 7 + RFC 4122 variant) — non-v7 never matches a row. */

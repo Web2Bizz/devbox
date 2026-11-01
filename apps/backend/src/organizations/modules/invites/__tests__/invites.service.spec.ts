@@ -1,16 +1,16 @@
 /**
- * Organizations service unit checks — self-contained runner (no new deps,
+ * Invites service unit checks — self-contained runner (no new deps,
  * plain node:assert, no live Postgres).
  *
  * Runs against COMPILED dist (same constraint as the *.e2e.ts runners):
- *   `bun run build && bun dist/organizations/__tests__/organizations.service.spec.js`
+ *   `bun run build && bun dist/organizations/modules/invites/__tests__/invites.service.spec.js`
  * Also executes under `bun test dist` (top-level run, throws on failure).
  *
- * Wires the REAL extracted chain (phase 3, CoC v2) with stubs only for
- * Postgres/users/disk:
- *   OrgGuardService → MembersService → InvitesService → OrganizationsService
- * (invite accept is delegated OrganizationsService → InvitesService, so the
- * pre-DB gates below still prove the production path).
+ * Wires the REAL invite chain (CoC §2: this spec lives in the owning nested
+ * module's `__tests__/`) with stubs only for Postgres/users/disk:
+ *   OrganizationsGuard → InvitesService
+ * (no OrganizationsService/MembersService needed — the invite accept path
+ * touches only the guard and the invites table).
  *
  * Covers (without a live DB where noted):
  * - invite accept pre-DB gates: non-v7 token → 404 without touching the DB
@@ -19,8 +19,8 @@
  *   DB rows, no TTL, no 410 — replay is also 404);
  * - email-bound invite mismatch → 404 (no enumeration).
  *
- * uuidv7 helper checks moved to
- * `utils/uuid-v7/__tests__/uuid-v7.spec.ts` (CoC v2: utils own their tests).
+ * uuidv7 helper checks live in
+ * `utils/uuid-v7/__tests__/uuid-v7.spec.ts` (CoC §7: utils own their tests).
  *
  * DB-backed rules (single-maintainer 409s, last-maintainer 400s, member
  * accept success, link/unlink) need live Postgres and are covered by the
@@ -29,11 +29,9 @@
  */
 import assert from 'node:assert/strict';
 import { NotFoundException } from '@nestjs/common';
+import { OrganizationsGuard } from '../../../organizations.guard';
+import { randomUuidV7 } from '../../../utils/uuid-v7';
 import { InvitesService } from '../invites.service';
-import { MembersService } from '../members.service';
-import { OrgGuardService } from '../org-guard.service';
-import { OrganizationsService } from '../organizations.service';
-import { randomUuidV7 } from '../utils/uuid-v7';
 
 const SPEC_USER = '123e4567-e89b-12d3-a456-426614174001';
 
@@ -45,7 +43,7 @@ function silentLogger() {
     warn() {},
     error() {},
     fatal() {},
-  } as unknown as ConstructorParameters<typeof OrganizationsService>[0];
+  } as unknown as ConstructorParameters<typeof InvitesService>[0];
 }
 
 /**
@@ -93,30 +91,20 @@ function stubUsers(user: { id: string; email: string } | null = null) {
 }
 
 /**
- * Production shape: the guard, the two domain-root services and the org
- * service wired exactly as OrganizationsModule does (stubs only at the
- * Postgres/user/disk edges).
+ * Production shape for this module: the shared guard plus InvitesService
+ * wired exactly as InvitesModule does (stubs only at the Postgres/user/disk
+ * edges).
  */
-function makeService(db: never, users: never): OrganizationsService {
-  const guard = new OrgGuardService(silentLogger(), db);
-  const members = new MembersService(silentLogger(), db, stubPaths(), users, guard);
-  const invites = new InvitesService(silentLogger(), db, stubPaths(), users, guard);
-  return new OrganizationsService(
-    silentLogger(),
-    db,
-    stubPaths(),
-    users,
-    guard,
-    members,
-    invites,
-  );
+function makeInvites(db: never, users: never): InvitesService {
+  const guard = new OrganizationsGuard(silentLogger(), db);
+  return new InvitesService(silentLogger(), db, stubPaths(), users, guard);
 }
 
 const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
   {
     name: 'accept with a non-v7 token → 404 without touching the DB',
     run: async () => {
-      const svc = makeService(untouchedDb(), stubUsers());
+      const svc = makeInvites(untouchedDb(), stubUsers());
       await assert.rejects(
         () => svc.acceptInvite({ token: 'no-such-token' }, SPEC_USER),
         (err: unknown) => {
@@ -132,7 +120,7 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
   {
     name: 'accept with a valid v7 but unknown token → 404 (no TTL, no 410)',
     run: async () => {
-      const svc = makeService(mockDb([]), stubUsers({ id: SPEC_USER, email: 'a@rush-code.local' }));
+      const svc = makeInvites(mockDb([]), stubUsers({ id: SPEC_USER, email: 'a@rush-code.local' }));
       const token = randomUuidV7();
       await assert.rejects(
         () => svc.acceptInvite({ token }, SPEC_USER),
@@ -156,7 +144,7 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
         role: 'user',
         createdAt: new Date(),
       };
-      const svc = makeService(
+      const svc = makeInvites(
         mockDb([stored]),
         stubUsers({ id: SPEC_USER, email: 'other@rush-code.local' }),
       );
@@ -183,15 +171,15 @@ async function main(): Promise<void> {
     }
   }
   if (failed > 0) {
-    console.error(`${failed}/${checks.length} organizations checks failed`);
+    console.error(`${failed}/${checks.length} invites checks failed`);
     process.exitCode = 1;
-    throw new Error(`${failed}/${checks.length} organizations checks failed`);
+    throw new Error(`${failed}/${checks.length} invites checks failed`);
   } else {
-    console.log(`${checks.length}/${checks.length} organizations checks passed`);
+    console.log(`${checks.length}/${checks.length} invites checks passed`);
   }
 }
 
 void main().catch((err: unknown) => {
-  console.error(`organizations checks failed to run: ${(err as Error).message}`);
+  console.error(`invites checks failed to run: ${(err as Error).message}`);
   process.exit(1);
 });

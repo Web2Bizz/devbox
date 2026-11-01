@@ -5,25 +5,27 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
-import { AppLogger } from "../common/logger";
-import { DbService, dbUnavailable, type DbClient } from "../common/db/db.service";
+import { AppLogger } from "../../../common/logger";
+import { DbService, dbUnavailable, type DbClient } from "../../../common/db/db.service";
 import {
   organizationMembers,
   type OrganizationMemberRow,
-} from "../common/db/schema";
-import { WorkspacePathService } from "../common/storage/workspace-path.service";
-import { UsersService } from "../users/users.service";
-import type { AddMemberInput, UpdateMemberRoleInput } from "./dto";
-import type { OrganizationMember, OrgRole } from "./organizations.types";
-import { OrgGuardService } from "./org-guard.service";
-import { toMember } from "./utils/organization-member";
-import { isPgForeignKeyViolation, isPgUniqueViolation } from "./utils/pg-error";
+} from "../../../common/db/schema";
+import { WorkspacePathService } from "../../../common/storage/workspace-path.service";
+import { UsersService } from "../../../users/users.service";
+import type { AddMemberInput, UpdateMemberRoleInput } from "../../dto";
+import type { OrganizationMember, OrgRole } from "../../organizations.types";
+import { OrganizationsGuard } from "../../organizations.guard";
+import { toMember } from "../../utils/organization-member";
+import { isPgForeignKeyViolation, isPgUniqueViolation } from "../../utils/pg-error";
 
 /**
  * MembersService — org membership (list/add/remove/change-role) backed by
  * `organization_members` (drizzle/0004; partial unique single-maintainer
  * index). Extracted verbatim from OrganizationsService (phase 3, CoC v2);
- * the access gate comes from OrgGuardService.
+ * the access gate comes from OrganizationsGuard. Lives in MembersModule
+ * (`organizations/modules/members/`, CoC §2) — imported by
+ * OrganizationsModule, never registered in AppModule.
  *
  * Access policy: reads are member-only (404 for strangers), mutations are
  * maintainer-only (403 for plain members), the last maintainer can never be
@@ -41,7 +43,7 @@ export class MembersService {
     private readonly db: DbService,
     private readonly paths: WorkspacePathService,
     private readonly users: UsersService,
-    private readonly guard: OrgGuardService,
+    private readonly guard: OrganizationsGuard,
   ) {}
 
   /** Live drizzle client — throws 503 EXTERNAL_UNAVAILABLE when Postgres is down. */

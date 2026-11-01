@@ -1,5 +1,12 @@
-import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  type CanActivate,
+  type ExecutionContext,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
+import { readIdentity } from "../auth/identity.service";
 import { AppLogger } from "../common/logger";
 import { DbService, dbUnavailable, type DbClient } from "../common/db/db.service";
 import {
@@ -10,8 +17,8 @@ import {
 import type { OrgRole } from "./organizations.types";
 
 /**
- * OrgGuardService — the shared org access gate (defense in depth — HTTP
- * guards repeat it):
+ * OrganizationsGuard — the shared org access gate (defense in depth — the
+ * services repeat it):
  * - reads (get/members) are member-only: strangers get 404 (the org's very
  *   existence is not leaked);
  * - mutations (settings/members/invites/links) are maintainer-only:
@@ -20,16 +27,48 @@ import type { OrgRole } from "./organizations.types";
  *   (org_id WHERE role='maintainer') wins races; callers pre-check for
  *   friendly 409s and guard the last-maintainer removal/demotion with 400.
  *
+ * Two surfaces on one class: the policy methods (orgRowOrThrow, roleOf,
+ * memberRowOrThrow, maintainerOrThrow, maintainerCount, getRole) are called
+ * by the domain services, while `canActivate` applies the same policy as an
+ * HTTP guard on the routes that carry `:id` (defense in depth — the services
+ * keep their own checks). Because a guard runs before pipes, malformed
+ * bodies on gated routes are answered 404/403 before validation ever sees
+ * them.
+ *
  * Every lookup funnels Postgres outages through `dbUnavailable` → 503
  * EXTERNAL_UNAVAILABLE (Retry-After 30 via ApiErrorFilter), logged once with
  * the correlationId. Logs carry only ids/reasons.
  */
 @Injectable()
-export class OrgGuardService {
+export class OrganizationsGuard implements CanActivate {
   constructor(
-    private readonly logger: AppLogger = new AppLogger("OrgGuardService"),
+    private readonly logger: AppLogger = new AppLogger("OrganizationsGuard"),
     private readonly db: DbService,
   ) {}
+
+  /**
+   * HTTP guard: GET on an org-scoped route needs membership, every other
+   * method needs the maintainer role. Routes without a `:id` param (create,
+   * list, invite accept) are not gated here, and an anonymous request is
+   * left to JwtAuthGuard (guard order keeps auth first → 401).
+   */
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const req = context.switchToHttp().getRequest<{
+      params?: { id?: string };
+      method?: string;
+      correlationId?: string;
+    }>();
+    const orgId = req.params?.id;
+    if (!orgId) return true;
+    const identity = readIdentity(req);
+    if (!identity) return true;
+    if (req.method === "GET") {
+      await this.memberRowOrThrow(orgId, identity.id, req.correlationId);
+      return true;
+    }
+    await this.maintainerOrThrow(orgId, identity.id, req.correlationId);
+    return true;
+  }
 
   /** Live drizzle client — throws 503 EXTERNAL_UNAVAILABLE when Postgres is down. */
   private client(): DbClient {

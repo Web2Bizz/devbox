@@ -5,31 +5,33 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { eq } from "drizzle-orm";
-import { AppLogger } from "../common/logger";
-import { DbService, dbUnavailable, type DbClient } from "../common/db/db.service";
+import { AppLogger } from "../../../common/logger";
+import { DbService, dbUnavailable, type DbClient } from "../../../common/db/db.service";
 import {
   organizationInvites,
   organizationMembers,
   type OrganizationInviteRow,
-} from "../common/db/schema";
-import { WorkspacePathService } from "../common/storage/workspace-path.service";
-import { UsersService } from "../users/users.service";
-import type { AcceptInviteInput, CreateInviteInput } from "./dto";
+} from "../../../common/db/schema";
+import { WorkspacePathService } from "../../../common/storage/workspace-path.service";
+import { UsersService } from "../../../users/users.service";
+import type { AcceptInviteInput, CreateInviteInput } from "../../dto";
 import type {
   OrganizationInvite,
   OrganizationMember,
   OrgRole,
-} from "./organizations.types";
-import { OrgGuardService } from "./org-guard.service";
-import { toMember } from "./utils/organization-member";
-import { isPgForeignKeyViolation, isPgUniqueViolation } from "./utils/pg-error";
-import { isUuidV7, randomUuidV7 } from "./utils/uuid-v7";
+} from "../../organizations.types";
+import { OrganizationsGuard } from "../../organizations.guard";
+import { toMember } from "../../utils/organization-member";
+import { isPgForeignKeyViolation, isPgUniqueViolation } from "../../utils/pg-error";
+import { isUuidV7, randomUuidV7 } from "../../utils/uuid-v7";
 
 /**
  * InvitesService — persistent single-use uuidv7 invite links backed by
  * `organization_invites` (drizzle/0007). Extracted verbatim from
  * OrganizationsService (phase 3, CoC v2); the access gate comes from
- * OrgGuardService.
+ * OrganizationsGuard. Lives in InvitesModule
+ * (`organizations/modules/invites/`, CoC §2) — imported by
+ * OrganizationsModule, never registered in AppModule.
  *
  * Invites have NO TTL (links never expire). `email` NULL = open link-invite
  * (any session user can accept); set = email-invite (only the matching
@@ -48,7 +50,7 @@ export class InvitesService {
     private readonly db: DbService,
     private readonly paths: WorkspacePathService,
     private readonly users: UsersService,
-    private readonly guard: OrgGuardService,
+    private readonly guard: OrganizationsGuard,
   ) {}
 
   /** Live drizzle client — throws 503 EXTERNAL_UNAVAILABLE when Postgres is down. */

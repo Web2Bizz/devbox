@@ -186,7 +186,7 @@ async function main(): Promise<void> {
     } else {
       // Live PG — full suite (tables migrated + cleared above).
       const { OrganizationsService } = await import("./organizations.service");
-      const { ProjectsService } = await import("./modules/projects/projects.service");
+      const { ProjectsService } = await import("./projects/projects.service");
       const { UsersService } = await import("../users/users.service");
       const { TokenService } = await import("../auth/token.service");
       const orgs = app.get(OrganizationsService, { strict: false }) as {

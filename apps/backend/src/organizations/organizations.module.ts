@@ -1,8 +1,8 @@
 import { Module } from "@nestjs/common";
 import { DbModule } from "../common/db/db.module";
 import { WorkspacePathService } from "../common/storage/workspace-path.service";
-import { ProjectsModule } from "./modules/projects/projects.module";
-import { RegistriesModule } from "./modules/registries/registries.module";
+import { ProjectsModule } from "./projects/projects.module";
+import { RegistriesModule } from "./registries/registries.module";
 import { OrgProjectsController } from "./org-projects.controller";
 import { OrganizationsController } from "./organizations.controller";
 import { OrganizationsService } from "./organizations.service";

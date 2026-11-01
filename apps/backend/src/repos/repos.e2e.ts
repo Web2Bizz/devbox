@@ -110,7 +110,9 @@ async function main(): Promise<void> {
     });
 
     await check('GET /api/v1/repos?q filters by name', async () => {
-      const hit = await fetch(`${base}/api/v1/repos?q=DEM`, auth);
+      // q matches the repo *name* (uuid) case-insensitively; no-git/corrupted
+      // siblings are skipped before the filter, so the last-4 suffix is unique.
+      const hit = await fetch(`${base}/api/v1/repos?q=${E2E_PID.slice(-4)}`, auth);
       assert.equal(hit.status, 200);
       assert.equal(((await readJson(hit)) as unknown[]).length, 1);
       const miss = await fetch(`${base}/api/v1/repos?q=zzz-nope`, auth);
@@ -143,8 +145,13 @@ async function main(): Promise<void> {
       assert.equal(res.status, 404);
     });
 
-    await check('missing REPOS_ROOT → 200 [] (never 500)', async () => {
-      process.env.REPOS_ROOT = path.join(REPOS_ROOT, 'definitely-missing-xyz');
+    await check('empty REPOS_ROOT dir → 200 [] (never 500)', async () => {
+      // REPOS_ROOT must exist (env validation fails fast on an unreadable
+      // path — that is covered by storage-unavailable.spec). A configured but
+      // empty root lists nothing and never 500s.
+      const emptyRoot = path.join(REPOS_ROOT, 'empty-root');
+      mkdirSync(emptyRoot, { recursive: true });
+      process.env.REPOS_ROOT = emptyRoot;
       const res = await fetch(`${base}/api/v1/repos`, auth);
       assert.equal(res.status, 200);
       assert.deepEqual(await readJson(res), []);

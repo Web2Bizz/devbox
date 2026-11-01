@@ -39,7 +39,7 @@ import { JwtAuthGuard } from '../../../auth/jwt-auth.guard';
 import type { RequestIdentity } from '../../../auth/identity.service';
 import { ReqUser } from '../../../auth/req-user.decorator';
 import { OrganizationsService } from '../../../organizations/organizations.service';
-import { ownerKeyOrThrow } from '../../../organizations/modules/projects/projects.service';
+import { ownerKeyOrThrow } from '../../../organizations/projects/projects.service';
 import { WorkspacePathService } from '../../../common/storage/workspace-path.service';
 import { OpencodeService } from './opencode.service';
 import { serveBasicAuthHeader } from './modules/auth/auth.service';

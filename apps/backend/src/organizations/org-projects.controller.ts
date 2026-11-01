@@ -29,10 +29,10 @@ import {
   updateProjectSchema,
   type CreateProjectInput,
   type UpdateProjectInput,
-} from "./modules/projects/dto";
-import { ProjectsService } from "./modules/projects/projects.service";
-import { ChatsService } from "./modules/projects/modules/chats/chats.service";
-import { SessionsService } from "./modules/projects/modules/sessions/sessions.service";
+} from "./projects/dto";
+import { ProjectsService } from "./projects/projects.service";
+import { ChatsService } from "./projects/chats/chats.service";
+import { SessionsService } from "./projects/sessions/sessions.service";
 
 /**
  * Canonical nested project surface (1:1 model):
@@ -41,6 +41,11 @@ import { SessionsService } from "./modules/projects/modules/sessions/sessions.se
  * GET /:id/projects/:projectId (assertBelongs, mismatch → 404)
  * PATCH /:id/projects/:projectId, DELETE (soft), POST .../restore (API only).
  * Membership enforced via OrganizationsService.getRole (404 for strangers).
+ *
+ * SCOPE-EXCEPTION: projection, delegates only, no logic — this is the one
+ * allowed Organization → projects projection surface (PLAN §3.4); every
+ * decision is delegated to ProjectsService/ChatsService/SessionsService and
+ * the shared access gate.
  */
 @ApiTags("org-projects")
 @Controller("organizations/:id/projects")

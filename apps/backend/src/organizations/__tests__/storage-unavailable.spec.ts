@@ -21,7 +21,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { validateEnvWithWarnings } from '../../common/env/env';
 import { ReposService } from '../../repos/repos.service';
-import { ProjectFilesService } from '../modules/projects/modules/files/project-files.service';
+import { ProjectFilesService } from '../projects/files/project-files.service';
 import { WorkspaceCloneService } from '../../workspaces/modules/clone/clone.service';
 import { CloneJobsRepository } from '../../workspaces/modules/clone/clone.repository';
 import { WorkspacePathService } from '../../common/storage/workspace-path.service';

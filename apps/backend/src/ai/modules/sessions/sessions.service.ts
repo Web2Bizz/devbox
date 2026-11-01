@@ -2,7 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
 import type { OpencodeClient } from '@opencode-ai/sdk/v2';
 import { OrganizationsService } from '../../../organizations/organizations.service';
-import { ownerKeyOrThrow } from '../../../organizations/modules/projects/projects.service';
+import { ownerKeyOrThrow } from '../../../organizations/projects/projects.service';
 import { WorkspacePathService } from '../../../common/storage/workspace-path.service';
 import { OpencodeSdkClient } from '../opencode/opencode-sdk-client';
 import { OpencodeService } from '../opencode/opencode.service';

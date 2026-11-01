@@ -20,7 +20,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ReqUser } from '../auth/req-user.decorator';
 import type { RequestIdentity } from '../auth/identity.service';
 import { ZodValidationPipe } from '../common/validation';
-import { GithubInstallationsService } from '../organizations/modules/projects/modules/github/github-installations.service';
+import { GithubInstallationsService } from '../organizations/projects/github-link/github-installations.service';
 import { CloneJobsRepository } from './modules/clone/clone.repository';
 import {
   CloneWorkspaceDto,

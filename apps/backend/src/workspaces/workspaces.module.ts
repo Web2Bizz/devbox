@@ -1,5 +1,5 @@
 import { Module, forwardRef } from '@nestjs/common';
-import { GithubModule } from '../organizations/modules/projects/modules/github/github.module';
+import { GithubModule } from '../organizations/projects/github-link/github.module';
 import { CloneJobsRepository } from './modules/clone/clone.repository';
 import { WorkspaceCloneService } from './modules/clone/clone.service';
 import { WorkspacePathService } from '../common/storage/workspace-path.service';

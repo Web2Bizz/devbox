@@ -21,7 +21,7 @@
  */
 import assert from 'node:assert/strict';
 import { validateEnv } from './env';
-import { WorkspacePathService } from '../../common/storage/workspace-path.service';
+import { WorkspacePathService } from '../../workspaces/modules/path/path.service';
 
 type Source = NodeJS.ProcessEnv;
 

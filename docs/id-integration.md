@@ -94,13 +94,13 @@ Repo facts today:
 - No `AuthGuard`, no JWT, no passport, no server session. Identity is a
   **mock string**: `resolveUserId(req, queryUserId)` =
   `x-user-id` header wins → `?userId` query → `'default'`
-  (`apps/backend/src/organizations/projects/github-link/github.controller.ts:41-60`,
-  duplicated in `apps/backend/src/organizations/projects/repository/workspaces.controller.ts:35-49`).
+  (`apps/backend/src/projects/github/github.controller.ts:41-60`,
+  duplicated in `apps/backend/src/workspaces/workspaces.controller.ts:35-49`).
 - CORS allowlist includes `x-user-id`
-  (`apps/backend/src/app/app.setup.ts:70`).
+  (`apps/backend/src/app.setup.ts:70`).
 - Drizzle: no `users` table; `github_installations.user_id` is nullable
   text, FK-less, explicitly waiting for users
-  (`apps/backend/src/common/db/schema.ts:11-12,63-72`).
+  (`apps/backend/src/db/schema.ts:11-12,63-72`).
 - Frontend: `useLogin` (mock latency + `isMockCredential`) with
   `TODO REAL-API: api.login`, `useProfile` (mock timer + `MOCK_PROFILE`)
   with `TODO REAL-API: GET/PUT /api/v1/profile`; `api/client.ts` is
@@ -138,7 +138,7 @@ Open questions for the `.d.ts` reading:
 ## 3. Env names (proposal — add to `.env.example` + `AppEnv`, never log values)
 
 Single source stays `.env.example`; typed access via
-`apps/backend/src/common/env/env.ts` (`validateEnv`, WARN-defaults, fail-fast on
+`apps/backend/src/env.ts` (`validateEnv`, WARN-defaults, fail-fast on
 explicit garbage, `findSuspiciousUnknownKeys` typo guard). Naming avoids
 collision with the existing `NPM_*` (registry/install token) namespace.
 

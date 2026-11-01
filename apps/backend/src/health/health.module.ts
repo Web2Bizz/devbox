@@ -1,16 +1,12 @@
 import { Module } from '@nestjs/common';
 import { DbModule } from '../common/db/db.module';
+import { OpencodeModule } from '../ai/modules/opencode/opencode.module';
+import { DockerModule } from '../organizations/modules/registries/modules/docker/docker.module';
+import { NpmModule } from '../organizations/modules/registries/modules/npm/npm.module';
 import { HealthController } from './health.controller';
 
-/**
- * HealthModule — Common scope: imports DbModule only.
- *
- * opencode/registry/npmRegistry reachability arrives through the global
- * HealthRegistry (CommonModule), which each domain module populates on boot
- * (OpencodeModule/DockerModule/NpmModule) — health never imports a domain.
- */
 @Module({
-  imports: [DbModule],
+  imports: [DbModule, OpencodeModule, DockerModule, NpmModule],
   controllers: [HealthController],
 })
 export class HealthModule {}

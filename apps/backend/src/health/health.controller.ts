@@ -1,8 +1,16 @@
-import { Controller, Get, Version, VERSION_NEUTRAL } from '@nestjs/common';
+import { Controller, Get, Optional, Version, VERSION_NEUTRAL } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { DbService } from '../common/db/db.service';
-import { HealthRegistry } from '../common/health/health-registry';
-import { HealthDto } from '../common/http/api/dto';
+import { OpencodeService } from '../ai/modules/opencode/opencode.service';
+import {
+  DockerRegistryService,
+  type DockerRegistryStatus,
+} from '../organizations/modules/registries/modules/docker/docker.service';
+import {
+  NpmRegistryService,
+  type NpmRegistryStatus,
+} from '../organizations/modules/registries/modules/npm/npm.service';
+import { HealthDto } from '../common/api/dto';
 import type { HealthResponse } from '@rush-code/contracts';
 
 /**
@@ -14,18 +22,17 @@ import type { HealthResponse } from '@rush-code/contracts';
  * Always 200: db, opencode, registry and npmRegistry are reachability flags
  * ('up' | 'down' | 'skipped'), never error statuses. The opencode/registry
  * probes run on a short budget and degrade to 'down' on timeout — never
- * throw. Dependency probes are self-registered by their owning domain
- * modules through HealthRegistry (Common → domain imports are forbidden);
- * a key nobody registered falls back to 'down' (opencode) / 'skipped'
- * (registries, same as unconfigured URL). The opencode wire flag is
- * 'up' | 'down' only — 'skipped' is never reported for it.
+ * throw. The registry services are @Optional so health stays green even if a
+ * module is unwired; missing → 'skipped' (same as unconfigured URL).
  */
 @ApiTags('health')
 @Controller()
 export class HealthController {
   constructor(
     private readonly db: DbService,
-    private readonly health: HealthRegistry,
+    private readonly opencode: OpencodeService,
+    @Optional() private readonly registry?: DockerRegistryService,
+    @Optional() private readonly npmRegistry?: NpmRegistryService,
   ) {}
 
   @Get('health')
@@ -33,17 +40,13 @@ export class HealthController {
   @ApiOperation({ summary: 'Liveness + postgres/opencode/registry reachability' })
   @ApiResponse({ status: 200, description: 'ok (even if db/opencode/registry down — flags carry the state)', type: HealthDto })
   async getHealth(): Promise<HealthResponse> {
-    const [db, opencodeFlag, registry, npmRegistry] = await Promise.all([
+    const [db, opencode, registry, npmRegistry] = await Promise.all([
       this.db.checkDb(),
-      this.health.probe('opencode'),
-      this.health.probe('registry'),
-      this.health.probe('npmRegistry'),
+      this.opencode.checkConnectivity(),
+      this.registry?.checkConnectivity() ?? Promise.resolve('skipped' as DockerRegistryStatus),
+      this.npmRegistry?.checkConnectivity() ?? Promise.resolve('skipped' as NpmRegistryStatus),
     ]);
-    // Contract HealthResponse.opencode is 'up' | 'down' — a probe that never
-    // registered (or answers 'skipped') reports 'down', never a third state.
-    const opencode: HealthResponse['opencode'] =
-      opencodeFlag === 'up' ? 'up' : 'down';
-    return { status: 'ok', db, opencode, registry: registry ?? 'skipped', npmRegistry: npmRegistry ?? 'skipped' };
+    return { status: 'ok', db, opencode, registry, npmRegistry };
   }
 
   @Get('v1/health')

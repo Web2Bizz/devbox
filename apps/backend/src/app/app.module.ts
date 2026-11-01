@@ -4,11 +4,11 @@ import { DbModule } from '../common/db/db.module';
 import { HealthModule } from '../health/health.module';
 import { CommonModule } from '../common/common.module';
 import { OrganizationsModule } from '../organizations/organizations.module';
-import { ReposModule } from '../organizations/projects/repository/repos.module';
-import { WorkspacesModule } from '../organizations/projects/repository/workspaces.module';
-import { AuthModule } from '../auth/auth.module';
+import { ReposModule } from '../repos/repos.module';
+import { WorkspacesModule } from '../workspaces/workspaces.module';
+import { AuthModule } from '../users/auth/auth.module';
 import { UsersModule } from '../users/users.module';
-import { ProcessesModule } from '../processes/processes.module';
+import { AiModule } from '../ai/ai.module';
 import { validateConfigForNest } from '../common/env/env';
 
 @Module({
@@ -25,7 +25,7 @@ import { validateConfigForNest } from '../common/env/env';
     ReposModule,
     UsersModule,
     AuthModule,
-    ProcessesModule,
+    AiModule,
   ],
 })
 export class AppModule {}

@@ -70,7 +70,7 @@ if (!reposRoot) {
 
 ## Логирование — без стеков и секретов в normal path
 
-Правила: только через `AppLogger` (`src/common/logger/`), `console.*` в runtime запрещён. Уровни `debug → info → warn → error → fatal`, уважает `LOG_LEVEL`. Normal path — однострочники `[domain] op key=value` + `correlationId`, без `\n at `, без URL/query/headers/body/`Bearer`/секретов/PII. Стек/`cause` (санитизирован, ≤2000, через `serializeCause`) — только в `debug`. `ExternalClient` — только `service/operation/attempt/latencyMs/status/code`. e2e-скан секретов обязателен (эталон `src/processes/ai/opencode/keys.e2e.ts`).
+Правила: только через `AppLogger` (`src/common/logger/`), `console.*` в runtime запрещён. Уровни `debug → info → warn → error → fatal`, уважает `LOG_LEVEL`. Normal path — однострочники `[domain] op key=value` + `correlationId`, без `\n at `, без URL/query/headers/body/`Bearer`/секретов/PII. Стек/`cause` (санитизирован, ≤2000, через `serializeCause`) — только в `debug`. `ExternalClient` — только `service/operation/attempt/latencyMs/status/code`. e2e-скан секретов обязателен (эталон `src/opencode/modules/keys/opencode-keys.e2e.ts`).
 
 ### Не правильно
 
@@ -116,20 +116,6 @@ logger.error(`[external] failure service=${service} operation=${op} status=${sta
 | `bun run test:e2e:auth` / `:projects` / `:github` / `:repos` / `:opencode-keys` | точечные e2e |
 | `bun run keys:reencrypt` | перешифровка opencode-ключей |
 | `bun run db:check-integrity` | проверка целостности Drizzle-схемы |
-
-## Scope-границы (после backend-domain-restructure)
-
-- **Common** (`common/`, `auth/`, `users/`, `health/`) не импортирует `organizations/` и `processes/`.
-- **Organization** (`organizations/`, включая `projects/` и `repository/`) импортирует Common/users/auth;
-  `processes/` — запрещён. Единственное исключение — `org-projects.controller.ts` (`SCOPE-EXCEPTION`).
-- **Processes** (`processes/`) может импортировать всё ниже; вход — только HTTP-контроллеры или
-  событие `workers/` с `projectId` и gate через `organizations/projects/access`.
-- Проект существует только внутри `organizations/projects/`; C4-гейт — единый
-  `organizations/projects/access/ProjectAccessService.assertProjectAccessById`.
-- Диск — только `common/storage/` (jail + `ensureDir/removeDir/statPath/readDir`) или
-  `organizations/projects/repository/`; исключение — `resolveGithubPrivateKey` в `common/env`.
-- Grep-гейты: `grep -rn "from.*organizations" src/common src/health src/users src/auth` пусто;
-  `grep -rn "from.*processes" src/organizations` пусто; `grep -rn "repos/\|workspaces/\|ai/modules" src` пусто.
 
 ## Конвенции (коротко)
 

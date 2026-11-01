@@ -1,6 +1,6 @@
 # План реструктуризации backend по scope: Common / Organization (⊃ Project) / Processes
 
-Статус: реализовано 2026-11-01 (фазы 0–9 выполнены, см. `evolution-log.md`); дальнейшие правки — только по новым задачам. Трекинг задач не используется.
+Статус: черновик v2 (правки: platform→common, crypto/keys→common, projects внутри organizations, ai+workers→processes), код не написан. Трекинг задач не используется.
 Принцип: только перемещение и выделение границ, без изменения поведения.
 Каждый этап — зелёные `bun run lint` + `bun run build`, e2e не краснеют.
 
@@ -252,28 +252,6 @@ src/
 | 6.5 | `session_messages` / fork-поля — в этом плане? | (a) Нет — только в SDK-миграции; (b) да | (a) — схема БД здесь не меняется, миграции только в SDK-плане |
 | 6.6 | `contracts.ts` + `packages/contracts` трогать? | (a) Нет, только сверка фазы 7; (b) чистить | (a) |
 | 6.7 | Grep-гейты — руками или в CI | (a) Руками до фазы 9, затем решить; (b) сразу в `scripts/check` | (a) |
-
-### 6.8 Решения зафиксированы (2026-11-01, подтверждено пользователем)
-
-| # | Решение | Статус |
-|---|---|---|
-| 6.1 | Проект только внутри `organizations/projects/` | Принято 2026-11-01 |
-| 6.2 | `CommonModule` остаётся как есть, шим не вводится | Принято 2026-11-01 |
-| 6.3 | `common/env/env.ts` в этом плане не режем | Принято 2026-11-01 |
-| 6.4 | `org-projects.controller.ts` остаётся тонкой проекцией с `SCOPE-EXCEPTION` | Принято 2026-11-01 |
-| 6.5 | `session_messages`/fork-поля — только в SDK-миграции | Принято 2026-11-01 |
-| 6.6 | `contracts.ts` + `packages/contracts` — только сверка (фаза 7) | Принято 2026-11-01 |
-| 6.7 | Grep-гейты руками до фазы 9 | Принято 2026-11-01 |
-
-Дополнительно принято (не входило в §6, найдено в фазе 0):
-
-| Вопрос | Решение | Статус |
-|---|---|---|
-| `health/` импортирует `ai/opencode` + `organizations/registries` | Инверсия через `common/health/health-registry.ts`: доменные модули сами регистрируют пробу (`OnModuleInit`), health не импортирует домены | Сделано (фаза 1B, commit `278df2d`) |
-| `keys.controller.ts` (в common) импортирует `ai/.../billing` | Store/rotation остаются в `common/keys`, HTTP-поверхность (`/api/v1/key`, `/api/v1/usage`) вынесена в `ai/modules/opencode` | Сделано (фаза 1B) |
-| `storage/storage-unavailable.spec.ts` импортирует домены | Спека вынесена в `organizations/__tests__/` (common не импортирует домены) | Сделано (фаза 1A) |
-| `.gitignore: keys/` глотает `src/**/keys/` | Корневой паттерн `keys/` → `/keys/` (+ `*.pem` остаётся) | Сделано (фаза 1B) |
-| Pre-existing red: `crypto` empty-plaintext round-trip | Guard `raw.length <= TAG_BYTES` → `<` (auth-tag проверка не ослаблена) | Сделано (фаза 1B) |
 
 ## 7. Риски
 

@@ -23,7 +23,7 @@ import {
   ProjectChatDto,
   createChatSchema,
   type CreateChatInput,
-} from "./dto";
+} from "./chats.dto";
 
 /**
  * Project chats — Bearer-guarded (JwtAuthGuard, legacy mock fallback in

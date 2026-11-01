@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { AppLogger } from "../../../../../common/logger";
-import type { GithubLinkInput } from "../../dto";
+import type { GithubLinkInput } from "../../projects.dto";
 import { ProjectsService } from "../../projects.service";
 
 /**

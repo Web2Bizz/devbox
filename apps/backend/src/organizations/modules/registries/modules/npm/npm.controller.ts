@@ -3,7 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagg
 import { ApiErrorDto } from '../../../../../common/http/api/dto';
 import { JwtAuthGuard } from '../../../../../auth/jwt-auth.guard';
 import { NpmRegistryService } from './npm.service';
-import { NpmRegistryStatusDto } from './dto';
+import { NpmRegistryStatusDto } from './npm.dto';
 
 /**
  * npm registry (Verdaccio) — observe-only read surface (GET only).

@@ -13,7 +13,7 @@ import {
 } from '../../../../../common/external/external-error';
 import { withRetry } from '../../../../../common/external/retry';
 import { GithubAppService } from './github-app.service';
-import type { ListReposQueryInput } from './dto';
+import type { ListReposQueryInput } from './github.dto';
 
 export type GithubRepo = {
   id: number;

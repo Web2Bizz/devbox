@@ -27,8 +27,6 @@ import {
   RefreshBodyDto,
   RegisterBodyDto,
   UpdateMeBodyDto,
-} from "./auth.dto";
-import {
   loginSchema,
   refreshSchema,
   registerSchema,
@@ -37,7 +35,7 @@ import {
   type RefreshInput,
   type RegisterInput,
   type UpdateMeInput,
-} from "./dto";
+} from "./auth.dto";
 import { JwtAuthGuard } from "./jwt-auth.guard";
 import { ReqUser } from "./req-user.decorator";
 import type { RequestIdentity } from "./identity.service";

@@ -17,7 +17,7 @@ import type {
   CreateProjectInput,
   GithubLinkInput,
   UpdateProjectInput,
-} from "./dto";
+} from "./projects.dto";
 
 const execFileAsync = promisify(execFile);
 

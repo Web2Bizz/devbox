@@ -7,7 +7,7 @@ import {
   AskAnswerDto,
   askQuestionSchema,
   type AskQuestion,
-} from './dto';
+} from './agents.dto';
 
 /**
  * AgentsController — list available AI agents + ask a question (mock).

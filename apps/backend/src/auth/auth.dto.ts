@@ -1,5 +1,22 @@
 import { ApiProperty } from '@nestjs/swagger';
 
+/**
+ * Auth DTO — single source of truth is @rush-code/contracts (verbatim trims,
+ * min/max, email regex + error strings; trim-first semantics preserved).
+ * Controllers import from './auth.dto' — the runtime objects are
+ * the package schemas. Swagger body DTOs live in this file.
+ */
+export {
+  loginSchema,
+  refreshSchema,
+  registerSchema,
+  updateMeSchema,
+  type LoginInput,
+  type RefreshInput,
+  type RegisterInput,
+  type UpdateMeInput,
+} from '@rush-code/contracts';
+
 /** Public user DTO — never carries passwordHash (never logged, never serialized). */
 export class AuthUserDto {
   @ApiProperty({ example: '3fa85f64-5717-4562-b3fc-2c963f66afa6' })

@@ -4,8 +4,8 @@ import { ApiErrorDto } from '../../../common/http/api/dto';
 import { JwtAuthGuard } from '../../../auth/jwt-auth.guard';
 import { DockerRegistryService } from './modules/docker/docker.service';
 import { NpmRegistryService } from './modules/npm/npm.service';
-import { RegistryCatalogDto } from './modules/docker/dto';
-import { NpmRegistryStatusDto } from './modules/npm/dto';
+import { RegistryCatalogDto } from './modules/docker/docker.dto';
+import { NpmRegistryStatusDto } from './modules/npm/npm.dto';
 
 /**
  * Unified registry lists — canonical read surface (GET only).

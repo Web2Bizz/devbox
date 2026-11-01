@@ -13,7 +13,7 @@ import {
 } from "../../../common/db/schema";
 import { WorkspacePathService } from "../../../common/storage/workspace-path.service";
 import { UsersService } from "../../../users/users.service";
-import type { AddMemberInput, UpdateMemberRoleInput } from "../../dto";
+import type { AddMemberInput, UpdateMemberRoleInput } from "../../organizations.dto";
 import type { OrganizationMember, OrgRole } from "../../organizations.types";
 import { OrganizationsGuard } from "../../organizations.guard";
 import { toMember } from "../../utils/organization-member";

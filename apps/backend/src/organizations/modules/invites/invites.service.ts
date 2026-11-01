@@ -14,7 +14,7 @@ import {
 } from "../../../common/db/schema";
 import { WorkspacePathService } from "../../../common/storage/workspace-path.service";
 import { UsersService } from "../../../users/users.service";
-import type { AcceptInviteInput, CreateInviteInput } from "../../dto";
+import type { AcceptInviteInput, CreateInviteInput } from "../../organizations.dto";
 import type {
   OrganizationInvite,
   OrganizationMember,

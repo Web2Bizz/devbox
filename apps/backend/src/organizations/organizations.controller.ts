@@ -35,7 +35,7 @@ import {
   type CreateOrganizationInput,
   type UpdateMemberRoleInput,
   type UpdateOrganizationInput,
-} from "./dto";
+} from "./organizations.dto";
 import { OrganizationsGuard } from "./organizations.guard";
 import { OrganizationsService } from "./organizations.service";
 

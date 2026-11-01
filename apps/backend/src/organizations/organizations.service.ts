@@ -17,7 +17,7 @@ import type {
   CreateOrganizationInput,
   UpdateMemberRoleInput,
   UpdateOrganizationInput,
-} from "./dto";
+} from "./organizations.dto";
 import { InvitesService } from "./modules/invites/invites.service";
 import { MembersService } from "./modules/members/members.service";
 import { OrganizationsGuard } from "./organizations.guard";

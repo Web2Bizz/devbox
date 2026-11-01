@@ -16,7 +16,7 @@ import { projectSessions, type ProjectSessionRow } from "../../../../../common/d
 import { ChatsService } from "../chats/chats.service";
 import { ProjectsService } from "../../projects.service";
 import { ProjectAccessService } from "../project-access/project-access.service";
-import type { CreateSessionInput } from "./dto";
+import type { CreateSessionInput } from "./sessions.dto";
 
 export type ProjectSession = {
   id: string;

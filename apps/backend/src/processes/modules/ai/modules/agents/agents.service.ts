@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { AskAgent } from './ask.agent';
-import type { AgentDto } from './dto';
+import type { AgentDto } from './agents.dto';
 
 /**
  * Registry of available AI agents (scaffold: Ask only, mock answers).

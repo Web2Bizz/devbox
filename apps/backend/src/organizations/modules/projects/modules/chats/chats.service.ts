@@ -14,7 +14,7 @@ import {
 import { projectChats, type ProjectChatRow } from "../../../../../common/db/schema";
 import { ProjectAccessService } from "../project-access/project-access.service";
 import { ProjectsService } from "../../projects.service";
-import type { CreateChatInput } from "./dto";
+import type { CreateChatInput } from "./chats.dto";
 
 export type ProjectChat = {
   id: string;

@@ -20,7 +20,7 @@ import {
   ProjectSessionDto,
   createSessionSchema,
   type CreateSessionInput,
-} from "./dto";
+} from "./sessions.dto";
 
 /**
  * Project sessions — Bearer-guarded (JwtAuthGuard, legacy mock fallback in

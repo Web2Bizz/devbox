@@ -32,7 +32,7 @@ import {
   type CreateProjectInput,
   type GithubLinkInput,
   type UpdateProjectInput,
-} from "./dto";
+} from "./projects.dto";
 import { GithubLinkService } from "./modules/github/github-link.service";
 import { ProjectsService } from "./projects.service";
 import { ChatsService } from "./modules/chats/chats.service";

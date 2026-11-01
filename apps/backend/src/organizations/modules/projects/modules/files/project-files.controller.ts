@@ -5,7 +5,7 @@ import { ReqUser } from '../../../../../auth/req-user.decorator';
 import type { RequestIdentity } from '../../../../../auth/identity.service';
 import { NoIndexInterceptor } from '../../../../../common/http/noindex.interceptor';
 import { ZodValidationPipe } from '../../../../../common/validation';
-import { FileNodeDto, filesQuerySchema, type FilesQuery } from './dto';
+import { FileNodeDto, filesQuerySchema, type FilesQuery } from './project-files.dto';
 import { ProjectFilesService, type FileNode } from './project-files.service';
 
 /**

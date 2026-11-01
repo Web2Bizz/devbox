@@ -3,7 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagg
 import { ApiErrorDto } from '../../../../../common/http/api/dto';
 import { JwtAuthGuard } from '../../../../../auth/jwt-auth.guard';
 import { DockerRegistryService } from './docker.service';
-import { RegistryCatalogDto } from './dto';
+import { RegistryCatalogDto } from './docker.dto';
 
 /**
  * Docker Registry HTTP API v2 — minimal read surface (GET only).

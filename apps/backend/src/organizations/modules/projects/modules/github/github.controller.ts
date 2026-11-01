@@ -36,7 +36,7 @@ import {
   listReposQuerySchema,
   type InstallCallbackQueryInput,
   type ListReposQueryInput,
-} from "./dto";
+} from "./github.dto";
 import { GithubInstallationsService } from "./github-installations.service";
 import {
   INSTALLATION_ACTIONS,

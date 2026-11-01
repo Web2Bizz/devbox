@@ -138,3 +138,90 @@ rg -g '*.schema.ts' '(createdAt|updatedAt|deletedAt): z\.string' \
 # openapi At-fields must declare format: date-time (spot-check)
 rg -A2 'createdAt:|updatedAt:|deletedAt:' contracts/openapi.yaml
 ```
+
+---
+
+## 3. array-generic-style
+
+### Scope
+
+Whole monorepo — `apps/backend/src/**`, `apps/frontend/src/**`,
+`apps/cli/src/**`, `packages/contracts/src/**`, `apps/mobile/src/**`.
+Mandatory for all new type annotations.
+
+### Rule
+
+Array types are written only as `Array<T>` — the `T[]` shorthand is forbidden.
+Applies to declarations, signatures, generics, and `readonly` arrays
+(`ReadonlyArray<T>` / `readonly Array<T>`, never `readonly T[]`).
+Index access (`items[0]`) and tuple literals are untouched by this rule.
+
+```ts
+// do
+export type Project = {
+  memberIds: Array<string>;
+};
+
+function listUsers(ids: Array<string>): Array<User> {
+  return ids.map((userId) => findUser(userId));
+}
+```
+
+```ts
+// don't
+export type Project = {
+  memberIds: string[];
+};
+
+function listUsers(ids: string[]): User[] {
+  return ids.map((userId) => findUser(userId));
+}
+```
+
+### Control
+
+```sh
+# candidates for review — every hit in type position must become Array<T>
+# (triage out index access like items[0])
+rg -g '*.ts' -g '*.tsx' ':\s*[A-Za-z0-9_<>]+(\[\])+|=>\s*[A-Za-z0-9_<>]+(\[\])+' \
+  packages/contracts/src apps/backend/src apps/frontend/src apps/cli/src apps/mobile/src
+```
+
+---
+
+## 4. no-abbreviated-names
+
+### Scope
+
+Whole monorepo — same paths as §3. Mandatory for all new identifiers.
+
+### Rule
+
+Variable, parameter, property, and function names are never abbreviated —
+write the full word. `userRepository`, `configuration`, `message`,
+`index`, `error`, `request`, `response` — not `usrRepo`, `cfg`, `msg`,
+`idx`, `err`, `req`, `res`. Loop counters and conventional domain terms
+(`id`, `url`, `api`) keep their canonical form; anything else is spelled out.
+
+```ts
+// do
+function findUserById(userId: string, userRepository: UserRepository): User {
+  const user = userRepository.findById(userId);
+  return user;
+}
+```
+
+```ts
+// don't
+function findUsrById(usrId: string, usrRepo: UserRepository): User {
+  const usr = usrRepo.findById(usrId);
+  return usr;
+}
+```
+
+### Control
+
+Review-only — no reliable regex exists. Reviewers reject new abbreviations
+(`repo`, `cfg`, `ctx`, `msg`, `err`, `req`, `res`, `idx`, `tmp`, `util`
+as a name) unless the abbreviation is the canonical domain term
+(`id`, `url`, `api`) or an upstream API mandates it.

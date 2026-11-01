@@ -1,5 +1,4 @@
 import { Global, Module } from "@nestjs/common";
-import { DbModule } from "../common/db/db.module";
 import { PasswordService } from "./password.service";
 import { UsersController } from "./users.controller";
 import { UsersService } from "./users.service";
@@ -11,7 +10,6 @@ import { UsersService } from "./users.service";
  */
 @Global()
 @Module({
-  imports: [DbModule],
   controllers: [UsersController],
   providers: [UsersService, PasswordService],
   exports: [UsersService, PasswordService],

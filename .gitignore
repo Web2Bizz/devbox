@@ -34,8 +34,7 @@ build/
 *.tgz
 
 # GitHub App private key (file-based, never commit the PEM)
-keys/
-keys/*.pem
+/keys/
 *.pem
 
 # Logs

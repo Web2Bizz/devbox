@@ -1,4 +1,5 @@
-import { Global, Module } from '@nestjs/common';
+import { Global, Module, type OnModuleInit } from '@nestjs/common';
+import { HealthRegistry } from '../../../../../common/health/health-registry';
 import { NpmRegistryService } from './npm.service';
 import { NpmRegistryController } from './npm.controller';
 
@@ -6,9 +7,9 @@ export { NpmRegistryService, NpmRegistryController };
 
 /**
  * Global npm-registry module (mirrors DockerRegistryModule/OpencodeModule) —
- * NpmRegistryService is injectable in any provider (HealthController,
- * …) without explicit imports. HealthModule still imports it explicitly
- * to document the dependency.
+ * NpmRegistryService is injectable in any provider without explicit
+ * imports. Health is inverted: this module registers its own 'npmRegistry'
+ * probe in the shared HealthRegistry (HealthModule imports no domain).
  *
  * Observe-only: the module never publishes/installs, only probes Verdaccio
  * availability (GET /-/ping). Boot is never blocked: onModuleInit pings
@@ -21,4 +22,13 @@ export { NpmRegistryService, NpmRegistryController };
   providers: [NpmRegistryService],
   exports: [NpmRegistryService],
 })
-export class NpmModule {}
+export class NpmModule implements OnModuleInit {
+  constructor(
+    private readonly health: HealthRegistry,
+    private readonly service: NpmRegistryService,
+  ) {}
+
+  onModuleInit(): void {
+    this.health.register('npmRegistry', () => this.service.checkConnectivity());
+  }
+}

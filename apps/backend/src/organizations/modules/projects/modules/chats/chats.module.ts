@@ -1,5 +1,4 @@
 import { Module, forwardRef } from "@nestjs/common";
-import { DbModule } from "../../../../../common/db/db.module";
 import { OrganizationsModule } from "../../../../../organizations/organizations.module";
 import { ProjectsModule } from "../../projects.module";
 import { SessionsModule } from "../sessions/sessions.module";
@@ -8,15 +7,14 @@ import { ChatsService } from "./chats.service";
 
 /**
  * Nested module — imported by ProjectsModule, never registered in AppModule directly.
- * DbModule wires the strict-Postgres ChatsService (503 when PG is down).
+ * DbService comes from the global CommonModule (503 when PG is down).
  * SessionsModule (forwardRef) supplies SessionsService for chat-delete
  * detach (sessions survive with chat_id → NULL).
  * OrganizationsModule supplies the Card 5 access gate (member-or-owner
- * scoping, no cycle: orgs import only DbModule).
+ * scoping, no cycle: orgs import nothing from ai/projects).
  */
 @Module({
   imports: [
-    DbModule,
     forwardRef(() => OrganizationsModule),
     forwardRef(() => ProjectsModule),
     forwardRef(() => SessionsModule),

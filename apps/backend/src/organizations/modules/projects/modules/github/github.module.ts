@@ -1,5 +1,4 @@
 import { Module, forwardRef } from "@nestjs/common";
-import { DbModule } from "../../../../../common/db/db.module";
 import { ProjectsModule } from "../../projects.module";
 import { GithubAppService } from "./github-app.service";
 import { GithubInstallationsService } from "./github-installations.service";
@@ -9,11 +8,11 @@ import { GithubService } from "./github.service";
 
 /**
  * Nested module — imported by ProjectsModule, never registered in AppModule directly.
- * DbModule wires the strict-Postgres GithubInstallationsService (503 when PG is down).
+ * DbService comes from the global CommonModule (503 when PG is down).
  * GithubAppService token cache stays memory-only (tokens never persisted).
  */
 @Module({
-  imports: [DbModule, forwardRef(() => ProjectsModule)],
+  imports: [forwardRef(() => ProjectsModule)],
   controllers: [GithubController],
   providers: [GithubAppService, GithubInstallationsService, GithubService, GithubLinkService],
   exports: [GithubAppService, GithubInstallationsService, GithubService, GithubLinkService],

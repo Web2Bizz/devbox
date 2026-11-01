@@ -17,7 +17,7 @@ import {
   Version,
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiResponse, ApiTags } from "@nestjs/swagger";
-import { NoIndexInterceptor } from "../../../common/noindex.interceptor";import { ZodValidationPipe } from "../../../common/validation";
+import { NoIndexInterceptor } from "../../../common/http/noindex.interceptor";import { ZodValidationPipe } from "../../../common/validation";
 import { JwtAuthGuard } from "../../../users/auth/jwt-auth.guard";
 import { ReqUser } from "../../../users/auth/req-user.decorator";
 import type { RequestIdentity } from "../../../users/auth/identity.service";
@@ -32,7 +32,7 @@ import {
   type GithubLinkInput,
   type UpdateProjectInput,
 } from "./dto";
-import { V1Endpoint } from "../../../common/api/version";
+import { V1Endpoint } from "../../../common/http/api/version";
 import { GithubLinkService } from "./modules/github/github-link.service";
 import { ProjectsService } from "./projects.service";
 import { ChatsService } from "./modules/chats/chats.service";

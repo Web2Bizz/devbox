@@ -15,7 +15,7 @@ import {
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiResponse, ApiTags } from "@nestjs/swagger";
 import type { Response } from "express";
-import { V1Endpoint } from "../../common/api/version";
+import { V1Endpoint } from "../../common/http/api/version";
 import { AppLogger } from "../../common/logger";
 import { ExternalServiceError } from "../../common/external/external-error";
 import { ZodValidationPipe } from "../../common/validation";

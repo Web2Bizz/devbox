@@ -1,5 +1,4 @@
 import { Module, forwardRef } from "@nestjs/common";
-import { DbModule } from "../../../../../common/db/db.module";
 import { OrganizationsModule } from "../../../../../organizations/organizations.module";
 import { ChatsModule } from "../chats/chats.module";
 import { ProjectsModule } from "../../projects.module";
@@ -8,14 +7,12 @@ import { SessionsService } from "./sessions.service";
 
 /**
  * Nested module — imported by ProjectsModule, never registered in AppModule directly.
- * DbModule wires the strict-Postgres SessionsService (503 when PG is down).
+ * DbService comes from the global CommonModule (503 when PG is down).
  * OrganizationsModule supplies the Card 5 access gate
- * (assertProjectAccess — member-or-owner scoping, no cycle: orgs import
- * only DbModule).
+ * (assertProjectAccess — member-or-owner scoping, no cycle).
  */
 @Module({
   imports: [
-    DbModule,
     forwardRef(() => OrganizationsModule),
     forwardRef(() => ProjectsModule),
     forwardRef(() => ChatsModule),

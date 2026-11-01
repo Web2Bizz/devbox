@@ -3,9 +3,9 @@ import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { AppLogger } from '../../../../../common/logger';
 import { ExternalServiceError } from '../../../../../common/external/external-error';
-import { storageUnavailable, throwStorageNotConfigured } from '../../../../../storage/storage-unavailable';
+import { storageUnavailable, throwStorageNotConfigured } from '../../../../../common/storage/storage-unavailable';
 import { OrganizationsService } from '../../../../../organizations/organizations.service';
-import { WorkspacePathService } from '../../../../../workspaces/modules/path/path.service';
+import { WorkspacePathService } from '../../../../../common/storage/workspace-path.service';
 import { ProjectsService, ownerKeyOrThrow } from '../../projects.service';
 
 export type FileNode = {

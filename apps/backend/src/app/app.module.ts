@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { DbModule } from '../common/db/db.module';
 import { HealthModule } from '../health/health.module';
 import { CommonModule } from '../common/common.module';
 import { OrganizationsModule } from '../organizations/organizations.module';
@@ -19,7 +18,6 @@ import { validateConfigForNest } from '../common/env/env';
       validate: validateConfigForNest,
     }),
     CommonModule,
-    DbModule,
     HealthModule,
     OrganizationsModule,
     ReposModule,

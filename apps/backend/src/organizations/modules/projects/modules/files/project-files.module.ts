@@ -1,6 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { OrganizationsModule } from '../../../../../organizations/organizations.module';
-import { WorkspacePathService } from '../../../../../workspaces/modules/path/path.service';
+import { WorkspacePathService } from '../../../../../common/storage/workspace-path.service';
 import { ProjectsModule } from '../../projects.module';
 import { ProjectFilesController } from './project-files.controller';
 import { ProjectFilesService } from './project-files.service';
@@ -10,7 +10,7 @@ import { ProjectFilesService } from './project-files.service';
  * WorkspacePathService is provided directly (stateless, same pattern as
  * ProjectsModule — avoids a ProjectsModule ↔ WorkspacesModule cycle).
  * OrganizationsModule supplies the Card 5 access gate (member-or-owner
- * scoping, no cycle: orgs import only DbModule).
+ * scoping, no cycle).
  */
 @Module({
   imports: [forwardRef(() => ProjectsModule), forwardRef(() => OrganizationsModule)],

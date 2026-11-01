@@ -6,8 +6,8 @@ import {
   fromStatus,
   fromUnknown,
 } from "../../../../../common/external/external-error";
-import { CryptoService } from "../../../../../organizations/modules/crypto/crypto.service";
-import { OpencodeKeysService } from "../../../../../organizations/modules/keys/keys.service";
+import { CryptoService } from "../../../../../common/crypto/crypto.service";
+import { OpencodeKeysService } from "../../../../../common/keys/keys.service";
 
 /** GET /api/v1/usage response (Zen Go contract + legacy backward-compat). */
 export type BillingLimitBucket = {

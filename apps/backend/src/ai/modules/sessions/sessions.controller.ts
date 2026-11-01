@@ -21,7 +21,7 @@ import type { RequestIdentity } from '../../../users/auth/identity.service';
 import { ReqUser } from '../../../users/auth/req-user.decorator';
 import { AppLogger } from '../../../common/logger';
 import { ZodValidationPipe } from '../../../common/validation';
-import { ApiErrorDto } from '../../../common/api/dto';
+import { ApiErrorDto } from '../../../common/http/api/dto';
 import {
   createSessionRequestSchema,
   interruptSessionRequestSchema,

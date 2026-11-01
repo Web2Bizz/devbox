@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { AppLogger } from "../common/logger";
 import { dbUnavailable } from "../common/db/db.service";
-import { PasswordService } from "./modules/password/password.service";
+import { hashPassword } from "./utils/password";
 import type {
   CreateLocalInput,
   PublicUser,
@@ -25,17 +25,17 @@ export function toPublicUser(user: StoredUser): PublicUser {
 /**
  * UsersService — Postgres-backed user registry (strict, no memory fallback).
  *
- * Business logic only: trimming, hashing and error mapping. Every drizzle query
- * lives in UsersRepository, so this service never imports `drizzle-orm` or the
- * schema. When Postgres is unconfigured/unreachable the repository throws and
- * `dbUnavailable` funnels it to 503 EXTERNAL_UNAVAILABLE (Retry-After 30 via
- * ApiErrorFilter), logged once with the correlationId.
+ * Business logic only: trimming, hashing (stateless `utils/password` util) and
+ * error mapping. Every drizzle query lives in UsersRepository, so this service
+ * never imports `drizzle-orm` or the schema. When Postgres is
+ * unconfigured/unreachable the repository throws and `dbUnavailable` funnels it
+ * to 503 EXTERNAL_UNAVAILABLE (Retry-After 30 via ApiErrorFilter), logged once
+ * with the correlationId.
  * Lookup key is the lowercased email (mirrors users_email_lower_idx).
  */
 @Injectable()
 export class UsersService {
   constructor(
-    private readonly passwordService: PasswordService,
     private readonly usersRepository: UsersRepository,
     private readonly logger: AppLogger = new AppLogger("UsersService"),
   ) {}
@@ -48,7 +48,7 @@ export class UsersService {
     const firstName = input.firstName.trim();
     const lastName = input.lastName.trim();
     const email = input.email.trim();
-    const passwordHash = await this.passwordService.hash(input.password);
+    const passwordHash = await hashPassword(input.password, this.logger);
     try {
       const user = await this.usersRepository.insertLocal({
         firstName,

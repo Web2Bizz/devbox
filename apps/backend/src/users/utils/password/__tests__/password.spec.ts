@@ -1,8 +1,8 @@
 /**
- * PasswordService unit checks — self-contained runner (plain node:assert, no deps).
+ * Password util checks — self-contained runner (plain node:assert, no deps).
  *
  * Runs against COMPILED dist:
- *   `bun run build && bun dist/users/modules/password/__tests__/password.spec.js`
+ *   `bun run build && bun dist/users/utils/password/__tests__/password.spec.js`
  * Also executes under `bun run test` (dist/*.spec.js).
  *
  * Covers argon2id round-trip (hash → verify true, wrong password → false) and a
@@ -11,7 +11,7 @@
  * Needs the bun runtime (`Bun.password`) — no live Postgres.
  */
 import assert from "node:assert/strict";
-import { PasswordService } from "../password.service";
+import { hashPassword, verifyPassword, type PasswordLogger } from "../password.util";
 
 type LogEntry = { level: string; message: string };
 
@@ -37,7 +37,7 @@ function captureLogger(entries: Array<LogEntry>) {
     warn: record("warn"),
     error: record("error"),
     fatal: record("fatal"),
-  } as unknown as ConstructorParameters<typeof PasswordService>[0];
+  } as unknown as PasswordLogger;
 }
 
 /** The bun global is writable — swap only `Bun.password` and restore it after. */
@@ -56,11 +56,11 @@ const checks: Array<{ name: string; run: () => Promise<void> }> = [
     name: "hash → verify round-trip: argon2id hash verifies, wrong password does not",
     run: async () => {
       const entries: Array<LogEntry> = [];
-      const service = new PasswordService(captureLogger(entries));
-      const passwordHash = await service.hash(PASSWORD);
+      const logger = captureLogger(entries);
+      const passwordHash = await hashPassword(PASSWORD, logger);
       assert.match(passwordHash, /^\$argon2id\$/);
-      assert.equal(await service.verify(PASSWORD, passwordHash), true);
-      assert.equal(await service.verify("wrong-password", passwordHash), false);
+      assert.equal(await verifyPassword(PASSWORD, passwordHash, logger), true);
+      assert.equal(await verifyPassword("wrong-password", passwordHash, logger), false);
       assert.ok(
         entries.some((entry) => entry.message.includes("[auth] password hashed")),
       );
@@ -81,8 +81,10 @@ const checks: Array<{ name: string; run: () => Promise<void> }> = [
         },
       });
       try {
-        const service = new PasswordService(captureLogger(entries));
-        assert.equal(await service.verify(PASSWORD, STORED_HASH, "cid-1"), false);
+        assert.equal(
+          await verifyPassword(PASSWORD, STORED_HASH, captureLogger(entries), "cid-1"),
+          false,
+        );
       } finally {
         restore();
       }

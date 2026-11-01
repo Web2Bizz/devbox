@@ -6,8 +6,9 @@
  *   `bun run build && bun dist/users/__tests__/users.spec.js`
  * Also executes under `bun run test` (dist/*.spec.js).
  *
- * Wires the REAL service + repository and stubs only the Postgres edge
- * (same convention as invites.service.spec.ts):
+ * Wires the REAL service + repository; hashing goes through the real
+ * `utils/password` util (needs the bun runtime) and only the Postgres edge is
+ * stubbed (same convention as invites.service.spec.ts):
  * - createLocal duplicate (SQLSTATE 23505) → null (caller answers 409);
  * - createLocal maps the inserted row to ISO-8601 timestamps;
  * - any other DB failure → 503 EXTERNAL_UNAVAILABLE (dbUnavailable);
@@ -21,7 +22,6 @@ import assert from "node:assert/strict";
 import { type SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { ExternalServiceError } from "../../common/external/external-error";
-import type { PasswordService } from "../modules/password/password.service";
 import { UsersRepository } from "../users.repository";
 import { UsersService } from "../users.service";
 
@@ -37,23 +37,11 @@ function silentLogger() {
     warn() {},
     error() {},
     fatal() {},
-  } as unknown as ConstructorParameters<typeof UsersService>[2];
-}
-
-/** Hashing is covered by password.spec.ts — keep the users spec DB-focused. */
-function stubPasswords() {
-  return {
-    hash: async (): Promise<string> => "stub-password-hash",
-    verify: async (): Promise<boolean> => true,
-  } as unknown as PasswordService;
+  } as unknown as ConstructorParameters<typeof UsersService>[1];
 }
 
 function makeService(db: never): UsersService {
-  return new UsersService(
-    stubPasswords(),
-    new UsersRepository(db),
-    silentLogger(),
-  );
+  return new UsersService(new UsersRepository(db), silentLogger());
 }
 
 /** DbService stub whose client getter throws when touched — proves a pre-DB gate. */

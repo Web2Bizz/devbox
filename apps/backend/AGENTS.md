@@ -70,7 +70,7 @@ if (!reposRoot) {
 
 ## Логирование — без стеков и секретов в normal path
 
-Правила: только через `AppLogger` (`src/common/logger/`), `console.*` в runtime запрещён. Уровни `debug → info → warn → error → fatal`, уважает `LOG_LEVEL`. Normal path — однострочники `[domain] op key=value` + `correlationId`, без `\n at `, без URL/query/headers/body/`Bearer`/секретов/PII. Стек/`cause` (санитизирован, ≤2000, через `serializeCause`) — только в `debug`. `ExternalClient` — только `service/operation/attempt/latencyMs/status/code`. e2e-скан секретов обязателен (эталон `src/opencode/modules/keys/opencode-keys.e2e.ts`).
+Правила: только через `AppLogger` (`src/common/logger/`), `console.*` в runtime запрещён. Уровни `debug → info → warn → error → fatal`, уважает `LOG_LEVEL`. Normal path — однострочники `[domain] op key=value` + `correlationId`, без `\n at `, без URL/query/headers/body/`Bearer`/секретов/PII. Стек/`cause` (санитизирован, ≤2000, через `serializeCause`) — только в `debug`. `ExternalClient` — только `service/operation/attempt/latencyMs/status/code`. e2e-скан секретов обязателен (эталон `src/processes/modules/ai/modules/opencode/__tests__/keys.e2e.ts`).
 
 ### Не правильно
 
@@ -116,6 +116,22 @@ logger.error(`[external] failure service=${service} operation=${op} status=${sta
 | `bun run test:e2e:auth` / `:projects` / `:github` / `:repos` / `:opencode-keys` | точечные e2e |
 | `bun run keys:reencrypt` | перешифровка opencode-ключей |
 | `bun run db:check-integrity` | проверка целостности Drizzle-схемы |
+
+## Scope-правила (кратко)
+
+- Три слоя: `processes/` → `organizations/` (⊃ `modules/projects/`) → `common/`.
+  Стрелка только вниз: `common/` не знает о доменах, `organizations/` не
+  импортирует `processes/` (в т.ч. `ai`). `organizations/org-projects` проекции нет.
+- `common/` — ОДИН `@Global()` модуль (`common.module.ts`); в подпапках
+  `*.module.ts` запрещён (CoC §3). Новый кросс-доменный код — в `common/`.
+- Вложенные модули — только `<parent>/modules/<sub>/` (CoC §2), наружу торчит
+  родитель. Утилиты — `utils/<name>/` со своим `index.ts` и `__tests__/`.
+  Тесты — `__tests__/` рядом с кодом (`*.spec.ts` / `*.e2e.ts`).
+- Storage: `REPOS_ROOT` — единственный корень. fs — только через
+  `common/storage` (`WorkspacePathService`) или `repository/**`; `cwd`/`__dirname`
+  как корень запрещены.
+- uuidv7 — только `Bun.randomUUIDv7()` (runtime Bun); своего util нет.
+- DI-зависимости в конструкторах — `private readonly` (CoC §5).
 
 ## Конвенции (коротко)
 

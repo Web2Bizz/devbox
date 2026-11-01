@@ -253,6 +253,37 @@ src/
 | 6.6 | `contracts.ts` + `packages/contracts` трогать? | (a) Нет, только сверка фазы 7; (b) чистить | (a) |
 | 6.7 | Grep-гейты — руками или в CI | (a) Руками до фазы 9, затем решить; (b) сразу в `scripts/check` | (a) |
 
+### 6.8 Решения зафиксированы (2026-11-01, подтверждено пользователем)
+
+| # | Решение | Статус |
+|---|---|---|
+| 6.1 | Проект только внутри организаций: `organizations/modules/projects/` (CoC §2 требует `modules/<sub>/`, поэтому уровень `modules/` сохранён) | Принято |
+| 6.2 | `CommonModule` остаётся единственным модулем `common/`: DbService/CryptoService/OpencodeKeysService/HealthRegistry — его провайдеры, шим не вводится | Принято |
+| 6.3 | `common/env/env.ts` в этом плане не режем | Принято |
+| 6.4 | `org-projects.controller.ts` удалён: оба набора роутов объединены в один `ProjectsController` (один контроллер на модуль, по требованию пользователя) | Принято |
+| 6.5 | `session_messages`/fork-поля — только в SDK-миграции; схема БД здесь не менялась | Принято |
+| 6.6 | `contracts.ts` + `packages/contracts` не трогались (diff с checkpoint пустой) | Принято |
+| 6.7 | Grep-гейты — руками до фазы 9, в CI не выносим | Принято |
+
+Дополнительные решения по ходу (не входили в §6):
+
+| Вопрос | Решение | Статус |
+|---|---|---|
+| `health/` импортировал `ai/opencode` + registries | инверсия через `common/health/health-registry.ts` (домены self-register в OnModuleInit) | Сделано |
+| keys HTTP-поверхность в common | store/rotation в `common/keys`, HTTP (`/api/v1/key`, `/api/v1/usage`) в `processes/modules/ai/modules/opencode` | Сделано |
+| `users/auth` | вынесен в `auth/` (sibling `users/`) | Сделано |
+| members/invites | `organizations/modules/{members,invites}/` (Nest-модули по CoC §2) | Сделано |
+| C4-гейт | `organizations/modules/projects/modules/project-access/` (ProjectAccessModule), projects больше не импортирует OrganizationsModule | Сделано |
+| org-guard | `organizations.guard.ts` — реальный `CanActivate` (GET=member, мутации=maintainer, навешан на gated-роуты OrganizationsController; 410-заглушки исключены). Принятое изменение поведения: guard до pipe (битый body у не-member → 404/403 вместо 400) | Сделано |
+| uuidv7 | генерация через `Bun.randomUUIDv7()` (runtime Bun), валидация — приватный хелпер в InvitesService | Сделано |
+| `ai`/`workers` | `processes/modules/{ai,workers}` + `ProcessesModule` (CoC §2) | Сделано |
+| `repos`/`workspaces` | `organizations/modules/projects/modules/repository/` (`modules/repos`, `modules/workspaces`, `utils/repos-git`, `utils/submodules`); мёртвый дубль `workspaces/modules/jobs` удалён | Сделано |
+| прямые `fs` | единый jail: `ensureDir/removeDir/statPath/readDir` в `common/storage/workspace-path.service.ts`; прямой `node:fs` остался только в common/{env,db,storage} и `repository/**` | Сделано |
+
+### 6.9 Итог фаз
+
+Все фазы 0–9 пройдены: дерево `src/` соответствует §2, grep-гейты границ пустые, гейты (`lint`, `build`, `test`, полный `test:e2e`, `db:check-integrity`) зелёные, wire-контракт не менялся.
+
 ## 7. Риски
 
 | Риск | Где | Митигация |

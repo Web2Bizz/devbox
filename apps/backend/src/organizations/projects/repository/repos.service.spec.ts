@@ -32,7 +32,7 @@ function makeLogger() {
       warn: (msg: unknown) => {
         warns.push(msg as WarnCall);
       },
-    } as unknown as import('../common/logger').AppLogger,
+    } as unknown as import('../../../common/logger').AppLogger,
   };
 }
 

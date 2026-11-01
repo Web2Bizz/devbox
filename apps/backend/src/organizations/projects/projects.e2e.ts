@@ -312,7 +312,7 @@ async function main(): Promise<void> {
       await check("POST initializes a valid git repo on disk", async () => {
         const { WorkspacePathService } =
           await import("../../common/storage/workspace-path.service");
-        const { isValidGitRepo } = await import("../../repos/repos-git.util");
+        const { isValidGitRepo } = await import("./repository/repos-git.util");
         const paths = new WorkspacePathService();
         // Owner-forced row → owner user home (C1, no ownerless rows).
         const resolved = await paths.resolveUser(owner.id, projectId);

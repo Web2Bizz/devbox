@@ -51,8 +51,8 @@ process.env.AUTH_LEGACY_MOCK_FALLBACK = 'false';
 
 async function main(): Promise<void> {
   const { NestFactory } = await import('@nestjs/core');
-  const { AppModule } = await import('../app/app.module');
-  const { configureApp } = await import('../app/app.setup');
+  const { AppModule } = await import('../../../app/app.module');
+  const { configureApp } = await import('../../../app/app.setup');
 
   const app = await NestFactory.create(AppModule, { logger: false });
   configureApp(app);
@@ -77,7 +77,7 @@ async function main(): Promise<void> {
 
   // Bearer caller = the fixture space owner (E2E_UID). Hand-signed
   // (TokenService.sign is pure, no DB — organizations unreachable pattern).
-  const { TokenService } = await import('../auth/token.service');
+  const { TokenService } = await import('../../../auth/token.service');
   const tokens = app.get(TokenService, { strict: false }) as {
     sign: (
       claims: Record<string, unknown>,

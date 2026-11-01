@@ -5,7 +5,8 @@ import {
   InternalServerErrorException,
 } from '@nestjs/common';
 import { throwStorageNotConfigured } from './storage-unavailable';
-import { mkdir, realpath } from 'node:fs/promises';
+import { mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
+import type { Dirent, Stats } from 'node:fs';
 import path from 'node:path';
 
 const UUID_RE =
@@ -351,5 +352,26 @@ export class WorkspacePathService {
     await mkdir(scoped.absHome, { recursive: true });
     await mkdir(scoped.absSecrets, { recursive: true });
     return scoped;
+  }
+  // --- jailed filesystem primitives ---------------------------------------
+  // Disk I/O for the storage tree goes through this file only: callers
+  // resolve a path via the *Strict methods above (jail asserted) and then
+  // use these thin wrappers instead of importing node:fs directly
+  // (PLAN §3.8 single-jail rule; behaviour is unchanged).
+
+  async ensureDir(absPath: string): Promise<void> {
+    await mkdir(absPath, { recursive: true });
+  }
+
+  async removeDir(absPath: string): Promise<void> {
+    await rm(absPath, { recursive: true, force: true });
+  }
+
+  async statPath(absPath: string): Promise<Stats> {
+    return stat(absPath);
+  }
+
+  async readDir(absPath: string): Promise<Dirent[]> {
+    return readdir(absPath, { withFileTypes: true });
   }
 }

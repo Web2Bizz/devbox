@@ -1,12 +1,12 @@
 import { BadRequestException, Controller, Get, Headers, NotFoundException, Param, Query, UseGuards, Version } from '@nestjs/common';
 import { ApiBearerAuth, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { ZodValidationPipe } from '../common/validation';
-import { V1Endpoint } from '../common/http/api/version';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { ReqUser } from '../auth/req-user.decorator';
-import type { RequestIdentity } from '../auth/identity.service';
-import { OrganizationsService } from '../organizations/organizations.service';
-import { RepoDto, reposQuerySchema, userSpaceSchema, type ReposQuery } from './dto';
+import { ZodValidationPipe } from '../../../common/validation';
+import { V1Endpoint } from '../../../common/http/api/version';
+import { JwtAuthGuard } from '../../../auth/jwt-auth.guard';
+import { ReqUser } from '../../../auth/req-user.decorator';
+import type { RequestIdentity } from '../../../auth/identity.service';
+import { OrganizationsService } from '../../../organizations/organizations.service';
+import { RepoDto, reposQuerySchema, userSpaceSchema, type ReposQuery } from './repos.dto';
 import { ReposService } from './repos.service';
 
 /**

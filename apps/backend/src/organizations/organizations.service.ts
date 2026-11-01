@@ -4,7 +4,6 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { eq } from "drizzle-orm";
-import { rm } from "node:fs/promises";
 import { AppLogger } from "../common/logger";
 import { DbService, dbUnavailable, type DbClient } from "../common/db/db.service";
 import {
@@ -321,7 +320,7 @@ export class OrganizationsService {
       const scoped = await this.paths.orgScopeStrict(orgId);
       const jailReal = await this.paths.realStrictRoot();
       await this.paths.assertInsideJail(scoped.absHome, jailReal);
-      await rm(scoped.absHome, { recursive: true, force: true });
+      await this.paths.removeDir(scoped.absHome);
     } catch (err) {
       const reason =
         err instanceof InternalServerErrorException

@@ -32,14 +32,14 @@ src/
 ├─ auth/ — sibling users/: auth.controller (/auth: register/login/refresh/logout/me),
 │         jwt-auth.guard, token/identity services, auth-provider, req-user.decorator
 ├─ organizations/ — SCOPE: Organization
-│  ├─ organizations.{module,service,controller}.ts, organizations.types.ts, dto.ts
+│  ├─ organizations.{module,service,controller}.ts, organizations.types.ts, organizations.dto.ts
 │  ├─ organizations.guard.ts — реальный CanActivate (GET = member, мутации = maintainer;
 │  │                           навешан на gated-роуты OrganizationsController)
 │  ├─ modules/members/ — MembersModule / MembersService
 │  ├─ modules/invites/ — InvitesModule / InvitesService (uuidv7 через Bun.randomUUIDv7)
 │  ├─ modules/registries/ — RegistriesModule: modules/docker/ + modules/npm/ (observe-only)
 │  ├─ modules/projects/ — SCOPE: Project, ОДИН контроллер на модуль (projects.controller.ts)
-│  │  ├─ projects.{module,service}.ts, dto.ts
+│  │  ├─ projects.{module,service}.ts, projects.dto.ts
 │  │  ├─ modules/project-access/ — ProjectAccessService (гейт C4: org-linked → member,
 │  │  │                            user-space → owner, stranger → 404 без утечки)
 │  │  ├─ modules/repository/ — repository.module.ts (git-поверхность проекта)

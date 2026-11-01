@@ -3,9 +3,9 @@ import { ApiBearerAuth, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../../../../users/auth/jwt-auth.guard';
 import { ReqUser } from '../../../../../users/auth/req-user.decorator';
 import type { RequestIdentity } from '../../../../../users/auth/identity.service';
-import { NoIndexInterceptor } from '../../../../../common/noindex.interceptor';
+import { NoIndexInterceptor } from '../../../../../common/http/noindex.interceptor';
 import { ZodValidationPipe } from '../../../../../common/validation';
-import { V1Endpoint } from '../../../../../common/api/version';
+import { V1Endpoint } from '../../../../../common/http/api/version';
 import { FileNodeDto, filesQuerySchema, type FilesQuery } from './dto';
 import { ProjectFilesService, type FileNode } from './project-files.service';
 

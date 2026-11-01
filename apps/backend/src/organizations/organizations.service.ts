@@ -20,7 +20,7 @@ import {
   type OrganizationRow,
 } from "../common/db/schema";
 import { UsersService } from "../users/users.service";
-import { WorkspacePathService } from "../workspaces/modules/path/path.service";
+import { WorkspacePathService } from "../common/storage/workspace-path.service";
 import type {
   AcceptInviteInput,
   AddMemberInput,

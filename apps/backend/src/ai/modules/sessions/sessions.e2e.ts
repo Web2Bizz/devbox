@@ -476,7 +476,7 @@ async function main(): Promise<void> {
   // C4 gate + jail patched on the PROTOTYPES (no Postgres in this suite) so
   // requests really reach the stub (same convention as opencode.e2e).
   const { OrganizationsService } = await import('../../../organizations/organizations.service');
-  const { WorkspacePathService } = await import('../../../workspaces/modules/path/path.service');
+  const { WorkspacePathService } = await import('../../../common/storage/workspace-path.service');
   const allowAccess = async (): Promise<{ ownerId: string; orgIds: string[] }> => ({
     ownerId: E2E_USER_ID,
     orgIds: [],

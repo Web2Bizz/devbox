@@ -19,7 +19,7 @@
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import { AppLogger } from '../../../../../common/logger';
-import { ApiErrorFilter } from '../../../../../common/api-error.filter';
+import { ApiErrorFilter } from '../../../../../common/http/api-error.filter';
 import { ExternalClient } from '../../../../../common/external/external-client';
 import { ExternalServiceError } from '../../../../../common/external/external-error';
 import { computeBackoffDelay, withRetry } from '../../../../../common/external/retry';

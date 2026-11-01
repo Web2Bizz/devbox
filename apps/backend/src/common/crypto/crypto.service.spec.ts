@@ -2,7 +2,7 @@
  * CryptoService unit checks — self-contained runner (plain node:assert).
  *
  * Runs against COMPILED dist (same constraint as the *.e2e.ts runners):
- *   `bun run build && bun dist/organizations/modules/crypto/crypto.service.spec.js`
+ *   `bun run build && bun dist/common/crypto/crypto.service.spec.js`
  * Also executes under `bun test dist` (top-level run, throws on failure).
  *
  * Covers: AES-256-GCM roundtrip (keyId envelope), random IV per call,

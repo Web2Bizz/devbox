@@ -2,7 +2,7 @@
  * Unified storage deny unit checks — self-contained runner (no new deps).
  *
  * Runs against COMPILED dist (same constraint as the *.e2e.ts runners):
- *   `bun run build && bun dist/storage/storage-unavailable.spec.js`
+ *   `bun run build && bun dist/organizations/__tests__/storage-unavailable.spec.js`
  * Also executes under `bun test dist` (top-level run, throws on failure).
  *
  * Covers the customer decision (single REPOS_ROOT catalog, reads AND writes):
@@ -19,13 +19,13 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { validateEnvWithWarnings } from '../common/env/env';
-import { ReposService } from '../repos/repos.service';
-import { ProjectFilesService } from '../organizations/modules/projects/modules/files/project-files.service';
-import { WorkspaceCloneService } from '../workspaces/modules/clone/clone.service';
-import { CloneJobsRepository } from '../workspaces/modules/clone/clone.repository';
-import { WorkspacePathService } from '../workspaces/modules/path/path.service';
-import { WorkspacesService } from '../workspaces/workspaces.service';
+import { validateEnvWithWarnings } from '../../common/env/env';
+import { ReposService } from '../../repos/repos.service';
+import { ProjectFilesService } from '../modules/projects/modules/files/project-files.service';
+import { WorkspaceCloneService } from '../../workspaces/modules/clone/clone.service';
+import { CloneJobsRepository } from '../../workspaces/modules/clone/clone.repository';
+import { WorkspacePathService } from '../../common/storage/workspace-path.service';
+import { WorkspacesService } from '../../workspaces/workspaces.service';
 
 type Source = NodeJS.ProcessEnv;
 

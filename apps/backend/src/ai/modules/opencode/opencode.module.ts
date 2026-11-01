@@ -1,12 +1,14 @@
 import { Global, Module } from '@nestjs/common';
 import { ServeAuthModule } from './modules/auth/auth.module';
 import { BillingModule } from './modules/billing/billing.module';
-import { OpencodeKeysController } from '../../../organizations/modules/keys/keys.controller';
+import { OpencodeKeysController } from '../../../common/keys/keys.controller';
+import { CryptoModule } from '../../../common/crypto/crypto.module';
+import { KeysModule } from '../../../common/keys/keys.module';
 import { OpencodeSdkClient } from './opencode-sdk-client';
 import { OpencodeController } from './opencode.controller';
 import { OpencodeService } from './opencode.service';
 import { OrganizationsModule } from '../../../organizations/organizations.module';
-import { WorkspacePathService } from '../../../workspaces/modules/path/path.service';
+import { WorkspacePathService } from '../../../common/storage/workspace-path.service';
 
 /**
  * Global opencode module (mirrors CommonModule) — OpencodeService is
@@ -24,10 +26,10 @@ import { WorkspacePathService } from '../../../workspaces/modules/path/path.serv
  * real-user gate: non-uuid mock → 401 before any upstream call +
  * serveBasicAuthHeader, server Basic from OPENCODE_PASSWORD).
  * Provider keys/tokens (crypto envelope + keys store + /api/v1/key +
- * /api/v1/usage controller) live in organizations/modules — orgs own
- * provider credentials. Root providers: OpencodeService (single owner of
- * OPENCODE_* config + fetch) + OpencodeSdkClient (pinned @opencode-ai/sdk
- * instance). The per-user DB Bearer is
+ * /api/v1/usage controller) live in common (crypto + keys modules); orgs no
+ * longer own provider credentials. Root providers: OpencodeService (single
+ * owner of OPENCODE_* config + fetch) + OpencodeSdkClient (pinned
+ * @opencode-ai/sdk instance). The per-user DB Bearer is
  * gone from the serve path: no stored key → no 404 anymore; without
  * OPENCODE_PASSWORD the upstream 401 is the honest signal.
  *
@@ -41,7 +43,7 @@ import { WorkspacePathService } from '../../../workspaces/modules/path/path.serv
  */
 @Global()
 @Module({
-  imports: [BillingModule, ServeAuthModule, OrganizationsModule],
+  imports: [BillingModule, ServeAuthModule, OrganizationsModule, CryptoModule, KeysModule],
   controllers: [OpencodeController, OpencodeKeysController],
   providers: [OpencodeService, OpencodeSdkClient, WorkspacePathService],
   exports: [BillingModule, ServeAuthModule, OpencodeService, OpencodeSdkClient],

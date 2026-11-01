@@ -3,7 +3,7 @@ import type { Request as ExpressRequest, Response as ExpressResponse } from 'exp
 import type { OpencodeClient } from '@opencode-ai/sdk/v2';
 import { OrganizationsService } from '../../../organizations/organizations.service';
 import { ownerKeyOrThrow } from '../../../organizations/modules/projects/projects.service';
-import { WorkspacePathService } from '../../../workspaces/modules/path/path.service';
+import { WorkspacePathService } from '../../../common/storage/workspace-path.service';
 import { OpencodeSdkClient } from '../opencode/opencode-sdk-client';
 import { OpencodeService } from '../opencode/opencode.service';
 import {
@@ -11,7 +11,7 @@ import {
   serveBasicAuthHeader,
 } from '../opencode/modules/auth/auth.service';
 import { AppLogger } from '../../../common/logger';
-import { relaySse } from '../../../common/sse-relay';
+import { relaySse } from '../../../common/sse/sse-relay';
 import { fromStatus, fromUnknown } from '../../../common/external/external-error';
 import type {
   CreateSessionInput,

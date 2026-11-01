@@ -20,7 +20,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { WorkspacePathService } from '../../../workspaces/modules/path/path.service';
+import { WorkspacePathService } from '../../../common/storage/workspace-path.service';
 import { ProjectsService } from './projects.service';
 
 const silentLogger = {

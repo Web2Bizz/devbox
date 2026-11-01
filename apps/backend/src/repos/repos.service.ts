@@ -5,7 +5,7 @@ import { AppLogger } from '../common/logger';
 import {
   storageUnavailable,
   throwStorageNotConfigured,
-} from '../storage/storage-unavailable';
+} from '../common/storage/storage-unavailable';
 import { userSpaceSchema, type ReposQuery } from './dto';
 import { isValidGitRepo } from './repos-git.util';
 

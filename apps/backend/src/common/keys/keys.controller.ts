@@ -1,0 +1,153 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Put,
+  Req,
+  UnauthorizedException,
+  UseGuards,
+  Version,
+} from "@nestjs/common";
+import { ApiBearerAuth, ApiResponse, ApiTags } from "@nestjs/swagger";
+import { V1Endpoint } from "../http/api/version";
+import { JwtAuthGuard } from "../../users/auth/jwt-auth.guard";
+import type { RequestIdentity } from "../../users/auth/identity.service";
+import { ReqUser } from "../../users/auth/req-user.decorator";
+import { AppLogger } from "../logger";
+import { ZodValidationPipe } from "../validation";
+import { CryptoService } from "../crypto/crypto.service";
+import { opencodeKeySchema, type OpencodeKeyInput } from "./keys.schema";
+import { BillingService } from "../../ai/modules/opencode/modules/billing/billing.service";
+import {
+  OpencodeKeyBodyDto,
+  OpencodeKeyDeleteResultDto,
+  OpencodeKeyResultDto,
+  OpencodeKeyStatusDto,
+  OpencodeUsageDto,
+} from "./keys.dto";
+import { OpencodeKeysService } from "./keys.service";
+
+function isUserId(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+/**
+ * OpencodeKeysController — the caller's own OpenCode API key + live usage.
+ *
+ * - All routes require JwtAuthGuard (login/password auth, Bearer access
+ *   token). Only the identity's own user_id is ever read/written — there is
+ *   no user-id parameter to tamper with. Non-uuid mock identities (legacy
+ *   dev fallback) are rejected with 401 instead of leaking a driver error.
+ * - PUT /api/v1/key { apiKey } — zod-validated, encrypted with
+ *   CryptoService (AES-256-GCM) before storage; answers { ok, updatedAt }
+ *   (the key is never returned, never logged).
+ * - GET /api/v1/key — { configured, updatedAt? } (existence only).
+ * - DELETE /api/v1/key — idempotent { ok: true }.
+ * - GET /api/v1/usage — live Zen Go usage via the
+ *   per-user key (missing → 404 opencode_key_missing; rejected → 401
+ *   opencode_key_invalid; upstream 429 → 429 EXTERNAL_RATE_LIMITED;
+ *   upstream 5xx → EXTERNAL_UPSTREAM_5XX (status passthrough: 502/500…);
+ *   timeout → 504 EXTERNAL_TIMEOUT; network/non-JSON/shape-mismatch →
+ *   503 EXTERNAL_UNAVAILABLE with Retry-After 30, fixed message
+ *   «сервис временно недоступен, повторите позже», never a mock 200).
+ */
+@ApiTags("opencode-keys")
+@ApiBearerAuth()
+@Controller()
+@UseGuards(JwtAuthGuard)
+export class OpencodeKeysController {
+  constructor(
+    private readonly keys: OpencodeKeysService,
+    private readonly crypto: CryptoService,
+    private readonly billing: BillingService,
+    private readonly logger: AppLogger = new AppLogger("OpencodeKeysController"),
+  ) {}
+
+  private ownUserId(identity: RequestIdentity): string {
+    if (!isUserId(identity.id)) {
+      throw new UnauthorizedException({
+        code: "unauthorized",
+        message: "Authentication required",
+      });
+    }
+    return identity.id;
+  }
+
+  @Put("key")
+  @Version("1")
+  @V1Endpoint("Store your own OpenCode API key (encrypted at rest)")
+  @ApiResponse({ status: 200, type: OpencodeKeyResultDto })
+  @ApiResponse({ status: 400, description: "bad request (validation)" })
+  @ApiResponse({ status: 401, description: "missing/invalid bearer" })
+  async putKey(
+    @ReqUser() identity: RequestIdentity,
+    @Body(new ZodValidationPipe(opencodeKeySchema)) body: OpencodeKeyInput,
+    @Req() req?: { correlationId?: string },
+  ): Promise<OpencodeKeyResultDto> {
+    const userId = this.ownUserId(identity);
+    const correlationId = req?.correlationId;
+    // Encrypt first (fail-fast 500 when unconfigured), persist ciphertext only
+    // (envelope carries the active KEK id for rotation dual-read).
+    const enc = this.crypto.encrypt((body as OpencodeKeyBodyDto).apiKey);
+    const stored = await this.keys.save(
+      userId,
+      { encryptedKey: enc.data, iv: enc.iv, keyId: enc.keyId },
+      correlationId,
+    );
+    return { ok: true, updatedAt: stored.updatedAt };
+  }
+
+  @Get("key")
+  @Version("1")
+  @V1Endpoint("Whether you have an OpenCode API key stored")
+  @ApiResponse({ status: 200, type: OpencodeKeyStatusDto })
+  @ApiResponse({ status: 401, description: "missing/invalid bearer" })
+  async keyStatus(
+    @ReqUser() identity: RequestIdentity,
+    @Req() req?: { correlationId?: string },
+  ): Promise<OpencodeKeyStatusDto> {
+    const stored = await this.keys.findByUserId(
+      this.ownUserId(identity),
+      req?.correlationId,
+    );
+    return stored
+      ? { configured: true, updatedAt: stored.updatedAt }
+      : { configured: false };
+  }
+
+  @Delete("key")
+  @Version("1")
+  @V1Endpoint("Delete your stored OpenCode API key")
+  @ApiResponse({ status: 200, type: OpencodeKeyDeleteResultDto })
+  @ApiResponse({ status: 401, description: "missing/invalid bearer" })
+  async deleteKey(
+    @ReqUser() identity: RequestIdentity,
+    @Req() req?: { correlationId?: string },
+  ): Promise<OpencodeKeyDeleteResultDto> {
+    await this.keys.deleteByUserId(this.ownUserId(identity), req?.correlationId);
+    return { ok: true };
+  }
+
+  @Get("usage")
+  @Version("1")
+  @HttpCode(200)
+  @V1Endpoint("Live OpenCode balance+usage for your stored key")
+  @ApiResponse({ status: 200, type: OpencodeUsageDto })
+  @ApiResponse({ status: 401, description: "missing/invalid bearer or rejected key" })
+  @ApiResponse({ status: 404, description: "no key stored (opencode_key_missing)" })
+  @ApiResponse({ status: 429, description: "upstream rate limit (EXTERNAL_RATE_LIMITED, Retry-After)" })
+  @ApiResponse({ status: 502, description: "upstream server error passthrough (EXTERNAL_UPSTREAM_5XX, Retry-After)" })
+  @ApiResponse({ status: 503, description: "upstream unavailable or shape mismatch (EXTERNAL_UNAVAILABLE, Retry-After)" })
+  @ApiResponse({ status: 504, description: "upstream timeout (EXTERNAL_TIMEOUT, Retry-After)" })
+  async usage(
+    @ReqUser() identity: RequestIdentity,
+    @Req() req?: { correlationId?: string },
+  ): Promise<OpencodeUsageDto> {
+    const correlationId = req?.correlationId;
+    const out = await this.billing.getUsage(this.ownUserId(identity), correlationId);
+    this.logger.debug("[opencode-keys] usage ok", correlationId);
+    return out;
+  }
+}

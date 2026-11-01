@@ -1,6 +1,6 @@
 import { Module, forwardRef } from "@nestjs/common";
 import { DbModule } from "../../../common/db/db.module";
-import { WorkspacePathService } from "../../../workspaces/modules/path/path.service";
+import { WorkspacePathService } from "../../../common/storage/workspace-path.service";
 import { ProjectsController } from "./projects.controller";
 import { ProjectsService } from "./projects.service";
 import { ChatsModule } from "./modules/chats/chats.module";

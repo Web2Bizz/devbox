@@ -1,12 +1,12 @@
 import { Injectable, InternalServerErrorException } from "@nestjs/common";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { AppLogger } from "../../../common/logger";
+import { AppLogger } from "../logger";
 import {
   DEFAULT_OPENCODE_KEYS_ACTIVE_KEY_ID,
   DEFAULT_OPENCODE_KEYS_PREVIOUS_KEY_ID,
   MIN_OPENCODE_KEYS_ENCRYPTION_KEY_LENGTH,
   OPENCODE_KEYS_KEY_ID_PATTERN,
-} from "../../../common/env/env";
+} from "../env/env";
 
 /** AES-256-GCM params: 12-byte IV, 16-byte auth tag (both base64 at rest). */
 const IV_BYTES = 12;

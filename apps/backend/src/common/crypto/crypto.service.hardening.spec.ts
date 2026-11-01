@@ -2,7 +2,7 @@
  * CryptoService hardening + rotation-convergence checks — self-contained runner (plain node:assert).
  *
  * Runs against COMPILED dist (same constraint as the *.e2e.ts runners):
- *   `bun run build && bun dist/organizations/modules/crypto/crypto.service.hardening.spec.js`
+ *   `bun run build && bun dist/common/crypto/crypto.service.hardening.spec.js`
  * Also executes under `bun test dist` (top-level run, throws on failure).
  *
  * Complements crypto.service.spec.ts (which owns roundtrip/random-IV/
@@ -95,8 +95,8 @@ async function main(): Promise<void> {
   setKeyring(ACTIVE_A);
 
   const { CryptoService } = await import("./crypto.service");
-  const { BillingService } = await import("../../../ai/modules/opencode/modules/billing/billing.service");
-  const { AppLogger } = await import("../../../common/logger");
+  const { BillingService } = await import("../../ai/modules/opencode/modules/billing/billing.service");
+  const { AppLogger } = await import("../logger");
 
   let passed = 0;
   const check = async (name: string, fn: () => void | Promise<void>): Promise<void> => {

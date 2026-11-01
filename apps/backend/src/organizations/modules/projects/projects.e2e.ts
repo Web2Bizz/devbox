@@ -311,7 +311,7 @@ async function main(): Promise<void> {
 
       await check("POST initializes a valid git repo on disk", async () => {
         const { WorkspacePathService } =
-          await import("../../../workspaces/modules/path/path.service");
+          await import("../../../common/storage/workspace-path.service");
         const { isValidGitRepo } = await import("../../../repos/repos-git.util");
         const paths = new WorkspacePathService();
         // Owner-forced row → owner user home (C1, no ownerless rows).
@@ -354,7 +354,7 @@ async function main(): Promise<void> {
 
       await check("missing repo dir → GET/list report corrupted:true", async () => {
         const { WorkspacePathService } =
-          await import("../../../workspaces/modules/path/path.service");
+          await import("../../../common/storage/workspace-path.service");
         const paths = new WorkspacePathService();
         const resolved = await paths.resolveUser(owner.id, projectId);
         await rm(resolved.absRepo, { recursive: true, force: true });
@@ -549,7 +549,7 @@ async function main(): Promise<void> {
         const probe = (await readJson(res)) as { id?: string };
         const probeId = probe.id as string;
         const { WorkspacePathService } =
-          await import("../../../workspaces/modules/path/path.service");
+          await import("../../../common/storage/workspace-path.service");
         const paths = new WorkspacePathService();
         const resolved = await paths.resolveUser(owner.id, probeId);
         assert.equal((await stat(resolved.absRepo)).isDirectory(), true);

@@ -7,8 +7,8 @@ import {
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { ApiError } from '@rush-code/contracts';
-import { AppLogger, serializeCause } from './logger';
-import { ExternalServiceError } from './external/external-error';
+import { AppLogger, serializeCause } from '../logger';
+import { ExternalServiceError } from '../external/external-error';
 
 function isAbortError(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false;

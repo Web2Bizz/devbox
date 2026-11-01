@@ -17,7 +17,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { WorkspacePathService } from '../../../workspaces/modules/path/path.service';
+import { WorkspacePathService } from '../../../common/storage/workspace-path.service';
 import { SYSTEM_OWNER_UUID, ownerKeyOrThrow } from './projects.service';
 
 const UUID_RE =

@@ -4,10 +4,10 @@ import { mkdir, stat } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { AppLogger } from '../../../common/logger';
 import { ExternalServiceError } from '../../../common/external/external-error';
-import { storageUnavailable } from '../../../storage/storage-unavailable';
+import { storageUnavailable } from '../../../common/storage/storage-unavailable';
 import { isValidGitRepo } from '../../../repos/repos-git.util';
 import { CloneJobsRepository, type CloneJob } from './clone.repository';
-import { WorkspacePathService } from '../path/path.service';
+import { WorkspacePathService } from '../../../common/storage/workspace-path.service';
 import { readSubmodules } from '../../workspace-submodules.util';
 
 const execFileAsync = promisify(execFile);

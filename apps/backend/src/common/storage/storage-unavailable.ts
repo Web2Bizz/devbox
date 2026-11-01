@@ -1,5 +1,5 @@
-import { AppLogger } from "../common/logger";
-import { ExternalServiceError } from "../common/external/external-error";
+import { AppLogger } from "../logger";
+import { ExternalServiceError } from "../external/external-error";
 
 /** Fixed 503 message for unconfigured storage (mirrors dbUnavailable). */
 export const STORAGE_UNAVAILABLE_MESSAGE =

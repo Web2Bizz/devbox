@@ -10,8 +10,8 @@ import {
   Version,
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiResponse, ApiTags } from "@nestjs/swagger";
-import { V1Endpoint } from "../common/api/version";
-import { NoIndexInterceptor } from "../common/noindex.interceptor";
+import { V1Endpoint } from "../common/http/api/version";
+import { NoIndexInterceptor } from "../common/http/noindex.interceptor";
 import { AuthUserDto } from "./auth/auth.dto";
 import { ReqUser } from "./auth/req-user.decorator";
 import type { RequestIdentity } from "./auth/identity.service";

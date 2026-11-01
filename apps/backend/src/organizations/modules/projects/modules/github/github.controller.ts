@@ -19,7 +19,7 @@ import {
   ApiResponse,
   ApiTags,
 } from "@nestjs/swagger";
-import { V1Endpoint } from "../../../../../common/api/version";
+import { V1Endpoint } from "../../../../../common/http/api/version";
 import { DEFAULT_MOCK_USER_ID } from "../../../../../users/auth/identity.service";
 import { JwtAuthGuard } from "../../../../../users/auth/jwt-auth.guard";
 import { ReqUser } from "../../../../../users/auth/req-user.decorator";

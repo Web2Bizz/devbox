@@ -5,10 +5,10 @@ import {
 } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { json } from 'express';
-import { ApiErrorFilter } from '../common/api-error.filter';
-import { CorrelationInterceptor } from '../common/correlation.interceptor';
+import { ApiErrorFilter } from '../common/http/api-error.filter';
+import { CorrelationInterceptor } from '../common/http/correlation.interceptor';
 import { validateEnv } from '../common/env/env';
-import { DEFAULT_API_VERSION } from '../common/api/version';
+import { DEFAULT_API_VERSION } from '../common/http/api/version';
 
 /**
  * Shared Nest application wiring — used by main.ts AND the versioning e2e

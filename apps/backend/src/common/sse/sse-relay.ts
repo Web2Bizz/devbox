@@ -1,5 +1,5 @@
 import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
-import type { AppLogger } from './logger';
+import type { AppLogger } from '../logger';
 
 /**
  * Shared SSE re-stream mechanics (was the private relaySse of

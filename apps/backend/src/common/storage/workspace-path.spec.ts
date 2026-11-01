@@ -2,7 +2,7 @@
  * WorkspacePath organizations-layout unit checks — self-contained runner.
  *
  * Runs against COMPILED dist (same constraint as the *.e2e.ts runners):
- *   `bun run build && bun dist/workspaces/modules/path/path.spec.js`
+ *   `bun run build && bun dist/common/storage/workspace-path.spec.js`
  * Also executes under `bun test dist` (top-level run, throws on failure).
  *
  * Covers the Card-2 canon (REPOS_ROOT strict, NO `workspace` segment):
@@ -17,7 +17,7 @@ import { mkdtempSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { WorkspacePathService } from './path.service';
+import { WorkspacePathService } from './workspace-path.service';
 
 const UID = randomUUID();
 const OID = randomUUID();

@@ -10,7 +10,7 @@ import {
   NpmRegistryService,
   type NpmRegistryStatus,
 } from '../organizations/modules/registries/modules/npm/npm.service';
-import { HealthDto } from '../common/api/dto';
+import { HealthDto } from '../common/http/api/dto';
 import type { HealthResponse } from '@rush-code/contracts';
 
 /**

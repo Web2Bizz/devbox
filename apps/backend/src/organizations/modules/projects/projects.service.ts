@@ -13,7 +13,7 @@ import { AppLogger } from "../../../common/logger";
 import { DbService, dbUnavailable, type DbClient } from "../../../common/db/db.service";
 import { projects, type ProjectRow } from "../../../common/db/schema";
 import { isValidGitRepo } from "../../../repos/repos-git.util";
-import { WorkspacePathService } from "../../../workspaces/modules/path/path.service";
+import { WorkspacePathService } from "../../../common/storage/workspace-path.service";
 import type {
   CreateProjectInput,
   GithubLinkInput,

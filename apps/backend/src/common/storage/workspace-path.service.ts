@@ -4,7 +4,7 @@ import {
   Injectable,
   InternalServerErrorException,
 } from '@nestjs/common';
-import { throwStorageNotConfigured } from '../../../storage/storage-unavailable';
+import { throwStorageNotConfigured } from './storage-unavailable';
 import { mkdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 

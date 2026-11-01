@@ -3,8 +3,8 @@ import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { AppLogger } from '../common/logger';
 import { ExternalServiceError } from '../common/external/external-error';
-import { storageUnavailable } from '../storage/storage-unavailable';
-import { WorkspacePathService } from './modules/path/path.service';
+import { storageUnavailable } from '../common/storage/storage-unavailable';
+import { WorkspacePathService } from '../common/storage/workspace-path.service';
 import { readSubmodules, type SubmoduleEntry } from './workspace-submodules.util';
 
 export type WorkspaceTreeNode = {

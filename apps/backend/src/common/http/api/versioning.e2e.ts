@@ -3,7 +3,7 @@
  *
  * Runs against COMPILED dist (tsc emits decorator metadata there; bun's own
  * TS transpiler does not, so this file must not be executed via `bun test`
- * on TS sources). Usage: `bun run build && bun dist/common/api/versioning.e2e.js`.
+ * on TS sources). Usage: `bun run build && bun dist/common/http/api/versioning.e2e.js`.
  *
  * Boots the real AppModule through the shared configureApp()/setupSwagger()
  * on an ephemeral port and asserts the v1 prefix, removed legacy /api/*
@@ -91,8 +91,8 @@ function startUnauthorizedUpstream(): Promise<{
 
 async function main(): Promise<void> {
   const { NestFactory } = await import('@nestjs/core');
-  const { AppModule } = await import('../../app/app.module');
-  const { configureApp, setupSwagger } = await import('../../app/app.setup');
+  const { AppModule } = await import('../../../app/app.module');
+  const { configureApp, setupSwagger } = await import('../../../app/app.setup');
 
   const app = await NestFactory.create(AppModule, { logger: false });
   configureApp(app);
@@ -102,7 +102,7 @@ async function main(): Promise<void> {
   const results: CheckResult[] = [];
 
   // Bearer for the guarded domain routes (guard passes, gate denies 503 w/o DB).
-  const { TokenService } = await import('../../users/auth/token.service');
+  const { TokenService } = await import('../../../users/auth/token.service');
   const tokens = app.get(TokenService, { strict: false }) as {
     sign: (
       claims: Record<string, unknown>,
@@ -273,8 +273,8 @@ async function main(): Promise<void> {
     const unauthorized = await startUnauthorizedUpstream();
     process.env.OPENCODE_URL = unauthorized.url;
     try {
-      const { OrganizationsService } = await import('../../organizations/organizations.service');
-      const { WorkspacePathService } = await import('../../workspaces/modules/path/path.service');
+      const { OrganizationsService } = await import('../../../organizations/organizations.service');
+      const { WorkspacePathService } = await import('../../../common/storage/workspace-path.service');
       const orgsProto = OrganizationsService.prototype as unknown as {
         assertProjectAccessById: (
           projectId: string,

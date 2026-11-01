@@ -8,6 +8,10 @@ import { OpencodeKeysService } from "./keys.service";
  * controller. The HTTP controller lives on the root OpencodeModule to
  * avoid a keys↔billing import cycle (controller needs billing, billing
  * needs the store).
+ *
+ * SCOPE: Common — rotation/store is reusable; it imports only DbModule and
+ * never organizations/ or processes/. The HTTP surface (/api/v1/key,
+ * /api/v1/usage) lives in ai/modules/opencode (Processes scope).
  */
 @Module({
   imports: [DbModule],

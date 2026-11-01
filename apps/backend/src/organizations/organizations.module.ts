@@ -16,6 +16,10 @@ import { OrganizationsService } from "./organizations.service";
  * no import needed, no cycle). WorkspacePathService is provided directly
  * (stateless). Re-exports ProjectsModule + RegistriesModule so existing
  * consumers keep working.
+ *
+ * SCOPE: Organization — may import common/users/auth only, never
+ * processes/. Membership lives in members/, invites in invites/, shared
+ * role gates in OrgGuardService (SQL/tables unchanged).
  */
 @Module({
   imports: [DbModule, ProjectsModule, RegistriesModule],

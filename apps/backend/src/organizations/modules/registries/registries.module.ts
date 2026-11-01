@@ -15,7 +15,8 @@ import { RegistryController } from './registry.controller';
  * - GET /api/v1/registry/npm/status
  *
  * Submodules stay `@Global()` so their services remain injectable anywhere
- * (e.g. HealthController) without explicit imports.
+ * without explicit imports; each one self-registers its reachability probe
+ * in the Common-owned HealthRegistry (health/ never imports a domain).
  */
 @Global()
 @Module({

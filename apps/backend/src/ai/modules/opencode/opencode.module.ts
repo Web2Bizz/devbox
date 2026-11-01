@@ -1,9 +1,10 @@
-import { Global, Module } from '@nestjs/common';
+import { Global, Module, type OnModuleInit } from '@nestjs/common';
 import { ServeAuthModule } from './modules/auth/auth.module';
 import { BillingModule } from './modules/billing/billing.module';
-import { OpencodeKeysController } from '../../../common/keys/keys.controller';
+import { OpencodeKeysController } from './keys.controller';
 import { CryptoModule } from '../../../common/crypto/crypto.module';
 import { KeysModule } from '../../../common/keys/keys.module';
+import { HealthRegistry } from '../../../common/health/health-registry';
 import { OpencodeSdkClient } from './opencode-sdk-client';
 import { OpencodeController } from './opencode.controller';
 import { OpencodeService } from './opencode.service';
@@ -12,9 +13,10 @@ import { WorkspacePathService } from '../../../common/storage/workspace-path.ser
 
 /**
  * Global opencode module (mirrors CommonModule) — OpencodeService is
- * injectable in any provider (SessionsService, HealthController, …) without
- * explicit imports. HealthModule still imports it explicitly to
- * document the dependency.
+ * injectable in any provider (SessionsService, …) without explicit imports.
+ * The health probe is not imported by HealthModule: this module registers
+ * `opencode` in the Common-owned HealthRegistry on boot (Common never
+ * imports a domain).
  *
  * OpencodeSdkClient wraps the pinned @opencode-ai/sdk (transport via
  * ExternalClient timeout/retry); OpencodeController mirrors the upstream
@@ -25,8 +27,9 @@ import { WorkspacePathService } from '../../../common/storage/workspace-path.ser
  * billing (BillingService, live usage), auth (ServeAuthService
  * real-user gate: non-uuid mock → 401 before any upstream call +
  * serveBasicAuthHeader, server Basic from OPENCODE_PASSWORD).
- * Provider keys/tokens (crypto envelope + keys store + /api/v1/key +
- * /api/v1/usage controller) live in common (crypto + keys modules); orgs no
+ * Provider keys/tokens: the store (crypto envelope + keys store) lives in
+ * common, while the HTTP surface (/api/v1/key + /api/v1/usage controller)
+ * is owned here because it needs BillingService (Processes scope); orgs no
  * longer own provider credentials. Root providers: OpencodeService (single
  * owner of OPENCODE_* config + fetch) + OpencodeSdkClient (pinned
  * @opencode-ai/sdk instance). The per-user DB Bearer is
@@ -48,4 +51,14 @@ import { WorkspacePathService } from '../../../common/storage/workspace-path.ser
   providers: [OpencodeService, OpencodeSdkClient, WorkspacePathService],
   exports: [BillingModule, ServeAuthModule, OpencodeService, OpencodeSdkClient],
 })
-export class OpencodeModule {}
+export class OpencodeModule implements OnModuleInit {
+  constructor(
+    private readonly health: HealthRegistry,
+    private readonly opencode: OpencodeService,
+  ) {}
+
+  onModuleInit(): void {
+    // Self-registration keeps the arrow Common → Processes absent.
+    this.health.register('opencode', () => this.opencode.checkConnectivity());
+  }
+}

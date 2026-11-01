@@ -116,7 +116,9 @@ function decryptWith(
   iv: Buffer,
   raw: Buffer,
 ): string {
-  if (iv.length !== IV_BYTES || raw.length <= TAG_BYTES) {
+  // Empty plaintext is valid AES-GCM (empty ciphertext + 16-byte tag), so
+  // only envelopes shorter than the tag itself are malformed.
+  if (iv.length !== IV_BYTES || raw.length < TAG_BYTES) {
     throw new Error("malformed envelope");
   }
   const tag = raw.subarray(raw.length - TAG_BYTES);

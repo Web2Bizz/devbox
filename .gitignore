@@ -34,8 +34,8 @@ build/
 *.tgz
 
 # GitHub App private key (file-based, never commit the PEM)
-keys/
-keys/*.pem
+# Root-anchored: a bare `keys/` would also swallow src/**/keys/ dirs.
+/keys/
 *.pem
 
 # Logs

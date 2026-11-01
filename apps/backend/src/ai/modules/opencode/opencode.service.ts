@@ -36,9 +36,9 @@ export class OpencodeService {
   constructor(
     @Optional() private readonly config?: ConfigService,
     private readonly logger: AppLogger = new AppLogger('OpencodeService'),
-    @Optional() externalClient?: ExternalClient,
+    @Optional() private readonly externalClient?: ExternalClient,
   ) {
-    this.external = externalClient ?? new ExternalClient(new AppLogger('ExternalClient'));
+    this.external = this.externalClient ?? new ExternalClient(new AppLogger('ExternalClient'));
   }
 
   private resolved(): { url: string; timeoutMs: number } {

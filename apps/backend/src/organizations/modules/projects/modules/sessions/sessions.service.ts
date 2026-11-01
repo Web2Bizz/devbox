@@ -15,7 +15,7 @@ import {
 import { projectSessions, type ProjectSessionRow } from "../../../../../common/db/schema";
 import { ChatsService } from "../chats/chats.service";
 import { ProjectsService } from "../../projects.service";
-import { OrganizationsService } from "../../../../../organizations/organizations.service";
+import { ProjectAccessService } from "../project-access/project-access.service";
 import type { CreateSessionInput } from "./dto";
 
 export type ProjectSession = {
@@ -48,7 +48,7 @@ function toSession(row: ProjectSessionRow): ProjectSession {
  * the correlationId.
  *
  * Scope (Card 5 access layer): every user-facing op gates on
- * OrganizationsService.assertProjectAccess — org-linked projects admit any
+ * ProjectAccessService.assertProjectAccess — org-linked projects admit any
  * member of a linked org, user-space projects admit only the owner
  * (project.ownerId vs the requester). Strangers get 404 (existence is not
  * leaked). Cascade helpers (removeByProject/detachChat/hasChatReference)
@@ -63,7 +63,7 @@ export class SessionsService {
     private readonly chats: ChatsService,
     private readonly logger: AppLogger = new AppLogger("SessionsService"),
     private readonly db: DbService,
-    private readonly orgs?: OrganizationsService,
+    private readonly access?: ProjectAccessService,
   ) {}
 
   /** Live drizzle client — throws 503 EXTERNAL_UNAVAILABLE when Postgres is down. */
@@ -83,8 +83,8 @@ export class SessionsService {
     requesterId: string | undefined,
     correlationId?: string,
   ): Promise<void> {
-    if (!requesterId || !this.orgs) return;
-    await this.orgs.assertProjectAccess(
+    if (!requesterId || !this.access) return;
+    await this.access.assertProjectAccess(
       projectId,
       ownerId,
       requesterId,

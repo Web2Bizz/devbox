@@ -418,9 +418,9 @@ async function main(): Promise<void> {
       const unauthorized = await startUnauthorizedUpstream();
       process.env.OPENCODE_URL = unauthorized.url;
       try {
-        const { OrganizationsService } = await import('../../../../organizations/organizations.service');
+        const { ProjectAccessService } = await import('../../../../organizations/modules/projects/modules/project-access/project-access.service');
         const { WorkspacePathService } = await import('../../../../common/storage/workspace-path.service');
-        const orgsProto = OrganizationsService.prototype as unknown as {
+        const orgsProto = ProjectAccessService.prototype as unknown as {
           assertProjectAccessById: (
             projectId: string,
             userId: string,
@@ -492,10 +492,10 @@ async function main(): Promise<void> {
       try {
         // The C4 gate + workspace jail are patched on the PROTOTYPES (no
         // Postgres here) so the request really reaches the stub.
-        const { OrganizationsService } = await import('../../../../organizations/organizations.service');
+        const { ProjectAccessService } = await import('../../../../organizations/modules/projects/modules/project-access/project-access.service');
         const { WorkspacePathService } = await import('../../../../common/storage/workspace-path.service');
         (
-          OrganizationsService.prototype as unknown as { assertProjectAccessById: unknown }
+          ProjectAccessService.prototype as unknown as { assertProjectAccessById: unknown }
         ).assertProjectAccessById = async () => ({ ownerId: E2E_USER_ID, orgIds: [] });
         const pathsProto = WorkspacePathService.prototype as unknown as Record<string, unknown>;
         pathsProto.resolveUserStrict = async () => ({ absRepo: E2E_PROJECT_DIR });

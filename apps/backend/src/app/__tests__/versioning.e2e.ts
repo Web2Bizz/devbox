@@ -279,9 +279,9 @@ async function main(): Promise<void> {
     const unauthorized = await startUnauthorizedUpstream();
     process.env.OPENCODE_URL = unauthorized.url;
     try {
-      const { OrganizationsService } = await import('../../organizations/organizations.service');
+      const { ProjectAccessService } = await import('../../organizations/modules/projects/modules/project-access/project-access.service');
       const { WorkspacePathService } = await import('../../common/storage/workspace-path.service');
-      const orgsProto = OrganizationsService.prototype as unknown as {
+      const orgsProto = ProjectAccessService.prototype as unknown as {
         assertProjectAccessById: (
           projectId: string,
           userId: string,

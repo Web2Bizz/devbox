@@ -1,6 +1,6 @@
 import { Module, forwardRef } from "@nestjs/common";
-import { OrganizationsModule } from "../../../../../organizations/organizations.module";
 import { ProjectsModule } from "../../projects.module";
+import { ProjectAccessModule } from "../project-access/project-access.module";
 import { SessionsModule } from "../sessions/sessions.module";
 import { ChatsController } from "./chats.controller";
 import { ChatsService } from "./chats.service";
@@ -10,12 +10,13 @@ import { ChatsService } from "./chats.service";
  * DbService comes from the global CommonModule (503 when PG is down).
  * SessionsModule (forwardRef) supplies SessionsService for chat-delete
  * detach (sessions survive with chat_id → NULL).
- * OrganizationsModule supplies the Card 5 access gate (member-or-owner
- * scoping, no cycle: orgs import nothing from ai/projects).
+ * ProjectAccessModule supplies the C4 gate (member-or-owner scoping) —
+ * a sibling of this module, so chats no longer reach up into the
+ * organizations module.
  */
 @Module({
   imports: [
-    forwardRef(() => OrganizationsModule),
+    ProjectAccessModule,
     forwardRef(() => ProjectsModule),
     forwardRef(() => SessionsModule),
   ],

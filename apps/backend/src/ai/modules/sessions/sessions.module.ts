@@ -12,7 +12,8 @@ import { SessionsService } from './sessions.service';
  *
  * OpencodeModule (OpencodeService + OpencodeSdkClient + ServeAuthService —
  * the real-user gate the raw prompt path asserts below the sdk) and
- * OrganizationsModule (C4 gate) are
+ * OrganizationsModule (C4 gate, reaching ProjectAccessService transitively
+ * via OrganizationsModule → ProjectsModule → ProjectAccessModule) are
  * imported explicitly to document the dependencies (same convention as
  * HealthModule); WorkspacePathService is provided directly
  * (stateless, same pattern as OpencodeModule/ProjectsModule).

@@ -36,8 +36,10 @@ import { WorkspacePathService } from '../../../common/storage/workspace-path.ser
  * JwtAuthGuard comes from the global auth module, ExternalClient/AppLogger
  * from the global CommonModule.
  *
- * OrganizationsModule is imported for the C4 project gate
- * (assertProjectAccessById — no cycle, orgs has no ai import).
+ * OrganizationsModule is imported for the C4 project gate, which reaches
+ * ProjectAccessService transitively (OrganizationsModule → ProjectsModule →
+ * ProjectAccessModule; assertProjectAccessById — no cycle, orgs has no ai
+ * import).
  * WorkspacePathService is provided directly (stateless, same pattern as
  * ProjectsModule) for the C4 project directory jail.
  */

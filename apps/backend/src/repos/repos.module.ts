@@ -7,8 +7,10 @@ import { OrganizationsModule } from '../organizations/organizations.module';
  * ReposModule — readonly git-repo registry
  * (REPOS_ROOT/<user-space>/workspace/<repo>, GET only).
  * Top-level module registered in AppModule alongside ProjectsModule.
- * Imports OrganizationsModule for the C3 space gate (own user-space or
- * member org — strangers get 404, no enumeration).
+ * Imports OrganizationsModule for the C3 space gate, which reaches
+ * ProjectAccessService transitively (OrganizationsModule → ProjectsModule →
+ * ProjectAccessModule; own user-space or member org — strangers get 404,
+ * no enumeration).
  */
 @Module({
   imports: [OrganizationsModule],

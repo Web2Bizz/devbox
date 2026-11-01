@@ -21,7 +21,7 @@ import { ZodValidationPipe } from "../../../common/validation";
 import { JwtAuthGuard } from "../../../auth/jwt-auth.guard";
 import { ReqUser } from "../../../auth/req-user.decorator";
 import type { RequestIdentity } from "../../../auth/identity.service";
-import { OrganizationsService } from "../../../organizations/organizations.service";
+import { ProjectAccessService } from "./modules/project-access/project-access.service";
 import {
   EffectiveConfigDto,
   GithubLinkStatusDto,
@@ -49,7 +49,7 @@ import { SessionsService } from "./modules/sessions/sessions.service";
  *    POST /organizations/:id/projects (orgId forced from path)
  *    GET /organizations/:id/projects/:projectId (assertBelongs, mismatch → 404)
  *    PATCH/DELETE (soft) + POST .../restore (API only) + GET .../effective-config.
- *    Membership enforced via OrganizationsService.getRole (404 for strangers).
+ *    Membership enforced via ProjectAccessService.getRole (404 for strangers).
  *
  * There is no router prefix on the class: every method spells out its full
  * path, so the URL set is exactly the union of the two former controllers.
@@ -64,7 +64,7 @@ import { SessionsService } from "./modules/sessions/sessions.service";
  *   never trusted) — new rows always carry a real owner (no ownerless
  *   rows; see C5 deny-by-default).
  * - GET/PATCH/DELETE :id (+ github status) gate through
- *   OrganizationsService.assertProjectAccess (org-linked → member,
+ *   ProjectAccessService.assertProjectAccess (org-linked → member,
  *   user-space → owner; strangers → 404, no existence leak — the same
  *   no-enumeration rule as memberOrThrow).
  * - Anonymous → 401 from the guard (before any DB touch).
@@ -82,7 +82,7 @@ export class ProjectsController {
     private readonly github: GithubLinkService,
     private readonly chats: ChatsService,
     private readonly sessions: SessionsService,
-    private readonly orgs: OrganizationsService,
+    private readonly access: ProjectAccessService,
   ) {}
 
   /**
@@ -96,7 +96,7 @@ export class ProjectsController {
     correlationId?: string,
   ) {
     const project = await this.projects.getOrThrow(projectId, correlationId);
-    await this.orgs.assertProjectAccess(
+    await this.access.assertProjectAccess(
       project.id,
       project.ownerId,
       userId,
@@ -106,7 +106,7 @@ export class ProjectsController {
   }
 
   private async memberOrThrow(orgId: string, userId: string, correlationId?: string): Promise<void> {
-    const role = await this.orgs.getRole(orgId, userId, correlationId);
+    const role = await this.access.getRole(orgId, userId, correlationId);
     if (!role) {
       const { NotFoundException } = await import("@nestjs/common");
       throw new NotFoundException(`Organization ${orgId} not found`);

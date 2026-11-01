@@ -38,7 +38,7 @@ import { OpencodeSdkClient } from './opencode-sdk-client';
 import { JwtAuthGuard } from '../../../auth/jwt-auth.guard';
 import type { RequestIdentity } from '../../../auth/identity.service';
 import { ReqUser } from '../../../auth/req-user.decorator';
-import { OrganizationsService } from '../../../organizations/organizations.service';
+import { ProjectAccessService } from '../../../organizations/modules/projects/modules/project-access/project-access.service';
 import { ownerKeyOrThrow } from '../../../organizations/modules/projects/projects.service';
 import { WorkspacePathService } from '../../../common/storage/workspace-path.service';
 import { OpencodeService } from './opencode.service';
@@ -92,7 +92,7 @@ const CURSOR_PASSTHROUGH_HEADERS = ['x-next-cursor', 'link'] as const;
  *
  * Project scope (Card C4): every session/message/provider route requires a
  * `?projectId` and gates through
- * OrganizationsService.assertProjectAccessById BEFORE any upstream call
+ * ProjectAccessService.assertProjectAccessById BEFORE any upstream call
  * (org-linked → member, user-space → owner; strangers → 404, no existence
  * leak; missing projectId → 400 PROJECT_REQUIRED). The caller's `?directory`
  * is accepted for compatibility but IGNORED — upstream calls that take a
@@ -128,7 +128,7 @@ export class OpencodeController {
   constructor(
     private readonly sdk: OpencodeSdkClient,
     private readonly opencode: OpencodeService,
-    private readonly orgs: OrganizationsService,
+    private readonly access: ProjectAccessService,
     private readonly paths: WorkspacePathService,
     private readonly logger: AppLogger = new AppLogger('OpencodeController'),
   ) {}
@@ -155,7 +155,7 @@ export class OpencodeController {
         message: 'projectId is required — session routes are project-scoped',
       });
     }
-    const { ownerId } = await this.orgs.assertProjectAccessById(
+    const { ownerId } = await this.access.assertProjectAccessById(
       projectId,
       userId,
       correlationId,

@@ -24,7 +24,7 @@ import {
 
 /**
  * Project sessions — Bearer-guarded (JwtAuthGuard, legacy mock fallback in
- * dev). Every op scopes through OrganizationsService.assertProjectAccess
+ * dev). Every op scopes through ProjectAccessService.assertProjectAccess
  * (Card 5): org-linked projects admit any member of a linked org,
  * user-space projects admit only the owner; strangers get 404 (existence
  * is not leaked — no 403 enumeration oracle).

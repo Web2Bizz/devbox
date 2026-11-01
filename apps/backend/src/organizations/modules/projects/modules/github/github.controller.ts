@@ -43,7 +43,7 @@ import {
   getRawBody,
   verifyWebhookSignature,
   type InstallationWebhookPayload,
-} from "./github-webhook.util";
+} from "./utils/webhook";
 import { GithubAppService } from "./github-app.service";
 import { GithubService } from "./github.service";
 

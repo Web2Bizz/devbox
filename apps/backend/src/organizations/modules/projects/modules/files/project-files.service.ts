@@ -4,7 +4,7 @@ import path from 'node:path';
 import { AppLogger } from '../../../../../common/logger';
 import { ExternalServiceError } from '../../../../../common/external/external-error';
 import { storageUnavailable, throwStorageNotConfigured } from '../../../../../common/storage/storage-unavailable';
-import { OrganizationsService } from '../../../../../organizations/organizations.service';
+import { ProjectAccessService } from '../project-access/project-access.service';
 import { WorkspacePathService } from '../../../../../common/storage/workspace-path.service';
 import { ProjectsService, ownerKeyOrThrow } from '../../projects.service';
 
@@ -34,7 +34,7 @@ export class ProjectFilesService {
     private readonly projects: ProjectsService,
     private readonly paths: WorkspacePathService,
     private readonly logger: AppLogger = new AppLogger('ProjectFilesService'),
-    private readonly orgs?: OrganizationsService,
+    private readonly access?: ProjectAccessService,
   ) {}
 
   /**
@@ -63,8 +63,8 @@ export class ProjectFilesService {
     // service is not wired (manual `new` in unit specs like
     // storage-unavailable.spec). Disk homes are NOT moved by linking
     // (metadata-only join rows) — the user home below stays canonical.
-    if (requesterId && this.orgs) {
-      await this.orgs.assertProjectAccess(
+    if (requesterId && this.access) {
+      await this.access.assertProjectAccess(
         project.id,
         project.ownerId,
         requesterId,
@@ -73,7 +73,7 @@ export class ProjectFilesService {
     }
     const clamped = Math.min(Math.max(depth, 0), MAX_DEPTH);
     // Owner home determines the content jail (access already gated above
-    // via OrganizationsService.assertProjectAccess — Card 5; legacy non-uuid
+    // via ProjectAccessService.assertProjectAccess — Card 5; legacy non-uuid
     // owners have no home here → 404, never an unscoped read).
     let abs: string;
     let rel: string;

@@ -475,14 +475,14 @@ async function main(): Promise<void> {
 
   // C4 gate + jail patched on the PROTOTYPES (no Postgres in this suite) so
   // requests really reach the stub (same convention as opencode.e2e).
-  const { OrganizationsService } = await import('../../../../organizations/organizations.service');
+  const { ProjectAccessService } = await import('../../../../organizations/modules/projects/modules/project-access/project-access.service');
   const { WorkspacePathService } = await import('../../../../common/storage/workspace-path.service');
   const allowAccess = async (): Promise<{ ownerId: string; orgIds: string[] }> => ({
     ownerId: E2E_USER_ID,
     orgIds: [],
   });
   (
-    OrganizationsService.prototype as unknown as { assertProjectAccessById: unknown }
+    ProjectAccessService.prototype as unknown as { assertProjectAccessById: unknown }
   ).assertProjectAccessById = allowAccess;
   const pathsProto = WorkspacePathService.prototype as unknown as Record<string, unknown>;
   pathsProto.resolveUserStrict = async () => ({ absRepo: JAIL_DIR });
@@ -786,7 +786,7 @@ async function main(): Promise<void> {
     {
       const { NotFoundException } = await import('@nestjs/common');
       (
-        OrganizationsService.prototype as unknown as { assertProjectAccessById: unknown }
+        ProjectAccessService.prototype as unknown as { assertProjectAccessById: unknown }
       ).assertProjectAccessById = async (): Promise<never> => {
         // What the real service throws for strangers (no existence leak).
         throw new NotFoundException('Project 123e4567-e89b-12d3-a456-426614174090 not found');
@@ -807,7 +807,7 @@ async function main(): Promise<void> {
         });
       } finally {
         (
-          OrganizationsService.prototype as unknown as { assertProjectAccessById: unknown }
+          ProjectAccessService.prototype as unknown as { assertProjectAccessById: unknown }
         ).assertProjectAccessById = allowAccess;
       }
     }

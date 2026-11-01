@@ -4,7 +4,7 @@ import { ZodValidationPipe } from '../common/validation';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ReqUser } from '../auth/req-user.decorator';
 import type { RequestIdentity } from '../auth/identity.service';
-import { OrganizationsService } from '../organizations/organizations.service';
+import { ProjectAccessService } from '../organizations/modules/projects/modules/project-access/project-access.service';
 import { RepoDto, reposQuerySchema, userSpaceSchema, type ReposQuery } from './dto';
 import { ReposService } from './repos.service';
 
@@ -18,9 +18,9 @@ import { ReposService } from './repos.service';
  * - Bearer-guarded (JwtAuthGuard); anonymous → 401.
  * - Callers see only their own space: GET /repos scopes to the Bearer
  *   identity's user-space; GET /repos/:userSpace admits the owner's own
- *   space or a member org (OrganizationsService.getRole) — strangers get
+ *   space or a member org (ProjectAccessService.getRole) — strangers get
  *   404 (existence is not leaked, same no-enumeration rule as
- *   OrganizationsService member reads).
+ *   organizations member reads).
  */
 @ApiTags('repos')
 @Controller('repos')
@@ -29,7 +29,7 @@ import { ReposService } from './repos.service';
 export class ReposController {
   constructor(
     private readonly repos: ReposService,
-    private readonly orgs: OrganizationsService,
+    private readonly access: ProjectAccessService,
   ) {}
 
   @Get()
@@ -72,9 +72,9 @@ export class ReposController {
       );
     }
     // Own user-space passes directly; any other space must be a member org
-    // (reuse of the OrganizationsService.getRole member rule — strangers 404).
+    // (reuse of the ProjectAccessService.getRole member rule — strangers 404).
     if (parsed.data !== identity.id) {
-      const role = await this.orgs.getRole(parsed.data, identity.id, correlationId);
+      const role = await this.access.getRole(parsed.data, identity.id, correlationId);
       if (!role) throw new NotFoundException(`Repo space ${parsed.data} not found`);
     }
     return this.repos.list(parsed.data, query, correlationId) as Promise<RepoDto[]>;

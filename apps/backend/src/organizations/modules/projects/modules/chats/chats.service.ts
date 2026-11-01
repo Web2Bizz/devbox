@@ -12,7 +12,7 @@ import {
   type DbClient,
 } from "../../../../../common/db/db.service";
 import { projectChats, type ProjectChatRow } from "../../../../../common/db/schema";
-import { OrganizationsService } from "../../../../../organizations/organizations.service";
+import { ProjectAccessService } from "../project-access/project-access.service";
 import { ProjectsService } from "../../projects.service";
 import type { CreateChatInput } from "./dto";
 
@@ -39,7 +39,7 @@ function toChat(row: ProjectChatRow): ProjectChat {
  * (Retry-After 30 via ApiErrorFilter), logged once with the correlationId.
  *
  * Scope (Card 5 access layer): user-facing ops (list/create/remove) gate on
- * OrganizationsService.assertProjectAccess — org-linked projects admit any
+ * ProjectAccessService.assertProjectAccess — org-linked projects admit any
  * member of a linked org, user-space projects admit only the owner.
  * Strangers get 404 (existence is not leaked). getInProject/removeByProject
  * stay access-free (called by SessionsService.create / project-delete after
@@ -52,7 +52,7 @@ export class ChatsService {
     private readonly projects: ProjectsService,
     private readonly logger: AppLogger = new AppLogger("ChatsService"),
     private readonly db: DbService,
-    private readonly orgs?: OrganizationsService,
+    private readonly access?: ProjectAccessService,
   ) {}
 
   /** Live drizzle client — throws 503 EXTERNAL_UNAVAILABLE when Postgres is down. */
@@ -71,8 +71,8 @@ export class ChatsService {
     requesterId: string | undefined,
     correlationId?: string,
   ): Promise<void> {
-    if (!requesterId || !this.orgs) return;
-    await this.orgs.assertProjectAccess(
+    if (!requesterId || !this.access) return;
+    await this.access.assertProjectAccess(
       projectId,
       ownerId,
       requesterId,

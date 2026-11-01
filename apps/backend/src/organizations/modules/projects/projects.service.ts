@@ -116,7 +116,7 @@ function toProject(row: ProjectRow): Project {
  *   users/<ownerUuid>/projects/<project.id>/{content,.secrets}
  *     + users/<ownerUuid>/.secrets
  *   (org-scoped homes orgs/<orgUuid>/projects/<id>/… resolve via
- *   resolveOrg — see OrganizationsService; user homes always win for
+ *   resolveOrg — see the organizations service; user homes always win for
  *   owner-bound rows here.)
  *   ownerKey = ownerKeyOrThrow(ownerId ?? SYSTEM_OWNER_UUID-nCoalesce):
  *     NULL owners deterministically map to SYSTEM_OWNER_UUID

@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
 import type { OpencodeClient } from '@opencode-ai/sdk/v2';
-import { OrganizationsService } from '../../../organizations/organizations.service';
+import { ProjectAccessService } from '../../../organizations/modules/projects/modules/project-access/project-access.service';
 import { ownerKeyOrThrow } from '../../../organizations/modules/projects/projects.service';
 import { WorkspacePathService } from '../../../common/storage/workspace-path.service';
 import { OpencodeSdkClient } from '../opencode/opencode-sdk-client';
@@ -129,7 +129,7 @@ export class SessionsService {
   constructor(
     private readonly sdk: OpencodeSdkClient,
     private readonly opencode: OpencodeService,
-    private readonly orgs: OrganizationsService,
+    private readonly access: ProjectAccessService,
     private readonly paths: WorkspacePathService,
     private readonly auth: ServeAuthService,
     private readonly logger: AppLogger = new AppLogger('SessionsService'),
@@ -148,7 +148,7 @@ export class SessionsService {
   /**
    * C4 project gate + directory jail — the same fail-closed composition as
    * OpencodeController.requireProjectDir (gateway convention: each surface
-   * composes OrganizationsService.assertProjectAccessById + WorkspacePath
+   * composes ProjectAccessService.assertProjectAccessById + WorkspacePath
    * itself; extraction to a shared helper is a follow-up, the semantics
    * here are identical and must not drift). Returns the narrowed projectId
    * (uuid the gate accepted) alongside the jailed content dir.
@@ -164,7 +164,7 @@ export class SessionsService {
         message: 'projectId is required — session routes are project-scoped',
       });
     }
-    const { ownerId } = await this.orgs.assertProjectAccessById(
+    const { ownerId } = await this.access.assertProjectAccessById(
       projectId,
       userId,
       correlationId,

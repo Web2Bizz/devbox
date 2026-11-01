@@ -1,4 +1,4 @@
-import { AppLogger } from "../common/app-logger.service";
+import { AppLogger } from "../common/logger";
 import { ExternalServiceError } from "../common/external/external-error";
 
 /** Fixed 503 message for unconfigured storage (mirrors dbUnavailable). */

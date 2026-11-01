@@ -25,13 +25,5 @@ if [ "$loaded" = "0" ]; then
   echo "=== no secret files found in $SECRETS_DIR (.env / *.env)"
 fi
 
-if pm2 describe opencode >/dev/null 2>&1; then
-  echo "=== restarting opencode with updated env"
-  pm2 restart opencode --update-env
-else
-  echo "=== opencode not running, starting it"
-  pm2 start "cd /workspace && opencode serve --port 4096 --hostname 0.0.0.0" --name opencode
-fi
-
-pm2 save
+echo "=== secrets reloaded (restart the container to apply)"
 echo "=== done"

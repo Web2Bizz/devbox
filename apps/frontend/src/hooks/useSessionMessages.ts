@@ -123,7 +123,6 @@ export function useSessionMessages(
   const reload = useCallback(() => {
     sendMutation.reset();
     void queryClient.invalidateQueries({ queryKey });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryClient, queryKey]);
 
   const send = useCallback(
@@ -135,7 +134,6 @@ export function useSessionMessages(
         // Error surfaces via the `error` memo (mutationErrorText).
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [sendMutation.mutateAsync],
   );
 

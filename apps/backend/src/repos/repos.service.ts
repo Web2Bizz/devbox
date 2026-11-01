@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { readdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { AppLogger } from '../common/app-logger.service';
+import { AppLogger } from '../common/logger';
 import {
   storageUnavailable,
   throwStorageNotConfigured,
@@ -179,7 +179,6 @@ export class ReposService {
     const candidates = await this.scan(userSpace, correlationId);
     const valid: RepoEntry[] = [];
     for (const c of candidates) {
-      // eslint-disable-next-line no-await-in-loop
       const check = await isValidGitRepo(c.absPath, this.logger);
       if (!check.ok) continue; // no-git/corrupted → skip, never 500
       if (q && !c.name.toLowerCase().includes(q)) continue;

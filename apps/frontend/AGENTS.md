@@ -10,10 +10,44 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 # AGENTS.md — frontend (Rush Code web)
 
-Канон — корень [`AGENTS.md`](../../AGENTS.md) (разделы «Frontend — дизайн-система»,
-«Frontend — слои», включая `### Data-хуки — только React Query`).
-Этот файл хранит Next.js-блок выше + локальные уточнения границы ниже;
-правила слоёв/хуков — в корне.
+Этот файл — канон фронтенда: структура, слои, хуки, дизайн-система и граница.
+Корень [`AGENTS.md`](../../AGENTS.md) хранит только ссылку сюда.
+
+## Дизайн-система
+
+- Общие правила — [`DESIGN.md`](../../DESIGN.md) (корень). При расхождении
+  побеждает **прикладной**: [`DESIGN.md`](../frontend/DESIGN.md) (веб-шелл)
+  ближе к коду и кит-версии.
+- Читать перед правками шелла (`dashboard-shell`, `layout/Sidebar`,
+  `layout/Content`, `app/globals.css`).
+- Порядок стилей: `@web2bizz/ui/styles.css` → `globals.css`
+  (source order, не менять). Hex — только `:root` / `.dark`.
+- Проверки: `bun run lint` (`tsc --noEmit` + `biome lint`) + `bun run build`
+  (`next build --turbopack`).
+
+## Слои
+
+- `app/` — только тонкая композиция (страница владеет `<ФичаСекция />`,
+  бизнес-логика — в `features/` + `hooks/`). Каталогов `entities/` и `shared/`
+  нет — не выдумывать.
+
+| Слой | Путь | Что класть |
+| ---- | ---- | ---------- |
+| Маршруты | `app/` | `page.tsx`, `layout.tsx`, `loading.tsx`, `error.tsx`; `globals.css` |
+| Фичи | `src/features/<имя>/` | фича-модуль целиком: UI-секция + диалоги + локальный статус |
+| Компоненты | `src/components/` | общие презентационные компоненты |
+| Хуки | `src/hooks/` | data-хуки + `query-keys.ts` (единственный источник ключей) |
+| API | `src/api/` | `client.ts` (единственный fetch-слой) + `sessions-client.ts` (доменный фасад); своих типов не заводить |
+| Lib | `src/lib/` | утилиты, сторы + алиасы схем (реэкспорт пакета) |
+| i18n | `src/i18n/` | словарь en/ru, провайдер |
+
+### Data-хуки — только React Query
+
+- Все data-хуки — на `useQuery`/`useMutation`/`useQueryClient`.
+- `queryFn` бросает raw `ApiClientError`; формат — в `useMemo` через `format-error` + `t`.
+- `reload` = `invalidateQueries({ queryKey })`; ключи — только из `query-keys.ts`.
+- Исключение — streaming/SSE (`useChat`): `useEffect` + доменный SSE
+  с комментом-обоснованием; на React Query не переносится.
 
 ## Структура
 

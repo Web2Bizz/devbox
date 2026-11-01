@@ -72,7 +72,7 @@ paths-gated (`apps/mobile/app/**`, `src/**`, `packages/**`).
 для Dokploy/prod-деплоев, забирающих готовый образ. Тома —
 `opencode-*` (`projects`, `ssh-keys`, `gh-config`, `pnpm-store`,
 `opencode-data`, …), лимиты prod — `2G`/`2.0` (тяжёлый образ: Playwright
-Chromium + pm2). Требует `OPENCODE_SERVER_PASSWORD` (fail-fast, если не
+Chromium). Требует `OPENCODE_SERVER_PASSWORD` (fail-fast, если не
 задан). Отдельного compose-файла у сервиса нет: единый файл — корневой
 `docker-compose.yml` (внутренние сети `front`/`back`); Dokploy деплоит
 корневой стек целиком через compose-redeploy webhook (см. `docker.yml`, job
@@ -150,7 +150,7 @@ parallel with prefixed streaming logs. The repo-root `.env` is injected into
 every target by `scripts/dev/with-env.ts` (shell wins > file; missing `.env`
 falls back to built-in dev defaults: backend `:3100` with `db: "skipped"`,
 frontend `:3001`). Each server watches its own sources — there is no outer
-file-watcher (the old pm2 `watch` is gone with pm2), so no double-restart
+file-watcher, so no double-restart
 inotify crash-loops. Nx is a task runner, not a supervisor: no autorestart /
 backoff — a crashing server exits non-zero and fails the run; fix the crash
 and rerun. Stop everything with `Ctrl+C` (no daemon left behind).
@@ -171,56 +171,33 @@ bun run dev:frontend   # frontend (+ contracts build) → http://localhost:3001 
 
 Предусловия: Bun 1.4.2 (сверь с `.bun-version`), `cp .env.example .env` один раз
 (`.env` в gitignore, не коммитить), внешний Postgres (своего сервиса в
-`docker-compose.yml` нет), свободные порты `3100`/`3001`. Процессы держит
-pm2 `6.0.14` без ecosystem-файла, обёрткой без watch (`watching disabled` —
-нет double-restart). При рассинхроне версий демона/клиента pm2 `6.0.14`/`7.0.1`
-pm2 пишет warning — лечится через `pm2 update`.
+`docker-compose.yml` нет), свободные порты `3100`/`3001`. Запуск, управление
+и логи — только через nx (см. `bun run dev*` выше).
 
 Старт:
 
 ```bash
 cp .env.example .env   # once; .env is gitignored, never commit it
 bun install
-pm2 start bun --name rush-backend -- run dev:backend
-pm2 start bun --name rush-frontend -- run dev:frontend
+bun run dev:backend
+bun run dev:frontend
 ```
 
-Важно (pm2 и окружение): `scripts/dev/with-env.ts` отдаёт приоритет
+Важно (окружение): `scripts/dev/with-env.ts` отдаёт приоритет
 `process.env` над файлом `.env`. Если `DATABASE_URL`/`POSTGRES_*` уже есть в
-окружении терминала (или pm2-демон поднялся с ними), они перебьют значения из
+окружении терминала, они перебьют значения из
 `.env` — backend стартует, в `/health` будет `db:"up"`, но любой запрос к БД
-упадёт `relation ... does not exist` → 503 EXTERNAL_UNAVAILABLE. Стартуй pm2 с
+упадёт `relation ... does not exist` → 503 EXTERNAL_UNAVAILABLE. Стартуй с
 чистым окружением, иначе стенд поднимется на чужой БД:
 
 ```bash
 env -u DATABASE_URL -u POSTGRES_USER -u POSTGRES_PASSWORD -u POSTGRES_DB -u POSTGRES_HOST -u POSTGRES_PORT \
-  pm2 start bun --name rush-backend -- run dev:backend
+  bun run dev:backend
 env -u DATABASE_URL -u POSTGRES_USER -u POSTGRES_PASSWORD -u POSTGRES_DB -u POSTGRES_HOST -u POSTGRES_PORT \
-  pm2 start bun --name rush-frontend -- run dev:frontend
+  bun run dev:frontend
 ```
 
-Статус и логи:
-
-```bash
-pm2 list
-pm2 logs --nostream --lines 50
-pm2 logs rush-backend --nostream --lines 50
-```
-
-Рестарт:
-
-```bash
-pm2 restart rush-backend
-pm2 restart rush-frontend
-pm2 restart all
-```
-
-Стоп и удаление из pm2:
-
-```bash
-pm2 stop rush-backend rush-frontend
-pm2 delete rush-backend rush-frontend
-```
+Логи — через nx (`--output-style=stream`, см. `bun run dev*` выше).
 
 Проверки:
 
@@ -250,8 +227,7 @@ dev-секрет, и все сессии сбрасываются при каж�
 Локальный стенд opencode: приложение — надстройка над opencode, поэтому список
 сессий и чат работают только при живом стенде; без него backend отдаёт
 503 EXTERNAL_UNAVAILABLE. Стенд поднимается отдельным процессом на свободном
-порту `4097` (порт `4096` в dev занят личным opencode — его не трогаем),
-супервизор — pm2, имя приложения — `rush-opencode`.
+порту `4097` (порт `4096` в dev занят личным opencode — его не трогаем).
 
 Обязательна изоляция конфига: `OPENCODE_CONFIG_DIR=<изолированный каталог>` —
 иначе стенд унаследует личный конфиг opencode (пароль из
@@ -265,7 +241,7 @@ backend пойдёт в дефолтный `4096`.
 ```bash
 mkdir -p "$HOME/.config/rush-opencode-stand"   # изолированный каталог вне репо
 OPENCODE_CONFIG_DIR="$HOME/.config/rush-opencode-stand" \
-  bun scripts/dev/with-env.ts pm2 start opencode --name rush-opencode --cwd "${REPOS_ROOT}" -- serve --port 4097 --hostname 127.0.0.1
+  bun scripts/dev/with-env.ts opencode serve --port 4097 --hostname 127.0.0.1 --cwd "${REPOS_ROOT}"
 ```
 
 `--cwd` задаёт рабочий каталог opencode-стенда = `REPOS_ROOT` (где лежат
@@ -277,12 +253,7 @@ OPENCODE_CONFIG_DIR="$HOME/.config/rush-opencode-stand" \
 Значения (в т.ч. пароль стенда) подхватывает `scripts/dev/with-env.ts` из
 `.env` — `source .env` не эквивалентно (shell-подстановка ломает пароли).
 
-Стоп стенда:
-
-```bash
-pm2 stop rush-opencode
-pm2 delete rush-opencode
-```
+Стоп стенда — `Ctrl+C` (foreground-процесс, демона нет).
 
 Проверка стенда (секрет — только по имени):
 
@@ -347,7 +318,7 @@ BACKEND_PUBLISH=127.0.0.1:3100 FRONTEND_PUBLISH=127.0.0.1:8080 docker compose up
 
 Порты: `3100` backend · `8080` frontend (standalone `:3000`) · `4096` opencode только внутри сети (`expose`, наружу не публикуется). Postgres — внешний (в compose сервиса нет). Порт `3001` (`NEXT_PUBLIC_PORT`) — только хост-локальный `next dev` (`bun run dev:frontend` / `bun run dev`), compose его не публикует.
 Сети: `front` (frontend↔backend) · `back` (backend↔opencode).
-Volumes: `opencode-*` (workspace/ssh/gh-config/pnpm-store/pm2/opencode-data/secrets/playwright-browsers). Бэкап БД — на стороне внешнего Postgres.
+Volumes: `opencode-*` (workspace/ssh/gh-config/pnpm-store/opencode-data/secrets/playwright-browsers). Бэкап БД — на стороне внешнего Postgres.
 
 ## Commands
 
@@ -358,7 +329,7 @@ Volumes: `opencode-*` (workspace/ssh/gh-config/pnpm-store/pm2/opencode-data/secr
 | `bun run dev:backend`| backend dev (`nx run backend:dev` → contracts build + `nest start --watch`, :3100) |
 | `bun run dev:frontend`| frontend dev (`nx run frontend:dev` → contracts build + `next dev`, :3001) |
 | `bun run build`      | `nx run-many -t build` (all projects; `build:backend` / `build:frontend` per app, `build:affected` for touched only) |
-| `bun run lint`       | `nx run-many -t lint` (`tsc --noEmit` + `biome lint` per project; `lint:affected` for touched only; Biome replaces eslint — no eslint config left) |
+| `bun run lint`       | `nx run-many -t lint` (`tsc --noEmit` + `biome lint` per project; `lint:affected` for touched only; Biome replaces eslint — no eslint config left; shared config in `packages/biome-config/biome.json`, per-app `biome.jsonc` only `extends` it) |
 | `bun run test`       | `nx run-many -t test` (per-project runner; `test:affected` for touched only; backend tests run on `dist`, so build precedes test) |
 | `bun run graph`      | `nx graph` (project dependency graph) |
 | `docker compose up -d` | full stack from registry images (backend + frontend + opencode; postgres внешний) |

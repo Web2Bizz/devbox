@@ -14,7 +14,7 @@
  * diagnost string serialization.
  */
 import assert from 'node:assert/strict';
-import { AppLogger } from '../app-logger.service';
+import { AppLogger } from '../logger';
 import { ExternalClient } from './external-client';
 import { ExternalServiceError } from './external-error';
 

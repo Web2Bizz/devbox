@@ -18,8 +18,8 @@
  *   secrets scrubbed).
  */
 import { Injectable } from '@nestjs/common';
-import { AppLogger, serializeCause } from '../app-logger.service';
-import { validateEnv } from '../../env';
+import { AppLogger, serializeCause } from '../logger';
+import { validateEnv } from '../../common/env/env';
 import {
   ExternalServiceError,
   fromStatus,

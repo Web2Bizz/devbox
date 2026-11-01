@@ -14,14 +14,14 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Inject, Optional, forwardRef } from '@nestjs/common';
-import { V1Endpoint } from '../api/version';
-import { DEFAULT_MOCK_USER_ID as DEFAULT_WORKSPACE_USER_ID } from '../auth/identity.service';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { ReqUser } from '../auth/req-user.decorator';
-import type { RequestIdentity } from '../auth/identity.service';
-import { ZodValidationPipe } from '../common/zod-validation.pipe';
-import { GithubInstallationsService } from '../projects/github/github-installations.service';
-import { CloneJobsRepository } from './clone-jobs.repository';
+import { V1Endpoint } from '../common/api/version';
+import { DEFAULT_MOCK_USER_ID as DEFAULT_WORKSPACE_USER_ID } from '../users/auth/identity.service';
+import { JwtAuthGuard } from '../users/auth/jwt-auth.guard';
+import { ReqUser } from '../users/auth/req-user.decorator';
+import type { RequestIdentity } from '../users/auth/identity.service';
+import { ZodValidationPipe } from '../common/validation';
+import { GithubInstallationsService } from '../organizations/modules/projects/modules/github/github-installations.service';
+import { CloneJobsRepository } from './modules/clone/clone.repository';
 import {
   CloneWorkspaceDto,
   WorkspaceCloneJobDto,
@@ -33,7 +33,7 @@ import {
   type CloneWorkspaceInput,
   type WorkspaceTreeQuery,
 } from './dto';
-import { WorkspaceCloneService } from './workspace-clone.service';
+import { WorkspaceCloneService } from './modules/clone/clone.service';
 import { WorkspacesService } from './workspaces.service';
 
 /** MVP mock user key (single copy lives in auth/identity.service.ts). */
@@ -44,7 +44,7 @@ export { DEFAULT_WORKSPACE_USER_ID };
  * longer calls it (C2: userId comes from @ReqUser(), header/query
  * spoofing removed).
  */
-export { resolveIdentityUserId as resolveUserId } from '../auth/identity.service';
+export { resolveIdentityUserId as resolveUserId } from '../users/auth/identity.service';
 
 function toJobDto(job: {
   userSpace: string;

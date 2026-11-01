@@ -154,7 +154,6 @@ services:
       - opencode-ssh-keys:/root/.ssh
       - opencode-gh-config:/root/.config/gh
       - opencode-pnpm-store:/pnpm/store
-      - opencode-pm2-home:/root/.pm2
       - opencode-data:/root/.local/share/opencode
       - opencode-secrets:/root/.secrets
       - opencode-playwright-browsers:/playwright-browsers
@@ -176,7 +175,6 @@ volumes:
   opencode-ssh-keys:
   opencode-gh-config:
   opencode-pnpm-store:
-  opencode-pm2-home:
   opencode-data:
   opencode-secrets:
   opencode-playwright-browsers:

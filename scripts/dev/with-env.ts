@@ -1,11 +1,10 @@
-// Dev env bridge — replaces the pm2 `ecosystem.config.cjs` injection.
+// Dev env bridge — injects the repo-root `.env` into process.env.
 // Loads the repo-root `.env` into process.env (shell wins > file, file wins
 // over built-in defaults) and execs the given command (nx dev targets).
 //
 // Why this exists: nx runs each target with cwd={projectRoot}, so
 // apps/backend dotenv and `next dev` would never see the repo-root `.env`.
-// The old pm2 setup solved it by parsing the root `.env` and injecting it
-// before spawn — this launcher does the same, minus the supervisor.
+// This launcher parses the root `.env` and injects it before spawn.
 //
 // Parser semantics (ported from the removed ecosystem.config.cjs, no new
 // syntax invented): KEY=VALUE lines, `#` comments, optional quotes,
@@ -16,9 +15,7 @@
 // further below), both of which break parity.
 //
 // Deliberately NO autorestart/backoff here: nest --watch, `next dev` and
-// tsc --watch already watch their own sources; the outer pm2 `watch` is gone
-// with pm2, so the double-watch inotify crash-loop source is removed at the
-// root cause instead of being papered over with restarts. A crashing dev
+// tsc --watch already watch their own sources. A crashing dev
 // server exits non-zero and nx tears down the parallel run — fix the crash,
 // then rerun. Logs stream prefixed per project (--output-style=stream).
 // Secrets are never printed — only the count of injected keys on debug.

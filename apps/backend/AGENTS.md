@@ -1,71 +1,131 @@
-# AGENTS.md — backend (Rush Code API)
+# AGENTS.md
 
-Канон — корень [`AGENTS.md`](../../AGENTS.md). При расхождении побеждает корень.
+---
+
+**Описание**: NestJS API, основной бэкенд Rush Code.
+**Ключевые слова**: backend, nestjs, api, drizzle, zod
+
+---
 
 ## Стек
 
-- NestJS 12 + TypeScript 6 + Zod 4 + Drizzle (см. `package.json`, `app.module.ts`).
-- Wire-контракт: `@rush-code/contracts` (`packages/contracts`) зеркалит
-  `contracts/openapi.yaml` поле-в-поле; `src/contracts.ts` — deprecated-реэкспорт.
-- OpenCode-граница: `/api/opencode/*` — deprecated-алиас на один релиз, публичный
-  контракт — `/api/sessions*` (см. корень «OpenCode — граница backend/frontend»).
-  Liveness — `GET /api/info`, `OpencodeService.checkConnectivity()` трактует
-  `401+JSON` как `up`. Upstream-вызовы spread'ят `serveBasicAuthHeader()`;
-  `global/health` шлёт его тоже (браузерный вход анонимен, upstream — Basic).
-  Ошибки: 400/422 → `EXTERNAL_BAD_REQUEST`, 404 → `EXTERNAL_NOT_FOUND`
-  (без `Retry-After`); `cause` сериализуется `serializeCause` (только debug).
-- Конфиг/env: `src/env.ts` (+ `.env.example` в корне); обязательные переменные —
-  fail-fast, тихие фолбэки запрещены (см. корень «Фолбэки запрещены по умолчанию»).
+- **NestJS** — HTTP-каркас и DI (модули, контроллеры, гарды)
+- **TypeScript** — язык бэкенда
+- **Zod** — валидация границы (DTO и boundary-схемы входа/выхода)
+- **Drizzle ORM** — типовой доступ к Postgres (схема, миграции, запросы)
+- **pg** — драйвер Postgres под Drizzle
+- **@rush-code/contracts** — wire-типы и схемы, зеркало `contracts/openapi.yaml` поле-в-поле
 
-## Структура модулей (по факту на 2026-10-30)
+## Поток одного запроса
 
-```
-src/
-├─ main.ts, app.setup.ts, app.module.ts, env.ts (+ env*.spec) — бутстрап, strict-env
-├─ contracts.ts — deprecated-реэкспорт @rush-code/contracts
-├─ api/ — v1 REST: api.controller.ts (@Controller()+@Version('1')), dto.ts, proxy.service.ts
-│         (legacy-прокси), version.ts (versioning URI), versioning.e2e.ts
-├─ auth/ — аккаунты/JWT (auth.controller v1, jwt-auth.guard, auth.e2e)
-├─ sessions/ — ДОМЕННЫЙ модуль (карточки 4–6): sessions.controller.ts (@Controller('sessions'),
-│    GET /, POST /, GET status|models|providers|events, GET/POST :id/messages, POST :id/interrupt),
-│    sessions.service.ts (гейт requireProject, трансляция runner→домен, toSessionInfo с model,
-│    fetchWithRetry+serveBasicAuthHeader для create/prompt/interrupt, SSE через sse-relay),
-│    sessions.dto.ts (реэкспорт-баррель), sessions.module.ts, sessions.e2e.ts
-├─ opencode/ — DEPRECATED-зеркало /api/opencode/* (18 роутов, deprecated:true) + транспорт runner'а:
-│    opencode.controller.ts, opencode.service.ts (dialUrl, checkConnectivity→/api/info,
-│    fetchWithRetry/fetchWithTimeout — авторизацию НЕ добавляют), opencode-client.ts
-│    (OpencodeSdkClient, lazy import @opencode-ai/sdk/v2), module, opencode.e2e.ts (37)
-├─ opencode-keys/ — per-user ключи OpenCode + serveBasicAuthHeader (opencode-auth.service.ts)
-│    + billing usage; opencode-keys.e2e.ts — эталон скана секретов/форм логов
-├─ common/ — app-logger.service.ts (AppLogger + serializeCause), api-error.filter.ts,
-│    correlation.interceptor.ts, noindex.interceptor.ts, zod-validation.pipe.ts, common.module.ts,
-│    sse-relay.ts (общая механика SSE: probe до заголовков→503, abort downstream, бэкофф),
-│    external/ (external-client.ts + .spec/.e2e, external-error.ts + .spec: маппинг EXTERNAL_*, retry.ts)
-├─ projects/, organizations/ — C4: assertProjectAccessById (404 без утечки существования)
-├─ repos/, workspaces/, storage/ — REPOS_ROOT (jail WorkspacePathService.resolveUserStrict/assertInsideJail)
-├─ db/ — Drizzle (миграции apps/backend/drizzle, meta/ не коммитится)
-└─ docker-registry/, npm-registry/, health/ — реестры-пинги и GET /health
+`JwtAuthGuard` → C4-гейт `assertProjectAccessById` (404 без утечки) →
+jail (`WorkspacePathService` поверх `REPOS_ROOT`) → upstream к runner:
+sdk (`OpencodeSdkClient`) для полей, которые генератор НЕ режет, иначе сырой
+`fetchWithRetry` + `serveBasicAuthHeader` → маппинг сбоя в `EXTERNAL_*`
+(`external-error.ts`) → `ApiErrorFilter` в `ApiError`-envelope
+(+`x-correlation-id`) — normal path однострочник `[http] handled`, без стеков/секретов.
+
+## Фолбэки запрещены по умолчанию
+
+Правила: никаких тихих фолбэков без явного указания пользователя. Валидация конфигов и env (`common/env/env.ts`, `.env.example`) — строго. `REPOS_ROOT` — единственный источник чтения И записи всего storage. Без конфига — отказ (storage-чтения 503 `EXTERNAL_UNAVAILABLE`, создание проектов 500), boot без корня продолжается с логом ERROR. Исключения: `GET /projects` и `GET /projects/:id` без корня — `corrupted` + `storage-unconfigured`. Фолбэк для тюнинга чтения (таймауты/ретраи/хосты dev-dial) — лишь исключение с комментарием, но НЕ для путей хранения.
+
+### Не правильно
+
+```ts
+// Тихий fallback на cwd — проекты молча создаются не там
+const root = process.env.REPOS_ROOT ?? path.join(process.cwd(), 'repos');
 ```
 
-`packages/contracts/src/` — 12 пар `entity.ts` + `entity.schema.ts` (`opencode-session/`,
-`opencode-event/`, `sessions/` добавлены карточками 3–6, включая `SessionModel` для
-`GET /api/sessions/models`); `contracts/openapi.yaml` — источник правды;
-`contracts/opencode-stand-2.2.0.json` — провенанс живой спеки.
+```ts
+// WARN-тихоня вместо fail-fast
+if (!process.env.REPOS_ROOT) {
+  logger.warn('no root, using default');
+  return path.join(process.cwd(), 'repos');
+}
+```
 
-### Поток одного запроса
+```ts
+// Молча отдаём [] без корня
+if (!reposRoot) return [];
+```
 
-`JwtAuthGuard` (или публичный роут) → C4-гейт `assertProjectAccessById` (404 без утечки
-существования) → гейт + jail модуля (`requireProject` / `WorkspacePathService` поверх
-`REPOS_ROOT`) → upstream к runner: sdk (`OpencodeSdkClient`) для полей, которые генератор
-НЕ режет, иначе сырой `fetchWithRetry` + `serveBasicAuthHeader` → маппинг сбоя в
-`EXTERNAL_*` (`external-error.ts`) → `ApiErrorFilter` оборачивает в `ApiError`-envelope
-(+`x-correlation-id`, cors) — normal path однострочник `[http] handled`, без стеков/секретов.
+### Правильно
+
+```ts
+// Fail-fast с понятной ошибкой
+if (!process.env.REPOS_ROOT) {
+  throw new Error('REPOS_ROOT is not set: задайте в .env (см. .env.example)');
+}
+```
+
+```ts
+// Без корня — отказ, а не fallback
+if (!reposRoot) {
+  throw new ExternalServiceError('EXTERNAL_UNAVAILABLE', 'storage-unconfigured', {
+    retryAfter: 30,
+    correlationId,
+  });
+}
+```
+
+## Логирование — без стеков и секретов в normal path
+
+Правила: только через `AppLogger` (`src/common/logger/`), `console.*` в runtime запрещён. Уровни `debug → info → warn → error → fatal`, уважает `LOG_LEVEL`. Normal path — однострочники `[domain] op key=value` + `correlationId`, без `\n at `, без URL/query/headers/body/`Bearer`/секретов/PII. Стек/`cause` (санитизирован, ≤2000, через `serializeCause`) — только в `debug`. `ExternalClient` — только `service/operation/attempt/latencyMs/status/code`. e2e-скан секретов обязателен (эталон `src/opencode/modules/keys/opencode-keys.e2e.ts`).
+
+### Не правильно
+
+```ts
+// console в runtime
+console.log('getUsage', response.data);
+```
+
+```ts
+// Стек в error + секрет в сообщении
+logger.error(`getUsage failed ${apiKey}\n at ${err.stack}`);
+```
+
+```ts
+// URL/body в external-логe
+logger.warn(`[external] retry ${url} body=${JSON.stringify(body)}`);
+```
+
+### Правильно
+
+```ts
+// Однострочник без секретов, стек только в debug
+logger.warn(`[opencode-billing] getUsage status=${status} code=${code} [cid=${correlationId}]`);
+logger.debug(`[opencode-billing] cause code=${code} detail=${serializeCause(err)}`);
+```
+
+```ts
+// ExternalClient — только поля, без URL/body
+logger.debug(`[external] start service=${service} operation=${op} method=${method}`);
+logger.error(`[external] failure service=${service} operation=${op} status=${status} code=${code} attempt=${n} latencyMs=${ms}`);
+```
+
+## Скрипты
+
+| Скрипт | Описание |
+|---|---|
+| `bun run dev` | watch-режим (nest + swc) |
+| `bun run build` | сборка в `dist` |
+| `bun run start` | запуск собранного `dist/main.js` |
+| `bun run lint` | проверка типов (`tsc --noEmit`) + стиля (`biome`) |
+| `bun run test` | юнит-спеки из `dist` (`*.spec.js`) |
+| `bun run test:e2e` | полный e2e-сьют (build + все e2e/spec) |
+| `bun run test:e2e:auth` / `:projects` / `:github` / `:repos` / `:opencode-keys` | точечные e2e |
+| `bun run keys:reencrypt` | перешифровка opencode-ключей |
+| `bun run db:check-integrity` | проверка целостности Drizzle-схемы |
 
 ## Конвенции (коротко)
 
-- Логи — только через `AppLogger` (`src/common/app-logger.service.ts`); `console.*`
-  в runtime запрещён; normal path — однострочники без стеков/секретов (см. корень
-  «Логирование — без стеков и секретов»).
+- Логи — только через `AppLogger` (`src/common/logger/`); `console.*` в runtime запрещён;
+  normal path — однострочники без стеков/секретов.
 - Storage: единственный корень — `REPOS_ROOT`; без него — 503/500, не `<cwd>/repos`.
-- Проверки: `bun run lint` (`tsc --noEmit` + `biome lint`) и `bun run build`
-  (детали — корень «Frontend — дизайн-система», backend-скрипты в `package.json`).
+- Проверки: `bun run lint` (`tsc --noEmit` + `biome lint`) и `bun run build`.
+
+## Дополнительные правила
+
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — структура модулей бэкенда (`src/`).
+- [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) — backend-дополнение
+  к корневому [`CODE_OF_CONDUCT.md`](../../CODE_OF_CONDUCT.md).

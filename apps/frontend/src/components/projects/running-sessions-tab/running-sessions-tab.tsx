@@ -101,7 +101,6 @@ export function RunningSessionsTab({
   const lastType = events.length > 0 ? events[events.length - 1].type : '';
   useEffect(() => {
     if (lastType.startsWith('session.')) reload();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events.length]);
 
   // Busy filter: the derived status map, overlaid by the row's own status

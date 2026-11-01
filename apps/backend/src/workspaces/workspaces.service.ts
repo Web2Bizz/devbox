@@ -1,10 +1,10 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { AppLogger } from '../common/app-logger.service';
+import { AppLogger } from '../common/logger';
 import { ExternalServiceError } from '../common/external/external-error';
 import { storageUnavailable } from '../storage/storage-unavailable';
-import { WorkspacePathService } from './workspace-path.service';
+import { WorkspacePathService } from './modules/path/path.service';
 import { readSubmodules, type SubmoduleEntry } from './workspace-submodules.util';
 
 export type WorkspaceTreeNode = {

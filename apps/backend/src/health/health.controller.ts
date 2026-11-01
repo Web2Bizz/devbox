@@ -1,21 +1,21 @@
 import { Controller, Get, Optional, Version, VERSION_NEUTRAL } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { DbService } from '../db/db.service';
-import { OpencodeService } from '../opencode/opencode.service';
+import { DbService } from '../common/db/db.service';
+import { OpencodeService } from '../ai/modules/opencode/opencode.service';
 import {
   DockerRegistryService,
   type DockerRegistryStatus,
-} from '../docker-registry/docker-registry.service';
+} from '../organizations/modules/registries/modules/docker/docker.service';
 import {
   NpmRegistryService,
   type NpmRegistryStatus,
-} from '../npm-registry/npm-registry.service';
-import { HealthDto } from '../api/dto';
+} from '../organizations/modules/registries/modules/npm/npm.service';
+import { HealthDto } from '../common/api/dto';
 import type { HealthResponse } from '@rush-code/contracts';
 
 /**
  * Liveness probe — deliberately VERSION_NEUTRAL and excluded from the global
- * 'api' prefix (see configureApp in app.setup.ts): stays GET /health.
+ * 'api' prefix (see configureApp in app/app.setup.ts): stays GET /health.
  * The /api/v1/health alias is also exposed for API clients; monitoring can
  * continue using the unversioned /health route.
  *

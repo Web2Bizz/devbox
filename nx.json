@@ -11,6 +11,8 @@
       "{workspaceRoot}/bun.lock",
       "{workspaceRoot}/bunfig.toml",
       "{workspaceRoot}/tsconfig.base.json",
+      "{workspaceRoot}/biome.jsonc",
+      "{workspaceRoot}/packages/biome-config/biome.json",
       "{workspaceRoot}/.npmrc",
       "{workspaceRoot}/.bun-version"
     ],

@@ -29,9 +29,4 @@ if [ ! -f /root/.ssh/config ]; then
 fi
 chmod 600 /root/.ssh/id_ed25519 /root/.ssh/id_rsa 2>/dev/null || true
 
-pm2 delete opencode 2>/dev/null || true
-
-pm2 start "cd /workspace && opencode serve --port 4096 --hostname 0.0.0.0" --name opencode
-
-pm2 save
-exec pm2 logs opencode --lines 0
+exec opencode serve --port 4096 --hostname 0.0.0.0

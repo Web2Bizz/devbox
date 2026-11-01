@@ -48,7 +48,7 @@ RUN mkdir -p /root/.config/opencode && printf '%s\n' \
     && printf '%s\n' 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' > /etc/ssh/ssh_known_hosts
 
 # --- глобальные CLI-инструменты ---
-RUN npm i -g typescript pm2 @nestjs/cli vite vitest @rspack/cli @playwright/test
+RUN npm i -g typescript @nestjs/cli vite vitest @rspack/cli @playwright/test
 
 # --- прогрев pnpm store библиотеками, которые проекты подтянут сами ---
 RUN mkdir -p /tmp/warmup && cd /tmp/warmup && pnpm init \
@@ -60,7 +60,7 @@ RUN mkdir -p /tmp/warmup && cd /tmp/warmup && pnpm init \
 ENV PLAYWRIGHT_BROWSERS_PATH=/playwright-browsers
 RUN npx playwright install --with-deps chromium
 
-# --- entrypoint: pm2 держит opencode serve живым между рестартами ---
+# --- entrypoint: opencode serve как PID 1 ---
 COPY entrypoint.sh /entrypoint.sh
 COPY reload-secrets.sh /usr/local/bin/reload-secrets
 RUN chmod +x /entrypoint.sh /usr/local/bin/reload-secrets

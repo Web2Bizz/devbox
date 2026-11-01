@@ -1,0 +1,23 @@
+{
+  "name": "@rush-code/biome-config",
+  "version": "0.1.0",
+  "description": "Shared Biome base config for Rush Code bun workspaces (backend/frontend/cli/contracts). Single source for parser + noConsole rule + test overrides.",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./biome.json",
+    "./biome": "./biome.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "biome.json"
+  ],
+  "keywords": [
+    "biome",
+    "biome-config"
+  ],
+  "engines": {
+    "node": ">=22",
+    "bun": ">=1.4.2"
+  }
+}

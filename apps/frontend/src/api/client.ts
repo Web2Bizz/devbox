@@ -12,7 +12,6 @@ import type {
   Organization as OrganizationDto,
   OrganizationInvite as InviteDto,
   OrganizationMember as MemberDto,
-  MessagesResponse,
   NpmRegistryStatusResponse,
   OpencodeKeyResult,
   OpencodeKeyStatus,
@@ -20,8 +19,6 @@ import type {
   OrgRole,
   Project as ProjectApiDto,
   RegistryCatalogResponse,
-  SendChatResponse,
-  Session,
   UpdateMemberRoleInput as UpdateMemberRoleRequest,
   UpdateOrganizationInput as UpdateOrganizationRequest,
 } from '@rush-code/contracts';
@@ -201,21 +198,10 @@ export const api = {
   baseUrl: BASE_URL,
   apiVersion: API_VERSION,
   getHealth: () => request<HealthResponse>('/health'),
-  // Proxy routes: 200 always means live upstream data. When the opencode
-  // server is unreachable the backend answers 503 EXTERNAL_UNAVAILABLE
-  // («сервис временно недоступен, повторите позже») with Retry-After —
-  // surfaced here as ApiClientError (no mock payloads, never 200).
-  // C4: every route requires `?projectId` (backend gates BEFORE any
-  // upstream call — missing → 400 PROJECT_REQUIRED, strangers → 404).
-  // The param stays optional client-side so legacy callers compile; omit
-  // it only where no project context exists (the backend 400 then
-  // surfaces honestly as ApiClientError, never masked).
-  getSession: (projectId?: string) =>
-    requestV1<Session>(`/session${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`),
   // ── Domain sessions surface — GET/POST /api/sessions* (card 4 product
   // contract). Unversioned ON PURPOSE: the backend serves these routes
-  // VERSION_NEUTRAL; the thin /api/v1/sessions (getSession-era) is a legacy
-  // surface — never route domain rows through it. JWT-guarded + C4 gate:
+  // VERSION_NEUTRAL (the deleted /api/v1/session proxy is gone — never
+  // route domain rows through a versioned alias). JWT-guarded + C4 gate:
   // projectId is REQUIRED here (missing → honest 400 PROJECT_REQUIRED
   // ApiClientError, strangers → 404 not_found, runner outage → 503
   // EXTERNAL_UNAVAILABLE — never masked, never defaulted). Every answer is
@@ -392,18 +378,6 @@ export const api = {
           ...(opts?.signal ? { signal: opts.signal } : {}),
         },
       ),
-    ),
-  getMessages: (sessionId: string, projectId?: string) =>
-    requestV1<MessagesResponse>(
-      `/messages?sessionId=${encodeURIComponent(sessionId)}${projectId ? `&projectId=${encodeURIComponent(projectId)}` : ''}`,
-    ),
-  sendChat: (message: string, sessionId?: string, projectId?: string) =>
-    requestV1<SendChatResponse>(
-      `/chat${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ message, sessionId }),
-      },
     ),
   // Docker-registry surface: 200 always means live upstream /v2/_catalog
   // data. Unconfigured/unreachable answers 503 EXTERNAL_UNAVAILABLE

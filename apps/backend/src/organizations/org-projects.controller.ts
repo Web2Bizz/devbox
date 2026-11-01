@@ -15,12 +15,12 @@ import {
   Version,
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiResponse, ApiTags } from "@nestjs/swagger";
-import { JwtAuthGuard } from "../auth/jwt-auth.guard";
-import { ReqUser } from "../auth/req-user.decorator";
-import type { RequestIdentity } from "../auth/identity.service";
+import { JwtAuthGuard } from "../users/auth/jwt-auth.guard";
+import { ReqUser } from "../users/auth/req-user.decorator";
+import type { RequestIdentity } from "../users/auth/identity.service";
 import { NoIndexInterceptor } from "../common/noindex.interceptor";
-import { ZodValidationPipe } from "../common/zod-validation.pipe";
-import { V1Endpoint } from "../api/version";
+import { ZodValidationPipe } from "../common/validation";
+import { V1Endpoint } from "../common/api/version";
 import { OrganizationsService } from "./organizations.service";
 import {
   ProjectDto,
@@ -29,10 +29,10 @@ import {
   updateProjectSchema,
   type CreateProjectInput,
   type UpdateProjectInput,
-} from "../projects/dto";
-import { ProjectsService } from "../projects/projects.service";
-import { ChatsService } from "../projects/chats/chats.service";
-import { SessionsService } from "../projects/sessions/sessions.service";
+} from "./modules/projects/dto";
+import { ProjectsService } from "./modules/projects/projects.service";
+import { ChatsService } from "./modules/projects/modules/chats/chats.service";
+import { SessionsService } from "./modules/projects/modules/sessions/sessions.service";
 
 /**
  * Canonical nested project surface (1:1 model):

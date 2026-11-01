@@ -2,7 +2,7 @@ import type { Config } from 'drizzle-kit';
 
 export default {
   schema: './src/db/schema.ts',
-  out: './drizzle-rebuild',
+  out: './drizzle',
   dialect: 'postgresql',
   migrations: {
     table: '__drizzle_migrations_code_first',

@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { AppLogger } from '../common/app-logger.service';
+import type { AppLogger } from '../common/logger';
 
 const execFileAsync = promisify(execFile);
 

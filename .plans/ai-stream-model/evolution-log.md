@@ -1,0 +1,1 @@
+# evolution-log: epoch1 coarse -> epoch2 evidence (useChat/SessionInfo/CreateSessionRequest без model, sse-relay) -> epoch3 decisions (scope обязателен, YAML источник правды, model optional passthrough, UI на доменных providers) -> epoch4 PLAN.md

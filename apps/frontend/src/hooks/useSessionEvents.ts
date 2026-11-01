@@ -106,7 +106,6 @@ export function useSessionEvents(projectId?: string): UseSessionEventsResult {
       ctrl?.abort();
       if (timer) clearTimeout(timer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nonce, projectId, t]);
 
   const reconnect = useCallback(() => {

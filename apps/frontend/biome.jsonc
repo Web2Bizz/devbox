@@ -1,0 +1,24 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
+  // Per-app wrapper: all shared settings live in packages/biome-config/biome.json.
+  // Only build-output ignores are local (used when `biome lint` runs with cwd here).
+  "root": false,
+  "extends": ["../../packages/biome-config/biome.json"],
+  "files": {
+    "includes": ["**", "!!**/.next/**", "!!**/dist/**", "!!**/node_modules/**", "!!**/coverage/**"]
+  },
+  "overrides": [
+    {
+      // Frontend baseline exception (checked 2026-10-13): the only console.*
+      // in frontend runtime code is console.error in the Next.js error
+      // boundary below, which reports the render error. No AppLogger
+      // equivalent exists on the client — so the rule stays on for the rest
+      // of the frontend with this single-file exception instead of weakening
+      // the frontend. Lives here (not in the shared config or root) because
+      // files under apps/frontend/ are governed by this nearest config, and
+      // shared override globs resolve from each extending package directory.
+      "includes": ["app/error.tsx"],
+      "linter": { "rules": { "suspicious": { "noConsole": "off" } } }
+    }
+  ]
+}

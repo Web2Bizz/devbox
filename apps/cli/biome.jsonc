@@ -1,0 +1,10 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
+  // Per-app wrapper: all shared settings live in packages/biome-config/biome.json.
+  // Only build-output ignores are local (used when `biome lint` runs with cwd here).
+  "root": false,
+  "extends": ["../../packages/biome-config/biome.json"],
+  "files": {
+    "includes": ["**", "!!**/dist/**", "!!**/node_modules/**", "!!**/coverage/**"]
+  }
+}

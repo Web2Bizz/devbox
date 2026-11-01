@@ -34,7 +34,7 @@ process.env.AUTH_LEGACY_MOCK_FALLBACK = "false";
 
 async function main(): Promise<void> {
   const { resolveTestDb, applyTestMigrations } =
-    await import("../db/e2e-db");
+    await import("../common/db/e2e-db");
   const testDb = await resolveTestDb(
     process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL ?? "",
   );
@@ -61,8 +61,8 @@ async function main(): Promise<void> {
   console.log(`[organizations e2e] REPOS_ROOT: ${reposRoot}`);
 
   const { NestFactory } = await import("@nestjs/core");
-  const { AppModule } = await import("../app.module");
-  const { configureApp } = await import("../app.setup");
+  const { AppModule } = await import("../app/app.module");
+  const { configureApp } = await import("../app/app.setup");
 
   const app = await NestFactory.create(AppModule, { logger: false });
   configureApp(app);
@@ -105,7 +105,7 @@ async function main(): Promise<void> {
       // A hand-signed access token (TokenService.sign is pure, no DB) gets
       // past JwtAuthGuard so the 503 below proves the SERVICE denies with
       // EXTERNAL_UNAVAILABLE — not the guard with 401.
-      const { TokenService } = await import("../auth/token.service");
+      const { TokenService } = await import("../users/auth/token.service");
       const tokens = app.get(TokenService, { strict: false }) as {
         sign: (
           claims: Record<string, unknown>,
@@ -186,9 +186,9 @@ async function main(): Promise<void> {
     } else {
       // Live PG — full suite (tables migrated + cleared above).
       const { OrganizationsService } = await import("./organizations.service");
-      const { ProjectsService } = await import("../projects/projects.service");
-      const { UsersService } = await import("../auth/users.service");
-      const { TokenService } = await import("../auth/token.service");
+      const { ProjectsService } = await import("./modules/projects/projects.service");
+      const { UsersService } = await import("../users/users.service");
+      const { TokenService } = await import("../users/auth/token.service");
       const orgs = app.get(OrganizationsService, { strict: false }) as {
         clearAllForTests: () => Promise<void>;
       };
@@ -487,8 +487,8 @@ async function main(): Promise<void> {
         // legacy user-space / ownerless rows are seeded directly (the hand
         // migration surface): org_id NULL + owner, and org_id NULL + owner
         // NULL (pre-auth legacy → deny-by-default, C5).
-        const { DbService } = await import("../db/db.service");
-        const { projects: projectsTable } = await import("../db/schema");
+        const { DbService } = await import("../common/db/db.service");
+        const { projects: projectsTable } = await import("../common/db/schema");
         const { eq: eqOp } = await import("drizzle-orm");
         const db = app.get(DbService, { strict: false }) as {
           client: {

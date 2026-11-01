@@ -250,7 +250,6 @@ describe('sessions-client domain boundary', () => {
       })) as unknown as typeof fetch;
     const ctrl2 = new AbortController();
     const err = await (async () => {
-      // eslint-disable-next-line no-unreachable-loop
       for await (const _f of sessionEventStream(PROJECT, ctrl2.signal)) return _f;
       return null;
     })().catch((e: unknown) => e);

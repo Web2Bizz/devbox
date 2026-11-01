@@ -9,8 +9,8 @@ import {
 import { and, eq } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { rm } from "node:fs/promises";
-import { AppLogger } from "../common/app-logger.service";
-import { DbService, dbUnavailable, type DbClient } from "../db/db.service";
+import { AppLogger } from "../common/logger";
+import { DbService, dbUnavailable, type DbClient } from "../common/db/db.service";
 import {
   organizationInvites,
   organizationMembers,
@@ -18,9 +18,9 @@ import {
   type OrganizationInviteRow,
   type OrganizationMemberRow,
   type OrganizationRow,
-} from "../db/schema";
-import { UsersService } from "../auth/users.service";
-import { WorkspacePathService } from "../workspaces/workspace-path.service";
+} from "../common/db/schema";
+import { UsersService } from "../users/users.service";
+import { WorkspacePathService } from "../workspaces/modules/path/path.service";
 import type {
   AcceptInviteInput,
   AddMemberInput,
@@ -482,7 +482,7 @@ export class OrganizationsService {
       // removes the org row (FK cascade drops members/invites) + cascade
       // SOFT-deletes member projects (status=deleted, rows+disk kept for
       // restore, running containers stopped best-effort).
-      const { projects } = await import("../db/schema");
+      const { projects } = await import("../common/db/schema");
       const { and: andOp, eq: eqOp } = await import("drizzle-orm");
       const rows = await this.client()
         .select({ id: projects.id })
@@ -846,7 +846,7 @@ export class OrganizationsService {
     correlationId?: string,
   ): Promise<string[]> {
     try {
-      const { projects } = await import("../db/schema");
+      const { projects } = await import("../common/db/schema");
       const { eq: eqOp } = await import("drizzle-orm");
       const rows = await this.client()
         .select({ orgId: projects.orgId })
@@ -885,7 +885,7 @@ export class OrganizationsService {
     correlationId?: string,
   ): Promise<{ orgId: string | null; ownerId: string | null }> {
     try {
-      const { projects } = await import("../db/schema");
+      const { projects } = await import("../common/db/schema");
       const { eq: eqOp } = await import("drizzle-orm");
       const rows = await this.client()
         .select({ orgId: projects.orgId, ownerId: projects.ownerId })

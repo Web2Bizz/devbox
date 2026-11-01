@@ -358,7 +358,6 @@ export function useChat(options?: UseChatOptions): UseChatResult {
       ctrl?.abort();
       if (timer) clearTimeout(timer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nonce, projectId, t]);
 
   // Scoped mode: bind to the given sessionId + load its history
@@ -393,7 +392,6 @@ export function useChat(options?: UseChatOptions): UseChatResult {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSessionId, projectId]);
 
   // Abort any in-flight queue POST on unmount (SSE cleanup lives above).
@@ -504,7 +502,6 @@ export function useChat(options?: UseChatOptions): UseChatResult {
         attemptRef.current = 0;
         setNonce((n) => n + 1);
       });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, t]);
 
   return {

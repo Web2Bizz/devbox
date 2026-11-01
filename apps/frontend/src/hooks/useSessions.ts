@@ -198,7 +198,6 @@ export function useSessions(options?: UseSessionsOptions): UseSessionsResult {
     abortMutation.reset();
     void queryClient.invalidateQueries({ queryKey });
     void queryClient.invalidateQueries({ queryKey: statusKey });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryClient, queryKey, statusKey]);
 
   const create = useCallback(
@@ -209,7 +208,6 @@ export function useSessions(options?: UseSessionsOptions): UseSessionsResult {
         return null;
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [createMutation.mutateAsync],
   );
 
@@ -222,7 +220,6 @@ export function useSessions(options?: UseSessionsOptions): UseSessionsResult {
         // Error surfaces via the `error` memo (mutationErrorText).
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [abortMutation.mutateAsync],
   );
 

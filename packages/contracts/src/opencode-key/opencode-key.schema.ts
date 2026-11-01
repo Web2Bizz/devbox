@@ -10,7 +10,7 @@ import type {
 
 /**
  * Boundary schemas for opencode-key.ts.
- * opencodeKeySchema is verbatim apps/backend/src/opencode-keys/dto.ts
+ * opencodeKeySchema is verbatim apps/backend/src/opencode/modules/keys/keys.schema.ts
  * (same trim/min/max + error strings): short strings are almost certainly
  * a paste mistake, so min 20 fails fast. Response schemas mirror
  * contracts/openapi.yaml (OpencodeKeyResult/Status/Usage/LimitBucket).

@@ -112,8 +112,8 @@ async function main(): Promise<void> {
   process.env.OPENCODE_URL = flaky.url;
 
   const { NestFactory } = await import('@nestjs/core');
-  const { AppModule } = await import('../../app.module');
-  const { configureApp } = await import('../../app.setup');
+  const { AppModule } = await import('../../app/app.module');
+  const { configureApp } = await import('../../app/app.setup');
 
   const app = await NestFactory.create(AppModule, { logger: false });
   configureApp(app);
@@ -201,7 +201,7 @@ async function main(): Promise<void> {
       // never a retryable status, so the upstream is hit EXACTLY once even
       // though EXTERNAL_RETRY_MAX_ATTEMPTS=3.
       const { ExternalClient } = await import('./external-client');
-      const { AppLogger } = await import('../app-logger.service');
+      const { AppLogger } = await import('../logger');
       const client = new ExternalClient(new AppLogger('ExternalClient'));
       const res = await client.fetchWithRetry(
         `${flaky.url}/unauthorized`,

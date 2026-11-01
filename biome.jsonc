@@ -6,6 +6,13 @@
   // reformat the whole tree in one go. Revisit formatting as a separate,
   // dedicated change. (This file is JSONC so these comments are legal;
   // Biome 2.x parses plain biome.json as strict JSON.)
+  //
+  // Shared settings live in packages/biome-config/biome.json (single source).
+  // This root file only adds monorepo scope (files.includes) and VCS
+  // integration. Per-app exceptions live in each app's own biome.jsonc
+  // (files under apps/<name>/ are governed by the nearest config, and
+  // shared override globs resolve from each extending package directory).
+  "extends": ["./packages/biome-config/biome.json"],
   "vcs": {
     "enabled": true,
     "clientKind": "git",
@@ -22,6 +29,8 @@
       "apps/backend/**",
       "apps/frontend/**",
       "apps/cli/**",
+      "packages/contracts/**",
+      "packages/biome-config/**",
       // Belt-and-braces: the allowlist above already scopes mobile out
       // (separate npm project, never linted by this config) — this negation
       // keeps it out even if the allowlist is ever broadened to apps/**.
@@ -31,53 +40,5 @@
       "!!**/node_modules/**",
       "!!**/coverage/**"
     ]
-  },
-  "javascript": {
-    // NestJS uses legacy parameter decorators (@Body(), @Query(),
-    // @Headers(), ...) throughout the backend — without this flag every
-    // controller fails to parse. Parser-only setting, not a lint rule.
-    "parser": { "unsafeParameterDecoratorsEnabled": true }
-  },
-  "linter": {
-    "enabled": true,
-    "rules": {
-      // Deliberately `preset: "none"` (NOT "recommended"): enabling the
-      // whole recommended set blindly would surface dozens of unrelated
-      // diagnostics across the tree. Only the console rule below (the
-      // eslint `no-console` replacement, verified via
-      // `biome explain noConsole` -> lint/suspicious/noConsole) is
-      // enforced; widen the set later as a separate change.
-      "preset": "none",
-      "suspicious": {
-        // Replaces eslint `no-console`: bans console.* in runtime sources
-        // (backend: use AppLogger from src/common/app-logger.service.ts).
-        "noConsole": "error"
-      }
-    }
-  },
-  "overrides": [
-    {
-      // Test reporters: console in spec/e2e/test files is the test reporter,
-      // not runtime logging — same scoping as the previous eslint config.
-      "includes": [
-        "**/*.spec.ts",
-        "**/*.spec.tsx",
-        "**/*.e2e.ts",
-        "**/*.test.ts",
-        "**/*.test.tsx",
-        "**/__tests__/**"
-      ],
-      "linter": { "rules": { "suspicious": { "noConsole": "off" } } }
-    },
-    {
-      // Frontend baseline exception (checked 2026-10-13): the only console.*
-      // in frontend runtime code is console.error in the Next.js error
-      // boundary below, which reports the render error. No AppLogger
-      // equivalent exists on the client, and app code is out of scope for
-      // this rollout — so the rule stays on for the rest of the frontend
-      // with this single-file exception instead of weakening the frontend.
-      "includes": ["apps/frontend/app/error.tsx"],
-      "linter": { "rules": { "suspicious": { "noConsole": "off" } } }
-    }
-  ]
+  }
 }

@@ -1,12 +1,14 @@
-# Code of Conduct — types-over-interfaces
+# Code of Conduct — wire consistency
 
-## Scope
+## 1. types-over-interfaces
+
+### Scope
 
 Whole monorepo — `packages/contracts/src/**`, `apps/backend/src/**`,
 `apps/frontend/src/**`, `apps/frontend/app/**`, `apps/mobile/src/**`.
 Mandatory in `@rush-code/contracts` (the wire-contract etalon).
 
-## Rule
+### Rule
 
 New entities are declared only as `export type`. Extension is done via
 intersection (`&`). The `interface` keyword is forbidden for our own code.
@@ -42,7 +44,7 @@ Etalon: [`packages/contracts/src`](packages/contracts/src) — every domain
 `organization/`, `opencode-key/`) declares `<domain>.ts` entities as types
 and mirrors `contracts/openapi.yaml` field-for-field.
 
-## Exceptions (require justification in the PR)
+### Exceptions (require justification in the PR)
 
 - External library types that require `interface` (e.g. `declare module`
   shims where the upstream API mandates it).
@@ -51,11 +53,88 @@ and mirrors `contracts/openapi.yaml` field-for-field.
 - Global declaration merging (`declare global`) — only with a comment
   explaining why a `type` cannot express it.
 
-## Control
+### Control
 
 ```sh
 # must print nothing outside the exceptions above
 rg -g '*.ts' -g '*.tsx' '(export )?interface \w+' \
   packages/contracts/src apps/backend/src \
   apps/frontend/src apps/frontend/app apps/mobile/src
+```
+
+---
+
+## 2. timestamps — ISO-8601
+
+### Scope
+
+Whole monorepo — `packages/contracts/src/**` (etalon), `contracts/openapi.yaml`,
+`apps/backend/src/**`, `apps/frontend/src/**`, `apps/mobile/src/**`.
+Mandatory for every `*At` wire field (`createdAt`, `updatedAt`, `deletedAt`,
+`suspendedAt`, `lastCheckAt`, …).
+
+### Rule
+
+Every timestamp crossing the wire is an ISO-8601 UTC string
+(`YYYY-MM-DDTHH:mm:ss.sssZ`, `format: date-time`).
+`At`-suffix always means ISO-8601 string — never `Date`, never epoch `number`.
+
+```ts
+// do
+/** ISO-8601 timestamp */
+createdAt: string;
+
+// do — nullable / optional variants keep the same scalar
+/** Soft-delete timestamp (null when active). */
+deletedAt: string | null;
+/** ISO-8601 timestamp (present only when configured). */
+updatedAt?: string;
+```
+
+```ts
+// don't — Date / number never cross the wire (DB-internal only)
+createdAt: Date;
+createdAt: number;
+```
+
+- Entity types: `string` (or `string | null` / `?`) + `/** ISO-8601 … */` doc.
+- Emission (backend): always `date.toISOString()` — DB `timestamp withTimezone`
+  → `.toISOString()`, upstream epoch millis → `new Date(ms).toISOString()`
+  at the domain boundary (see `sessions.service.ts`, `proxy.service.ts`).
+- OpenAPI: `type: string` + `format: date-time`.
+- Zod boundary: `z.iso.datetime()` (plus `.nullable()` / `.optional()` wrappers)
+  for all new schemas; legacy `z.string().min(1)` on `*At` fields is deprecated
+  — do not copy into new domains.
+- Comparison/sort: lexicographic (`localeCompare`) or `Date.parse` — ISO-8601
+  lexicographic order equals chronological order.
+
+Etalon: [`packages/contracts/src/sessions`](packages/contracts/src/sessions) —
+`SessionInfo.createdAt` / `SessionMessage.createdAt`
+(`string` + `z.iso.datetime()`, error `'Field "createdAt" must be an ISO-8601 timestamp'`),
+`contracts/openapi.yaml` `SessionInfo.createdAt` (`type: string`, `format: date-time`).
+
+### Exceptions (require justification in the PR)
+
+- `opencode-session/OpencodeSessionTime`
+  (`created/updated/idle/viewed/archived: number`) — upstream
+  `Session.Info.time` epoch-millis passthrough owned by the opencode spec.
+  The `/api/opencode/*` mirror relays it verbatim and never re-maps;
+  conversion to ISO-8601 happens only at the domain boundary
+  (`sessions/SessionInfo.createdAt`, `SessionMessage.createdAt`).
+- DB layer `Date` objects (`drizzle` `timestamp withTimezone`) — internal only,
+  converted via `.toISOString()` before crossing the wire.
+
+### Control
+
+```sh
+# must print nothing — At-fields are string over the wire (except the upstream mirror)
+rg -g '*.ts' '(createdAt|updatedAt|deletedAt|suspendedAt)\??: (Date|number)' \
+  packages/contracts/src apps/backend/src apps/frontend/src apps/mobile/src
+
+# new code must print nothing — At-schemas use strict datetime
+rg -g '*.schema.ts' '(createdAt|updatedAt|deletedAt): z\.string' \
+  packages/contracts/src
+
+# openapi At-fields must declare format: date-time (spot-check)
+rg -A2 'createdAt:|updatedAt:|deletedAt:' contracts/openapi.yaml
 ```

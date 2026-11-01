@@ -129,6 +129,8 @@ function decryptWith(
 }
 
 /**
+ * SCOPE: Common — reusable KEK envelope, no organization/project knowledge.
+ *
  * CryptoService — AES-256-GCM envelope for per-user OpenCode API keys with
  * versioned KEK rotation.
  *

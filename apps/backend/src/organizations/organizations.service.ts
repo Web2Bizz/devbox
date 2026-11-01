@@ -1,13 +1,5 @@
-import {
-  BadRequestException,
-  ConflictException,
-  ForbiddenException,
-  Injectable,
-  InternalServerErrorException,
-  NotFoundException,
-} from "@nestjs/common";
-import { and, eq } from "drizzle-orm";
-import { randomBytes } from "node:crypto";
+import { Injectable, InternalServerErrorException, NotFoundException } from "@nestjs/common";
+import { eq } from "drizzle-orm";
 import { rm } from "node:fs/promises";
 import { AppLogger } from "../common/logger";
 import { DbService, dbUnavailable, type DbClient } from "../common/db/db.service";
@@ -15,8 +7,6 @@ import {
   organizationInvites,
   organizationMembers,
   organizations,
-  type OrganizationInviteRow,
-  type OrganizationMemberRow,
   type OrganizationRow,
 } from "../common/db/schema";
 import { UsersService } from "../users/users.service";
@@ -29,64 +19,15 @@ import type {
   UpdateMemberRoleInput,
   UpdateOrganizationInput,
 } from "./dto";
-
-export type OrgRole = "maintainer" | "user";
-
-export type Organization = {
-  id: string;
-  name: string;
-  description: string | null;
-  ownerId: string | null;
-  isPrivate: boolean;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type OrganizationMember = {
-  orgId: string;
-  userId: string;
-  role: OrgRole;
-  createdAt: string;
-};
-
-export type OrganizationInvite = {
-  /** uuidv7 invite token (link material, single-use, never expires) */
-  token: string;
-  orgId: string;
-  /** bound email (lowercased) or null for open link-invites */
-  email: string | null;
-  role: OrgRole;
-  createdAt: string;
-};
-
-/**
- * RFC 9562 uuidv7 (unix_ts_ms + rand_a/rand_b) — time-ordered invite ids
- * with no extra dependency (Node 22 has no native v7 yet).
- */
-export function randomUuidV7(nowMs = Date.now()): string {
-  const bytes = randomBytes(16);
-  const now = Math.floor(nowMs);
-  bytes[0] = Math.floor(now / 2 ** 40) & 0xff;
-  bytes[1] = Math.floor(now / 2 ** 32) & 0xff;
-  bytes[2] = Math.floor(now / 2 ** 24) & 0xff;
-  bytes[3] = Math.floor(now / 2 ** 16) & 0xff;
-  bytes[4] = Math.floor(now / 2 ** 8) & 0xff;
-  bytes[5] = now & 0xff;
-  bytes[6] = (bytes[6] & 0x0f) | 0x70;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  const hex = bytes.toString("hex");
-  return (
-    `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-` +
-    `${hex.slice(16, 20)}-${hex.slice(20)}`
-  );
-}
-
-/** uuidv7 shape (version 7 + RFC 4122 variant) — non-v7 never matches a row. */
-export function isUuidV7(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-    value,
-  );
-}
+import { InvitesService } from "./invites.service";
+import { MembersService } from "./members.service";
+import { OrgGuardService } from "./org-guard.service";
+import type {
+  Organization,
+  OrganizationInvite,
+  OrganizationMember,
+  OrgRole,
+} from "./organizations.types";
 
 function toOrganization(row: OrganizationRow): Organization {
   return {
@@ -100,53 +41,6 @@ function toOrganization(row: OrganizationRow): Organization {
   };
 }
 
-function toMember(row: OrganizationMemberRow): OrganizationMember {
-  return {
-    orgId: row.orgId,
-    userId: row.userId,
-    role: row.role as OrgRole,
-    createdAt: row.createdAt.toISOString(),
-  };
-}
-
-function toInvite(row: OrganizationInviteRow): OrganizationInvite {
-  return {
-    token: row.token,
-    orgId: row.orgId,
-    email: row.email,
-    role: row.role as OrgRole,
-    createdAt: row.createdAt.toISOString(),
-  };
-}
-
-/**
- * Unwraps the Postgres SQLSTATE through drizzle's DrizzleQueryError
- * (real code lives in `.cause`, possibly nested) — without this, unique
- * (23505) / FK (23503) violations would all surface as 503 instead of the
- * intended 409/404. Never logs the value — codes only.
- */
-function pgCode(err: unknown): string | undefined {
-  let cur: unknown = err;
-  for (let i = 0; i < 4 && cur !== null && cur !== undefined; i++) {
-    const code = (cur as { code?: unknown }).code;
-    if (typeof code === "string") return code;
-    cur = (cur as { cause?: unknown }).cause;
-  }
-  return undefined;
-}
-
-function isPgUniqueViolation(err: unknown): boolean {
-  if (pgCode(err) === "23505") return true;
-  const msg = err instanceof Error ? err.message : String(err ?? "");
-  return /duplicate key|unique/i.test(msg);
-}
-
-function isPgForeignKeyViolation(err: unknown): boolean {
-  if (pgCode(err) === "23503") return true;
-  const msg = err instanceof Error ? err.message : String(err ?? "");
-  return /foreign key|violates foreign/i.test(msg);
-}
-
 /** uuid shape check (mirrors UsersService.isUserId — non-uuid keys never match a row). */
 function isUuidKey(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
@@ -158,11 +52,17 @@ function isUuidKey(value: string): boolean {
  * OrganizationsService — Postgres-backed org registry (strict, no memory
  * fallback) with disk-backed org homes (orgs/<orgId>/.secrets).
  *
+ * Owns org CRUD (`organizations`), project access (`projects.org_id`, the
+ * 1:1 model) and the shared test seams. Membership lives in MembersService,
+ * invites in InvitesService, the access gate in OrgGuardService (domain root
+ * per CoC v2); the membership/invite methods below are one-line delegates
+ * so the public API is unchanged. Pure helpers live in `utils/`
+ * (uuid-v7, pg-error, organization-member) — SQL/tables are unchanged.
+ *
  * Every method hits `organizations` / `organization_members` /
- * `projects_and_organizations` / `organization_invites`
- * (drizzle/0004 + 0007). Postgres outages funnel through `dbUnavailable`
- * → 503 EXTERNAL_UNAVAILABLE (Retry-After 30 via ApiErrorFilter), logged
- * once with the correlationId.
+ * `organization_invites` (drizzle/0004 + 0007). Postgres outages funnel
+ * through `dbUnavailable` → 503 EXTERNAL_UNAVAILABLE (Retry-After 30 via
+ * ApiErrorFilter), logged once with the correlationId.
  *
  * Access policy (defense in depth — HTTP guards repeat it):
  * - reads (get/members) are member-only: strangers get 404 (the org's
@@ -187,34 +87,14 @@ export class OrganizationsService {
     private readonly db: DbService,
     private readonly paths: WorkspacePathService,
     private readonly users: UsersService,
+    private readonly guard: OrgGuardService,
+    private readonly members: MembersService,
+    private readonly invites: InvitesService,
   ) {}
 
   /** Live drizzle client — throws 503 EXTERNAL_UNAVAILABLE when Postgres is down. */
   private client(): DbClient {
     return this.db.client;
-  }
-
-  /** Test/e2e seam — DELETE FROM organization_invites (requires live Postgres). */
-  async clearInvitesForTests(): Promise<void> {
-    await this.client().delete(organizationInvites);
-  }
-
-  /**
-   * Test/e2e seam — plants a single-use invite row (uuidv7, no TTL).
-   * The token must already be uuidv7 (use randomUuidV7()).
-   */
-  async seedInviteForTests(
-    token: string,
-    orgId: string,
-    role: OrgRole,
-    email: string | null = null,
-  ): Promise<void> {
-    await this.client().insert(organizationInvites).values({
-      token,
-      orgId,
-      email,
-      role,
-    });
   }
 
   /** Test/e2e seam — DELETE FROM org tables (requires live Postgres). */
@@ -223,97 +103,6 @@ export class OrganizationsService {
     await c.delete(organizationInvites);
     await c.delete(organizationMembers);
     await c.delete(organizations);
-  }
-
-  private async orgRowOrThrow(
-    orgId: string,
-    correlationId?: string,
-  ): Promise<OrganizationRow> {
-    try {
-      const rows = await this.client()
-        .select()
-        .from(organizations)
-        .where(eq(organizations.id, orgId))
-        .limit(1);
-      if (rows.length === 0)
-        throw new NotFoundException(`Organization ${orgId} not found`);
-      return rows[0];
-    } catch (err) {
-      if (err instanceof NotFoundException) throw err;
-      dbUnavailable("organizations.get", err, this.logger, correlationId);
-    }
-  }
-
-  private async roleOf(
-    orgId: string,
-    userId: string,
-    correlationId?: string,
-  ): Promise<OrgRole | null> {
-    try {
-      const rows = await this.client()
-        .select()
-        .from(organizationMembers)
-        .where(
-          and(
-            eq(organizationMembers.orgId, orgId),
-            eq(organizationMembers.userId, userId),
-          ),
-        )
-        .limit(1);
-      return rows.length > 0 ? (rows[0].role as OrgRole) : null;
-    } catch (err) {
-      dbUnavailable("organizations.roleOf", err, this.logger, correlationId);
-    }
-  }
-
-  /** Member-only read: strangers get 404 (existence is not leaked). */
-  private async memberRowOrThrow(
-    orgId: string,
-    requesterId: string,
-    correlationId?: string,
-  ): Promise<{ org: OrganizationRow; role: OrgRole }> {
-    const org = await this.orgRowOrThrow(orgId, correlationId);
-    const role = await this.roleOf(orgId, requesterId, correlationId);
-    if (!role) throw new NotFoundException(`Organization ${orgId} not found`);
-    return { org, role };
-  }
-
-  /** Maintainer-only mutation: stranger → 404, plain member → 403. */
-  private async maintainerOrThrow(
-    orgId: string,
-    requesterId: string,
-    correlationId?: string,
-  ): Promise<{ org: OrganizationRow; role: OrgRole }> {
-    const found = await this.memberRowOrThrow(orgId, requesterId, correlationId);
-    if (found.role !== "maintainer") {
-      throw new ForbiddenException("Only organization maintainers can do this");
-    }
-    return found;
-  }
-
-  private async maintainerCount(
-    orgId: string,
-    correlationId?: string,
-  ): Promise<number> {
-    try {
-      const rows = await this.client()
-        .select()
-        .from(organizationMembers)
-        .where(
-          and(
-            eq(organizationMembers.orgId, orgId),
-            eq(organizationMembers.role, "maintainer"),
-          ),
-        );
-      return rows.length;
-    } catch (err) {
-      dbUnavailable(
-        "organizations.maintainerCount",
-        err,
-        this.logger,
-        correlationId,
-      );
-    }
   }
 
   /**
@@ -397,7 +186,7 @@ export class OrganizationsService {
       );
     }
     this.logger.info(`[organizations] created org=${orgId}`, correlationId);
-    const row = await this.orgRowOrThrow(orgId, correlationId);
+    const row = await this.guard.orgRowOrThrow(orgId, correlationId);
     return toOrganization(row);
   }
 
@@ -415,7 +204,7 @@ export class OrganizationsService {
       const out: Organization[] = [];
       for (const link of links) {
         try {
-          const row = await this.orgRowOrThrow(link.orgId, correlationId);
+          const row = await this.guard.orgRowOrThrow(link.orgId, correlationId);
           out.push(toOrganization(row));
         } catch (err) {
           if (err instanceof NotFoundException) continue;
@@ -434,7 +223,7 @@ export class OrganizationsService {
     requesterId: string,
     correlationId?: string,
   ): Promise<Organization> {
-    const { org } = await this.memberRowOrThrow(orgId, requesterId, correlationId);
+    const { org } = await this.guard.memberRowOrThrow(orgId, requesterId, correlationId);
     return toOrganization(org);
   }
 
@@ -444,7 +233,7 @@ export class OrganizationsService {
     input: UpdateOrganizationInput,
     correlationId?: string,
   ): Promise<Organization> {
-    await this.maintainerOrThrow(orgId, requesterId, correlationId);
+    await this.guard.maintainerOrThrow(orgId, requesterId, correlationId);
     try {
       const rows = await this.client()
         .update(organizations)
@@ -475,7 +264,7 @@ export class OrganizationsService {
     requesterId: string,
     correlationId?: string,
   ): Promise<void> {
-    await this.maintainerOrThrow(orgId, requesterId, correlationId);
+    await this.guard.maintainerOrThrow(orgId, requesterId, correlationId);
     try {
       // Soft org delete: mark org row deleted-at via description? Orgs table
       // has no status column (project-level soft-delete only) — org delete
@@ -514,315 +303,6 @@ export class OrganizationsService {
           ? "storage-unconfigured"
           : `rm-failed: ${(err as Error).message}`.slice(0, 120);
       this.logger.warn({ projectId: orgId, path: "", reason }, correlationId);
-    }
-  }
-
-  async listMembers(
-    orgId: string,
-    requesterId: string,
-    correlationId?: string,
-  ): Promise<OrganizationMember[]> {
-    await this.memberRowOrThrow(orgId, requesterId, correlationId);
-    try {
-      const rows = await this.client()
-        .select()
-        .from(organizationMembers)
-        .where(eq(organizationMembers.orgId, orgId));
-      return rows
-        .map(toMember)
-        .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    } catch (err) {
-      dbUnavailable("organizations.members", err, this.logger, correlationId);
-    }
-  }
-
-  async addMember(
-    orgId: string,
-    requesterId: string,
-    input: AddMemberInput,
-    correlationId?: string,
-  ): Promise<OrganizationMember> {
-    await this.maintainerOrThrow(orgId, requesterId, correlationId);
-    const target = this.paths.checkUuid(input.userId, "userId");
-    const role = (input.role ?? "user") as OrgRole;
-    // Strict-503 (see create()): DB outage propagates, live null → 404.
-    let known: Awaited<ReturnType<UsersService["findById"]>>;
-    try {
-      known = await this.users.findById(target, correlationId);
-    } catch (err) {
-      dbUnavailable("organizations.addMember.userLookup", err, this.logger, correlationId);
-    }
-    if (!known) throw new NotFoundException(`User ${target} not found`);
-    if (role === "maintainer" && (await this.maintainerCount(orgId, correlationId)) > 0) {
-      throw new ConflictException("Organization already has a maintainer");
-    }
-    try {
-      const rows = await this.client()
-        .insert(organizationMembers)
-        .values({ orgId, userId: target, role })
-        .returning();
-      this.logger.info(
-        `[organizations] member added org=${orgId} role=${role}`,
-        correlationId,
-      );
-      return toMember(rows[0]);
-    } catch (err) {
-      if (isPgUniqueViolation(err)) {
-        // Duplicate (org,user) or a raced second maintainer → 409.
-        throw new ConflictException(
-          role === "maintainer"
-            ? "Organization already has a maintainer"
-            : "User is already a member",
-        );
-      }
-      if (isPgForeignKeyViolation(err)) {
-        throw new NotFoundException(`User ${target} not found`);
-      }
-      dbUnavailable("organizations.addMember", err, this.logger, correlationId);
-    }
-  }
-
-  async removeMember(
-    orgId: string,
-    requesterId: string,
-    targetUserId: string,
-    correlationId?: string,
-  ): Promise<void> {
-    await this.maintainerOrThrow(orgId, requesterId, correlationId);
-    const target = this.paths.checkUuid(targetUserId, "userId");
-    let row: OrganizationMemberRow | null = null;
-    try {
-      const rows = await this.client()
-        .select()
-        .from(organizationMembers)
-        .where(
-          and(
-            eq(organizationMembers.orgId, orgId),
-            eq(organizationMembers.userId, target),
-          ),
-        )
-        .limit(1);
-      row = rows[0] ?? null;
-    } catch (err) {
-      dbUnavailable(
-        "organizations.removeMember.lookup",
-        err,
-        this.logger,
-        correlationId,
-      );
-    }
-    if (!row) throw new NotFoundException(`Member ${target} not found`);
-    if (
-      (row.role as OrgRole) === "maintainer" &&
-      (await this.maintainerCount(orgId, correlationId)) <= 1
-    ) {
-      throw new BadRequestException("Cannot remove the last maintainer");
-    }
-    try {
-      await this.client()
-        .delete(organizationMembers)
-        .where(
-          and(
-            eq(organizationMembers.orgId, orgId),
-            eq(organizationMembers.userId, target),
-          ),
-        );
-      this.logger.info(`[organizations] member removed org=${orgId}`, correlationId);
-    } catch (err) {
-      dbUnavailable(
-        "organizations.removeMember",
-        err,
-        this.logger,
-        correlationId,
-      );
-    }
-  }
-
-  async changeRole(
-    orgId: string,
-    requesterId: string,
-    targetUserId: string,
-    input: UpdateMemberRoleInput,
-    correlationId?: string,
-  ): Promise<OrganizationMember> {
-    await this.maintainerOrThrow(orgId, requesterId, correlationId);
-    const target = this.paths.checkUuid(targetUserId, "userId");
-    const next = input.role as OrgRole;
-    let row: OrganizationMemberRow | null = null;
-    try {
-      const rows = await this.client()
-        .select()
-        .from(organizationMembers)
-        .where(
-          and(
-            eq(organizationMembers.orgId, orgId),
-            eq(organizationMembers.userId, target),
-          ),
-        )
-        .limit(1);
-      row = rows[0] ?? null;
-    } catch (err) {
-      dbUnavailable(
-        "organizations.changeRole.lookup",
-        err,
-        this.logger,
-        correlationId,
-      );
-    }
-    if (!row) throw new NotFoundException(`Member ${target} not found`);
-    const current = row.role as OrgRole;
-    if (current === next) return toMember(row);
-    if (
-      current === "maintainer" &&
-      next === "user" &&
-      (await this.maintainerCount(orgId, correlationId)) <= 1
-    ) {
-      throw new BadRequestException("Cannot demote the last maintainer");
-    }
-    if (
-      current === "user" &&
-      next === "maintainer" &&
-      (await this.maintainerCount(orgId, correlationId)) > 0
-    ) {
-      throw new ConflictException("Organization already has a maintainer");
-    }
-    try {
-      const rows = await this.client()
-        .update(organizationMembers)
-        .set({ role: next, updatedAt: new Date() })
-        .where(
-          and(
-            eq(organizationMembers.orgId, orgId),
-            eq(organizationMembers.userId, target),
-          ),
-        )
-        .returning();
-      this.logger.info(
-        `[organizations] role changed org=${orgId} role=${next}`,
-        correlationId,
-      );
-      return toMember(rows[0]);
-    } catch (err) {
-      if (isPgUniqueViolation(err)) {
-        throw new ConflictException("Organization already has a maintainer");
-      }
-      dbUnavailable("organizations.changeRole", err, this.logger, correlationId);
-    }
-  }
-
-  /**
-   * Mint a persistent single-use invite (maintainer-only, no TTL).
-   * The uuidv7 token is returned ONCE (never logged) and lives until
-   * accept (row deleted) or org deletion (cascade). `email` binds the
-   * invite to one address (lowercased, mismatch → 404); absent = open
-   * link-invite for any session user.
-   */
-  async createInvite(
-    orgId: string,
-    requesterId: string,
-    input: CreateInviteInput,
-    correlationId?: string,
-  ): Promise<OrganizationInvite> {
-    await this.maintainerOrThrow(orgId, requesterId, correlationId);
-    const role = (input.role ?? "user") as OrgRole;
-    if (role === "maintainer" && (await this.maintainerCount(orgId, correlationId)) > 0) {
-      throw new ConflictException("Organization already has a maintainer");
-    }
-    const rawEmail =
-      typeof input.email === "string" ? input.email.trim().toLowerCase() : "";
-    const email = rawEmail ? rawEmail : null;
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      throw new BadRequestException("email must be a valid email");
-    }
-    const token = randomUuidV7();
-    try {
-      const rows = await this.client()
-        .insert(organizationInvites)
-        .values({ token, orgId, email, role })
-        .returning();
-      this.logger.info(`[organizations] invite created org=${orgId} role=${role}`, correlationId);
-      return toInvite(rows[0]);
-    } catch (err) {
-      if (isPgForeignKeyViolation(err)) {
-        throw new NotFoundException(`Organization ${orgId} not found`);
-      }
-      dbUnavailable("organizations.createInvite", err, this.logger, correlationId);
-    }
-  }
-
-  /**
-   * Accept a persistent single-use invite. Missing/consumed → 404 (no
-   * enumeration, no expiry — links never expire). The row is DELETED
-   * before the membership insert result returns, so replay → 404 and a
-   * raced accept can never grant membership twice.
-   */
-  async acceptInvite(
-    input: AcceptInviteInput,
-    userId: string,
-    correlationId?: string,
-  ): Promise<OrganizationMember> {
-    const me = this.paths.checkUuid(userId, "userId");
-    const token = String(input.token ?? "").trim().toLowerCase();
-    if (!isUuidV7(token)) {
-      throw new NotFoundException("Invite not found or already used");
-    }
-    let stored: OrganizationInviteRow | null = null;
-    try {
-      const rows = await this.client()
-        .select()
-        .from(organizationInvites)
-        .where(eq(organizationInvites.token, token))
-        .limit(1);
-      stored = rows[0] ?? null;
-    } catch (err) {
-      dbUnavailable("organizations.acceptInvite.lookup", err, this.logger, correlationId);
-    }
-    if (!stored) {
-      throw new NotFoundException("Invite not found or already used");
-    }
-    // Strict-503 (see create()): DB outage propagates, live null → 404.
-    let known: Awaited<ReturnType<UsersService["findById"]>>;
-    try {
-      known = await this.users.findById(me, correlationId);
-    } catch (err) {
-      dbUnavailable("organizations.acceptInvite.userLookup", err, this.logger, correlationId);
-    }
-    if (!known) throw new NotFoundException(`User ${me} not found`);
-    if (stored.email && known.email.trim().toLowerCase() !== stored.email) {
-      throw new NotFoundException("Invite not found or already used");
-    }
-    if (
-      stored.role === "maintainer" &&
-      (await this.maintainerCount(stored.orgId, correlationId)) > 0
-    ) {
-      throw new ConflictException("Organization already has a maintainer");
-    }
-    try {
-      const rows = await this.client()
-        .insert(organizationMembers)
-        .values({ orgId: stored.orgId, userId: me, role: stored.role as OrgRole })
-        .returning();
-      await this.client()
-        .delete(organizationInvites)
-        .where(eq(organizationInvites.token, token))
-        .catch(() => undefined);
-      this.logger.info(
-        `[organizations] invite accepted org=${stored.orgId} role=${stored.role}`,
-        correlationId,
-      );
-      return toMember(rows[0]);
-    } catch (err) {
-      if (isPgUniqueViolation(err)) {
-        throw new ConflictException(
-          stored.role === "maintainer"
-            ? "Organization already has a maintainer"
-            : "User is already a member",
-        );
-      }
-      if (isPgForeignKeyViolation(err)) {
-        throw new NotFoundException("Organization or user not found");
-      }
-      dbUnavailable("organizations.acceptInvite", err, this.logger, correlationId);
     }
   }
 
@@ -870,7 +350,7 @@ export class OrganizationsService {
     userId: string,
     correlationId?: string,
   ): Promise<OrgRole | null> {
-    return this.roleOf(orgId, userId, correlationId);
+    return this.guard.getRole(orgId, userId, correlationId);
   }
 
   /**
@@ -994,5 +474,86 @@ export class OrganizationsService {
       throw new NotFoundException(`Project ${projectId} not found`);
     if (ownerId.toLowerCase() === userId.toLowerCase()) return;
     throw new NotFoundException(`Project ${projectId} not found`);
+  }
+
+  // --- Membership + invites: public API preserved via delegation ---------
+  // The implementations live at the domain root (MembersService /
+  // InvitesService) per CoC v2; signatures and return types are unchanged.
+
+  async listMembers(
+    orgId: string,
+    requesterId: string,
+    correlationId?: string,
+  ): Promise<OrganizationMember[]> {
+    return this.members.listMembers(orgId, requesterId, correlationId);
+  }
+
+  async addMember(
+    orgId: string,
+    requesterId: string,
+    input: AddMemberInput,
+    correlationId?: string,
+  ): Promise<OrganizationMember> {
+    return this.members.addMember(orgId, requesterId, input, correlationId);
+  }
+
+  async removeMember(
+    orgId: string,
+    requesterId: string,
+    targetUserId: string,
+    correlationId?: string,
+  ): Promise<void> {
+    return this.members.removeMember(orgId, requesterId, targetUserId, correlationId);
+  }
+
+  async changeRole(
+    orgId: string,
+    requesterId: string,
+    targetUserId: string,
+    input: UpdateMemberRoleInput,
+    correlationId?: string,
+  ): Promise<OrganizationMember> {
+    return this.members.changeRole(
+      orgId,
+      requesterId,
+      targetUserId,
+      input,
+      correlationId,
+    );
+  }
+
+  async createInvite(
+    orgId: string,
+    requesterId: string,
+    input: CreateInviteInput,
+    correlationId?: string,
+  ): Promise<OrganizationInvite> {
+    return this.invites.createInvite(orgId, requesterId, input, correlationId);
+  }
+
+  async acceptInvite(
+    input: AcceptInviteInput,
+    userId: string,
+    correlationId?: string,
+  ): Promise<OrganizationMember> {
+    return this.invites.acceptInvite(input, userId, correlationId);
+  }
+
+  /** Test/e2e seam — DELETE FROM organization_invites (requires live Postgres). */
+  async clearInvitesForTests(): Promise<void> {
+    return this.invites.clearInvitesForTests();
+  }
+
+  /**
+   * Test/e2e seam — plants a single-use invite row (uuidv7, no TTL).
+   * The token must already be uuidv7 (use randomUuidV7()).
+   */
+  async seedInviteForTests(
+    token: string,
+    orgId: string,
+    role: OrgRole,
+    email: string | null = null,
+  ): Promise<void> {
+    return this.invites.seedInviteForTests(token, orgId, role, email);
   }
 }

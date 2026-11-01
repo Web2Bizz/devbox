@@ -455,7 +455,10 @@ export function formatReport(checks: IntegrityCheck[]): string {
   ].join("\n");
 }
 
-const drizzleDir = joinPath(__dirname, "..", "..", "drizzle");
+// Migrations live at the backend root (apps/backend/drizzle): three levels up
+// from both `src/common/db` and `dist/common/db` (file was moved out of
+// `src/db` — keep this in sync with the source location).
+const drizzleDir = joinPath(__dirname, "..", "..", "..", "drizzle");
 
 function keyArray(row: QueryResultRow, field: string): string[] {
   const value: unknown = row[field];

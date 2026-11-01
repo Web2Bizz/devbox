@@ -28,6 +28,8 @@ function toStored(row: UserOpencodeKeyRow): StoredOpencodeKey {
 }
 
 /**
+ * SCOPE: Common — reusable key store, no organization/project knowledge.
+ *
  * OpencodeKeysService — Postgres-backed per-user OpenCode API-key store
  * (strict, no memory fallback).
  *

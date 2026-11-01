@@ -6,14 +6,21 @@
  *   `bun run build && bun dist/organizations/__tests__/organizations.service.spec.js`
  * Also executes under `bun test dist` (top-level run, throws on failure).
  *
+ * Wires the REAL extracted chain (phase 3, CoC v2) with stubs only for
+ * Postgres/users/disk:
+ *   OrgGuardService → MembersService → InvitesService → OrganizationsService
+ * (invite accept is delegated OrganizationsService → InvitesService, so the
+ * pre-DB gates below still prove the production path).
+ *
  * Covers (without a live DB where noted):
- * - uuidv7 invite ids (randomUuidV7/isUuidV7: version/variant bits, shape,
- *   rejects v4/base64/garbage, time-ordered);
  * - invite accept pre-DB gates: non-v7 token → 404 without touching the DB
  *   (stub client throws on access);
  * - valid v7 but unknown token → 404 via a mocked empty select (single-use
  *   DB rows, no TTL, no 410 — replay is also 404);
  * - email-bound invite mismatch → 404 (no enumeration).
+ *
+ * uuidv7 helper checks moved to
+ * `utils/uuid-v7/__tests__/uuid-v7.spec.ts` (CoC v2: utils own their tests).
  *
  * DB-backed rules (single-maintainer 409s, last-maintainer 400s, member
  * accept success, link/unlink) need live Postgres and are covered by the
@@ -22,11 +29,11 @@
  */
 import assert from 'node:assert/strict';
 import { NotFoundException } from '@nestjs/common';
-import {
-  OrganizationsService,
-  isUuidV7,
-  randomUuidV7,
-} from '../organizations.service';
+import { InvitesService } from '../invites.service';
+import { MembersService } from '../members.service';
+import { OrgGuardService } from '../org-guard.service';
+import { OrganizationsService } from '../organizations.service';
+import { randomUuidV7 } from '../utils/uuid-v7';
 
 const SPEC_USER = '123e4567-e89b-12d3-a456-426614174001';
 
@@ -85,28 +92,27 @@ function stubUsers(user: { id: string; email: string } | null = null) {
   } as never;
 }
 
+/**
+ * Production shape: the guard, the two domain-root services and the org
+ * service wired exactly as OrganizationsModule does (stubs only at the
+ * Postgres/user/disk edges).
+ */
 function makeService(db: never, users: never): OrganizationsService {
-  return new OrganizationsService(silentLogger(), db, stubPaths(), users);
+  const guard = new OrgGuardService(silentLogger(), db);
+  const members = new MembersService(silentLogger(), db, stubPaths(), users, guard);
+  const invites = new InvitesService(silentLogger(), db, stubPaths(), users, guard);
+  return new OrganizationsService(
+    silentLogger(),
+    db,
+    stubPaths(),
+    users,
+    guard,
+    members,
+    invites,
+  );
 }
 
-const V4 = '123e4567-e89b-12d3-a456-426614174001';
-
 const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
-  {
-    name: 'randomUuidV7 emits RFC 9562 v7 ids (version 7, variant 8-b, time-ordered)',
-    run: () => {
-      const a = randomUuidV7(Date.parse('2026-10-20T00:00:00.000Z'));
-      const b = randomUuidV7(Date.parse('2026-10-20T00:00:01.000Z'));
-      assert.ok(isUuidV7(a), `expected v7, got ${a}`);
-      assert.ok(isUuidV7(b), `expected v7, got ${b}`);
-      assert.match(a, /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
-      // Time-ordered: later timestamp sorts later lexicographically.
-      assert.ok(a < b, `expected ${a} < ${b}`);
-      assert.ok(!isUuidV7(V4), 'v4 must not pass as v7');
-      assert.ok(!isUuidV7('no-such-token'), 'garbage must not pass as v7');
-      assert.ok(!isUuidV7('a'.repeat(44)), 'base64url must not pass as v7');
-    },
-  },
   {
     name: 'accept with a non-v7 token → 404 without touching the DB',
     run: async () => {

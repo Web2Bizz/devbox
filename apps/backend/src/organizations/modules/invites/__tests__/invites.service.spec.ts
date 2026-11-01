@@ -19,9 +19,6 @@
  *   DB rows, no TTL, no 410 — replay is also 404);
  * - email-bound invite mismatch → 404 (no enumeration).
  *
- * uuidv7 helper checks live in
- * `utils/uuid-v7/__tests__/uuid-v7.spec.ts` (CoC §7: utils own their tests).
- *
  * DB-backed rules (single-maintainer 409s, last-maintainer 400s, member
  * accept success, link/unlink) need live Postgres and are covered by the
  * live branch of organizations.e2e.ts — this spec stays green without PG.
@@ -30,10 +27,12 @@
 import assert from 'node:assert/strict';
 import { NotFoundException } from '@nestjs/common';
 import { OrganizationsGuard } from '../../../organizations.guard';
-import { randomUuidV7 } from '../../../utils/uuid-v7';
 import { InvitesService } from '../invites.service';
 
 const SPEC_USER = '123e4567-e89b-12d3-a456-426614174001';
+
+/** A well-formed v4 uuid — the invite token must be v7 instead. */
+const V4_TOKEN = '123e4567-e89b-42d3-a456-426614174001';
 
 function silentLogger() {
   return {
@@ -118,10 +117,54 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
     },
   },
   {
+    name: 'accept rejects a v4 uuid pre-DB → 404 (token must be v7)',
+    run: async () => {
+      const svc = makeInvites(untouchedDb(), stubUsers());
+      await assert.rejects(
+        () => svc.acceptInvite({ token: V4_TOKEN }, SPEC_USER),
+        (err: unknown) => {
+          assert.ok(err instanceof NotFoundException);
+          assert.match((err as Error).message, /already used|not found/);
+          return true;
+        },
+      );
+      // untouchedDb throws 'db-touched' on any Postgres access — reaching
+      // this line proves the v7 shape gate runs before the lookup.
+    },
+  },
+  {
+    name: 'accept rejects a garbage token pre-DB → 404 (no DB access)',
+    run: async () => {
+      const svc = makeInvites(untouchedDb(), stubUsers());
+      await assert.rejects(
+        () => svc.acceptInvite({ token: 'no-such-token' }, SPEC_USER),
+        (err: unknown) => {
+          assert.ok(err instanceof NotFoundException);
+          assert.match((err as Error).message, /already used|not found/);
+          return true;
+        },
+      );
+    },
+  },
+  {
+    name: 'accept rejects a base64url token pre-DB → 404 (no DB access)',
+    run: async () => {
+      const svc = makeInvites(untouchedDb(), stubUsers());
+      await assert.rejects(
+        () => svc.acceptInvite({ token: 'a'.repeat(44) }, SPEC_USER),
+        (err: unknown) => {
+          assert.ok(err instanceof NotFoundException);
+          assert.match((err as Error).message, /already used|not found/);
+          return true;
+        },
+      );
+    },
+  },
+  {
     name: 'accept with a valid v7 but unknown token → 404 (no TTL, no 410)',
     run: async () => {
       const svc = makeInvites(mockDb([]), stubUsers({ id: SPEC_USER, email: 'a@rush-code.local' }));
-      const token = randomUuidV7();
+      const token = Bun.randomUUIDv7();
       await assert.rejects(
         () => svc.acceptInvite({ token }, SPEC_USER),
         (err: unknown) => {
@@ -136,7 +179,7 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
   {
     name: 'email-bound invite mismatch → 404 (no enumeration)',
     run: async () => {
-      const token = randomUuidV7();
+      const token = Bun.randomUUIDv7();
       const stored = {
         token,
         orgId: '123e4567-e89b-12d3-a456-426614174005',

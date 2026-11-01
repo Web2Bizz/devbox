@@ -23,7 +23,14 @@ import type {
 import { OrganizationsGuard } from "../../organizations.guard";
 import { toMember } from "../../utils/organization-member";
 import { isPgForeignKeyViolation, isPgUniqueViolation } from "../../utils/pg-error";
-import { isUuidV7, randomUuidV7 } from "../../utils/uuid-v7";
+
+/**
+ * uuidv7 shape (version 7 + RFC 4122 variant) — a non-v7 token can never
+ * match a row, so it is rejected before any Postgres access.
+ */
+function isUuidV7(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
 
 /**
  * InvitesService — persistent single-use uuidv7 invite links backed by
@@ -76,7 +83,7 @@ export class InvitesService {
 
   /**
    * Test/e2e seam — plants a single-use invite row (uuidv7, no TTL).
-   * The token must already be uuidv7 (use randomUuidV7()).
+   * The token must already be uuidv7 (use Bun.randomUUIDv7()).
    */
   async seedInviteForTests(
     token: string,
@@ -116,7 +123,7 @@ export class InvitesService {
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       throw new BadRequestException("email must be a valid email");
     }
-    const token = randomUuidV7();
+    const token = Bun.randomUUIDv7();
     try {
       const rows = await this.client()
         .insert(organizationInvites)

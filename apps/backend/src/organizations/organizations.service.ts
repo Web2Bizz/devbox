@@ -58,7 +58,7 @@ function isUuidKey(value: string): boolean {
  * modules under `organizations/modules/` per CoC §2; the access gate is
  * OrganizationsGuard (domain root). The membership/invite methods below are
  * one-line delegates so the public API is unchanged. Pure helpers live in
- * `utils/` (uuid-v7, pg-error, organization-member) — SQL/tables are
+ * `utils/` (pg-error, organization-member) — SQL/tables are
  * unchanged.
  *
  * Every method hits `organizations` / `organization_members` /
@@ -548,7 +548,7 @@ export class OrganizationsService {
 
   /**
    * Test/e2e seam — plants a single-use invite row (uuidv7, no TTL).
-   * The token must already be uuidv7 (use randomUuidV7()).
+   * The token must already be uuidv7 (use Bun.randomUUIDv7()).
    */
   async seedInviteForTests(
     token: string,

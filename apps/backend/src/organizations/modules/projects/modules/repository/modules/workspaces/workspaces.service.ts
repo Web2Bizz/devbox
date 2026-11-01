@@ -1,11 +1,11 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { AppLogger } from '../common/logger';
-import { ExternalServiceError } from '../common/external/external-error';
-import { storageUnavailable } from '../common/storage/storage-unavailable';
-import { WorkspacePathService } from '../common/storage/workspace-path.service';
-import { readSubmodules, type SubmoduleEntry } from './workspace-submodules.util';
+import { AppLogger } from '../../../../../../../common/logger';
+import { ExternalServiceError } from '../../../../../../../common/external/external-error';
+import { storageUnavailable } from '../../../../../../../common/storage/storage-unavailable';
+import { WorkspacePathService } from '../../../../../../../common/storage/workspace-path.service';
+import { readSubmodules, type SubmoduleEntry } from '../../utils/submodules';
 
 export type WorkspaceTreeNode = {
   path: string;
@@ -26,7 +26,7 @@ const MAX_ENTRIES = 200;
  * with 503 EXTERNAL_UNAVAILABLE (Retry-After 30, logged once with the
  * correlationId — never a silent []/404 over <cwd>/repos), traversal yields
  * 403, missing paths 404. Readonly — readdir/stat only, never writes.
- * Submodule reads delegate to workspace-submodules.util (unsafe gitlinks
+ * Submodule reads delegate to utils/submodules (unsafe gitlinks
  * skipped).
  */
 @Injectable()

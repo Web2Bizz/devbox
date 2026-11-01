@@ -1,5 +1,4 @@
 import { ForbiddenException, Inject, Injectable, NotFoundException, forwardRef } from '@nestjs/common';
-import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { AppLogger } from '../../../../../common/logger';
 import { ExternalServiceError } from '../../../../../common/external/external-error';
@@ -108,13 +107,12 @@ export class ProjectFilesService {
   private async readNode(abs: string, rel: string, depth: number): Promise<FileNode> {
     let entries;
     try {
-      entries = await readdir(abs, { withFileTypes: true });
+      entries = await this.paths.readDir(abs);
     } catch {
       // Single file (or missing) — surface the file node; missing → caller 404.
-      const { stat } = await import('node:fs/promises');
       try {
-        const st = await stat(abs);
-        if (st.isFile()) return { path: rel, type: 'file' };
+        const st = await this.paths.statPath(abs);
+        if (st?.isFile()) return { path: rel, type: 'file' };
       } catch {
         throw new NotFoundException(`Path ${rel} not found`);
       }

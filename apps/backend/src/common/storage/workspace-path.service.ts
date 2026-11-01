@@ -5,11 +5,23 @@ import {
   InternalServerErrorException,
 } from '@nestjs/common';
 import { throwStorageNotConfigured } from './storage-unavailable';
-import { mkdir, realpath } from 'node:fs/promises';
+import { mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
+import type { Stats } from 'node:fs';
 import path from 'node:path';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Minimal dirent shape for `readDir()` listings (structural subset of
+ * `Dirent`, so the fs primitive stays the only fs import outside this file).
+ */
+export type DirEntry = {
+  name: string;
+  isDirectory(): boolean;
+  isFile(): boolean;
+  isSymbolicLink(): boolean;
+};
 
 export type ProjectScope = 'user' | 'org';
 
@@ -76,6 +88,10 @@ export type ProjectResolved = {
  *   (frozen `<space>/workspace/<repo>` layout). Pre-epic on-disk data is
  *   moved by hand per docs/manual-migration-orgs-layout.md (no
  *   auto-migration code).
+ * - SINGLE JAIL for fs: `ensureDir/removeDir/statPath/readDir` are thin
+ *   primitives on paths the caller already resolved through this jail, so
+ *   projects/files/organizations/repository never import `node:fs`
+ *   themselves (gate: `grep -rn "node:fs" src` outside this file).
  */
 @Injectable()
 export class WorkspacePathService {
@@ -152,6 +168,50 @@ export class WorkspacePathService {
       throw new ForbiddenException('Path traversal is forbidden');
     }
     return real;
+  }
+
+  /**
+   * fs primitives — the SINGLE jail rule for disk access outside
+   * common/storage (CoC: repository is the only other place allowed to touch
+   * fs). Every method here is a thin, behaviour-preserving wrapper: the
+   * CALLER passes a path already validated by the jail
+   * (`resolveUser`/`resolveOrg`/`ensureProjectDirs`…), these helpers do NO
+   * path validation and NO storage-config gate of their own.
+   */
+
+  /** `mkdir -p` for a jailed path (recursive, idempotent). */
+  async ensureDir(abs: string): Promise<void> {
+    await mkdir(abs, { recursive: true });
+  }
+
+  /**
+   * Remove a jailed path. Defaults are `recursive: true, force: true` — the
+   * same semantics as the previous direct `rm(abs, { recursive, force })`
+   * call sites (missing path is not an error).
+   */
+  async removeDir(abs: string, opts?: { recursive?: boolean; force?: boolean }): Promise<void> {
+    await rm(abs, {
+      recursive: opts?.recursive ?? true,
+      force: opts?.force ?? true,
+    });
+  }
+
+  /**
+   * `stat` for a jailed path: missing target (`ENOENT`) → `null`, any other
+   * error (EACCES, ENOTDIR parent, …) is rethrown as-is.
+   */
+  async statPath(abs: string): Promise<Stats | null> {
+    try {
+      return await stat(abs);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw err;
+    }
+  }
+
+  /** `readdir` with dirents (names + type predicates) for a jailed path. */
+  async readDir(abs: string): Promise<DirEntry[]> {
+    return readdir(abs, { withFileTypes: true });
   }
 
   /** Decode once (`%2e%2e` → `..`) so encoded escapes are caught too. */

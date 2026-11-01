@@ -13,12 +13,12 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Inject, Optional, forwardRef } from '@nestjs/common';
-import { DEFAULT_MOCK_USER_ID as DEFAULT_WORKSPACE_USER_ID } from '../auth/identity.service';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { ReqUser } from '../auth/req-user.decorator';
-import type { RequestIdentity } from '../auth/identity.service';
-import { ZodValidationPipe } from '../common/validation';
-import { GithubInstallationsService } from '../organizations/modules/projects/modules/github/github-installations.service';
+import { DEFAULT_MOCK_USER_ID as DEFAULT_WORKSPACE_USER_ID } from '../../../../../../../auth/identity.service';
+import { JwtAuthGuard } from '../../../../../../../auth/jwt-auth.guard';
+import { ReqUser } from '../../../../../../../auth/req-user.decorator';
+import type { RequestIdentity } from '../../../../../../../auth/identity.service';
+import { ZodValidationPipe } from '../../../../../../../common/validation';
+import { GithubInstallationsService } from '../../../github/github-installations.service';
 import { CloneJobsRepository } from './modules/clone/clone.repository';
 import {
   CloneWorkspaceDto,
@@ -30,7 +30,7 @@ import {
   workspaceTreeQuerySchema,
   type CloneWorkspaceInput,
   type WorkspaceTreeQuery,
-} from './dto';
+} from './workspaces.dto';
 import { WorkspaceCloneService } from './modules/clone/clone.service';
 import { WorkspacesService } from './workspaces.service';
 
@@ -42,7 +42,7 @@ export { DEFAULT_WORKSPACE_USER_ID };
  * longer calls it (C2: userId comes from @ReqUser(), header/query
  * spoofing removed).
  */
-export { resolveIdentityUserId as resolveUserId } from '../auth/identity.service';
+export { resolveIdentityUserId as resolveUserId } from '../../../../../../../auth/identity.service';
 
 function toJobDto(job: {
   userSpace: string;

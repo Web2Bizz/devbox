@@ -7,12 +7,11 @@ import {
 import { and, eq } from "drizzle-orm";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, rm, stat } from "node:fs/promises";
 import { promisify } from "node:util";
 import { AppLogger } from "../../../common/logger";
 import { DbService, dbUnavailable, type DbClient } from "../../../common/db/db.service";
 import { projects, type ProjectRow } from "../../../common/db/schema";
-import { isValidGitRepo } from "../../../repos/repos-git.util";
+import { isValidGitRepo } from "./modules/repository/utils/repos-git";
 import { WorkspacePathService } from "../../../common/storage/workspace-path.service";
 import type {
   CreateProjectInput,
@@ -225,8 +224,8 @@ export class ProjectsService {
         return { ...project, corrupted: true, corruptedReason: "resolve-failed" };
       }
       try {
-        const st = await stat(absRepo);
-        if (!st.isDirectory()) throw new Error("not-a-directory");
+        const st = await this.paths.statPath(absRepo);
+        if (!st || !st.isDirectory()) throw new Error("not-a-directory");
       } catch {
         this.logger.warn({
           projectId: project.id,
@@ -270,7 +269,7 @@ export class ProjectsService {
       const resolved = await this.paths.resolveUserStrict(ownerKey, projectId);
       const jailReal = await this.paths.realStrictRoot();
       await this.paths.assertInsideJail(resolved.absBase, jailReal);
-      await rm(resolved.absBase, { recursive: true, force: true });
+      await this.paths.removeDir(resolved.absBase);
     } catch (err) {
       const reason =
         err instanceof InternalServerErrorException
@@ -354,7 +353,7 @@ export class ProjectsService {
       throw err;
     }
     try {
-      await mkdir(absRepo, { recursive: true });
+      await this.paths.ensureDir(absRepo);
       const opts = { cwd: absRepo, timeout: PROJECT_GIT_TIMEOUT_MS };
       await execFileAsync("git", ["init", "-b", "main"], opts);
       // Local identity so the empty commit never fails on machines without

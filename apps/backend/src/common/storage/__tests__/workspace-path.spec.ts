@@ -10,10 +10,12 @@
  *   users/<uuid>/projects/<uuid>/content and orgs/<uuid>/projects/<uuid>/content;
  * - non-uuid ids → 400; traversal subs → 403 (incl. `../.secrets` escape);
  * - empty REPOS_ROOT → 503 reads / 500 strict writes (no fallback);
- * - ensureProjectDirs creates content + empty `.secrets` reserves.
+ * - ensureProjectDirs creates content + empty `.secrets` reserves;
+ * - fs primitives (single jail): ensureDir/readDir/statPath/removeDir on a
+ *   tmp dir — statPath(ENOENT) → null, removeDir recursive+force defaults.
  */
 import assert from 'node:assert/strict';
-import { mkdtempSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -163,6 +165,36 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
       assert.equal(statSync(o.absRepo).isDirectory(), true);
       assert.equal(statSync(o.absSecrets).isDirectory(), true);
       assert.equal(statSync(o.scopeSecrets).isDirectory(), true);
+    },
+  },
+  {
+    name: 'fs primitives over a tmp dir (ensureDir/readDir/statPath/removeDir)',
+    run: async () => {
+      const paths = new WorkspacePathService();
+      const base = mkdtempSync(path.join(tmpdir(), 'ws-path-primitives-'));
+      const dir = path.join(base, 'nested', 'deep');
+
+      // Missing path → null (no throw), unlike raw stat.
+      assert.equal(await paths.statPath(dir), null);
+      await paths.ensureDir(dir);
+      assert.equal(statSync(dir).isDirectory(), true);
+      // Idempotent (`mkdir -p` semantics).
+      await paths.ensureDir(dir);
+
+      writeFileSync(path.join(dir, 'file.txt'), 'hi');
+      mkdirSync(path.join(dir, 'child'));
+      const entries = await paths.readDir(dir);
+      const byName = new Map(entries.map((e) => [e.name, e]));
+      assert.equal(entries.length, 2);
+      assert.equal(byName.get('file.txt')?.isFile(), true);
+      assert.equal(byName.get('file.txt')?.isDirectory(), false);
+      assert.equal(byName.get('child')?.isDirectory(), true);
+      assert.equal((await paths.statPath(path.join(dir, 'file.txt')))?.isFile(), true);
+
+      // Defaults are recursive + force: the tree goes away, a missing path is fine.
+      await paths.removeDir(dir);
+      assert.equal(await paths.statPath(dir), null);
+      await paths.removeDir(dir);
     },
   },
 ];

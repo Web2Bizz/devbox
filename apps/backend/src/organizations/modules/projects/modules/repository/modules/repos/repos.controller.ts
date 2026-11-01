@@ -1,11 +1,11 @@
 import { BadRequestException, Controller, Get, Headers, NotFoundException, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { ZodValidationPipe } from '../common/validation';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { ReqUser } from '../auth/req-user.decorator';
-import type { RequestIdentity } from '../auth/identity.service';
-import { ProjectAccessService } from '../organizations/modules/projects/modules/project-access/project-access.service';
-import { RepoDto, reposQuerySchema, userSpaceSchema, type ReposQuery } from './dto';
+import { ZodValidationPipe } from '../../../../../../../common/validation';
+import { JwtAuthGuard } from '../../../../../../../auth/jwt-auth.guard';
+import { ReqUser } from '../../../../../../../auth/req-user.decorator';
+import type { RequestIdentity } from '../../../../../../../auth/identity.service';
+import { ProjectAccessService } from '../../../project-access/project-access.service';
+import { RepoDto, reposQuerySchema, userSpaceSchema, type ReposQuery } from './repos.dto';
 import { ReposService } from './repos.service';
 
 /**
@@ -21,6 +21,10 @@ import { ReposService } from './repos.service';
  *   space or a member org (ProjectAccessService.getRole) — strangers get
  *   404 (existence is not leaked, same no-enumeration rule as
  *   organizations member reads).
+ *
+ * Module placement: nested in the projects domain
+ * (organizations/modules/projects/modules/repository/modules/repos) — the
+ * member gate is ProjectAccessService, owned by that same domain.
  */
 @ApiTags('repos')
 @Controller('repos')

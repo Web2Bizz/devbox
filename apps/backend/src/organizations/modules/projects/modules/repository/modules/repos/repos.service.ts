@@ -1,13 +1,13 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { readdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { AppLogger } from '../common/logger';
+import { AppLogger } from '../../../../../../../common/logger';
 import {
   storageUnavailable,
   throwStorageNotConfigured,
-} from '../common/storage/storage-unavailable';
-import { userSpaceSchema, type ReposQuery } from './dto';
-import { isValidGitRepo } from './repos-git.util';
+} from '../../../../../../../common/storage/storage-unavailable';
+import { userSpaceSchema, type ReposQuery } from './repos.dto';
+import { isValidGitRepo } from '../../utils/repos-git';
 
 export type RepoEntry = {
   /** Scope owner id (user uuid under users/, org uuid under orgs/). */

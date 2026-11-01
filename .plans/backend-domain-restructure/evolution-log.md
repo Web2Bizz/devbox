@@ -6,3 +6,4 @@
 - 2026-11-01 — uuid-v7 util удалён: генерация через `Bun.randomUUIDv7()` напрямую (Bun runtime), валидация v7 — приватный хелпер в InvitesService; тесты валидатора перенесены в invites spec.
 - 2026-11-01 — Фаза 4 (CoC v2): C4-гейт вынесен в organizations/modules/projects/modules/project-access (ProjectAccessModule); projects/chats/sessions/files больше не импортируют OrganizationsModule; webhook-util -> github/utils/webhook; optional DI deps readonly.
 - 2026-11-01 — Фаза 5A (CoC v2): ai -> processes/modules/ai, workers -> processes/modules/workers, добавлен ProcessesModule (AppModule монтирует его); маршруты/DTO не менялись.
+- 2026-11-01 — Фаза 5B (CoC v2): repos/ + workspaces/ -> organizations/modules/projects/modules/repository (modules/repos, modules/workspaces, utils/repos-git, utils/submodules); dead duplicate jobs/ удалён; единый jail: fs-примитивы в common/storage, прямой node:fs убран из projects/files/organizations.

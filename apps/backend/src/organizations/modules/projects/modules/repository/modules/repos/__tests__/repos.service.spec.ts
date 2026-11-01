@@ -2,7 +2,7 @@
  * Repos scanner unit checks — self-contained runner (no new deps, plain node:assert).
  *
  * Runs against COMPILED dist (same constraint as the *.e2e.ts runners):
- *   `bun run build && bun dist/repos/__tests__/repos.service.spec.js`
+ *   `bun run build && bun dist/organizations/modules/projects/modules/repository/modules/repos/__tests__/repos.service.spec.js`
  * Also executes under `bun test dist` (top-level run, throws on failure).
  *
  * Covers: valid repo listed (users/ + orgs/ trees, no `workspace` segment),
@@ -17,7 +17,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { ReposService } from '../repos.service';
-import { isValidGitRepo } from '../repos-git.util';
+import { isValidGitRepo } from '../../../utils/repos-git';
 
 type WarnCall = {
   path?: string;
@@ -32,7 +32,7 @@ function makeLogger() {
       warn: (msg: unknown) => {
         warns.push(msg as WarnCall);
       },
-    } as unknown as import('../../common/logger').AppLogger,
+    } as unknown as import('../../../../../../../../common/logger').AppLogger,
   };
 }
 

@@ -20,12 +20,12 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { validateEnvWithWarnings } from '../../common/env/env';
-import { ReposService } from '../../repos/repos.service';
-import { ProjectFilesService } from '../../organizations/modules/projects/modules/files/project-files.service';
-import { WorkspaceCloneService } from '../../workspaces/modules/clone/clone.service';
-import { CloneJobsRepository } from '../../workspaces/modules/clone/clone.repository';
+import { ReposService } from '../modules/projects/modules/repository/modules/repos/repos.service';
+import { ProjectFilesService } from '../modules/projects/modules/files/project-files.service';
+import { WorkspaceCloneService } from '../modules/projects/modules/repository/modules/workspaces/modules/clone/clone.service';
+import { CloneJobsRepository } from '../modules/projects/modules/repository/modules/workspaces/modules/clone/clone.repository';
 import { WorkspacePathService } from '../../common/storage/workspace-path.service';
-import { WorkspacesService } from '../../workspaces/workspaces.service';
+import { WorkspacesService } from '../modules/projects/modules/repository/modules/workspaces/workspaces.service';
 
 type Source = NodeJS.ProcessEnv;
 

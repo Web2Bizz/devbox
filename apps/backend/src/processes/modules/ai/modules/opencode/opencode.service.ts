@@ -1,8 +1,8 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { validateEnv } from '../../../common/env/env';
-import { AppLogger } from '../../../common/logger';
-import { ExternalClient } from '../../../common/external/external-client';
+import { validateEnv } from '../../../../../common/env/env';
+import { AppLogger } from '../../../../../common/logger';
+import { ExternalClient } from '../../../../../common/external/external-client';
 
 export type OpencodeStatus = 'up' | 'down';
 

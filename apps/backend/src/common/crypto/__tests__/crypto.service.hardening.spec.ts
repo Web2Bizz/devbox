@@ -16,8 +16,8 @@
  * (old row via previous → re-encrypt under active → key_id updated).
  *
  * Billing usage integrity + lazy re-encrypt convergence live in
- * ai/modules/opencode/modules/billing/__tests__/billing-key-rotation.spec.ts —
- * common must not import ai.
+ * processes/modules/ai/modules/opencode/modules/billing/__tests__/billing-key-rotation.spec.ts —
+ * common must not import processes.
  *
  * Dummy KEKs only (≥32 chars, `...-not-real-...`), via process.env in-test,
  * never logged (roles + keyIds only, never values). .env.example keeps the

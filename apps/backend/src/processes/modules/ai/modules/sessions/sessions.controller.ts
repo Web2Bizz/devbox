@@ -16,12 +16,12 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
-import { JwtAuthGuard } from '../../../auth/jwt-auth.guard';
-import type { RequestIdentity } from '../../../auth/identity.service';
-import { ReqUser } from '../../../auth/req-user.decorator';
-import { AppLogger } from '../../../common/logger';
-import { ZodValidationPipe } from '../../../common/validation';
-import { ApiErrorDto } from '../../../common/http/api/dto';
+import { JwtAuthGuard } from '../../../../../auth/jwt-auth.guard';
+import type { RequestIdentity } from '../../../../../auth/identity.service';
+import { ReqUser } from '../../../../../auth/req-user.decorator';
+import { AppLogger } from '../../../../../common/logger';
+import { ZodValidationPipe } from '../../../../../common/validation';
+import { ApiErrorDto } from '../../../../../common/http/api/dto';
 import {
   createSessionRequestSchema,
   interruptSessionRequestSchema,

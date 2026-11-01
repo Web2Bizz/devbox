@@ -1,13 +1,13 @@
 import { Global, Module, type OnModuleInit } from '@nestjs/common';
-import { HealthRegistry } from '../../../common/health/health-registry';
+import { HealthRegistry } from '../../../../../common/health/health-registry';
 import { ServeAuthModule } from './modules/auth/auth.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { OpencodeKeysController } from './keys.controller';
 import { OpencodeSdkClient } from './opencode-sdk-client';
 import { OpencodeController } from './opencode.controller';
 import { OpencodeService } from './opencode.service';
-import { OrganizationsModule } from '../../../organizations/organizations.module';
-import { WorkspacePathService } from '../../../common/storage/workspace-path.service';
+import { OrganizationsModule } from '../../../../../organizations/organizations.module';
+import { WorkspacePathService } from '../../../../../common/storage/workspace-path.service';
 
 /**
  * Global opencode module (mirrors CommonModule) — OpencodeService is

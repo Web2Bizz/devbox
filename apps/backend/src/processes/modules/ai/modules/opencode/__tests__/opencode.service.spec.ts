@@ -1,7 +1,7 @@
 /**
  * OpencodeService unit checks — self-contained runner (no new deps, plain
  * node:assert), same constraint as the *.e2e.ts runners:
- *   `bun run build && bun dist/ai/modules/opencode/opencode.service.spec.js`
+ *   `bun run build && bun dist/processes/modules/ai/modules/opencode/__tests__/opencode.service.spec.js`
  * Also executes under `bun test dist` (top-level run, throws on failure).
  *
  * Covers the liveness probe (checkConnectivity): v2 `GET /api/info` is the
@@ -15,8 +15,8 @@
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { AppLogger } from '../../../../common/logger';
-import { ExternalClient } from '../../../../common/external/external-client';
+import { AppLogger } from '../../../../../../common/logger';
+import { ExternalClient } from '../../../../../../common/external/external-client';
 import { OpencodeService } from '../opencode.service';
 
 function applyEnv(source: Record<string, string>): void {

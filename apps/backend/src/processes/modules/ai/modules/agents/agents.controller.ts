@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { ZodValidationPipe } from '../../../common/validation';
+import { ZodValidationPipe } from '../../../../../common/validation';
 import { AgentsService } from './agents.service';
 import {
   AgentDto,

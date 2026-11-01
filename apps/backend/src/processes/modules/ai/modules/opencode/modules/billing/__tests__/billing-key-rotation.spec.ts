@@ -3,7 +3,7 @@
  * (plain node:assert): key integrity + lazy KEK re-wrap convergence.
  *
  * Runs against COMPILED dist (same constraint as the *.e2e.ts runners):
- *   `bun run build && bun dist/ai/modules/opencode/modules/billing/__tests__/billing-key-rotation.spec.js`
+ *   `bun run build && bun dist/processes/modules/ai/modules/opencode/modules/billing/__tests__/billing-key-rotation.spec.js`
  * Also executes under `bun test dist` (top-level run, throws on failure).
  *
  * Split out of common/crypto/__tests__/crypto.service.hardening.spec.ts:
@@ -67,7 +67,7 @@ async function main(): Promise<void> {
   setKeyring(ACTIVE_A);
 
   const { CryptoService } = await import(
-    "../../../../../../common/crypto/crypto.service"
+    "../../../../../../../../common/crypto/crypto.service"
   );
   const { BillingService } = await import("../billing.service");
 

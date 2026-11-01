@@ -8,8 +8,8 @@ import { Injectable } from '@nestjs/common';
 // (dist/v2 + dist/v2/gen on disk); there is no 2.x major.
 import type { OpencodeClient } from '@opencode-ai/sdk/v2';
 import { OpencodeService } from './opencode.service';
-import { AppLogger } from '../../../common/logger';
-import { ExternalClient } from '../../../common/external/external-client';
+import { AppLogger } from '../../../../../common/logger';
+import { ExternalClient } from '../../../../../common/external/external-client';
 import { ServeAuthService, serveBasicAuthHeader } from './modules/auth/auth.service';
 
 type SdkModule = typeof import('@opencode-ai/sdk/v2');

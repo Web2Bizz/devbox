@@ -10,13 +10,13 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagger";
-import { JwtAuthGuard } from "../../../auth/jwt-auth.guard";
-import type { RequestIdentity } from "../../../auth/identity.service";
-import { ReqUser } from "../../../auth/req-user.decorator";
-import { AppLogger } from "../../../common/logger";
-import { ZodValidationPipe } from "../../../common/validation";
-import { CryptoService } from "../../../common/crypto/crypto.service";
-import { opencodeKeySchema, type OpencodeKeyInput } from "../../../common/keys/keys.schema";
+import { JwtAuthGuard } from "../../../../../auth/jwt-auth.guard";
+import type { RequestIdentity } from "../../../../../auth/identity.service";
+import { ReqUser } from "../../../../../auth/req-user.decorator";
+import { AppLogger } from "../../../../../common/logger";
+import { ZodValidationPipe } from "../../../../../common/validation";
+import { CryptoService } from "../../../../../common/crypto/crypto.service";
+import { opencodeKeySchema, type OpencodeKeyInput } from "../../../../../common/keys/keys.schema";
 import { BillingService } from "./modules/billing/billing.service";
 import {
   OpencodeKeyBodyDto,
@@ -25,7 +25,7 @@ import {
   OpencodeKeyStatusDto,
   OpencodeUsageDto,
 } from "./keys.dto";
-import { OpencodeKeysService } from "../../../common/keys/keys.service";
+import { OpencodeKeysService } from "../../../../../common/keys/keys.service";
 
 function isUserId(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);

@@ -3,7 +3,7 @@
  *
  * Runs against COMPILED dist (tsc emits decorator metadata there; bun's own
  * TS transpiler does not, so this file must not be executed via `bun test`
- * on TS sources). Usage: `bun run build && bun dist/ai/modules/opencode/__tests__/opencode.e2e.js`.
+ * on TS sources). Usage: `bun run build && bun dist/processes/modules/ai/modules/opencode/__tests__/opencode.e2e.js`.
  *
  * Down mode (default): boots the real AppModule through the shared
  * configureApp()/setupSwagger() on an ephemeral port and asserts the
@@ -37,7 +37,7 @@
  * Never logs secrets; reports db 'down' (strict Postgres) (no external network).
  *
  * Live mode (opt-in): OPENCODE_LIVE_URL=http://127.0.0.1:4096 bun
- * dist/ai/modules/opencode/__tests__/opencode.e2e.js — after the down phase, respawns itself with
+ * dist/processes/modules/ai/modules/opencode/__tests__/opencode.e2e.js — after the down phase, respawns itself with
  * OPENCODE_URL=<live> and asserts live 200s (create/patch/fork/status,
  * messages list with limit cursor, SSE headers, global/health version ==
  * pinned @opencode-ai/sdk version). Live session routes ALSO pass the C4
@@ -273,8 +273,8 @@ function startV2StandStub(): Promise<{
 
 async function main(): Promise<void> {
   const { NestFactory } = await import('@nestjs/core');
-  const { AppModule } = await import('../../../../app/app.module');
-  const { configureApp, setupSwagger } = await import('../../../../app/app.setup');
+  const { AppModule } = await import('../../../../../../app/app.module');
+  const { configureApp, setupSwagger } = await import('../../../../../../app/app.setup');
 
   const app = await NestFactory.create(AppModule, { logger: false });
   configureApp(app);
@@ -284,7 +284,7 @@ async function main(): Promise<void> {
   const results: CheckResult[] = [];
 
   // Bearer for the guarded mirror routes (guard passes, gate denies 503 w/o DB).
-  const { TokenService } = await import('../../../../auth/token.service');
+  const { TokenService } = await import('../../../../../../auth/token.service');
   const tokens = app.get(TokenService, { strict: false }) as {
     sign: (
       claims: Record<string, unknown>,
@@ -418,8 +418,8 @@ async function main(): Promise<void> {
       const unauthorized = await startUnauthorizedUpstream();
       process.env.OPENCODE_URL = unauthorized.url;
       try {
-        const { ProjectAccessService } = await import('../../../../organizations/modules/projects/modules/project-access/project-access.service');
-        const { WorkspacePathService } = await import('../../../../common/storage/workspace-path.service');
+        const { ProjectAccessService } = await import('../../../../../../organizations/modules/projects/modules/project-access/project-access.service');
+        const { WorkspacePathService } = await import('../../../../../../common/storage/workspace-path.service');
         const orgsProto = ProjectAccessService.prototype as unknown as {
           assertProjectAccessById: (
             projectId: string,
@@ -475,7 +475,7 @@ async function main(): Promise<void> {
       // the whole phase (one-liner warn/error, no marker secret, no Bearer).
       const stand = await startV2StandStub();
       process.env.OPENCODE_URL = stand.url;
-      const { AppLogger } = await import('../../../../common/logger');
+      const { AppLogger } = await import('../../../../../../common/logger');
       const logged: Array<{ method: string; args: unknown[] }> = [];
       const logMethods = ['debug', 'info', 'warn', 'error'] as const;
       const logOriginals = logMethods.map(
@@ -492,8 +492,8 @@ async function main(): Promise<void> {
       try {
         // The C4 gate + workspace jail are patched on the PROTOTYPES (no
         // Postgres here) so the request really reaches the stub.
-        const { ProjectAccessService } = await import('../../../../organizations/modules/projects/modules/project-access/project-access.service');
-        const { WorkspacePathService } = await import('../../../../common/storage/workspace-path.service');
+        const { ProjectAccessService } = await import('../../../../../../organizations/modules/projects/modules/project-access/project-access.service');
+        const { WorkspacePathService } = await import('../../../../../../common/storage/workspace-path.service');
         (
           ProjectAccessService.prototype as unknown as { assertProjectAccessById: unknown }
         ).assertProjectAccessById = async () => ({ ownerId: E2E_USER_ID, orgIds: [] });

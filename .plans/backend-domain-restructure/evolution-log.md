@@ -5,3 +5,4 @@
 - 2026-11-01 — Фаза 3 (правка по ревью): organizations.guard.ts — реальный CanActivate (member для GET, maintainer для мутаций, навешан на gated-роуты OrganizationsController; 410-заглушки исключены); MembersModule/InvitesModule в organizations/modules/; randomUuidV7 через Bun.randomUUIDv7.
 - 2026-11-01 — uuid-v7 util удалён: генерация через `Bun.randomUUIDv7()` напрямую (Bun runtime), валидация v7 — приватный хелпер в InvitesService; тесты валидатора перенесены в invites spec.
 - 2026-11-01 — Фаза 4 (CoC v2): C4-гейт вынесен в organizations/modules/projects/modules/project-access (ProjectAccessModule); projects/chats/sessions/files больше не импортируют OrganizationsModule; webhook-util -> github/utils/webhook; optional DI deps readonly.
+- 2026-11-01 — Фаза 5A (CoC v2): ai -> processes/modules/ai, workers -> processes/modules/workers, добавлен ProcessesModule (AppModule монтирует его); маршруты/DTO не менялись.

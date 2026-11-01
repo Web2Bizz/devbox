@@ -1,13 +1,13 @@
 import { HttpException, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
-import { AppLogger } from "../../../../../common/logger";
-import { ExternalClient } from "../../../../../common/external/external-client";
+import { AppLogger } from "../../../../../../../common/logger";
+import { ExternalClient } from "../../../../../../../common/external/external-client";
 import {
   ExternalServiceError,
   fromStatus,
   fromUnknown,
-} from "../../../../../common/external/external-error";
-import { CryptoService } from "../../../../../common/crypto/crypto.service";
-import { OpencodeKeysService } from "../../../../../common/keys/keys.service";
+} from "../../../../../../../common/external/external-error";
+import { CryptoService } from "../../../../../../../common/crypto/crypto.service";
+import { OpencodeKeysService } from "../../../../../../../common/keys/keys.service";
 
 /** GET /api/v1/usage response (Zen Go contract + legacy backward-compat). */
 export type BillingLimitBucket = {

@@ -2,7 +2,7 @@
  * Opencode keys + usage e2e — self-contained runner (plain fetch, no new deps).
  *
  * Runs against COMPILED dist (tsc decorator metadata; do not run via
- * `bun test` on TS sources). Usage: `bun run build && bun dist/ai/modules/opencode/__tests__/keys.e2e.js`.
+ * `bun test` on TS sources). Usage: `bun run build && bun dist/processes/modules/ai/modules/opencode/__tests__/keys.e2e.js`.
  *
  * Strict Postgres: needs a live PG (TEST_DATABASE_URL wins, DATABASE_URL
  * fallback; drizzle/0001..0005 applied automatically) — runs the full suite
@@ -99,7 +99,7 @@ async function main(): Promise<void> {
   let billingTarget = `http://127.0.0.1:${billingPort}/usage`;
 
   const { resolveTestDb, applyTestMigrations } =
-    await import("../../../../common/db/e2e-db");
+    await import("../../../../../../common/db/e2e-db");
   const testDb = await resolveTestDb(
     process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL ?? "",
   );
@@ -118,8 +118,8 @@ async function main(): Promise<void> {
   console.log(`[opencode-keys e2e] db mode: ${testDb.mode}`);
 
   const { NestFactory } = await import("@nestjs/core");
-  const { AppModule } = await import("../../../../app/app.module");
-  const { configureApp } = await import("../../../../app/app.setup");
+  const { AppModule } = await import("../../../../../../app/app.module");
+  const { configureApp } = await import("../../../../../../app/app.setup");
 
   let passed = 0;
   let failed = 0;
@@ -146,8 +146,8 @@ async function main(): Promise<void> {
   const app = await NestFactory.create(AppModule, { logger: false });
   configureApp(app);
   if (testDb.mode === "live") {
-    const { UsersService } = await import("../../../../users/users.service");
-    const { TokenService } = await import("../../../../auth/token.service");
+    const { UsersService } = await import("../../../../../../users/users.service");
+    const { TokenService } = await import("../../../../../../auth/token.service");
     const users = app.get(UsersService, { strict: false }) as {
       clearAllForTests: () => Promise<void>;
     };
@@ -188,7 +188,7 @@ async function main(): Promise<void> {
   // Captures { method, args } so the final scans can prove both never-log
   // secrets AND normal-path shape: warn/error are one-liners with
   // operation/status/code and no stack (`\n at ` only ever appears on debug).
-  const { AppLogger } = await import("../../../../common/logger");
+  const { AppLogger } = await import("../../../../../../common/logger");
   const captured: Array<{ method: string; args: unknown[] }> = [];
   const methods = ["debug", "info", "warn", "error"] as const;
   const originals = methods.map((m) => AppLogger.prototype[m]);
@@ -355,7 +355,7 @@ async function main(): Promise<void> {
         assert.ok(!row.iv.includes(TEST_API_KEY));
         // KEK version envelope: fresh rows are wrapped with the active id.
         assert.equal(row.key_id, "v1");
-        const { CryptoService } = await import("../../../../common/crypto/crypto.service");
+        const { CryptoService } = await import("../../../../../../common/crypto/crypto.service");
         const svc = new CryptoService();
         assert.equal(
           svc.decrypt({ keyId: row.key_id, iv: row.iv, data: row.encrypted_key }),
@@ -472,7 +472,7 @@ async function main(): Promise<void> {
         );
         const row = rows[0] as { encrypted_key: string; iv: string; key_id: string };
         assert.equal(row.key_id, "v1");
-        const { CryptoService } = await import("../../../../common/crypto/crypto.service");
+        const { CryptoService } = await import("../../../../../../common/crypto/crypto.service");
         const svc = new CryptoService();
         assert.equal(
           svc.decrypt({ keyId: row.key_id, iv: row.iv, data: row.encrypted_key }),

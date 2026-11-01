@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
-import { OrganizationsModule } from '../../../organizations/organizations.module';
+import { OrganizationsModule } from '../../../../../organizations/organizations.module';
 import { OpencodeModule } from '../opencode/opencode.module';
-import { WorkspacePathService } from '../../../common/storage/workspace-path.service';
+import { WorkspacePathService } from '../../../../../common/storage/workspace-path.service';
 import { SessionsController } from './sessions.controller';
 import { SessionsService } from './sessions.service';
 

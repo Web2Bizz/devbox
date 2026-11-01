@@ -35,16 +35,16 @@ import type { Request as ExpressRequest, Response as ExpressResponse } from 'exp
 // the same paths this controller mirrors under `/api/opencode/*`.
 import type { OutputFormat, Session, SessionV2Info } from '@opencode-ai/sdk/v2';
 import { OpencodeSdkClient } from './opencode-sdk-client';
-import { JwtAuthGuard } from '../../../auth/jwt-auth.guard';
-import type { RequestIdentity } from '../../../auth/identity.service';
-import { ReqUser } from '../../../auth/req-user.decorator';
-import { ProjectAccessService } from '../../../organizations/modules/projects/modules/project-access/project-access.service';
-import { ownerKeyOrThrow } from '../../../organizations/modules/projects/projects.service';
-import { WorkspacePathService } from '../../../common/storage/workspace-path.service';
+import { JwtAuthGuard } from '../../../../../auth/jwt-auth.guard';
+import type { RequestIdentity } from '../../../../../auth/identity.service';
+import { ReqUser } from '../../../../../auth/req-user.decorator';
+import { ProjectAccessService } from '../../../../../organizations/modules/projects/modules/project-access/project-access.service';
+import { ownerKeyOrThrow } from '../../../../../organizations/modules/projects/projects.service';
+import { WorkspacePathService } from '../../../../../common/storage/workspace-path.service';
 import { OpencodeService } from './opencode.service';
 import { serveBasicAuthHeader } from './modules/auth/auth.service';
-import { AppLogger } from '../../../common/logger';
-import { ZodValidationPipe } from '../../../common/validation';
+import { AppLogger } from '../../../../../common/logger';
+import { ZodValidationPipe } from '../../../../../common/validation';
 import {
   ApiErrorDto,
   opencodeCommandSchema,
@@ -57,9 +57,9 @@ import {
   type OpencodePromptInput,
   type OpencodeSessionUpdateInput,
   type OpencodeShellInput,
-} from '../../../common/http/api/dto';
-import { fromStatus, fromUnknown } from '../../../common/external/external-error';
-import { relaySse, type SseSubscription } from '../../../common/sse/sse-relay';
+} from '../../../../../common/http/api/dto';
+import { fromStatus, fromUnknown } from '../../../../../common/external/external-error';
+import { relaySse, type SseSubscription } from '../../../../../common/sse/sse-relay';
 
 /** Upstream cursor headers passed through on GET message lists (when present). */
 const CURSOR_PASSTHROUGH_HEADERS = ['x-next-cursor', 'link'] as const;

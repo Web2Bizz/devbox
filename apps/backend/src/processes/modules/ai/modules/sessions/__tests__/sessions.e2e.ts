@@ -4,7 +4,7 @@
  *
  * Runs against COMPILED dist (tsc emits decorator metadata there; bun's own
  * TS transpiler does not, so this file must not run via `bun test` on TS
- * sources). Usage: `bun run build && bun dist/ai/modules/sessions/__tests__/sessions.e2e.js`.
+ * sources). Usage: `bun run build && bun dist/processes/modules/ai/modules/sessions/__tests__/sessions.e2e.js`.
  *
  * Down mode (default, no Postgres, no real upstream): boots the real
  * AppModule through the shared configureApp()/setupSwagger(), patches the
@@ -409,9 +409,9 @@ type CheckResult = { name: string; ok: boolean; detail?: string };
 
 async function main(): Promise<void> {
   const { NestFactory } = await import('@nestjs/core');
-  const { AppModule } = await import('../../../../app/app.module');
-  const { configureApp, setupSwagger } = await import('../../../../app/app.setup');
-  const { AppLogger } = await import('../../../../common/logger');
+  const { AppModule } = await import('../../../../../../app/app.module');
+  const { configureApp, setupSwagger } = await import('../../../../../../app/app.setup');
+  const { AppLogger } = await import('../../../../../../common/logger');
 
   const app = await NestFactory.create(AppModule, { logger: false });
   configureApp(app);
@@ -420,7 +420,7 @@ async function main(): Promise<void> {
   const base = await app.getUrl();
   const results: CheckResult[] = [];
 
-  const { TokenService } = await import('../../../../auth/token.service');
+  const { TokenService } = await import('../../../../../../auth/token.service');
   const tokens = app.get(TokenService, { strict: false }) as {
     sign: (claims: Record<string, unknown>, secret: string, ttlSec: number) => { token: string };
   };
@@ -475,8 +475,8 @@ async function main(): Promise<void> {
 
   // C4 gate + jail patched on the PROTOTYPES (no Postgres in this suite) so
   // requests really reach the stub (same convention as opencode.e2e).
-  const { ProjectAccessService } = await import('../../../../organizations/modules/projects/modules/project-access/project-access.service');
-  const { WorkspacePathService } = await import('../../../../common/storage/workspace-path.service');
+  const { ProjectAccessService } = await import('../../../../../../organizations/modules/projects/modules/project-access/project-access.service');
+  const { WorkspacePathService } = await import('../../../../../../common/storage/workspace-path.service');
   const allowAccess = async (): Promise<{ ownerId: string; orgIds: string[] }> => ({
     ownerId: E2E_USER_ID,
     orgIds: [],

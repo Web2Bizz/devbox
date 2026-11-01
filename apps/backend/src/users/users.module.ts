@@ -1,19 +1,24 @@
 import { Global, Module } from "@nestjs/common";
-import { PasswordService } from "./password.service";
+import { PasswordModule } from "./modules/password/password.module";
 import { UsersController } from "./users.controller";
+import { UsersRepository } from "./users.repository";
 import { UsersService } from "./users.service";
 
 // SCOPE: Common
 /**
- * UsersModule — Postgres-backed user registry + password hashing + own-profile read.
- * Global: UsersService/PasswordService injectable anywhere (auth provider,
- * JwtAuthGuard, organizations access layer). Imported by the top-level auth
- * module — but this module never imports it back (module graph stays acyclic).
+ * UsersModule — Postgres-backed user registry + own-profile read; password
+ * hashing lives in the nested PasswordModule (CoC §2: `users/modules/password/`).
+ *
+ * @Global() stays on purpose (decision recorded in .plans/password-service/PLAN.md
+ * § Решения): UsersService is injected by auth/, organizations/ and processes/
+ * without explicit imports; PasswordService reaches auth via the re-exported
+ * PasswordModule. UsersModule never imports AuthModule (module graph stays acyclic).
  */
 @Global()
 @Module({
   controllers: [UsersController],
-  providers: [UsersService, PasswordService],
-  exports: [UsersService, PasswordService],
+  imports: [PasswordModule],
+  providers: [UsersService, UsersRepository],
+  exports: [UsersService, PasswordModule],
 })
 export class UsersModule {}

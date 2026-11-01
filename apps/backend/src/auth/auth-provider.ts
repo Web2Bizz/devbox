@@ -1,8 +1,8 @@
 import { Injectable, UnauthorizedException } from "@nestjs/common";
 import { AppLogger } from "../common/logger";
-import { PasswordService } from "../users/password.service";
-import { UsersService, type StoredUser } from "../users/users.service";
-import type { AuthProviderId } from "../users/users.service";
+import { PasswordService } from "../users/modules/password/password.service";
+import { UsersService } from "../users/users.service";
+import type { AuthProviderId, StoredUser } from "../users/users.types";
 
 /** Strategy seam for external identity providers (local + future stubs). */
 export type AuthProvider = {
@@ -24,7 +24,7 @@ export class LocalAuthProvider implements AuthProvider {
 
   constructor(
     private readonly users: UsersService,
-    private readonly passwords: PasswordService,
+    private readonly passwordService: PasswordService,
     private readonly logger: AppLogger = new AppLogger("LocalAuthProvider"),
   ) {}
 
@@ -38,7 +38,7 @@ export class LocalAuthProvider implements AuthProvider {
     const hash = user?.passwordHash ?? "";
     const ok =
       hash !== "" &&
-      (await this.passwords.verify(password, hash, correlationId));
+      (await this.passwordService.verify(password, hash, correlationId));
     if (!ok || !user) {
       this.logger.warn("[auth] local verify failed", correlationId);
       return null;

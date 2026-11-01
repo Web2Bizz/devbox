@@ -1,6 +1,6 @@
 # План реструктуризации backend по scope: Common / Organization (⊃ Project) / Processes
 
-Статус: черновик v2 (правки: platform→common, crypto/keys→common, projects внутри organizations, ai+workers→processes), код не написан. Трекинг задач не используется.
+Статус: реализовано 2026-11-01 (фазы 0–9 выполнены, см. `evolution-log.md`); дальнейшие правки — только по новым задачам. Трекинг задач не используется.
 Принцип: только перемещение и выделение границ, без изменения поведения.
 Каждый этап — зелёные `bun run lint` + `bun run build`, e2e не краснеют.
 

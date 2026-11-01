@@ -116,3 +116,21 @@
   `UsersService` приходит из глобального модуля (`organizations.service.ts`,
   `modules/members/members.service.ts`, `modules/invites/invites.service.ts`).
   Обратного импорта `UsersModule → AuthModule` нет — граф остаётся ацикличным.
+
+## Ревизия (после шага 6): `password` — утилита, а не вложенный модуль
+
+Требование владельца: хеширование пароля — утилита домена, а не Nest-сервис.
+`users/modules/password/` удалён целиком (`password.module.ts`,
+`password.service.ts`), вместо него по CoC §7:
+
+- `users/utils/password/password.util.ts` — `hashPassword(password, logger?)` и
+  `verifyPassword(password, hash, logger?, correlationId?)`: bun-native argon2id,
+  собственного логгера и DI у утилиты нет (получает `PasswordLogger` вызывающего);
+- `users/utils/password/index.ts` — баррель (`export * from "./password.util"`),
+  импорт снаружи только через него;
+- `users/utils/password/__tests__/password.spec.ts` — те же проверки.
+
+`UsersService` больше не инжектит `PasswordService` — вызывает `hashPassword`;
+`LocalAuthProvider` вызывает `verifyPassword`. `UsersModule` без `PasswordModule`:
+`providers: [UsersService, UsersRepository]`, `exports: [UsersService]`.
+Пункт «@Global()» выше в части `PasswordModule` считается заменённым этим разделом.

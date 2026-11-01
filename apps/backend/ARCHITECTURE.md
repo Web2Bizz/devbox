@@ -28,7 +28,7 @@ src/
 │  └─ health/ — HealthRegistry (реестр проб; домены регистрируются сами)
 │     (в подпапках common/ нет *.module.ts — это группы утилит, CoC §3)
 ├─ health/ — GET /health + /api/v1/health (только DbService + HealthRegistry)
-├─ users/ — профили: UsersModule (@Global: UsersService, PasswordService), users.controller (/users)
+├─ users/ — профили: UsersModule (@Global: UsersService), users.controller (/users), utils/password (argon2id)
 ├─ auth/ — sibling users/: auth.controller (/auth: register/login/refresh/logout/me),
 │         jwt-auth.guard, token/identity services, auth-provider, req-user.decorator
 ├─ organizations/ — SCOPE: Organization
@@ -77,7 +77,7 @@ src/
 - `organizations/` не импортирует `processes/` (в т.ч. `ai`): общие куски
   выносятся в `common/`.
 - `users/` — `@Global()`, но сам не импортирует `auth/` (граф остаётся ацикличным);
-  `auth/` — sibling, читает `UsersService`/`PasswordService` через global-модуль.
+  `auth/` — sibling, читает `UsersService` через global-модуль, а `verifyPassword` — из `users/utils/password` напрямую.
 - Вложенные модули наружу не экспортируются: торчит только родительский домен
   (CoC §2). `ProjectsModule` не импортирует `OrganizationsModule` — гейт закрыт
   через `ProjectAccessModule`.

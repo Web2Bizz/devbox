@@ -2,7 +2,7 @@
  * Auth (internal accounts) e2e — self-contained runner (plain fetch, no new deps).
  *
  * Runs against COMPILED dist (tsc decorator metadata; do not run via
- * `bun test` on TS sources). Usage: `bun run build && bun dist/users/auth/auth.e2e.js`.
+ * `bun test` on TS sources). Usage: `bun run build && bun dist/auth/auth.e2e.js`.
  *
  * Strict Postgres: needs a live PG (TEST_DATABASE_URL wins, DATABASE_URL
  * fallback; drizzle/0003 applied automatically) — runs the full suite.
@@ -26,7 +26,7 @@ process.env.AUTH_LEGACY_MOCK_FALLBACK = "false";
 
 async function main(): Promise<void> {
   const { resolveTestDb, applyTestMigrations } =
-    await import("../../common/db/e2e-db");
+    await import("../common/db/e2e-db");
   const testDb = await resolveTestDb(
     process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL ?? "",
   );
@@ -45,9 +45,9 @@ async function main(): Promise<void> {
   console.log(`[auth e2e] db mode: ${testDb.mode}`);
 
   const { NestFactory } = await import("@nestjs/core");
-  const { AppModule } = await import("../../app/app.module");
-  const { configureApp } = await import("../../app/app.setup");
-  const { UsersService } = await import("../users.service");
+  const { AppModule } = await import("../app/app.module");
+  const { configureApp } = await import("../app/app.setup");
+  const { UsersService } = await import("../users/users.service");
   const { TokenService } = await import("./token.service");
 
   let passed = 0;
@@ -232,7 +232,7 @@ async function main(): Promise<void> {
     await check(
       "register duplicate logs warn with correlationId (no secrets)",
       async () => {
-        const { AppLogger } = await import("../../common/logger");
+        const { AppLogger } = await import("../common/logger");
         const seen: Array<{ msg: unknown; cid?: string }> = [];
         const origWarn = AppLogger.prototype.warn;
         (

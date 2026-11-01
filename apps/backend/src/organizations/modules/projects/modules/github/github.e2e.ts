@@ -130,7 +130,7 @@ async function main(): Promise<void> {
     app: unknown,
     sub: string,
   ): Promise<Record<string, string>> {
-    const { TokenService } = await import("../../../../../users/auth/token.service");
+    const { TokenService } = await import("../../../../../auth/token.service");
     const nest = app as { get: (t: unknown, o: unknown) => unknown };
     const tokens = nest.get(TokenService, { strict: false }) as {
       sign: (

@@ -105,7 +105,7 @@ async function main(): Promise<void> {
       // A hand-signed access token (TokenService.sign is pure, no DB) gets
       // past JwtAuthGuard so the 503 below proves the SERVICE denies with
       // EXTERNAL_UNAVAILABLE — not the guard with 401.
-      const { TokenService } = await import("../users/auth/token.service");
+      const { TokenService } = await import("../auth/token.service");
       const tokens = app.get(TokenService, { strict: false }) as {
         sign: (
           claims: Record<string, unknown>,
@@ -188,7 +188,7 @@ async function main(): Promise<void> {
       const { OrganizationsService } = await import("./organizations.service");
       const { ProjectsService } = await import("./modules/projects/projects.service");
       const { UsersService } = await import("../users/users.service");
-      const { TokenService } = await import("../users/auth/token.service");
+      const { TokenService } = await import("../auth/token.service");
       const orgs = app.get(OrganizationsService, { strict: false }) as {
         clearAllForTests: () => Promise<void>;
       };

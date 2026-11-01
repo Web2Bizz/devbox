@@ -141,7 +141,7 @@ async function main(): Promise<void> {
   // Bearer for the guarded status route (guard passes; the phases below
   // exercise the service, not the guard).
   async function bearerFor(app: unknown): Promise<Record<string, string>> {
-    const { TokenService } = await import('../../../../../users/auth/token.service');
+    const { TokenService } = await import('../../../../../auth/token.service');
     const nest = app as { get: (t: unknown, o: unknown) => unknown };
     const tokens = nest.get(TokenService, { strict: false }) as {
       sign: (

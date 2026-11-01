@@ -1,6 +1,6 @@
 import { Global, Module } from '@nestjs/common';
-import { DbModule } from '../../common/db/db.module';
-import { UsersModule } from '../users.module';
+import { DbModule } from '../common/db/db.module';
+import { UsersModule } from '../users/users.module';
 import { AuthController } from './auth.controller';
 import {
   GithubAppProviderStub,
@@ -18,6 +18,9 @@ import { TokenService } from './token.service';
  * resolveUserId). User registry lives in the global UsersModule
  * (src/users) — imported here so the local provider and guard resolve.
  * Registered in AppModule imports.
+ *
+ * SCOPE: Common — sibling of users/, injects only DbService + UsersModule;
+ * never imports organizations/ or processes/.
  */
 @Global()
 @Module({

@@ -15,11 +15,11 @@ import {
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiResponse, ApiTags } from "@nestjs/swagger";
 import type { Response } from "express";
-import { V1Endpoint } from "../../common/http/api/version";
-import { AppLogger } from "../../common/logger";
-import { ExternalServiceError } from "../../common/external/external-error";
-import { ZodValidationPipe } from "../../common/validation";
-import { validateEnv } from "../../common/env/env";
+import { V1Endpoint } from "../common/http/api/version";
+import { AppLogger } from "../common/logger";
+import { ExternalServiceError } from "../common/external/external-error";
+import { ZodValidationPipe } from "../common/validation";
+import { validateEnv } from "../common/env/env";
 import { LocalAuthProvider } from "./auth-provider";
 import {
   AuthSessionDto,
@@ -44,7 +44,7 @@ import { JwtAuthGuard } from "./jwt-auth.guard";
 import { ReqUser } from "./req-user.decorator";
 import type { RequestIdentity } from "./identity.service";
 import { TokenService } from "./token.service";
-import { UsersService, toPublicUser } from "../users.service";
+import { UsersService, toPublicUser } from "../users/users.service";
 
 /** httpOnly refresh cookie (read by POST /auth/refresh via body or cookie). */
 export const REFRESH_COOKIE = "rush-code-refresh";

@@ -1,8 +1,8 @@
 import { Injectable, UnauthorizedException } from "@nestjs/common";
-import { AppLogger } from "../../common/logger";
-import { PasswordService } from "../password.service";
-import { UsersService, type StoredUser } from "../users.service";
-import type { AuthProviderId } from "../users.service";
+import { AppLogger } from "../common/logger";
+import { PasswordService } from "../users/password.service";
+import { UsersService, type StoredUser } from "../users/users.service";
+import type { AuthProviderId } from "../users/users.service";
 
 /** Strategy seam for external identity providers (local + future stubs). */
 export type AuthProvider = {

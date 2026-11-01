@@ -12,9 +12,9 @@ import {
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiResponse, ApiTags } from "@nestjs/swagger";
 import { V1Endpoint } from "../../../common/http/api/version";
-import { JwtAuthGuard } from "../../../users/auth/jwt-auth.guard";
-import type { RequestIdentity } from "../../../users/auth/identity.service";
-import { ReqUser } from "../../../users/auth/req-user.decorator";
+import { JwtAuthGuard } from "../../../auth/jwt-auth.guard";
+import type { RequestIdentity } from "../../../auth/identity.service";
+import { ReqUser } from "../../../auth/req-user.decorator";
 import { AppLogger } from "../../../common/logger";
 import { ZodValidationPipe } from "../../../common/validation";
 import { CryptoService } from "../../../common/crypto/crypto.service";

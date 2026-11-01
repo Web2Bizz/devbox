@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { AppLogger } from '../../common/logger';
+import { AppLogger } from '../common/logger';
 
 export type TokenType = 'access' | 'refresh';
 

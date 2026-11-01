@@ -420,7 +420,7 @@ async function main(): Promise<void> {
   const base = await app.getUrl();
   const results: CheckResult[] = [];
 
-  const { TokenService } = await import('../../../users/auth/token.service');
+  const { TokenService } = await import('../../../auth/token.service');
   const tokens = app.get(TokenService, { strict: false }) as {
     sign: (claims: Record<string, unknown>, secret: string, ttlSec: number) => { token: string };
   };

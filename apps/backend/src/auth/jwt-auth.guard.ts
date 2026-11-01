@@ -4,11 +4,11 @@ import {
   Injectable,
   UnauthorizedException,
 } from "@nestjs/common";
-import { AppLogger } from "../../common/logger";
-import { validateEnv } from "../../common/env/env";
+import { AppLogger } from "../common/logger";
+import { validateEnv } from "../common/env/env";
 import { resolveIdentityUserId } from "./identity.service";
 import { TokenService } from "./token.service";
-import { UsersService } from "../users.service";
+import { UsersService } from "../users/users.service";
 
 function bearerToken(req: unknown): string | null {
   if (typeof req !== "object" || req === null) return null;

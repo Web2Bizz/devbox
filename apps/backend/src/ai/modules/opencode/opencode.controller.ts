@@ -35,9 +35,9 @@ import type { Request as ExpressRequest, Response as ExpressResponse } from 'exp
 // the same paths this controller mirrors under `/api/opencode/*`.
 import type { OutputFormat, Session, SessionV2Info } from '@opencode-ai/sdk/v2';
 import { OpencodeSdkClient } from './opencode-sdk-client';
-import { JwtAuthGuard } from '../../../users/auth/jwt-auth.guard';
-import type { RequestIdentity } from '../../../users/auth/identity.service';
-import { ReqUser } from '../../../users/auth/req-user.decorator';
+import { JwtAuthGuard } from '../../../auth/jwt-auth.guard';
+import type { RequestIdentity } from '../../../auth/identity.service';
+import { ReqUser } from '../../../auth/req-user.decorator';
 import { OrganizationsService } from '../../../organizations/organizations.service';
 import { ownerKeyOrThrow } from '../../../organizations/modules/projects/projects.service';
 import { WorkspacePathService } from '../../../common/storage/workspace-path.service';

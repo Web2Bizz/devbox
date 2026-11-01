@@ -20,10 +20,10 @@ import {
   ApiTags,
 } from "@nestjs/swagger";
 import { V1Endpoint } from "../../../../../common/http/api/version";
-import { DEFAULT_MOCK_USER_ID } from "../../../../../users/auth/identity.service";
-import { JwtAuthGuard } from "../../../../../users/auth/jwt-auth.guard";
-import { ReqUser } from "../../../../../users/auth/req-user.decorator";
-import type { RequestIdentity } from "../../../../../users/auth/identity.service";
+import { DEFAULT_MOCK_USER_ID } from "../../../../../auth/identity.service";
+import { JwtAuthGuard } from "../../../../../auth/jwt-auth.guard";
+import { ReqUser } from "../../../../../auth/req-user.decorator";
+import type { RequestIdentity } from "../../../../../auth/identity.service";
 import { ZodValidationPipe } from "../../../../../common/validation";
 import { validateEnv } from "../../../../../common/env/env";
 import {
@@ -56,7 +56,7 @@ export { DEFAULT_MOCK_USER_ID };
  * longer calls it (C2: userId comes from @ReqUser(), header/query
  * spoofing removed).
  */
-export { resolveIdentityUserId as resolveUserId } from "../../../../../users/auth/identity.service";
+export { resolveIdentityUserId as resolveUserId } from "../../../../../auth/identity.service";
 
 /**
  * GithubController — multi-tenant GitHub App surface.

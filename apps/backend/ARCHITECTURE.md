@@ -85,7 +85,7 @@ src/
 ## Storage: один корень и один jail
 
 `REPOS_ROOT` — единственный источник правды для чтения И записи
-(`REPOS_ROOT/<user-space>/workspace/<repo>`). Без него — отказ: чтения 503
+(`REPOS_ROOT/(users|orgs)/<scopeId>/projects/<projectId>/content[/subPath]`). Без него — отказ: чтения 503
 `EXTERNAL_UNAVAILABLE`, создание проектов 500; boot продолжается с логом ERROR.
 Фолбэков на `cwd`/`__dirname` нет (grep-гейт).
 

@@ -11,11 +11,9 @@ import {
   Res,
   UnauthorizedException,
   UseGuards,
-  Version,
 } from "@nestjs/common";
-import { ApiBearerAuth, ApiResponse, ApiTags } from "@nestjs/swagger";
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagger";
 import type { Response } from "express";
-import { V1Endpoint } from "../common/http/api/version";
 import { AppLogger } from "../common/logger";
 import { ExternalServiceError } from "../common/external/external-error";
 import { ZodValidationPipe } from "../common/validation";
@@ -132,8 +130,7 @@ export class AuthController {
   ) {}
 
   @Post("register")
-  @Version("1")
-  @V1Endpoint("Register a local account (email+password)")
+  @ApiOperation({ summary: "Register a local account (email+password)" })
   @ApiResponse({ status: 201, type: AuthSessionDto })
   @ApiResponse({ status: 409, description: "email already registered" })
   async register(
@@ -192,9 +189,8 @@ export class AuthController {
   }
 
   @Post("login")
-  @Version("1")
   @HttpCode(200)
-  @V1Endpoint("Log in with email+password")
+  @ApiOperation({ summary: "Log in with email+password" })
   @ApiResponse({ status: 200, type: AuthSessionDto })
   @ApiResponse({
     status: 401,
@@ -244,9 +240,8 @@ export class AuthController {
   }
 
   @Post("refresh")
-  @Version("1")
   @HttpCode(200)
-  @V1Endpoint("Rotate the refresh token (single-use)")
+  @ApiOperation({ summary: "Rotate the refresh token (single-use)" })
   @ApiResponse({ status: 200, type: AuthTokensDto })
   @ApiResponse({ status: 401, description: "invalid or reused refresh token" })
   async refresh(
@@ -286,9 +281,8 @@ export class AuthController {
   }
 
   @Post("logout")
-  @Version("1")
   @HttpCode(200)
-  @V1Endpoint("Log out (revoke the refresh token, idempotent)")
+  @ApiOperation({ summary: "Log out (revoke the refresh token, idempotent)" })
   @ApiResponse({ status: 200, description: "logged out" })
   async logout(
     @Body() body: Partial<RefreshInput>,
@@ -307,9 +301,8 @@ export class AuthController {
   }
 
   @Get("me")
-  @Version("1")
   @UseGuards(JwtAuthGuard)
-  @V1Endpoint("Current user profile")
+  @ApiOperation({ summary: "Current user profile" })
   @ApiBearerAuth()
   @ApiResponse({ status: 200, type: AuthUserDto })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
@@ -328,9 +321,8 @@ export class AuthController {
   }
 
   @Patch("me")
-  @Version("1")
   @UseGuards(JwtAuthGuard)
-  @V1Endpoint("Update current user profile (firstName/lastName)")
+  @ApiOperation({ summary: "Update current user profile (firstName/lastName)" })
   @ApiBearerAuth()
   @ApiResponse({ status: 200, type: AuthUserDto })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })

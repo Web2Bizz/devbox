@@ -10,15 +10,13 @@ import {
   Post,
   UseGuards,
   UseInterceptors,
-  Version,
 } from "@nestjs/common";
-import { ApiBearerAuth, ApiResponse, ApiTags } from "@nestjs/swagger";
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagger";
 import { JwtAuthGuard } from "../../../../../auth/jwt-auth.guard";
 import { ReqUser } from "../../../../../auth/req-user.decorator";
 import type { RequestIdentity } from "../../../../../auth/identity.service";
 import { NoIndexInterceptor } from "../../../../../common/http/noindex.interceptor";
 import { ZodValidationPipe } from "../../../../../common/validation";
-import { V1Endpoint } from "../../../../../common/http/api/version";
 import { ChatsService } from "./chats.service";
 import { SessionsService } from "../sessions/sessions.service";
 import {
@@ -46,8 +44,7 @@ export class ChatsController {
   ) {}
 
   @Get()
-  @Version("1")
-  @V1Endpoint("List project chats")
+  @ApiOperation({ summary: "List project chats" })
   @ApiResponse({ status: 200, type: [ProjectChatDto] })
   @ApiResponse({ status: 404, description: "not found (or no access)" })
   async list(
@@ -63,8 +60,7 @@ export class ChatsController {
   }
 
   @Post()
-  @Version("1")
-  @V1Endpoint("Create project chat")
+  @ApiOperation({ summary: "Create project chat" })
   @ApiResponse({ status: 201, type: ProjectChatDto })
   @ApiResponse({ status: 404, description: "not found (or no access)" })
   async create(
@@ -82,8 +78,7 @@ export class ChatsController {
   }
 
   @Delete(":chatId")
-  @Version("1")
-  @V1Endpoint("Delete project chat")
+  @ApiOperation({ summary: "Delete project chat" })
   @ApiResponse({ status: 204 })
   @ApiResponse({ status: 404, description: "not found (or no access)" })
   @HttpCode(HttpStatus.NO_CONTENT)

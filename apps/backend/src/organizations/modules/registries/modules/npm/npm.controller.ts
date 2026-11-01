@@ -1,6 +1,5 @@
-import { Controller, Get, Headers, UseGuards, Version } from '@nestjs/common';
+import { Controller, Get, Headers, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { V1Endpoint } from '../../../../../common/http/api/version';
 import { ApiErrorDto } from '../../../../../common/http/api/dto';
 import { JwtAuthGuard } from '../../../../../auth/jwt-auth.guard';
 import { NpmRegistryService } from './npm.service';
@@ -37,9 +36,7 @@ export class NpmRegistryController {
   constructor(private readonly registry: NpmRegistryService) {}
 
   @Get('npm/status')
-  @Version('1')
-  @V1Endpoint('DEPRECATED: use GET /api/v1/registry/npm — npm registry status (probe → Verdaccio /-/ping, 503 when unreachable or auth refused)')
-  @ApiOperation({ deprecated: true })
+  @ApiOperation({ summary: 'DEPRECATED: use GET /api/v1/registry/npm — npm registry status (probe → Verdaccio /-/ping, 503 when unreachable or auth refused)', deprecated: true })
   @ApiResponse({ status: 200, description: 'live npm status', type: NpmRegistryStatusDto })
   @ApiResponse({ status: 503, description: 'npm registry unreachable or auth refused (EXTERNAL_UNAVAILABLE, neutral message, Retry-After)', type: ApiErrorDto })
   async status(

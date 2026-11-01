@@ -247,6 +247,12 @@ async function main(): Promise<void> {
       // mirror they deprecate (the removed proxy paths above must stay gone).
       assert.ok(paths.includes('/api/sessions'), `missing /api/sessions in ${paths.join(',')}`);
       assert.ok(paths.includes('/api/sessions/status'), `missing /api/sessions/status in ${paths.join(',')}`);
+      // Dropping the redundant per-handler `@Version('1')` must not drop the
+      // version segment from documented paths — `defaultVersion: '1'` (URI
+      // versioning) is the only thing that puts /v1 into these routes.
+      assert.ok(paths.includes('/api/v1/projects'), `missing /api/v1/projects in ${paths.join(',')}`);
+      assert.ok(paths.includes('/api/v1/organizations'), `missing /api/v1/organizations in ${paths.join(',')}`);
+      assert.ok(paths.includes('/api/v1/agents'), `missing /api/v1/agents in ${paths.join(',')}`);
     });
     await check('GET /swagger/v2.json has empty paths', '/swagger/v2.json', undefined, 200, (_res, body) => {
       assert.deepEqual((body as { paths?: unknown }).paths, {});

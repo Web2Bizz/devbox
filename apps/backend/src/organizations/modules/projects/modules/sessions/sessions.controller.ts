@@ -8,15 +8,13 @@ import {
   Post,
   UseGuards,
   UseInterceptors,
-  Version,
 } from "@nestjs/common";
-import { ApiBearerAuth, ApiResponse, ApiTags } from "@nestjs/swagger";
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagger";
 import { JwtAuthGuard } from "../../../../../auth/jwt-auth.guard";
 import { ReqUser } from "../../../../../auth/req-user.decorator";
 import type { RequestIdentity } from "../../../../../auth/identity.service";
 import { NoIndexInterceptor } from "../../../../../common/http/noindex.interceptor";
 import { ZodValidationPipe } from "../../../../../common/validation";
-import { V1Endpoint } from "../../../../../common/http/api/version";
 import { SessionsService } from "./sessions.service";
 import {
   ProjectSessionDto,
@@ -40,8 +38,7 @@ export class SessionsController {
   constructor(private readonly sessions: SessionsService) {}
 
   @Get()
-  @Version("1")
-  @V1Endpoint("List project sessions")
+  @ApiOperation({ summary: "List project sessions" })
   @ApiResponse({ status: 200, type: [ProjectSessionDto] })
   @ApiResponse({ status: 404, description: "not found (or no access)" })
   async list(
@@ -57,8 +54,7 @@ export class SessionsController {
   }
 
   @Post()
-  @Version("1")
-  @V1Endpoint("Create project session (binds projectId + optional chatId)")
+  @ApiOperation({ summary: "Create project session (binds projectId + optional chatId)" })
   @ApiResponse({ status: 201, type: ProjectSessionDto })
   @ApiResponse({ status: 404, description: "not found (or no access)" })
   async create(
@@ -76,8 +72,7 @@ export class SessionsController {
   }
 
   @Get(":sessionId")
-  @Version("1")
-  @V1Endpoint("Get project session")
+  @ApiOperation({ summary: "Get project session" })
   @ApiResponse({ status: 200, type: ProjectSessionDto })
   @ApiResponse({ status: 404, description: "not found (or no access)" })
   async get(
@@ -95,8 +90,7 @@ export class SessionsController {
   }
 
   @Patch(":sessionId/close")
-  @Version("1")
-  @V1Endpoint("Close project session")
+  @ApiOperation({ summary: "Close project session" })
   @ApiResponse({ status: 200, type: ProjectSessionDto })
   @ApiResponse({ status: 404, description: "not found (or no access)" })
   async close(

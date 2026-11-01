@@ -71,11 +71,10 @@ export function configureApp(app: INestApplication): void {
     allowedHeaders: [
       'content-type',
       'x-correlation-id',
-      'api-version',
       'x-user-id',
       'authorization',
     ],
-    exposedHeaders: ['x-correlation-id', 'api-version'],
+    exposedHeaders: ['x-correlation-id'],
     // true: the auth refresh httpOnly cookie (rush-code-refresh) + marker must
     // travel cross-origin (frontend :3001 → backend :3100). Origins stay
     // allowlisted above — no wildcard with credentials.

@@ -236,7 +236,8 @@ Phase B — backend (behind env flag, mock stays default):
    `@UseGuards(IdGuard)` + `req.user.id` instead of `resolveUserId`.
    `POST /api/v1/auth/login|logout`, `GET|PUT /api/v1/profile` (or whatever
    the package's server surface maps to) through `contracts/openapi.yaml` +
-   `contracts.ts` DTOs + `V1Endpoint` versioning.
+   `contracts.ts` DTOs + `@Version` (URI versioning, v1 is the default —
+   no per-endpoint version decorator needed).
 7. `health` gains `identity: 'real' | 'mock' | 'down'` (same tri-state as
    `npmRegistry`); `github_installations.user_id` backfill plan + future
    `users` table migration (`drizzle/00NN_*.sql`) — FK-less text stays until

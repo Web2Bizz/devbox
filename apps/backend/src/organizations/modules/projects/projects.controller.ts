@@ -14,9 +14,8 @@ import {
   Query,
   UseGuards,
   UseInterceptors,
-  Version,
 } from "@nestjs/common";
-import { ApiBearerAuth, ApiResponse, ApiTags } from "@nestjs/swagger";
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagger";
 import { NoIndexInterceptor } from "../../../common/http/noindex.interceptor";
 import { ZodValidationPipe } from "../../../common/validation";
 import { JwtAuthGuard } from "../../../auth/jwt-auth.guard";
@@ -34,7 +33,6 @@ import {
   type GithubLinkInput,
   type UpdateProjectInput,
 } from "./dto";
-import { V1Endpoint } from "../../../common/http/api/version";
 import { GithubLinkService } from "./modules/github/github-link.service";
 import { ProjectsService } from "./projects.service";
 import { ChatsService } from "./modules/chats/chats.service";
@@ -117,8 +115,7 @@ export class ProjectsController {
 
   @ApiTags("projects")
   @Get("projects")
-  @Version("1")
-  @V1Endpoint("List projects (org-scoped — use /organizations/:id/projects)")
+  @ApiOperation({ summary: "List projects (org-scoped — use /organizations/:id/projects)" })
   @ApiResponse({ status: 200, type: [ProjectDto] })
   async list(
     @Headers("x-correlation-id") correlationId?: string,
@@ -134,8 +131,7 @@ export class ProjectsController {
 
   @ApiTags("projects")
   @Post("projects")
-  @Version("1")
-  @V1Endpoint("Create project (use nested POST /organizations/:id/projects)")
+  @ApiOperation({ summary: "Create project (use nested POST /organizations/:id/projects)" })
   @ApiResponse({ status: 201, type: ProjectDto })
   async create(
     @Body(new ZodValidationPipe(createProjectSchema)) body: CreateProjectInput,
@@ -152,8 +148,7 @@ export class ProjectsController {
 
   @ApiTags("projects")
   @Get("projects/:id")
-  @Version("1")
-  @V1Endpoint("Get project by id")
+  @ApiOperation({ summary: "Get project by id" })
   @ApiResponse({ status: 200, type: ProjectDto })
   async get(
     @Param("id") id: string,
@@ -166,8 +161,7 @@ export class ProjectsController {
 
   @ApiTags("projects")
   @Patch("projects/:id")
-  @Version("1")
-  @V1Endpoint("Update project")
+  @ApiOperation({ summary: "Update project" })
   @ApiResponse({ status: 200, type: ProjectDto })
   async update(
     @Param("id") id: string,
@@ -181,8 +175,7 @@ export class ProjectsController {
 
   @ApiTags("projects")
   @Delete("projects/:id")
-  @Version("1")
-  @V1Endpoint("Delete project (cascades chats/sessions)")
+  @ApiOperation({ summary: "Delete project (cascades chats/sessions)" })
   @ApiResponse({ status: 204 })
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(
@@ -200,10 +193,7 @@ export class ProjectsController {
 
   @ApiTags("projects")
   @Post("projects/:id/github-link")
-  @Version("1")
-  @V1Endpoint(
-    "Link GitHub repository (removed — project github fields are authoritative)",
-  )
+  @ApiOperation({ summary: "Link GitHub repository (removed — project github fields are authoritative)" })
   @HttpCode(HttpStatus.GONE)
   async linkGithub(): Promise<never> {
     throw new GoneException(
@@ -213,8 +203,7 @@ export class ProjectsController {
 
   @ApiTags("projects")
   @Delete("projects/:id/github-link")
-  @Version("1")
-  @V1Endpoint("Unlink GitHub repository (removed)")
+  @ApiOperation({ summary: "Unlink GitHub repository (removed)" })
   @HttpCode(HttpStatus.GONE)
   async unlinkGithub(): Promise<never> {
     throw new GoneException(
@@ -224,8 +213,7 @@ export class ProjectsController {
 
   @ApiTags("projects")
   @Get("projects/:id/github-link")
-  @Version("1")
-  @V1Endpoint("GitHub link status")
+  @ApiOperation({ summary: "GitHub link status" })
   @ApiResponse({ status: 200, type: GithubLinkStatusDto })
   async githubStatus(
     @Param("id") id: string,
@@ -238,8 +226,7 @@ export class ProjectsController {
 
   @ApiTags("org-projects")
   @Get("organizations/:id/projects")
-  @Version("1")
-  @V1Endpoint("List organization projects (canonical)")
+  @ApiOperation({ summary: "List organization projects (canonical)" })
   @ApiResponse({ status: 200, type: [ProjectDto] })
   async listOrgProjects(
     @Param("id") id: string,
@@ -257,8 +244,7 @@ export class ProjectsController {
 
   @ApiTags("org-projects")
   @Post("organizations/:id/projects")
-  @Version("1")
-  @V1Endpoint("Create project in organization")
+  @ApiOperation({ summary: "Create project in organization" })
   @ApiResponse({ status: 201, type: ProjectDto })
   async createOrgProject(
     @Param("id") id: string,
@@ -277,8 +263,7 @@ export class ProjectsController {
 
   @ApiTags("org-projects")
   @Get("organizations/:id/projects/:projectId")
-  @Version("1")
-  @V1Endpoint("Get organization project (mismatch → 404)")
+  @ApiOperation({ summary: "Get organization project (mismatch → 404)" })
   @ApiResponse({ status: 200, type: ProjectDto })
   async getOrgProject(
     @Param("id") id: string,
@@ -296,8 +281,7 @@ export class ProjectsController {
 
   @ApiTags("org-projects")
   @Patch("organizations/:id/projects/:projectId")
-  @Version("1")
-  @V1Endpoint("Update organization project")
+  @ApiOperation({ summary: "Update organization project" })
   @ApiResponse({ status: 200, type: ProjectDto })
   async updateOrgProject(
     @Param("id") id: string,
@@ -312,8 +296,7 @@ export class ProjectsController {
 
   @ApiTags("org-projects")
   @Delete("organizations/:id/projects/:projectId")
-  @Version("1")
-  @V1Endpoint("Soft-delete organization project (stops containers)")
+  @ApiOperation({ summary: "Soft-delete organization project (stops containers)" })
   @ApiResponse({ status: 204 })
   @HttpCode(HttpStatus.NO_CONTENT)
   async removeOrgProject(
@@ -331,8 +314,7 @@ export class ProjectsController {
 
   @ApiTags("org-projects")
   @Post("organizations/:id/projects/:projectId/restore")
-  @Version("1")
-  @V1Endpoint("Restore soft-deleted project (API only, no UI)")
+  @ApiOperation({ summary: "Restore soft-deleted project (API only, no UI)" })
   @ApiResponse({ status: 200, type: ProjectDto })
   async restoreOrgProject(
     @Param("id") id: string,
@@ -347,8 +329,7 @@ export class ProjectsController {
 
   @ApiTags("org-projects")
   @Get("organizations/:id/projects/:projectId/effective-config")
-  @Version("1")
-  @V1Endpoint("Effective config (project overrides org, secrets masked)")
+  @ApiOperation({ summary: "Effective config (project overrides org, secrets masked)" })
   @ApiResponse({ status: 200, type: [EffectiveConfigDto] })
   async effectiveConfig(
     @Param("id") id: string,

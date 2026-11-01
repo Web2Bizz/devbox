@@ -10,11 +10,9 @@ import {
   Post,
   Query,
   UseGuards,
-  Version,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Inject, Optional, forwardRef } from '@nestjs/common';
-import { V1Endpoint } from '../common/http/api/version';
 import { DEFAULT_MOCK_USER_ID as DEFAULT_WORKSPACE_USER_ID } from '../auth/identity.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ReqUser } from '../auth/req-user.decorator';
@@ -107,10 +105,9 @@ export class WorkspacesController {
   }
 
   @Post('clone')
-  @Version('1')
   @UseGuards(JwtAuthGuard)
   @HttpCode(202)
-  @V1Endpoint('Clone a repo into the per-user workspace (idempotent, per-user lock)')
+  @ApiOperation({ summary: 'Clone a repo into the per-user workspace (idempotent, per-user lock)' })
   @ApiBearerAuth()
   @ApiResponse({ status: 202, type: WorkspaceCloneJobDto })
   @ApiResponse({ status: 400, description: 'bad repoUrl/repoName' })
@@ -128,9 +125,8 @@ export class WorkspacesController {
   }
 
   @Get(':repo/clone-status')
-  @Version('1')
   @UseGuards(JwtAuthGuard)
-  @V1Endpoint('Clone job status for a repo in the per-user workspace')
+  @ApiOperation({ summary: 'Clone job status for a repo in the per-user workspace' })
   @ApiBearerAuth()
   @ApiParam({ name: 'repo', example: 'demo' })
   @ApiResponse({ status: 200, type: WorkspaceCloneJobDto })
@@ -149,9 +145,8 @@ export class WorkspacesController {
   }
 
   @Get(':repo/tree')
-  @Version('1')
   @UseGuards(JwtAuthGuard)
-  @V1Endpoint('Readonly workspace file tree (jailed per-user, depth 0-5)')
+  @ApiOperation({ summary: 'Readonly workspace file tree (jailed per-user, depth 0-5)' })
   @ApiBearerAuth()
   @ApiParam({ name: 'repo', example: 'demo' })
   @ApiQuery({ name: 'path', required: false, example: '.' })
@@ -179,9 +174,8 @@ export class WorkspacesController {
   }
 
   @Get(':repo/submodules')
-  @Version('1')
   @UseGuards(JwtAuthGuard)
-  @V1Endpoint('Workspace repo submodules (.gitmodules + status, jailed paths)')
+  @ApiOperation({ summary: 'Workspace repo submodules (.gitmodules + status, jailed paths)' })
   @ApiBearerAuth()
   @ApiParam({ name: 'repo', example: 'demo' })
   @ApiResponse({ status: 200, type: [WorkspaceSubmoduleDto] })

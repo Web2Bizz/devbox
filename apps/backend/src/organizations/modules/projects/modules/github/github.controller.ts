@@ -11,15 +11,14 @@ import {
   ServiceUnavailableException,
   UnauthorizedException,
   UseGuards,
-  Version,
 } from "@nestjs/common";
 import {
   ApiBearerAuth,
+  ApiOperation,
   ApiQuery,
   ApiResponse,
   ApiTags,
 } from "@nestjs/swagger";
-import { V1Endpoint } from "../../../../../common/http/api/version";
 import { DEFAULT_MOCK_USER_ID } from "../../../../../auth/identity.service";
 import { JwtAuthGuard } from "../../../../../auth/jwt-auth.guard";
 import { ReqUser } from "../../../../../auth/req-user.decorator";
@@ -84,8 +83,7 @@ export class GithubController {
   ) {}
 
   @Get("install-url")
-  @Version("1")
-  @V1Endpoint("Get the GitHub App install URL for the current user")
+  @ApiOperation({ summary: "Get the GitHub App install URL for the current user" })
   @ApiResponse({ status: 200, type: GithubInstallUrlDto })
   @ApiResponse({
     status: 503,
@@ -104,9 +102,8 @@ export class GithubController {
   }
 
   @Get("callback")
-  @Version("1")
   @UseGuards(JwtAuthGuard)
-  @V1Endpoint("Bind a fresh GitHub App installation to the current user")
+  @ApiOperation({ summary: "Bind a fresh GitHub App installation to the current user" })
   @ApiBearerAuth()
   @ApiQuery({
     name: "installation_id",
@@ -140,9 +137,8 @@ export class GithubController {
   }
 
   @Post("webhook")
-  @Version("1")
   @HttpCode(200)
-  @V1Endpoint("GitHub App webhook (installation lifecycle, signature-verified)")
+  @ApiOperation({ summary: "GitHub App webhook (installation lifecycle, signature-verified)" })
   @ApiResponse({ status: 200, type: GithubWebhookAckDto })
   @ApiResponse({ status: 401, description: "Invalid webhook signature" })
   @ApiResponse({ status: 503, description: "Webhook secret is not configured" })
@@ -213,9 +209,8 @@ export class GithubController {
   }
 
   @Get("repos")
-  @Version("1")
   @UseGuards(JwtAuthGuard)
-  @V1Endpoint("List GitHub App installation repositories for the current user")
+  @ApiOperation({ summary: "List GitHub App installation repositories for the current user" })
   @ApiBearerAuth()
   @ApiQuery({ name: "page", required: false, type: Number, example: 1 })
   @ApiQuery({ name: "per_page", required: false, type: Number, example: 30 })

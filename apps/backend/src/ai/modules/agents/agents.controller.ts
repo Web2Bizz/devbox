@@ -1,7 +1,6 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
-import { ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ZodValidationPipe } from '../../../common/validation';
-import { V1Endpoint } from '../../../common/http/api/version';
 import { AgentsService } from './agents.service';
 import {
   AgentDto,
@@ -19,14 +18,14 @@ export class AgentsController {
   constructor(private readonly agents: AgentsService) {}
 
   @Get()
-  @V1Endpoint('List available AI agents')
+  @ApiOperation({ summary: 'List available AI agents' })
   @ApiResponse({ status: 200, type: [AgentDto] })
   list(): AgentDto[] {
     return this.agents.list();
   }
 
   @Post(':agentId/ask')
-  @V1Endpoint('Ask an AI agent a question (mock answer)')
+  @ApiOperation({ summary: 'Ask an AI agent a question (mock answer)' })
   @ApiParam({ name: 'agentId', example: 'ask' })
   @ApiResponse({ status: 200, type: AskAnswerDto })
   @ApiResponse({ status: 404, description: 'agent not found' })

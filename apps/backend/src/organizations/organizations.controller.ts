@@ -12,15 +12,13 @@ import {
   Req,
   UseGuards,
   UseInterceptors,
-  Version,
 } from "@nestjs/common";
-import { ApiBearerAuth, ApiResponse, ApiTags } from "@nestjs/swagger";
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagger";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { ReqUser } from "../auth/req-user.decorator";
 import type { RequestIdentity } from "../auth/identity.service";
 import { NoIndexInterceptor } from "../common/http/noindex.interceptor";
 import { ZodValidationPipe } from "../common/validation";
-import { V1Endpoint } from "../common/http/api/version";
 import {
   OrganizationDto,
   OrganizationInviteDto,
@@ -59,8 +57,7 @@ export class OrganizationsController {
   constructor(private readonly orgs: OrganizationsService) {}
 
   @Post()
-  @Version("1")
-  @V1Endpoint("Create organization (caller becomes maintainer)")
+  @ApiOperation({ summary: "Create organization (caller becomes maintainer)" })
   @ApiResponse({ status: 201, type: OrganizationDto })
   @ApiResponse({ status: 400, description: "bad request (validation)" })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
@@ -76,8 +73,7 @@ export class OrganizationsController {
   }
 
   @Get()
-  @Version("1")
-  @V1Endpoint("List organizations of the caller (membership-scoped)")
+  @ApiOperation({ summary: "List organizations of the caller (membership-scoped)" })
   @ApiResponse({ status: 200, type: [OrganizationDto] })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
   @ApiResponse({ status: 503, description: "postgres unreachable (EXTERNAL_UNAVAILABLE, Retry-After)" })
@@ -89,8 +85,7 @@ export class OrganizationsController {
   }
 
   @Get(":id")
-  @Version("1")
-  @V1Endpoint("Get organization by id (members only)")
+  @ApiOperation({ summary: "Get organization by id (members only)" })
   @ApiResponse({ status: 200, type: OrganizationDto })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
   @ApiResponse({ status: 404, description: "not found (or not a member)" })
@@ -104,8 +99,7 @@ export class OrganizationsController {
   }
 
   @Patch(":id")
-  @Version("1")
-  @V1Endpoint("Update organization settings (maintainer only)")
+  @ApiOperation({ summary: "Update organization settings (maintainer only)" })
   @ApiResponse({ status: 200, type: OrganizationDto })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
   @ApiResponse({ status: 403, description: "member without the maintainer role" })
@@ -121,8 +115,7 @@ export class OrganizationsController {
   }
 
   @Delete(":id")
-  @Version("1")
-  @V1Endpoint("Delete organization (maintainer only, projects survive)")
+  @ApiOperation({ summary: "Delete organization (maintainer only, projects survive)" })
   @ApiResponse({ status: 204 })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
   @ApiResponse({ status: 403, description: "member without the maintainer role" })
@@ -138,8 +131,7 @@ export class OrganizationsController {
   }
 
   @Get(":id/members")
-  @Version("1")
-  @V1Endpoint("List organization members (members only)")
+  @ApiOperation({ summary: "List organization members (members only)" })
   @ApiResponse({ status: 200, type: [OrganizationMemberDto] })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
   @ApiResponse({ status: 404, description: "not found (or not a member)" })
@@ -153,8 +145,7 @@ export class OrganizationsController {
   }
 
   @Post(":id/members")
-  @Version("1")
-  @V1Endpoint("Add organization member (maintainer only)")
+  @ApiOperation({ summary: "Add organization member (maintainer only)" })
   @ApiResponse({ status: 201, type: OrganizationMemberDto })
   @ApiResponse({ status: 400, description: "bad request (validation)" })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
@@ -172,8 +163,7 @@ export class OrganizationsController {
   }
 
   @Patch(":id/members/:userId")
-  @Version("1")
-  @V1Endpoint("Change member role (maintainer only)")
+  @ApiOperation({ summary: "Change member role (maintainer only)" })
   @ApiResponse({ status: 200, type: OrganizationMemberDto })
   @ApiResponse({ status: 400, description: "cannot demote the last maintainer (also validation)" })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
@@ -192,8 +182,7 @@ export class OrganizationsController {
   }
 
   @Delete(":id/members/:userId")
-  @Version("1")
-  @V1Endpoint("Remove organization member (maintainer only, never the last maintainer)")
+  @ApiOperation({ summary: "Remove organization member (maintainer only, never the last maintainer)" })
   @ApiResponse({ status: 204 })
   @ApiResponse({ status: 400, description: "cannot remove the last maintainer (also validation)" })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
@@ -211,8 +200,7 @@ export class OrganizationsController {
   }
 
   @Post(":id/invites")
-  @Version("1")
-  @V1Endpoint("Mint a persistent single-use invite (maintainer only, no TTL)")
+  @ApiOperation({ summary: "Mint a persistent single-use invite (maintainer only, no TTL)" })
   @ApiResponse({ status: 201, type: OrganizationInviteDto })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
   @ApiResponse({ status: 403, description: "member without the maintainer role" })
@@ -229,8 +217,7 @@ export class OrganizationsController {
   }
 
   @Post("invites/accept")
-  @Version("1")
-  @V1Endpoint("Accept a persistent single-use invite (uuidv7, no TTL)")
+  @ApiOperation({ summary: "Accept a persistent single-use invite (uuidv7, no TTL)" })
   @ApiResponse({ status: 200, type: OrganizationMemberDto })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
   @ApiResponse({ status: 404, description: "invite not found or already used" })
@@ -246,8 +233,7 @@ export class OrganizationsController {
   }
 
   @Post(":id/projects/:projectId")
-  @Version("1")
-  @V1Endpoint("Attach a project (removed — 1:1, 410)")
+  @ApiOperation({ summary: "Attach a project (removed — 1:1, 410)" })
   @ApiResponse({ status: 410, description: "link/unlink removed (1:1 model)" })
   @HttpCode(HttpStatus.GONE)
   async linkProject(): Promise<void> {
@@ -255,8 +241,7 @@ export class OrganizationsController {
   }
 
   @Delete(":id/projects/:projectId")
-  @Version("1")
-  @V1Endpoint("Detach a project (removed — 1:1, 410)")
+  @ApiOperation({ summary: "Detach a project (removed — 1:1, 410)" })
   @ApiResponse({ status: 410, description: "link/unlink removed (1:1 model)" })
   @HttpCode(HttpStatus.GONE)
   async unlinkProject(): Promise<void> {

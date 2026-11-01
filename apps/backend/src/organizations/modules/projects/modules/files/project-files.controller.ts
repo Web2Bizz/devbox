@@ -1,11 +1,10 @@
-import { Controller, Get, Headers, Param, Query, UseGuards, UseInterceptors, Version } from '@nestjs/common';
-import { ApiBearerAuth, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Controller, Get, Headers, Param, Query, UseGuards, UseInterceptors } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../../../../auth/jwt-auth.guard';
 import { ReqUser } from '../../../../../auth/req-user.decorator';
 import type { RequestIdentity } from '../../../../../auth/identity.service';
 import { NoIndexInterceptor } from '../../../../../common/http/noindex.interceptor';
 import { ZodValidationPipe } from '../../../../../common/validation';
-import { V1Endpoint } from '../../../../../common/http/api/version';
 import { FileNodeDto, filesQuerySchema, type FilesQuery } from './dto';
 import { ProjectFilesService, type FileNode } from './project-files.service';
 
@@ -26,8 +25,7 @@ export class ProjectFilesController {
   constructor(private readonly files: ProjectFilesService) {}
 
   @Get()
-  @Version('1')
-  @V1Endpoint('Readonly project file listing (path + depth, jailed, depth 0-5)')
+  @ApiOperation({ summary: 'Readonly project file listing (path + depth, jailed, depth 0-5)' })
   @ApiQuery({ name: 'path', required: false, example: '.' })
   @ApiQuery({ name: 'depth', required: false, example: 1 })
   @ApiResponse({ status: 200, type: FileNodeDto })

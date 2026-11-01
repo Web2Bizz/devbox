@@ -1,7 +1,6 @@
-import { BadRequestException, Controller, Get, Headers, NotFoundException, Param, Query, UseGuards, Version } from '@nestjs/common';
-import { ApiBearerAuth, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { BadRequestException, Controller, Get, Headers, NotFoundException, Param, Query, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ZodValidationPipe } from '../common/validation';
-import { V1Endpoint } from '../common/http/api/version';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ReqUser } from '../auth/req-user.decorator';
 import type { RequestIdentity } from '../auth/identity.service';
@@ -34,8 +33,7 @@ export class ReposController {
   ) {}
 
   @Get()
-  @Version('1')
-  @V1Endpoint('List valid git repos in your own space (readonly, corrupted skipped)')
+  @ApiOperation({ summary: 'List valid git repos in your own space (readonly, corrupted skipped)' })
   @ApiQuery({ name: 'limit', required: false, example: 50 })
   @ApiQuery({ name: 'offset', required: false, example: 0 })
   @ApiQuery({ name: 'q', required: false, example: 'demo' })
@@ -52,8 +50,7 @@ export class ReposController {
   }
 
   @Get(':userSpace')
-  @Version('1')
-  @V1Endpoint('List valid git repos for one space you can access (readonly, corrupted skipped)')
+  @ApiOperation({ summary: 'List valid git repos for one space you can access (readonly, corrupted skipped)' })
   @ApiParam({ name: 'userSpace', example: 'alice' })
   @ApiQuery({ name: 'limit', required: false, example: 50 })
   @ApiQuery({ name: 'offset', required: false, example: 0 })

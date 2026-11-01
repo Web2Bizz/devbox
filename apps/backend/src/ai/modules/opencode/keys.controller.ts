@@ -8,10 +8,8 @@ import {
   Req,
   UnauthorizedException,
   UseGuards,
-  Version,
 } from "@nestjs/common";
-import { ApiBearerAuth, ApiResponse, ApiTags } from "@nestjs/swagger";
-import { V1Endpoint } from "../../../common/http/api/version";
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagger";
 import { JwtAuthGuard } from "../../../auth/jwt-auth.guard";
 import type { RequestIdentity } from "../../../auth/identity.service";
 import { ReqUser } from "../../../auth/req-user.decorator";
@@ -76,8 +74,7 @@ export class OpencodeKeysController {
   }
 
   @Put("key")
-  @Version("1")
-  @V1Endpoint("Store your own OpenCode API key (encrypted at rest)")
+  @ApiOperation({ summary: "Store your own OpenCode API key (encrypted at rest)" })
   @ApiResponse({ status: 200, type: OpencodeKeyResultDto })
   @ApiResponse({ status: 400, description: "bad request (validation)" })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
@@ -100,8 +97,7 @@ export class OpencodeKeysController {
   }
 
   @Get("key")
-  @Version("1")
-  @V1Endpoint("Whether you have an OpenCode API key stored")
+  @ApiOperation({ summary: "Whether you have an OpenCode API key stored" })
   @ApiResponse({ status: 200, type: OpencodeKeyStatusDto })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
   async keyStatus(
@@ -118,8 +114,7 @@ export class OpencodeKeysController {
   }
 
   @Delete("key")
-  @Version("1")
-  @V1Endpoint("Delete your stored OpenCode API key")
+  @ApiOperation({ summary: "Delete your stored OpenCode API key" })
   @ApiResponse({ status: 200, type: OpencodeKeyDeleteResultDto })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
   async deleteKey(
@@ -131,9 +126,8 @@ export class OpencodeKeysController {
   }
 
   @Get("usage")
-  @Version("1")
   @HttpCode(200)
-  @V1Endpoint("Live OpenCode balance+usage for your stored key")
+  @ApiOperation({ summary: "Live OpenCode balance+usage for your stored key" })
   @ApiResponse({ status: 200, type: OpencodeUsageDto })
   @ApiResponse({ status: 401, description: "missing/invalid bearer or rejected key" })
   @ApiResponse({ status: 404, description: "no key stored (opencode_key_missing)" })

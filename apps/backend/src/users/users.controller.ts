@@ -7,10 +7,8 @@ import {
   Req,
   UseGuards,
   UseInterceptors,
-  Version,
 } from "@nestjs/common";
-import { ApiBearerAuth, ApiResponse, ApiTags } from "@nestjs/swagger";
-import { V1Endpoint } from "../common/http/api/version";
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagger";
 import { NoIndexInterceptor } from "../common/http/noindex.interceptor";
 import { AuthUserDto } from "../auth/auth.dto";
 import { ReqUser } from "../auth/req-user.decorator";
@@ -39,8 +37,7 @@ export class UsersController {
   constructor(private readonly users: UsersService) {}
 
   @Get(":id")
-  @Version("1")
-  @V1Endpoint("Get own user profile (403 for anyone else)")
+  @ApiOperation({ summary: "Get own user profile (403 for anyone else)" })
   @ApiResponse({ status: 200, type: AuthUserDto })
   @ApiResponse({ status: 403, description: "not your profile" })
   @ApiResponse({ status: 404, description: "own profile missing" })

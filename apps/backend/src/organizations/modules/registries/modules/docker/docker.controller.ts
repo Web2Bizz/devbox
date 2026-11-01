@@ -1,6 +1,5 @@
-import { Controller, Get, Headers, UseGuards, Version } from '@nestjs/common';
+import { Controller, Get, Headers, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { V1Endpoint } from '../../../../../common/http/api/version';
 import { ApiErrorDto } from '../../../../../common/http/api/dto';
 import { JwtAuthGuard } from '../../../../../auth/jwt-auth.guard';
 import { DockerRegistryService } from './docker.service';
@@ -27,9 +26,7 @@ export class DockerRegistryController {
   constructor(private readonly registry: DockerRegistryService) {}
 
   @Get('catalog')
-  @Version('1')
-  @V1Endpoint('DEPRECATED: use GET /api/v1/registry/docker — List registry repositories (proxy → Docker Registry /v2/_catalog, 503 when unreachable)')
-  @ApiOperation({ deprecated: true })
+  @ApiOperation({ summary: 'DEPRECATED: use GET /api/v1/registry/docker — List registry repositories (proxy → Docker Registry /v2/_catalog, 503 when unreachable)', deprecated: true })
   @ApiResponse({ status: 200, description: 'live catalog', type: RegistryCatalogDto })
   @ApiResponse({ status: 503, description: 'registry unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
   async catalog(

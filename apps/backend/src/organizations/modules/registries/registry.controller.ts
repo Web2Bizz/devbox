@@ -1,6 +1,5 @@
-import { Controller, Get, Headers, UseGuards, Version } from '@nestjs/common';
-import { ApiBearerAuth, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { V1Endpoint } from '../../../common/http/api/version';
+import { Controller, Get, Headers, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ApiErrorDto } from '../../../common/http/api/dto';
 import { JwtAuthGuard } from '../../../auth/jwt-auth.guard';
 import { DockerRegistryService } from './modules/docker/docker.service';
@@ -36,8 +35,7 @@ export class RegistryController {
   ) {}
 
   @Get('docker')
-  @Version('1')
-  @V1Endpoint('List docker registry repositories (proxy → Docker Registry /v2/_catalog, 503 when unreachable)')
+  @ApiOperation({ summary: 'List docker registry repositories (proxy → Docker Registry /v2/_catalog, 503 when unreachable)' })
   @ApiResponse({ status: 200, description: 'live catalog', type: RegistryCatalogDto })
   @ApiResponse({ status: 503, description: 'registry unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
   async getDocker(
@@ -48,8 +46,7 @@ export class RegistryController {
   }
 
   @Get('npm')
-  @Version('1')
-  @V1Endpoint('List npm registry status (probe → Verdaccio /-/ping, 503 when unreachable or auth refused)')
+  @ApiOperation({ summary: 'List npm registry status (probe → Verdaccio /-/ping, 503 when unreachable or auth refused)' })
   @ApiResponse({ status: 200, description: 'live npm status', type: NpmRegistryStatusDto })
   @ApiResponse({ status: 503, description: 'npm registry unreachable or auth refused (EXTERNAL_UNAVAILABLE, neutral message, Retry-After)', type: ApiErrorDto })
   async getNpm(

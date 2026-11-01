@@ -17,12 +17,14 @@ import {
   Version,
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiResponse, ApiTags } from "@nestjs/swagger";
-import { NoIndexInterceptor } from "../../../common/http/noindex.interceptor";import { ZodValidationPipe } from "../../../common/validation";
+import { NoIndexInterceptor } from "../../../common/http/noindex.interceptor";
+import { ZodValidationPipe } from "../../../common/validation";
 import { JwtAuthGuard } from "../../../users/auth/jwt-auth.guard";
 import { ReqUser } from "../../../users/auth/req-user.decorator";
 import type { RequestIdentity } from "../../../users/auth/identity.service";
 import { OrganizationsService } from "../../../organizations/organizations.service";
 import {
+  EffectiveConfigDto,
   GithubLinkStatusDto,
   ProjectDto,
   createProjectSchema,
@@ -39,9 +41,22 @@ import { ChatsService } from "./modules/chats/chats.service";
 import { SessionsService } from "./modules/sessions/sessions.service";
 
 /**
- * Projects CRUD + github link endpoints.
- * Global 'api' prefix + URI versioning supply /api/v1 — controller
- * declares only the resource segment.
+ * The single projects controller — serves BOTH project surfaces (one
+ * controller per module, CODE_OF_CONDUCT):
+ *
+ * 1. Top-level: /projects CRUD + github link endpoints.
+ *    Global 'api' prefix + URI versioning supply /api/v1.
+ * 2. Canonical nested (1:1 model):
+ *    GET /organizations/:id/projects (?includeDeleted, member-visible)
+ *    POST /organizations/:id/projects (orgId forced from path)
+ *    GET /organizations/:id/projects/:projectId (assertBelongs, mismatch → 404)
+ *    PATCH/DELETE (soft) + POST .../restore (API only) + GET .../effective-config.
+ *    Membership enforced via OrganizationsService.getRole (404 for strangers).
+ *
+ * There is no router prefix on the class: every method spells out its full
+ * path, so the URL set is exactly the union of the two former controllers.
+ * Methods are ordered former-top-level first, then former-nested — Express
+ * registers routes in declaration order.
  *
  * Security (Card C1, reuse of the Card 5 access layer):
  * - Class-level JwtAuthGuard + @ReqUser() identity only — there is no
@@ -53,11 +68,13 @@ import { SessionsService } from "./modules/sessions/sessions.service";
  * - GET/PATCH/DELETE :id (+ github status) gate through
  *   OrganizationsService.assertProjectAccess (org-linked → member,
  *   user-space → owner; strangers → 404, no existence leak — the same
- *   no-enumeration rule as OrgProjectsController.memberOrThrow).
+ *   no-enumeration rule as memberOrThrow).
  * - Anonymous → 401 from the guard (before any DB touch).
+ *
+ * Swagger keeps the two former groups: @ApiTags("projects") on the
+ * top-level methods, @ApiTags("org-projects") on the nested ones.
  */
-@ApiTags("projects")
-@Controller("projects")
+@Controller()
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 @UseInterceptors(NoIndexInterceptor)
@@ -90,7 +107,16 @@ export class ProjectsController {
     return project;
   }
 
-  @Get()
+  private async memberOrThrow(orgId: string, userId: string, correlationId?: string): Promise<void> {
+    const role = await this.orgs.getRole(orgId, userId, correlationId);
+    if (!role) {
+      const { NotFoundException } = await import("@nestjs/common");
+      throw new NotFoundException(`Organization ${orgId} not found`);
+    }
+  }
+
+  @ApiTags("projects")
+  @Get("projects")
   @Version("1")
   @V1Endpoint("List projects (org-scoped — use /organizations/:id/projects)")
   @ApiResponse({ status: 200, type: [ProjectDto] })
@@ -106,7 +132,8 @@ export class ProjectsController {
     });
   }
 
-  @Post()
+  @ApiTags("projects")
+  @Post("projects")
   @Version("1")
   @V1Endpoint("Create project (use nested POST /organizations/:id/projects)")
   @ApiResponse({ status: 201, type: ProjectDto })
@@ -123,7 +150,8 @@ export class ProjectsController {
     )) as ProjectDto;
   }
 
-  @Get(":id")
+  @ApiTags("projects")
+  @Get("projects/:id")
   @Version("1")
   @V1Endpoint("Get project by id")
   @ApiResponse({ status: 200, type: ProjectDto })
@@ -136,7 +164,8 @@ export class ProjectsController {
     return project as unknown as ProjectDto;
   }
 
-  @Patch(":id")
+  @ApiTags("projects")
+  @Patch("projects/:id")
   @Version("1")
   @V1Endpoint("Update project")
   @ApiResponse({ status: 200, type: ProjectDto })
@@ -150,7 +179,8 @@ export class ProjectsController {
     return (await this.projects.update(id, body, correlationId)) as ProjectDto;
   }
 
-  @Delete(":id")
+  @ApiTags("projects")
+  @Delete("projects/:id")
   @Version("1")
   @V1Endpoint("Delete project (cascades chats/sessions)")
   @ApiResponse({ status: 204 })
@@ -168,7 +198,8 @@ export class ProjectsController {
     await this.projects.remove(id, correlationId);
   }
 
-  @Post(":id/github-link")
+  @ApiTags("projects")
+  @Post("projects/:id/github-link")
   @Version("1")
   @V1Endpoint(
     "Link GitHub repository (removed — project github fields are authoritative)",
@@ -180,7 +211,8 @@ export class ProjectsController {
     );
   }
 
-  @Delete(":id/github-link")
+  @ApiTags("projects")
+  @Delete("projects/:id/github-link")
   @Version("1")
   @V1Endpoint("Unlink GitHub repository (removed)")
   @HttpCode(HttpStatus.GONE)
@@ -190,7 +222,8 @@ export class ProjectsController {
     );
   }
 
-  @Get(":id/github-link")
+  @ApiTags("projects")
+  @Get("projects/:id/github-link")
   @Version("1")
   @V1Endpoint("GitHub link status")
   @ApiResponse({ status: 200, type: GithubLinkStatusDto })
@@ -201,5 +234,129 @@ export class ProjectsController {
   ): Promise<GithubLinkStatusDto> {
     await this.assertAccess(id, identity.id, correlationId);
     return (await this.github.status(id, correlationId)) as GithubLinkStatusDto;
+  }
+
+  @ApiTags("org-projects")
+  @Get("organizations/:id/projects")
+  @Version("1")
+  @V1Endpoint("List organization projects (canonical)")
+  @ApiResponse({ status: 200, type: [ProjectDto] })
+  async listOrgProjects(
+    @Param("id") id: string,
+    @ReqUser() identity: RequestIdentity,
+    @Headers("x-correlation-id") correlationId?: string,
+    @Query("includeDeleted") includeDeleted?: string,
+  ): Promise<ProjectDto[]> {
+    await this.memberOrThrow(id, identity.id, correlationId);
+    const flag = includeDeleted === "true" || includeDeleted === "1";
+    return (await this.projects.list(correlationId, {
+      orgId: id,
+      includeDeleted: flag,
+    })) as ProjectDto[];
+  }
+
+  @ApiTags("org-projects")
+  @Post("organizations/:id/projects")
+  @Version("1")
+  @V1Endpoint("Create project in organization")
+  @ApiResponse({ status: 201, type: ProjectDto })
+  async createOrgProject(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(createProjectSchema)) body: CreateProjectInput,
+    @ReqUser() identity: RequestIdentity,
+    @Headers("x-correlation-id") correlationId?: string,
+  ): Promise<ProjectDto> {
+    await this.memberOrThrow(id, identity.id, correlationId);
+    // ownerId is never trusted from the body — the row is always owned by
+    // the Bearer identity (same rule as top-level POST /projects, C1).
+    return (await this.projects.create(
+      { ...body, orgId: id, ownerId: identity.id },
+      correlationId,
+    )) as ProjectDto;
+  }
+
+  @ApiTags("org-projects")
+  @Get("organizations/:id/projects/:projectId")
+  @Version("1")
+  @V1Endpoint("Get organization project (mismatch → 404)")
+  @ApiResponse({ status: 200, type: ProjectDto })
+  async getOrgProject(
+    @Param("id") id: string,
+    @Param("projectId") projectId: string,
+    @ReqUser() identity: RequestIdentity,
+    @Headers("x-correlation-id") correlationId?: string,
+    @Query("includeDeleted") includeDeleted?: string,
+  ): Promise<ProjectDto> {
+    await this.memberOrThrow(id, identity.id, correlationId);
+    const flag = includeDeleted === "true" || includeDeleted === "1";
+    return (await this.projects.assertProjectBelongsToOrg(id, projectId, correlationId, {
+      includeDeleted: flag,
+    })) as unknown as ProjectDto;
+  }
+
+  @ApiTags("org-projects")
+  @Patch("organizations/:id/projects/:projectId")
+  @Version("1")
+  @V1Endpoint("Update organization project")
+  @ApiResponse({ status: 200, type: ProjectDto })
+  async updateOrgProject(
+    @Param("id") id: string,
+    @Param("projectId") projectId: string,
+    @Body(new ZodValidationPipe(updateProjectSchema)) body: UpdateProjectInput,
+    @ReqUser() identity: RequestIdentity,
+    @Headers("x-correlation-id") correlationId?: string,
+  ): Promise<ProjectDto> {
+    await this.memberOrThrow(id, identity.id, correlationId);
+    return (await this.projects.update(projectId, body, correlationId, { orgId: id })) as ProjectDto;
+  }
+
+  @ApiTags("org-projects")
+  @Delete("organizations/:id/projects/:projectId")
+  @Version("1")
+  @V1Endpoint("Soft-delete organization project (stops containers)")
+  @ApiResponse({ status: 204 })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async removeOrgProject(
+    @Param("id") id: string,
+    @Param("projectId") projectId: string,
+    @ReqUser() identity: RequestIdentity,
+    @Headers("x-correlation-id") correlationId?: string,
+  ): Promise<void> {
+    await this.memberOrThrow(id, identity.id, correlationId);
+    await this.projects.assertProjectBelongsToOrg(id, projectId, correlationId);
+    await this.sessions.removeByProject(projectId, correlationId);
+    await this.chats.removeByProject(projectId, correlationId);
+    await this.projects.remove(projectId, correlationId);
+  }
+
+  @ApiTags("org-projects")
+  @Post("organizations/:id/projects/:projectId/restore")
+  @Version("1")
+  @V1Endpoint("Restore soft-deleted project (API only, no UI)")
+  @ApiResponse({ status: 200, type: ProjectDto })
+  async restoreOrgProject(
+    @Param("id") id: string,
+    @Param("projectId") projectId: string,
+    @ReqUser() identity: RequestIdentity,
+    @Headers("x-correlation-id") correlationId?: string,
+  ): Promise<ProjectDto> {
+    await this.memberOrThrow(id, identity.id, correlationId);
+    await this.projects.assertProjectBelongsToOrg(id, projectId, correlationId, { includeDeleted: true });
+    return (await this.projects.restore(projectId, correlationId)) as ProjectDto;
+  }
+
+  @ApiTags("org-projects")
+  @Get("organizations/:id/projects/:projectId/effective-config")
+  @Version("1")
+  @V1Endpoint("Effective config (project overrides org, secrets masked)")
+  @ApiResponse({ status: 200, type: [EffectiveConfigDto] })
+  async effectiveConfig(
+    @Param("id") id: string,
+    @Param("projectId") projectId: string,
+    @ReqUser() identity: RequestIdentity,
+    @Headers("x-correlation-id") correlationId?: string,
+  ): Promise<EffectiveConfigDto[]> {
+    await this.memberOrThrow(id, identity.id, correlationId);
+    return (await this.projects.effectiveConfig(id, projectId, correlationId)) as EffectiveConfigDto[];
   }
 }

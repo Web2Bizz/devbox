@@ -19,8 +19,9 @@ import { OrganizationsModule } from "../../../organizations/organizations.module
  * from the global CommonModule (503 when PG is down).
  * WorkspacePathService is provided directly (not via WorkspacesModule) to
  * avoid a module cycle; the service is stateless so a second instance is
- * safe. OrgProjectsController lives on OrganizationsModule (same folder
- * as the controller file) — not duplicated here.
+ * safe. Both project surfaces (top-level /projects and the canonical
+ * nested /organizations/:id/projects) are served by the single
+ * ProjectsController in this module — one controller per module.
  */
 @Module({
   imports: [

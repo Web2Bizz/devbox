@@ -147,7 +147,7 @@ async function main(): Promise<void> {
   configureApp(app);
   if (testDb.mode === "live") {
     const { UsersService } = await import("../../../../users/users.service");
-    const { TokenService } = await import("../../../../users/auth/token.service");
+    const { TokenService } = await import("../../../../auth/token.service");
     const users = app.get(UsersService, { strict: false }) as {
       clearAllForTests: () => Promise<void>;
     };

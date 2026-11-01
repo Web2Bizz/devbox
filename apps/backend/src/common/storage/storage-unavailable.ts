@@ -8,6 +8,8 @@ export const STORAGE_UNAVAILABLE_MESSAGE =
 /**
  * storageUnavailable — unified deny for the single REPOS_ROOT catalog.
  *
+ * SCOPE: Common — common/storage next to the WorkspacePathService jail.
+ *
  * REPOS_ROOT is the ONLY source of truth for reads AND writes. When it is
  * empty/whitespace (unconfigured), every storage READ (repos list, workspaces
  * tree/submodules, project-files tree, clone dest) funnels through here →

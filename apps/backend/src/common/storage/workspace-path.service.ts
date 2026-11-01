@@ -46,6 +46,9 @@ export type ProjectResolved = {
 /**
  * WorkspacePathService — scoped path jail for projects (organizations epic).
  *
+ * SCOPE: Common — lives in common/storage (503 gate + jail), stateless and
+ * provided directly (no WorkspacesModule dependency).
+ *
  * Canonical layout on disk (REPOS_ROOT, strict, БЕЗ сегмента `workspace`):
  *   users/<user_uuid>/projects/<project_uuid>/{content,.secrets}
  *   users/<user_uuid>/.secrets

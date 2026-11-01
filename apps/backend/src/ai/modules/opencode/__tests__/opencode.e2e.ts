@@ -284,7 +284,7 @@ async function main(): Promise<void> {
   const results: CheckResult[] = [];
 
   // Bearer for the guarded mirror routes (guard passes, gate denies 503 w/o DB).
-  const { TokenService } = await import('../../../../users/auth/token.service');
+  const { TokenService } = await import('../../../../auth/token.service');
   const tokens = app.get(TokenService, { strict: false }) as {
     sign: (
       claims: Record<string, unknown>,

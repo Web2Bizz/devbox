@@ -12,10 +12,10 @@ import {
 import { ApiBearerAuth, ApiResponse, ApiTags } from "@nestjs/swagger";
 import { V1Endpoint } from "../common/http/api/version";
 import { NoIndexInterceptor } from "../common/http/noindex.interceptor";
-import { AuthUserDto } from "./auth/auth.dto";
-import { ReqUser } from "./auth/req-user.decorator";
-import type { RequestIdentity } from "./auth/identity.service";
-import { JwtAuthGuard } from "./auth/jwt-auth.guard";
+import { AuthUserDto } from "../auth/auth.dto";
+import { ReqUser } from "../auth/req-user.decorator";
+import type { RequestIdentity } from "../auth/identity.service";
+import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { UsersService, toPublicUser } from "./users.service";
 
 /**

@@ -128,7 +128,7 @@ async function main(): Promise<void> {
       // past JwtAuthGuard so the 503s below prove the SERVICE denies with
       // EXTERNAL_UNAVAILABLE — not the guard with 401 (anon is asserted
       // separately).
-      const { TokenService } = await import("../../../../users/auth/token.service");
+      const { TokenService } = await import("../../../../auth/token.service");
       const tokens = app.get(TokenService, { strict: false }) as {
         sign: (
           claims: Record<string, unknown>,
@@ -218,7 +218,7 @@ async function main(): Promise<void> {
       // Live PG — full CRUD suite (tables migrated + cleared above).
       const { ProjectsService } = await import("../projects.service");
       const { UsersService } = await import("../../../../users/users.service");
-      const { TokenService } = await import("../../../../users/auth/token.service");
+      const { TokenService } = await import("../../../../auth/token.service");
       const registry = app.get(ProjectsService, { strict: false }) as {
         clearAllForTests: () => Promise<void>;
       };

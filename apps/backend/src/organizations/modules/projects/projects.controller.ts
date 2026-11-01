@@ -19,9 +19,9 @@ import {
 import { ApiBearerAuth, ApiResponse, ApiTags } from "@nestjs/swagger";
 import { NoIndexInterceptor } from "../../../common/http/noindex.interceptor";
 import { ZodValidationPipe } from "../../../common/validation";
-import { JwtAuthGuard } from "../../../users/auth/jwt-auth.guard";
-import { ReqUser } from "../../../users/auth/req-user.decorator";
-import type { RequestIdentity } from "../../../users/auth/identity.service";
+import { JwtAuthGuard } from "../../../auth/jwt-auth.guard";
+import { ReqUser } from "../../../auth/req-user.decorator";
+import type { RequestIdentity } from "../../../auth/identity.service";
 import { OrganizationsService } from "../../../organizations/organizations.service";
 import {
   EffectiveConfigDto,

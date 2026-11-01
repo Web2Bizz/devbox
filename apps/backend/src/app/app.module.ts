@@ -5,7 +5,7 @@ import { CommonModule } from '../common/common.module';
 import { OrganizationsModule } from '../organizations/organizations.module';
 import { ReposModule } from '../repos/repos.module';
 import { WorkspacesModule } from '../workspaces/workspaces.module';
-import { AuthModule } from '../users/auth/auth.module';
+import { AuthModule } from '../auth/auth.module';
 import { UsersModule } from '../users/users.module';
 import { AiModule } from '../ai/ai.module';
 import { validateConfigForNest } from '../common/env/env';

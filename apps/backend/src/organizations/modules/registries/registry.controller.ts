@@ -2,7 +2,7 @@ import { Controller, Get, Headers, UseGuards, Version } from '@nestjs/common';
 import { ApiBearerAuth, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { V1Endpoint } from '../../../common/http/api/version';
 import { ApiErrorDto } from '../../../common/http/api/dto';
-import { JwtAuthGuard } from '../../../users/auth/jwt-auth.guard';
+import { JwtAuthGuard } from '../../../auth/jwt-auth.guard';
 import { DockerRegistryService } from './modules/docker/docker.service';
 import { NpmRegistryService } from './modules/npm/npm.service';
 import { RegistryCatalogDto } from './modules/docker/dto';

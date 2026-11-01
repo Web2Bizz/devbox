@@ -8,7 +8,7 @@
  * per-space filtering (own space 200, foreign space 404 — 503 here since
  * the member gate needs PG and this suite runs without DB), invalid
  * userSpace → 400, anonymous → 401, POST /api/v1/repos → 404 (readonly:
- * GET only), missing root → 200 []. Never logs secrets; reports db 'down'
+ * GET only), empty root → 200 []. Never logs secrets; reports db 'down'
  * (strict Postgres).
  */
 import assert from 'node:assert/strict';
@@ -110,7 +110,9 @@ async function main(): Promise<void> {
     });
 
     await check('GET /api/v1/repos?q filters by name', async () => {
-      const hit = await fetch(`${base}/api/v1/repos?q=DEM`, auth);
+      // q matches the repo *name* (uuid) case-insensitively; no-git and
+      // corrupted siblings are filtered out first, so the suffix is unique.
+      const hit = await fetch(`${base}/api/v1/repos?q=${E2E_PID.slice(-4)}`, auth);
       assert.equal(hit.status, 200);
       assert.equal(((await readJson(hit)) as unknown[]).length, 1);
       const miss = await fetch(`${base}/api/v1/repos?q=zzz-nope`, auth);
@@ -143,8 +145,10 @@ async function main(): Promise<void> {
       assert.equal(res.status, 404);
     });
 
-    await check('missing REPOS_ROOT → 200 [] (never 500)', async () => {
-      process.env.REPOS_ROOT = path.join(REPOS_ROOT, 'definitely-missing-xyz');
+    await check('empty REPOS_ROOT dir → 200 [] (never 500)', async () => {
+      const emptyRoot = path.join(REPOS_ROOT, 'empty-root');
+      mkdirSync(emptyRoot, { recursive: true });
+      process.env.REPOS_ROOT = emptyRoot;
       const res = await fetch(`${base}/api/v1/repos`, auth);
       assert.equal(res.status, 200);
       assert.deepEqual(await readJson(res), []);

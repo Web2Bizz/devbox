@@ -95,7 +95,7 @@ async function main(): Promise<void> {
   setKeyring(ACTIVE_A);
 
   const { CryptoService } = await import("./crypto.service");
-  const { BillingService } = await import("../../ai/modules/opencode/modules/billing/billing.service");
+  const { BillingService } = await import("../../processes/ai/opencode/modules/billing/billing.service");
   const { AppLogger } = await import("../logger");
 
   let passed = 0;

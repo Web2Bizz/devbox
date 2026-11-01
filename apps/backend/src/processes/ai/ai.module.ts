@@ -1,11 +1,11 @@
 import { Module } from '@nestjs/common';
-import { AgentsModule } from './modules/agents/agents.module';
-import { OpencodeModule } from './modules/opencode/opencode.module';
-import { SessionsModule } from './modules/sessions/sessions.module';
-import { WorkersModule } from './modules/workers/workers.module';
+import { AgentsModule } from './agents/agents.module';
+import { OpencodeModule } from './opencode/opencode.module';
+import { SessionsModule } from './sessions/sessions.module';
+import { WorkersModule } from '../workers/workers.module';
 
 /**
- * AiModule — aggregate module without its own controller.
+ * AiModule — Processes/AI aggregate without its own controller.
  * Submodules: AgentsModule (with controller), WorkersModule (no controller),
  * OpencodeModule (global opencode upstream transport + mirror, re-exported
  * so existing consumers keep working), SessionsModule (/api/sessions* domain).

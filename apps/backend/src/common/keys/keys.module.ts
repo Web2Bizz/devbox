@@ -11,7 +11,7 @@ import { OpencodeKeysService } from "./keys.service";
  *
  * SCOPE: Common — rotation/store is reusable; it imports only DbModule and
  * never organizations/ or processes/. The HTTP surface (/api/v1/key,
- * /api/v1/usage) lives in ai/modules/opencode (Processes scope).
+ * /api/v1/usage) lives in processes/ai/opencode (Processes scope).
  */
 @Module({
   imports: [DbModule],

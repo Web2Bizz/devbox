@@ -8,7 +8,7 @@ import { ReposModule } from '../repos/repos.module';
 import { WorkspacesModule } from '../workspaces/workspaces.module';
 import { AuthModule } from '../auth/auth.module';
 import { UsersModule } from '../users/users.module';
-import { AiModule } from '../ai/ai.module';
+import { ProcessesModule } from '../processes/processes.module';
 import { validateConfigForNest } from '../common/env/env';
 
 @Module({
@@ -25,7 +25,7 @@ import { validateConfigForNest } from '../common/env/env';
     ReposModule,
     UsersModule,
     AuthModule,
-    AiModule,
+    ProcessesModule,
   ],
 })
 export class AppModule {}

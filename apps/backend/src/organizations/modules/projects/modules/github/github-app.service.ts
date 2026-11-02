@@ -15,6 +15,19 @@ type CachedToken = {
   expiresAtMs: number;
 };
 
+/**
+ * GitHub REST request with a fresh per-operation AbortSignal budget.
+ * octokit@5 ignores `request.timeout`; the signal is what actually aborts a
+ * hung call (→ EXTERNAL_TIMEOUT). Nested `request` defaults are deep-merged
+ * by @octokit/request, so every downstream call (auth-app included) keeps it.
+ */
+function githubRequest(timeoutMs: number, baseUrl: string) {
+  return octokitRequest.defaults({
+    baseUrl,
+    request: { signal: AbortSignal.timeout(timeoutMs) },
+  });
+}
+
 export type GithubAppInstallation = {
   id: number;
   account: { login: string; type: string } | null;
@@ -85,11 +98,16 @@ export class GithubAppService {
     const { githubAppId: appId, githubPrivateKey: privateKey } = env;
 
     try {
+      const request = githubRequest(
+        env.githubRequestTimeoutMs,
+        env.githubApiUrl,
+      );
       const auth = createAppAuth({
         appId: Number(appId),
         privateKey,
         // Respect GHE overrides — default stays https://api.github.com.
-        request: octokitRequest.defaults({ baseUrl: env.githubApiUrl }),
+        // The request defaults also carry the per-operation abort signal.
+        request,
       });
       const { token, expiresAt } = await auth({ type: 'installation', installationId: id });
       const expiresAtMs = Date.parse(expiresAt);
@@ -125,13 +143,16 @@ export class GithubAppService {
     const { githubAppId: appId, githubPrivateKey: privateKey } = env;
 
     try {
+      const request = githubRequest(
+        env.githubRequestTimeoutMs,
+        env.githubApiUrl,
+      );
       const auth = createAppAuth({
         appId: Number(appId),
         privateKey,
-        request: octokitRequest.defaults({ baseUrl: env.githubApiUrl }),
+        request,
       });
       const { token } = await auth({ type: 'app' });
-      const request = octokitRequest.defaults({ baseUrl: env.githubApiUrl });
       const response = await request('GET /app/installations/{installation_id}', {
         headers: { authorization: `Bearer ${token}` },
         installation_id: installationId,

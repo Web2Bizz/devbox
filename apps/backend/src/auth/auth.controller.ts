@@ -57,24 +57,36 @@ function secrets(): { access: string; refresh: string } {
   return { access: env.jwtAccessSecret, refresh: env.jwtRefreshSecret };
 }
 
+function sessionCookiePolicy(): {
+  sameSite: "lax" | "strict" | "none";
+  secure: boolean;
+} {
+  const sameSite = validateEnv(process.env).authCookieSameSite;
+  // SameSite=None is only honored together with Secure (cross-site). For
+  // lax/strict keep the historical rule: secure only behind https
+  // (production); plain http local dev would drop `Secure` cookies and break
+  // the /login → /projects flow.
+  const secure =
+    sameSite === "none" ? true : process.env.NODE_ENV === "production";
+  return { sameSite, secure };
+}
+
 function setSessionCookies(
   res: Response,
   refreshToken: string,
   refreshMaxAgeSec: number,
 ): void {
-  // secure only behind https (production); plain http on local dev would
-  // drop `Secure` cookies and break the /login → /projects flow.
-  const secure = process.env.NODE_ENV === "production";
+  const { sameSite, secure } = sessionCookiePolicy();
   res.cookie(REFRESH_COOKIE, refreshToken, {
     httpOnly: true,
-    sameSite: "lax",
+    sameSite,
     secure,
     path: "/api/v1/auth",
     maxAge: refreshMaxAgeSec * 1000,
   });
   res.cookie(AUTH_MARKER_COOKIE, "1", {
     httpOnly: false,
-    sameSite: "lax",
+    sameSite,
     secure,
     path: "/",
     maxAge: refreshMaxAgeSec * 1000,
@@ -82,8 +94,11 @@ function setSessionCookies(
 }
 
 function clearSessionCookies(res: Response): void {
-  res.clearCookie(REFRESH_COOKIE, { path: "/api/v1/auth" });
-  res.clearCookie(AUTH_MARKER_COOKIE, { path: "/" });
+  // Clear with the same attributes the cookie was set with (name+path
+  // identify it, sameSite/secure keep the deletion consistent).
+  const { sameSite, secure } = sessionCookiePolicy();
+  res.clearCookie(REFRESH_COOKIE, { sameSite, secure, path: "/api/v1/auth" });
+  res.clearCookie(AUTH_MARKER_COOKIE, { sameSite, secure, path: "/" });
 }
 
 function readRefreshCookie(req: unknown): string | null {

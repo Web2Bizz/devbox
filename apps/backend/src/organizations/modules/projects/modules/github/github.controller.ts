@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -150,7 +151,16 @@ export class GithubController {
     if (!env.githubWebhookSecret) {
       throw new ServiceUnavailableException("GitHub webhook is not configured");
     }
-    const raw = getRawBody(req) ?? JSON.stringify(body ?? {});
+    // Signature verification MUST run over the exact raw bytes captured by
+    // the express json verify hook. Re-serializing `body` would accept a
+    // signature that GitHub never produced — refuse instead.
+    const raw = getRawBody(req);
+    if (raw === null) {
+      throw new BadRequestException({
+        code: "WEBHOOK_RAW_BODY_REQUIRED",
+        message: "Webhook request is missing the captured raw body",
+      });
+    }
     if (!verifyWebhookSignature(raw, signature, env.githubWebhookSecret)) {
       throw new UnauthorizedException("Invalid webhook signature");
     }

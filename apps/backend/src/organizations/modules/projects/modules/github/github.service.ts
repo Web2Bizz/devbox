@@ -104,6 +104,11 @@ export class GithubService {
           return octokit.request('GET /installation/repositories', {
             per_page,
             page,
+            // octokit@5 ignores `request.timeout` — the abort signal is the
+            // actual per-attempt budget (hung GitHub → EXTERNAL_TIMEOUT).
+            request: {
+              signal: AbortSignal.timeout(env.githubRequestTimeoutMs),
+            },
           });
         },
         { method: 'GET', ...this.retryDefaults() },

@@ -93,6 +93,8 @@ export type AppEnv = {
   githubStateSecret: string;
   /** GitHub REST base URL, e.g. https://api.github.com (GHE override). */
   githubApiUrl: string;
+  /** Per-attempt budget ms for GitHub API calls (enforced via AbortSignal.timeout). */
+  githubRequestTimeoutMs: number;
   /** PROJECTS_ROOT jail root ('' = backend cwd fallback in ProjectFilesService). */
   projectsRoot: string;
   /**
@@ -177,6 +179,11 @@ export type AppEnv = {
    * local dev only (boot WARN), never for production).
    */
   authLegacyMockFallback: boolean;
+  /**
+   * Session cookie SameSite policy (default "lax"). "none" forces
+   * `Secure` regardless of NODE_ENV (cross-site cookies require it).
+   */
+  authCookieSameSite: "lax" | "strict" | "none";
 };
 
 // --- zod@4 primitive schemas (Standard Schema compatible) --------------------
@@ -291,6 +298,7 @@ export const envRawSchema = z.object({
   GITHUB_WEBHOOK_SECRET: z.string().optional(),
   GITHUB_STATE_SECRET: z.string().optional(),
   GITHUB_API_URL: z.string().optional(),
+  GITHUB_REQUEST_TIMEOUT_MS: z.string().optional(),
   DOCKER_REGISTRY_URL: z.string().optional(),
   DOCKER_REGISTRY_USER: z.string().optional(),
   DOCKER_REGISTRY_PASSWORD: z.string().optional(),
@@ -315,6 +323,7 @@ export const envRawSchema = z.object({
   JWT_ACCESS_TTL: z.string().optional(),
   JWT_REFRESH_TTL: z.string().optional(),
   AUTH_LEGACY_MOCK_FALLBACK: z.string().optional(),
+  AUTH_COOKIE_SAMESITE: z.string().optional(),
   OPENCODE_KEYS_ENCRYPTION_KEY: z.string().optional(),
   OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS: z.string().optional(),
   OPENCODE_KEYS_ACTIVE_KEY_ID: z.string().optional(),
@@ -325,6 +334,12 @@ export type EnvRaw = z.infer<typeof envRawSchema>;
 
 /** Default GitHub REST base URL (GHE override via GITHUB_API_URL). */
 export const DEFAULT_GITHUB_API_URL = "https://api.github.com";
+
+/** Default per-attempt GitHub API budget (ms) — enforced with AbortSignal.timeout. */
+export const DEFAULT_GITHUB_REQUEST_TIMEOUT_MS = 15000;
+
+/** Default session cookie SameSite policy. */
+export const DEFAULT_AUTH_COOKIE_SAMESITE = "lax" as const;
 
 /** Defaults for idempotent upstream retry (withRetry + ExternalClient). */
 export const DEFAULT_EXTERNAL_RETRY_MAX_ATTEMPTS = 3;
@@ -1061,6 +1076,22 @@ export function validateEnvWithWarnings(
     // перекрывается через GITHUB_API_URL; set-but-invalid → ERROR в assertValidUrl).
     firstNonEmpty(env.GITHUB_API_URL) || DEFAULT_GITHUB_API_URL;
   const githubApiUrl = assertValidUrl(githubApiRaw, "GITHUB_API_URL");
+  // Per-attempt budget for every GitHub REST call (AbortSignal.timeout —
+  // octokit@5 ignores `request.timeout`, so the signal is the enforcement).
+  // Unset → documented 15000 ms default (read-tuning, no WARN: matches the
+  // existing retry-timeout defaults); explicit garbage/<=0 is ERROR.
+  const githubTimeoutRaw = firstNonEmpty(env.GITHUB_REQUEST_TIMEOUT_MS);
+  let githubRequestTimeoutMs = DEFAULT_GITHUB_REQUEST_TIMEOUT_MS;
+  if (githubTimeoutRaw) {
+    const parsed = timeoutSchema.safeParse(githubTimeoutRaw);
+    if (!parsed.success || parsed.data <= 0) {
+      throw new Error(
+        `[env] GITHUB_REQUEST_TIMEOUT_MS must be a positive integer ms, got ${JSON.stringify(githubTimeoutRaw)}. ` +
+          "Check your .env (see .env.example).",
+      );
+    }
+    githubRequestTimeoutMs = parsed.data;
+  }
 
   // --- docker registry (optional; unset → skipped, never fail-fast) --------
   // Docker Registry HTTP API v2 (GET /v2/ ping + GET /v2/_catalog).
@@ -1500,6 +1531,25 @@ export function validateEnvWithWarnings(
         "Check your .env (see .env.example).",
     );
   }
+  // Session cookie SameSite policy: lax (default) | strict | none.
+  // "none" is only valid with Secure — the controller forces secure=true.
+  // Unset → documented "lax" default (no WARN); explicit garbage is ERROR.
+  const cookieSameSiteRaw = firstNonEmpty(env.AUTH_COOKIE_SAMESITE);
+  let authCookieSameSite: "lax" | "strict" | "none" = DEFAULT_AUTH_COOKIE_SAMESITE;
+  if (cookieSameSiteRaw) {
+    const normalized = cookieSameSiteRaw.toLowerCase();
+    if (
+      normalized !== "lax" &&
+      normalized !== "strict" &&
+      normalized !== "none"
+    ) {
+      throw new Error(
+        `[env] AUTH_COOKIE_SAMESITE must be "lax", "strict" or "none", got ${JSON.stringify(cookieSameSiteRaw)}. ` +
+          "Check your .env (see .env.example).",
+      );
+    }
+    authCookieSameSite = normalized as "lax" | "strict" | "none";
+  }
 
   // --- unknown keys (likely typos) ---------------------------------------------
   const unknownKeys = findSuspiciousUnknownKeys(source);
@@ -1542,6 +1592,7 @@ export function validateEnvWithWarnings(
       githubWebhookSecret,
       githubStateSecret,
       githubApiUrl,
+      githubRequestTimeoutMs,
       projectsRoot,
       reposRoot,
       cloneAllowedHosts,
@@ -1568,6 +1619,7 @@ export function validateEnvWithWarnings(
       jwtAccessTtlSec,
       jwtRefreshTtlSec,
       authLegacyMockFallback,
+      authCookieSameSite,
     },
     warnings,
   };

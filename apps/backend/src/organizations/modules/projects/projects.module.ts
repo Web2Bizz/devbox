@@ -1,5 +1,6 @@
 import { Module, forwardRef } from "@nestjs/common";
 import { WorkspacePathService } from "../../../common/storage/workspace-path.service";
+import { OrgProjectsController } from "./org-projects.controller";
 import { ProjectsController } from "./projects.controller";
 import { ProjectsService } from "./projects.service";
 import { ChatsModule } from "./modules/chats/chats.module";
@@ -36,8 +37,10 @@ import { SessionsModule } from "./modules/sessions/sessions.module";
  * organizations module → ProjectsModule → ProjectAccessModule.
  *
  * Both project surfaces (top-level /projects and the canonical nested
- * /organizations/:id/projects) are served by the single ProjectsController
- * in this module — one controller per module.
+ * /organizations/:id/projects) are served by this module with one
+ * controller per entity (CoC §1.1): ProjectsController owns /projects*,
+ * OrgProjectsController owns /organizations/:id/projects* (incl. the two
+ * 410 attach/detach stubs).
  */
 @Module({
   imports: [
@@ -48,7 +51,7 @@ import { SessionsModule } from "./modules/sessions/sessions.module";
     ProjectFilesModule,
     RepositoryModule,
   ],
-  controllers: [ProjectsController],
+  controllers: [ProjectsController, OrgProjectsController],
   providers: [ProjectsService, WorkspacePathService],
   exports: [
     ProjectsService,

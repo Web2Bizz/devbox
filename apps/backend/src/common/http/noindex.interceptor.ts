@@ -12,7 +12,8 @@ import type { Observable } from "rxjs";
  *
  * Applied pointwise (class-level `@UseInterceptors`) on the private
  * controllers only — UsersController, OrganizationsController,
- * ProjectsController, SessionsController, ChatsController,
+ * MembersController, InvitesController, ProjectsController,
+ * OrgProjectsController, SessionsController, ChatsController,
  * ProjectFilesController — never globally (public surfaces like /health
  * and the registry probes stay indexable/crawlable as before). The header
  * is set before the handler runs, so error envelopes (403/404/503) on the

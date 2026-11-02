@@ -9,17 +9,23 @@ import { OrganizationsGuard } from "./organizations.guard";
 import { OrganizationsService } from "./organizations.service";
 
 /**
- * OrganizationsModule — org CRUD + membership + invites + project links.
+ * OrganizationsModule — org CRUD + membership + invites + projects.
  * Owns ProjectsModule + RegistriesModule + MembersModule + InvitesModule as
  * nested modules (CoC §2: `organizations/modules/`; nested modules are never
  * registered in AppModule and are not re-exported outside the domain).
  *
+ * The module's own HTTP surface is OrganizationsController — /organizations
+ * CRUD only (CoC §1.1). Membership routes are served by
+ * MembersModule's MembersController, invites by InvitesModule's
+ * InvitesController, the project surfaces by ProjectsModule's
+ * ProjectsController/OrgProjectsController.
+ *
  * Membership lives in MembersModule and invites in InvitesModule; this module
  * imports them and OrganizationsService delegates to their services, so its
- * public API (and the thin controller) stays unchanged. The access gate
- * (OrganizationsGuard) is a domain-root provider here and in each nested
- * module that needs it — the guard is stateless, so per-module instances are
- * safe (no cycle back into OrganizationsModule).
+ * public API stays unchanged. The access gate (OrganizationsGuard) is a
+ * domain-root provider here and in each nested module that needs it — the
+ * guard is stateless, so per-module instances are safe (no cycle back into
+ * OrganizationsModule).
  *
  * UsersService comes from the global UsersModule — no import needed, no
  * cycle; DbService is a provider of the global CommonModule. CryptoService

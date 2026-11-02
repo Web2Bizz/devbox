@@ -34,11 +34,13 @@ src/
 ├─ organizations/ — SCOPE: Organization
 │  ├─ organizations.{module,service,controller}.ts, organizations.types.ts, organizations.dto.ts
 │  ├─ organizations.guard.ts — реальный CanActivate (GET = member, мутации = maintainer;
-│  │                           навешан на gated-роуты OrganizationsController)
-│  ├─ modules/members/ — MembersModule / MembersService
-│  ├─ modules/invites/ — InvitesModule / InvitesService (uuidv7 через Bun.randomUUIDv7)
+│  │                           навешан на gated-роуты Organizations/Members/Invites)
+│  ├─ modules/members/ — MembersModule / MembersService / members.controller.ts (/organizations/:id/members*)
+│  ├─ modules/invites/ — InvitesModule / InvitesService (uuidv7 через Bun.randomUUIDv7),
+│  │                     invites.controller.ts (/organizations/:id/invites, /organizations/invites/accept)
 │  ├─ modules/registries/ — RegistriesModule: modules/docker/ + modules/npm/ (observe-only)
-│  ├─ modules/projects/ — SCOPE: Project, ОДИН контроллер на модуль (projects.controller.ts)
+│  ├─ modules/projects/ — SCOPE: Project; два контроллера по сущностям (CoC §1.1):
+│  │  ├─ projects.controller.ts (/projects*), org-projects.controller.ts (/organizations/:id/projects*)
 │  │  ├─ projects.{module,service}.ts, projects.dto.ts
 │  │  ├─ modules/project-access/ — ProjectAccessService (гейт C4: org-linked → member,
 │  │  │                            user-space → owner, stranger → 404 без утечки)
@@ -64,9 +66,11 @@ src/
    └─ modules/workers/ — workers.module.ts
 ```
 
-Примечание про `organizations/org-projects.controller.ts`: проекции больше
-нет — оба набора роутов живут в единственном `projects.controller.ts`
-(`/organizations/:id/projects*` и `/projects*`). Wire-контракт не менялся.
+Примечание про `organizations/modules/projects/`: одна сущность — один
+контроллер (CoC §1.1). `projects.controller.ts` держит `/projects*`,
+`org-projects.controller.ts` — `/organizations/:id/projects*` (включая
+410-заглушки attach/detach). Wire-контракт не менялся: URL, методы,
+коды и Swagger-теги прежние.
 
 ## Правила зависимостей
 

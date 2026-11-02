@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import type { RequestIdentity } from "../../../../auth/identity.service";
+import { OrgProjectsController } from "../org-projects.controller";
 import { ProjectsController } from "../projects.controller";
 import { ProjectsService } from "../projects.service";
 import { ProjectAccessService } from "../modules/project-access/project-access.service";
@@ -98,7 +99,11 @@ function makeController() {
     sessions as unknown as SessionsService,
     access as unknown as ProjectAccessService,
   );
-  return { ctl, calls };
+  const orgCtl = new OrgProjectsController(
+    projects as unknown as ProjectsService,
+    access as unknown as ProjectAccessService,
+  );
+  return { ctl, orgCtl, calls };
 }
 
 describe("ProjectsController.remove has no cascade of its own", () => {
@@ -118,10 +123,10 @@ describe("ProjectsController.remove has no cascade of its own", () => {
   });
 });
 
-describe("ProjectsController.removeOrgProject has no cascade of its own", () => {
+describe("OrgProjectsController.removeOrgProject has no cascade of its own", () => {
   it("delegates to ProjectsService.remove only (no chat/session cascade)", async () => {
-    const { ctl, calls } = makeController();
-    await ctl.removeOrgProject(
+    const { orgCtl, calls } = makeController();
+    await orgCtl.removeOrgProject(
       ORG_ID,
       PROJECT_ID,
       IDENTITY,

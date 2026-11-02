@@ -73,6 +73,65 @@ auth/
   `utils/session-cookie/` с `index.ts` + `__tests__/`.
 - `keys/` вне `modules/` — надо в `modules/keys/`.
 
+### 1.1. Контроллер отвечает только за свою область
+
+- В модуле с HTTP-слоем контроллер отдаёт маршруты **только своей сущности**.
+  Родительский домен не держит маршруты вложенных модулей: если у вложенного
+  модуля есть HTTP-слой, у него **свой** `<sub>.controller.ts` в
+  `<parent>/modules/<sub>/`.
+- Второй контроллер того же домена (другая сущность или скоуп) — отдельный
+  класс с именем по сущности: `<entity>.controller.ts`
+  (`users.controller.ts`, `org-projects.controller.ts`), а не «второй набор
+  методов» в существующем файле.
+- Чужой ресурс в пути не даёт права писать маршрут в чужой контроллер:
+  `/organizations/:id/projects` принадлежит домену **projects** (данные отдаёт
+  projects), поэтому живёт в `org-projects.controller.ts`, а не в
+  `organizations.controller.ts`.
+- Заглушки удалённых фич (410) живут в домене своей сущности, а не в чужом
+  контроллере.
+- Проверка на ревью: все маршруты одного класса относятся к одной сущности;
+  у вложенного модуля с HTTP-слоем есть собственный контроллер.
+
+#### Не правильно
+
+```
+organizations/
+├─ organizations.controller.ts     ← CRUD орги + members + invites + 410-заглушки projects
+└─ modules/
+   ├─ members/                     ← модуль есть, контроллера нет
+   └─ invites/                     ← модуль есть, контроллера нет
+
+projects/
+└─ projects.controller.ts          ← /projects* и /organizations/:id/projects* в одном классе
+```
+
+```ts
+// organizations.controller.ts — три сущности в одном классе
+@Controller("organizations")
+export class OrganizationsController {
+  @Get(":id/members") // ← members: чужая сущность, свой модуль существует
+  @Post(":id/invites") // ← invites: чужая сущность, свой модуль существует
+  @Post(":id/projects/:projectId") // ← projects: 410-заглушка в чужом контроллере
+  async linkProject(): Promise<void> {
+    throw new GoneException("project links removed");
+  }
+}
+```
+
+#### Правильно
+
+```
+organizations/
+├─ organizations.controller.ts              ← только /organizations
+└─ modules/
+   ├─ members/members.controller.ts         ← /organizations/:id/members*
+   └─ invites/invites.controller.ts         ← /organizations/:id/invites, /organizations/invites/accept
+
+projects/
+├─ projects.controller.ts                   ← /projects*
+└─ org-projects.controller.ts               ← /organizations/:id/projects*
+```
+
 ### 2. Вложенные модули
 
 - Nest-модуль внутри другого домена хранится в `<parent>/modules/<sub>/`
@@ -176,3 +235,25 @@ rg -g '*.ts' 'constructor\(.*private ' src | rg -v 'readonly'
 | `__tests__/*.spec.ts` | Юнит-тест | Все юнит-тесты домена, только здесь. |
 | `__tests__/*.e2e.ts` | e2e-тест | Все e2e-тесты домена, только здесь. |
 | `index.ts` | Баррель | Только в `common/logger/`, `common/validation/` и `utils/<name>/`; в доменах баррелей нет — импорт по прямому пути (`./dto`, `./x.service`). |
+
+### 7. Контекст логгера — через `ClassName.name`
+
+Если нужно получить имя класса/функции/компонента — избегать литералов.
+Контекст `AppLogger` задаётся через `ClassName.name`, а не строкой с именем класса.
+
+```ts
+// правильно
+private readonly logger: AppLogger = new AppLogger(UsersService.name),
+```
+
+```ts
+// не правильно — литерал дублирует имя класса и расходится при переименовании
+private readonly logger: AppLogger = new AppLogger("UsersService"),
+```
+
+Контроль:
+
+```sh
+# кандидаты на ревью — каждый хит должен стать ClassName.name
+rg -g '*.ts' 'new AppLogger\(['"'"'"]' src
+```

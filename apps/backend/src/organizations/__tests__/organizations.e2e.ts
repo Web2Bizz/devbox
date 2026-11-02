@@ -199,12 +199,12 @@ async function main(): Promise<void> {
         clearAllForTests: () => Promise<void>;
       };
       const tokens = app.get(TokenService, { strict: false }) as {
-        clearAllForTests: () => void;
+        clearAllForTests: () => Promise<void>;
       };
       await orgs.clearAllForTests();
       await projects.clearAllForTests();
       await users.clearAllForTests();
-      tokens.clearAllForTests();
+      await tokens.clearAllForTests();
 
       async function register(
         tag: string,

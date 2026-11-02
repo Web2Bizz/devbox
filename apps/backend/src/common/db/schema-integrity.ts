@@ -12,6 +12,7 @@ import {
   projectChats,
   projects,
   projectSessions,
+  refreshTokens,
   userOpencodeKeys,
   users,
 } from "./schema";
@@ -91,6 +92,7 @@ const DRIZZLE_TABLES = [
   organizations,
   organizationMembers,
   organizationInvites,
+  refreshTokens,
 ] as const;
 
 const pgDialect = new PgDialect();

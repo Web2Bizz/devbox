@@ -5,10 +5,9 @@
  *   `bun run build && bun dist/organizations/modules/projects/modules/repository/modules/workspaces/modules/clone/__tests__/clone.repository.spec.js`
  * Also executes under `bun test dist` (top-level run, throws on failure).
  *
- * Covers the in-memory clone-job store (durable contract is
- * `workspace_clone_jobs`): idempotent enqueue, queued→cloning→ready/failed
- * transitions, error/progress fields, and per-user isolation for the same
- * repo name.
+ * Covers the in-memory clone-job store (no durable table exists yet):
+ * idempotent enqueue, queued→cloning→ready/failed transitions,
+ * error/progress fields, and per-user isolation for the same repo name.
  */
 import assert from 'node:assert/strict';
 import { CloneJobsRepository } from '../clone.repository';

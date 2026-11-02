@@ -124,7 +124,7 @@ export class AuthController {
     private readonly users: UsersService,
     private readonly tokens: TokenService,
     private readonly local: LocalAuthProvider,
-    private readonly logger: AppLogger = new AppLogger("AuthController"),
+    private readonly logger: AppLogger = new AppLogger(AuthController.name),
   ) {}
 
   @Post("register")
@@ -152,7 +152,7 @@ export class AuthController {
       }
       const { access, refresh } = secrets();
       const { accessTtl, refreshTtl } = refreshTtlSec();
-      const pair = this.tokens.issuePair(
+      const pair = await this.tokens.issuePair(
         { id: created.id, email: created.email },
         access,
         refresh,
@@ -218,7 +218,7 @@ export class AuthController {
     }
     const { access, refresh } = secrets();
     const { accessTtl, refreshTtl } = refreshTtlSec();
-    const pair = this.tokens.issuePair(
+    const pair = await this.tokens.issuePair(
       { id: user.id, email: user.email },
       access,
       refresh,
@@ -292,7 +292,7 @@ export class AuthController {
       readRefreshCookie(req) ||
       "";
     if (presented) {
-      this.tokens.revokeRefresh(presented, secrets().refresh);
+      await this.tokens.revokeRefresh(presented, secrets().refresh);
     }
     clearSessionCookies(res);
     return { ok: true };

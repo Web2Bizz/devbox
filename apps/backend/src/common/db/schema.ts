@@ -12,6 +12,8 @@
  *   the x-user-id header / ?userId query).
  * - organizations / organization_members: orgs epic; projects belong to an
  *   organization through projects.org_id (1:1). The former M2M table is gone.
+ * - refresh_tokens: persistent refresh-token rotation registry (jti rows,
+ *   soft revoke/soft prune — never physically deleted).
  *
  * Strict Postgres runtime (ProjectsService / GithubInstallationsService /
  * UsersService hit these tables only — no memory fallback); the tables are
@@ -278,3 +280,34 @@ export type OrganizationInviteRow = typeof organizationInvites.$inferSelect;
 
 export type OrganizationRow = typeof organizations.$inferSelect;
 export type OrganizationMemberRow = typeof organizationMembers.$inferSelect;
+
+/**
+ * Persistent refresh-token registry (durable contract for TokenService).
+ *
+ * - `id` is the JWT `jti` (uuid string; no FK — the token survives a user
+ *   hard-delete window and stays auditable).
+ * - `user_id` is the same text key used by `projects.owner_id` /
+ *   `github_installations.user_id` (no users FK, matching the auth contract).
+ * - `issued_at` / `expires_at` mirror the JWT `iat` / `exp` claims.
+ * - Rotation NEVER deletes a row: consumed/logged-out tokens get
+ *   `revoked_at = now()`, and the prune job only sets `deleted_at = now()`
+ *   for expired rows (soft-prune). Reads require both timestamps to be NULL
+ *   and `expires_at > now()`.
+ */
+export const refreshTokens = pgTable(
+  "refresh_tokens",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    issuedAt: timestamp("issued_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("refresh_tokens_user_id_idx").on(t.userId),
+    index("refresh_tokens_expires_at_idx").on(t.expiresAt),
+  ],
+);
+
+export type RefreshTokenRow = typeof refreshTokens.$inferSelect;

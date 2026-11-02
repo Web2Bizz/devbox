@@ -21,9 +21,10 @@ const TERMINAL_READY: CloneStatus = 'ready';
  * CloneJobsRepository — MVP in-memory clone-job store (boots without
  * postgres, like ProjectsService / GithubInstallationsService).
  *
- * Durable contract is the `workspace_clone_jobs` drizzle table
- * (drizzle/0003_clone_jobs.sql, unique (user_id, repo_name)) — production
- * swaps this store for drizzle without changing the service surface.
+ * Jobs live only in this process: there is no `clone_jobs` table and no
+ * migration for one yet, so a restart drops every job. The store stays keyed
+ * by (userId, repoName) so a later drizzle-backed implementation can swap in
+ * without changing the service surface.
  *
  * Keyed by (userId, repoName): the same repo name owned by two users yields
  * two independent jobs (per-user isolation); per-key promise locks make
@@ -34,7 +35,7 @@ export class CloneJobsRepository {
   private readonly jobs = new Map<string, CloneJob>();
   private readonly locks = new Map<string, Promise<void>>();
 
-  constructor(private readonly logger: AppLogger = new AppLogger('CloneJobs')) {}
+  constructor(private readonly logger: AppLogger = new AppLogger(CloneJobsRepository.name)) {}
 
   key(userId: string, repoName: string): string {
     return `${userId}::${repoName}`;
@@ -51,8 +52,8 @@ export class CloneJobsRepository {
     repoName: string;
     repoUrl: string;
   }): { job: CloneJob; created: boolean } {
-    const k = this.key(input.userId, input.repoName);
-    const prev = this.jobs.get(k);
+    const key = this.key(input.userId, input.repoName);
+    const prev = this.jobs.get(key);
     if (prev && prev.status !== 'failed') {
       return { job: prev, created: false };
     }
@@ -63,18 +64,18 @@ export class CloneJobsRepository {
       repoName: input.repoName,
       repoUrl: input.repoUrl,
       status: 'queued',
-      progress: prev?.status === 'failed' ? 0 : 0,
+      progress: 0,
       error: null,
       updatedAt: now,
     };
-    this.jobs.set(k, job);
+    this.jobs.set(key, job);
     this.logger.info(`[workspaces] clone queued ${input.userSpace}/${input.repoName}`);
     return { job, created: true };
   }
 
   transition(userId: string, repoName: string, status: CloneStatus, patch?: Partial<CloneJob>): CloneJob | null {
-    const k = this.key(userId, repoName);
-    const prev = this.jobs.get(k);
+    const key = this.key(userId, repoName);
+    const prev = this.jobs.get(key);
     if (!prev) return null;
     const next: CloneJob = {
       ...prev,
@@ -82,7 +83,7 @@ export class CloneJobsRepository {
       status,
       updatedAt: new Date().toISOString(),
     };
-    this.jobs.set(k, next);
+    this.jobs.set(key, next);
     return next;
   }
 
@@ -104,21 +105,25 @@ export class CloneJobsRepository {
     return this.transition(userId, repoName, 'failed', { error, progress: 0 });
   }
 
-  /** Runs `fn` serialized per (userId, repoName) — concurrent clones of the same repo collapse. */
-  async withLock<T>(userId: string, repoName: string, fn: () => Promise<T>): Promise<T> {
-    const k = this.key(userId, repoName);
-    const prev = this.locks.get(k) ?? Promise.resolve();
+  /** Runs `task` serialized per (userId, repoName) — concurrent clones of the same repo collapse. */
+  async withLock<T>(userId: string, repoName: string, task: () => Promise<T>): Promise<T> {
+    const key = this.key(userId, repoName);
+    const prev = this.locks.get(key) ?? Promise.resolve();
     let release!: () => void;
-    const current = new Promise<void>((res) => {
-      release = res;
+    const current = new Promise<void>((resolveLock) => {
+      release = resolveLock;
     });
-    this.locks.set(k, prev.then(() => current));
+    const own = prev.then(() => current);
+    this.locks.set(key, own);
     await prev;
     try {
-      return await fn();
+      return await task();
     } finally {
       release();
-      if (this.locks.get(k) === current) this.locks.delete(k);
+      // Only the tail of the chain owns the key: a newer job may have enqueued
+      // behind us (then it will clean up), and re-running the same key after
+      // completion must start a fresh chain.
+      if (this.locks.get(key) === own) this.locks.delete(key);
     }
   }
 

@@ -152,10 +152,10 @@ async function main(): Promise<void> {
       clearAllForTests: () => Promise<void>;
     };
     const tokens = app.get(TokenService, { strict: false }) as {
-      clearAllForTests: () => void;
+      clearAllForTests: () => Promise<void>;
     };
     await users.clearAllForTests();
-    tokens.clearAllForTests();
+    await tokens.clearAllForTests();
   }
   await app.listen(0);
   const base = await app.getUrl();

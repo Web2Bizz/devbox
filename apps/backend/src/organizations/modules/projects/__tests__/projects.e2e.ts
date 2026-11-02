@@ -226,11 +226,11 @@ async function main(): Promise<void> {
         clearAllForTests: () => Promise<void>;
       };
       const tokens = app.get(TokenService, { strict: false }) as {
-        clearAllForTests: () => void;
+        clearAllForTests: () => Promise<void>;
       };
       await registry.clearAllForTests();
       await users.clearAllForTests();
-      tokens.clearAllForTests();
+      await tokens.clearAllForTests();
 
       const owner = await register("owner");
       const stranger = await register("stranger");

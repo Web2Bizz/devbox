@@ -1,7 +1,7 @@
 import { Global, Module, type OnModuleInit } from '@nestjs/common';
 import { HealthRegistry } from '../../../../../common/health/health-registry';
-import { DockerRegistryService } from './docker.service';
-import { DockerRegistryController } from './docker.controller';
+import { DockerRegistryService } from './docker-registry.service';
+import { DockerRegistryController } from './docker-registry.controller';
 
 export { DockerRegistryService, DockerRegistryController };
 

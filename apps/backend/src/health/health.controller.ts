@@ -2,7 +2,7 @@ import { Controller, Get, Version, VERSION_NEUTRAL } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { DbService } from '../common/db/db.service';
 import { HealthRegistry } from '../common/health/health-registry';
-import { HealthDto } from '../common/http/api/dto';
+import { HealthDto } from '../common/http/api/api.dto';
 import type { HealthResponse } from '@rush-code/contracts';
 
 /**

@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import type { AppLogger } from '../../../../../../../../../../common/logger';
 import type { WorkspacePathService } from '../../../../../../../../../../common/storage/workspace-path.service';
-import type { CloneJobsRepository } from '../clone.repository';
-import { WorkspaceCloneService } from '../clone.service';
+import type { CloneJobsRepository } from '../clone-jobs.repository';
+import { WorkspaceCloneService } from '../workspace-clone.service';
 
 // The clone host allow-list is read from the validated AppEnv; unit runs have
 // no .env, so supply the one mandatory listen port validateEnv() requires and

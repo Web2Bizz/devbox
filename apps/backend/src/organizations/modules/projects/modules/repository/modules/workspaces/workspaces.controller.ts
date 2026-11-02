@@ -19,7 +19,7 @@ import { ReqUser } from '../../../../../../../auth/req-user.decorator';
 import type { RequestIdentity } from '../../../../../../../auth/identity.service';
 import { ZodValidationPipe } from '../../../../../../../common/validation';
 import { GithubInstallationsService } from '../../../github/github-installations.service';
-import { CloneJobsRepository } from './modules/clone/clone.repository';
+import { CloneJobsRepository } from './modules/clone/clone-jobs.repository';
 import {
   CloneWorkspaceDto,
   WorkspaceCloneJobDto,
@@ -31,7 +31,7 @@ import {
   type CloneWorkspaceInput,
   type WorkspaceTreeQuery,
 } from './workspaces.dto';
-import { WorkspaceCloneService } from './modules/clone/clone.service';
+import { WorkspaceCloneService } from './modules/clone/workspace-clone.service';
 import { WorkspacesService } from './workspaces.service';
 
 /** MVP mock user key (single copy lives in auth/identity.service.ts). */

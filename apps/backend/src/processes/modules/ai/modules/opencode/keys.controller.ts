@@ -21,7 +21,7 @@ import {
   OpencodeKeyResultDto,
   OpencodeKeyStatusDto,
 } from "./keys.dto";
-import { OpencodeKeysService } from "../../../../../common/keys/keys.service";
+import { OpencodeKeysService } from "../../../../../common/keys/opencode-keys.service";
 
 function isUserId(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);

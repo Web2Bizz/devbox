@@ -7,7 +7,7 @@ import { validateEnv } from '../../../../../../../../../common/env/env';
 import { ExternalServiceError } from '../../../../../../../../../common/external/external-error';
 import { storageUnavailable } from '../../../../../../../../../common/storage/storage-unavailable';
 import { isValidGitRepo } from '../../../../utils/repos-git';
-import { CloneJobsRepository, type CloneJob } from './clone.repository';
+import { CloneJobsRepository, type CloneJob } from './clone-jobs.repository';
 import { WorkspacePathService } from '../../../../../../../../../common/storage/workspace-path.service';
 import { readSubmodules } from '../../../../utils/submodules';
 import {

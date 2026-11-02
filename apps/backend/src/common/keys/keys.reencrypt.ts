@@ -24,7 +24,7 @@ async function main(): Promise<void> {
   const { NestFactory } = await import("@nestjs/core");
   const { AppModule } = await import("../../app/app.module");
   const { CryptoService } = await import("../crypto/crypto.service");
-  const { OpencodeKeysService } = await import("./keys.service");
+  const { OpencodeKeysService } = await import("./opencode-keys.service");
 
   const app = await NestFactory.createApplicationContext(AppModule, {
     logger: false,

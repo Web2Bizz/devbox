@@ -36,7 +36,7 @@ import {
   type OpencodePromptInput,
   type OpencodeSessionUpdateInput,
   type OpencodeShellInput,
-} from '../../../../../common/http/api/dto';
+} from '../../../../../common/http/api/api.dto';
 
 /**
  * OpenCode reverse-proxy (sdk-driven).

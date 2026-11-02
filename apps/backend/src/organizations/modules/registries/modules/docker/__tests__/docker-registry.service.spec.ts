@@ -9,7 +9,7 @@
  * never-log-secrets rule for DOCKER_REGISTRY_* values.
  *
  * Runs against COMPILED dist (same constraint as the *.e2e.ts runners):
- *   `bun run build && bun dist/organizations/modules/registries/modules/docker/__tests__/docker.service.spec.js`
+ *   `bun run build && bun dist/organizations/modules/registries/modules/docker/__tests__/docker-registry.service.spec.js`
  * Also executes under `bun test dist` (top-level run, throws on failure).
  */
 import assert from 'node:assert/strict';
@@ -22,7 +22,7 @@ import {
   dockerRegistryAuthHeaders,
   resolveDockerRegistryConfig,
 } from '../docker.config';
-import { DockerRegistryService } from '../docker.service';
+import { DockerRegistryService } from '../docker-registry.service';
 import { validateEnv } from '../../../../../../common/env/env';
 
 const SECRET_TOKEN = 'super-secret-token-xyz-never-log';

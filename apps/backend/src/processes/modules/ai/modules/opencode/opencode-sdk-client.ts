@@ -10,7 +10,7 @@ import type { OpencodeClient } from '@opencode-ai/sdk/v2';
 import { OpencodeConfig } from './opencode.config';
 import { AppLogger } from '../../../../../common/logger';
 import { ExternalClient } from '../../../../../common/external/external-client';
-import { ServeAuthService, serveBasicAuthHeader } from './modules/auth/auth.service';
+import { ServeAuthService, serveBasicAuthHeader } from './modules/auth/serve-auth.service';
 
 type SdkModule = typeof import('@opencode-ai/sdk/v2');
 

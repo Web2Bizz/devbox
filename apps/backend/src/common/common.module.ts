@@ -3,7 +3,7 @@ import { AppLogger } from './logger';
 import { ExternalClient } from './external/external-client';
 import { DbService } from './db/db.service';
 import { CryptoService } from './crypto/crypto.service';
-import { OpencodeKeysService } from './keys/keys.service';
+import { OpencodeKeysService } from './keys/opencode-keys.service';
 import { HealthRegistry } from './health/health-registry';
 
 /**

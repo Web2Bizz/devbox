@@ -1,6 +1,6 @@
 import { Global, Module, type OnModuleInit } from '@nestjs/common';
 import { HealthRegistry } from '../../../../../common/health/health-registry';
-import { ServeAuthModule } from './modules/auth/auth.module';
+import { ServeAuthModule } from './modules/auth/serve-auth.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { OpencodeKeysController } from './keys.controller';
 import { OpencodeSdkClient } from './opencode-sdk-client';

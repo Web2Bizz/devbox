@@ -27,10 +27,10 @@ import type {
   OpencodePromptInput,
   OpencodeSessionUpdateInput,
   OpencodeShellInput,
-} from '../../../../../common/http/api/dto';
+} from '../../../../../common/http/api/api.dto';
 import { OpencodeSdkClient } from './opencode-sdk-client';
 import { OpencodeConfig } from './opencode.config';
-import { serveBasicAuthHeader } from './modules/auth/auth.service';
+import { serveBasicAuthHeader } from './modules/auth/serve-auth.service';
 
 /** Upstream cursor headers passed through on GET message lists (when present). */
 const CURSOR_PASSTHROUGH_HEADERS = ['x-next-cursor', 'link'] as const;

@@ -1,8 +1,8 @@
 import { Module, forwardRef } from "@nestjs/common";
 import { GithubModule } from "../../../github/github.module";
 import { WorkspacePathService } from "../../../../../../../common/storage/workspace-path.service";
-import { CloneJobsRepository } from "./modules/clone/clone.repository";
-import { WorkspaceCloneService } from "./modules/clone/clone.service";
+import { CloneJobsRepository } from "./modules/clone/clone-jobs.repository";
+import { WorkspaceCloneService } from "./modules/clone/workspace-clone.service";
 import { WorkspacesController } from "./workspaces.controller";
 import { WorkspacesService } from "./workspaces.service";
 

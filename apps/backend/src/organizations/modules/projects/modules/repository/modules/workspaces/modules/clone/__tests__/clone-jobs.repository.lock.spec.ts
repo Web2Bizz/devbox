@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { CloneJobsRepository } from "../clone.repository";
+import { CloneJobsRepository } from "../clone-jobs.repository";
 
 type Case = { name: string; run: () => Promise<void> | void };
 

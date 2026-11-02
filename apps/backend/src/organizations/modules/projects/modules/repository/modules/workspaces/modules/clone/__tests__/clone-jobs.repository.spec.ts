@@ -2,7 +2,7 @@
  * CloneJobsRepository unit checks — self-contained runner (plain node:assert).
  *
  * Runs against COMPILED dist (same constraint as the other runners):
- *   `bun run build && bun dist/organizations/modules/projects/modules/repository/modules/workspaces/modules/clone/__tests__/clone.repository.spec.js`
+ *   `bun run build && bun dist/organizations/modules/projects/modules/repository/modules/workspaces/modules/clone/__tests__/clone-jobs.repository.spec.js`
  * Also executes under `bun test dist` (top-level run, throws on failure).
  *
  * Covers the in-memory clone-job store (no durable table exists yet):
@@ -10,7 +10,7 @@
  * error/progress fields, and per-user isolation for the same repo name.
  */
 import assert from 'node:assert/strict';
-import { CloneJobsRepository } from '../clone.repository';
+import { CloneJobsRepository } from '../clone-jobs.repository';
 
 const UID = '123e4567-e89b-12d3-a456-426614174001';
 const OTHER_UID = '123e4567-e89b-12d3-a456-426614174002';

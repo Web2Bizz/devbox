@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { serveBasicAuthHeader } from "../auth.service";
+import { serveBasicAuthHeader } from "../serve-auth.service";
 
 type Case = { name: string; run: () => Promise<void> | void };
 

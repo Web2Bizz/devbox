@@ -13,7 +13,7 @@
  * never-log-secrets rule for NPM_REGISTRY_* values.
  *
  * Runs against COMPILED dist (same constraint as the *.e2e.ts runners):
- *   `bun run build && bun dist/organizations/modules/registries/modules/npm/__tests__/npm.service.spec.js`
+ *   `bun run build && bun dist/organizations/modules/registries/modules/npm/__tests__/npm-registry.service.spec.js`
  * Also executes under `bun test dist` (top-level run, throws on failure).
  */
 import assert from 'node:assert/strict';
@@ -29,7 +29,7 @@ import {
   npmRegistryAuthMode,
   resolveNpmRegistryConfig,
 } from '../npm.config';
-import { NpmRegistryService } from '../npm.service';
+import { NpmRegistryService } from '../npm-registry.service';
 import { validateEnv } from '../../../../../../common/env/env';
 
 const SECRET_TOKEN = 'super-secret-npm-token-xyz-never-log';

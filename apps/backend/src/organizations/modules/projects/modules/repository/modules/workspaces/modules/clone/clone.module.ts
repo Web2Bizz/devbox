@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
-import { CloneJobsRepository } from './clone.repository';
-import { WorkspaceCloneService } from './clone.service';
+import { CloneJobsRepository } from './clone-jobs.repository';
+import { WorkspaceCloneService } from './workspace-clone.service';
 
 /**
  * CloneModule — idempotent per-user `git clone` lifecycle

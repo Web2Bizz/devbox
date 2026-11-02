@@ -1,5 +1,5 @@
 import { Module } from "@nestjs/common";
-import { ServeAuthService } from "./auth.service";
+import { ServeAuthService } from "./serve-auth.service";
 
 /**
  * ServeAuthModule — real-user gate for the serve paths (non-uuid mock

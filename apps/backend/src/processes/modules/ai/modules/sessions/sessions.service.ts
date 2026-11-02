@@ -7,7 +7,7 @@ import { OpencodeService } from '../opencode/opencode.service';
 import {
   ServeAuthService,
   serveBasicAuthHeader,
-} from '../opencode/modules/auth/auth.service';
+} from '../opencode/modules/auth/serve-auth.service';
 import { AppLogger } from '../../../../../common/logger';
 import { relaySse } from '../../../../../common/sse/sse-relay';
 import { fromStatus, fromUnknown } from '../../../../../common/external/external-error';

@@ -727,20 +727,37 @@ async function main(): Promise<void> {
               if (line) frames.push(JSON.parse(line.slice(5).trim()) as Record<string, unknown>);
             }
           };
+          const readUntil = async (
+            budgetMs: number,
+          ): Promise<{ value?: Uint8Array; done: boolean } | null> => {
+            // A quiet SSE stream resolves nothing: the relay awaits the next
+            // upstream frame (heartbeats are comments the sdk does not yield),
+            // so reader.read() alone would hang past the budget.
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            try {
+              return await Promise.race([
+                reader.read() as Promise<{ value?: Uint8Array; done: boolean }>,
+                new Promise<null>((resolve) => {
+                  timer = setTimeout(() => resolve(null), Math.max(1, budgetMs));
+                }),
+              ]);
+            } finally {
+              if (timer) clearTimeout(timer);
+            }
+          };
           const deadline = Date.now() + 8000;
           while (frames.length < 2 && Date.now() < deadline) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            consume(dec.decode(value, { stream: true }));
+            const chunk = await readUntil(deadline - Date.now());
+            if (chunk === null || chunk.done) break;
+            if (chunk.value) consume(dec.decode(chunk.value, { stream: true }));
           }
           // After the two expected frames keep reading for ~300ms: a leaked
-          // evt_3/evt_4 must be observed, not raced by the assertion. The
-          // stub emits an 80ms heartbeat, so each read resolves promptly.
+          // evt_3/evt_4 must be observed, not raced by the assertion.
           const settleDeadline = Date.now() + 300;
           while (Date.now() < settleDeadline) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            if (value) consume(dec.decode(value, { stream: true }));
+            const chunk = await readUntil(settleDeadline - Date.now());
+            if (chunk === null || chunk.done) break;
+            if (chunk.value) consume(dec.decode(chunk.value, { stream: true }));
           }
         }
         try {

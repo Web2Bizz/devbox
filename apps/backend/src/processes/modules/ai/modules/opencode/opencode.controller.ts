@@ -39,8 +39,6 @@ import { JwtAuthGuard } from '../../../../../auth/jwt-auth.guard';
 import type { RequestIdentity } from '../../../../../auth/identity.service';
 import { ReqUser } from '../../../../../auth/req-user.decorator';
 import { ProjectAccessService } from '../../../../../organizations/modules/projects/modules/project-access/project-access.service';
-import { ownerKeyOrThrow } from '../../../../../organizations/modules/projects/projects.service';
-import { WorkspacePathService } from '../../../../../common/storage/workspace-path.service';
 import { OpencodeService } from './opencode.service';
 import { serveBasicAuthHeader } from './modules/auth/auth.service';
 import { AppLogger } from '../../../../../common/logger';
@@ -97,8 +95,9 @@ const CURSOR_PASSTHROUGH_HEADERS = ['x-next-cursor', 'link'] as const;
  * leak; missing projectId → 400 PROJECT_REQUIRED). The caller's `?directory`
  * is accepted for compatibility but IGNORED — upstream calls that take a
  * directory always use the gated project's jailed content dir
- * (WorkspacePathService.resolveUserStrict + assertInsideJail; unconfigured
- * storage fails closed). v2 calls without a directory parameter ride the
+ * (ProjectAccessService.resolveProjectDirectory — WorkspacePathService
+ * .resolveUserStrict + assertInsideJail inside; unconfigured storage fails
+ * closed). v2 calls without a directory parameter ride the
  * gate only (documented per route). The SSE event streams (`global/event`,
  * `event`) and GET `global/health` stay project-free (global surfaces, no
  * session :id) — recorded remainder, not an exception for session reads.
@@ -129,50 +128,8 @@ export class OpencodeController {
     private readonly sdk: OpencodeSdkClient,
     private readonly opencode: OpencodeService,
     private readonly access: ProjectAccessService,
-    private readonly paths: WorkspacePathService,
-    private readonly logger: AppLogger = new AppLogger('OpencodeController'),
+    private readonly logger: AppLogger = new AppLogger(OpencodeController.name),
   ) {}
-
-  /**
-   * C4 project gate + directory jail (reuse, not a new rule).
-   *
-   * - Missing projectId → 400 PROJECT_REQUIRED (fail-closed: session routes
-   *   are project-scoped, there is no cross-project listing anymore).
-   * - assertProjectAccessById → 404 for strangers (no existence leak).
-   * - Returns the gated project's jailed content dir; callers pass it as
-   *   the upstream directory INSTEAD of the client `?directory` (which is
-   *   ignored — a forged directory can never escape the project jail).
-   * - Unconfigured storage fails closed (500 before any upstream call).
-   */
-  private async requireProjectDir(
-    projectId: string | undefined,
-    userId: string,
-    correlationId?: string,
-  ): Promise<string> {
-    if (!projectId || projectId.trim() === '') {
-      throw new BadRequestException({
-        code: 'PROJECT_REQUIRED',
-        message: 'projectId is required — session routes are project-scoped',
-      });
-    }
-    const { ownerId } = await this.access.assertProjectAccessById(
-      projectId,
-      userId,
-      correlationId,
-    );
-    // Ownerless rows are denied by the gate (C5 deny-by-default), so the
-    // owner is always a real uuid here; ownerKeyOrThrow reuses the
-    // ProjectsService user-home mapping (no new layout).
-    const resolved = await this.paths.resolveUserStrict(
-      ownerKeyOrThrow(ownerId),
-      projectId,
-    );
-    await this.paths.assertInsideJail(
-      resolved.absRepo,
-      await this.paths.realStrictRoot(),
-    );
-    return resolved.absRepo;
-  }
 
   private isUpstreamOk<T>(data: T | undefined, error: unknown): data is T {
     return data !== undefined && error === undefined;
@@ -280,8 +237,12 @@ export class OpencodeController {
     const cid = correlationId ?? '';
     const userId = identity.id;
     // C4: project gate first; the listing is scoped to the project jail
-    // (client ?directory ignored — see requireProjectDir).
-    const projectDir = await this.requireProjectDir(projectId, userId, cid);
+    // (client ?directory ignored — see resolveProjectDirectory).
+    const { directory: projectDir } = await this.access.resolveProjectDirectory(
+      projectId,
+      userId,
+      cid,
+    );
     const client = await this.sdk.create(userId, cid);
     try {
       // v2 namespace (GET /api/session): the v2 envelope is { data, cursor }
@@ -323,7 +284,11 @@ export class OpencodeController {
     // correct scoping and the payload the request actually needs. No dir
     // from the gate → the gate error propagates (fail-closed: no cwd or
     // default path is ever sent as a location).
-    const projectDir = await this.requireProjectDir(projectId, userId, cid);
+    const { directory: projectDir } = await this.access.resolveProjectDirectory(
+      projectId,
+      userId,
+      cid,
+    );
     const client = await this.sdk.create(userId, cid);
     try {
       // v2 namespace (POST /api/session): the legacy POST /session answers
@@ -369,7 +334,11 @@ export class OpencodeController {
     const userId = identity.id;
     // C4: project gate first; upstream status is scoped to the project jail
     // (client ?directory ignored).
-    const projectDir = await this.requireProjectDir(projectId, userId, cid);
+    const { directory: projectDir } = await this.access.resolveProjectDirectory(
+      projectId,
+      userId,
+      cid,
+    );
     const client = await this.sdk.create(userId, cid);
     try {
       const res = await client.session.status({ directory: projectDir });
@@ -401,7 +370,7 @@ export class OpencodeController {
     const userId = identity.id;
     // C4: project gate before the session :id (v2 get is path-only — the
     // gate is the binding; client ?directory ignored).
-    await this.requireProjectDir(projectId, userId, cid);
+    await this.access.resolveProjectDirectory(projectId, userId, cid);
     const client = await this.sdk.create(userId, cid);
     try {
       // v2 namespace (GET /api/session/{sessionID}, path-only — ?directory
@@ -438,7 +407,11 @@ export class OpencodeController {
     const userId = identity.id;
     // C4: project gate before the session :id; upstream delete runs in the
     // project jail (client ?directory ignored).
-    const projectDir = await this.requireProjectDir(projectId, userId, cid);
+    const { directory: projectDir } = await this.access.resolveProjectDirectory(
+      projectId,
+      userId,
+      cid,
+    );
     const client = await this.sdk.create(userId, cid);
     try {
       const res = await client.session.delete({
@@ -475,7 +448,11 @@ export class OpencodeController {
     const userId = identity.id;
     // C4: project gate before the session :id; upstream update runs in the
     // project jail (client ?directory ignored).
-    const projectDir = await this.requireProjectDir(projectId, userId, cid);
+    const { directory: projectDir } = await this.access.resolveProjectDirectory(
+      projectId,
+      userId,
+      cid,
+    );
     const client = await this.sdk.create(userId, cid);
     try {
       const res = await client.session.update({
@@ -514,7 +491,11 @@ export class OpencodeController {
     const userId = identity.id;
     // C4: project gate before the session :id; upstream fork runs in the
     // project jail (client ?directory ignored).
-    const projectDir = await this.requireProjectDir(projectId, userId, cid);
+    const { directory: projectDir } = await this.access.resolveProjectDirectory(
+      projectId,
+      userId,
+      cid,
+    );
     const client = await this.sdk.create(userId, cid);
     try {
       const res = await client.session.fork({
@@ -555,7 +536,7 @@ export class OpencodeController {
     const userId = identity.id;
     // C4: project gate before the session :id (v2 messages take no
     // directory — the gate is the binding; client ?directory ignored).
-    await this.requireProjectDir(projectId, userId, cid);
+    await this.access.resolveProjectDirectory(projectId, userId, cid);
     const client = await this.sdk.create(userId, cid);
     try {
       const limit = this.parseLimit(limitRaw);
@@ -604,7 +585,7 @@ export class OpencodeController {
     const userId = identity.id;
     // C4: project gate before the session :id (v2 message is path-only —
     // the gate is the binding; client ?directory ignored).
-    await this.requireProjectDir(projectId, userId, cid);
+    await this.access.resolveProjectDirectory(projectId, userId, cid);
     const client = await this.sdk.create(userId, cid);
     try {
       // v2 namespace (GET /api/session/{sessionID}/message/{messageID},
@@ -645,7 +626,11 @@ export class OpencodeController {
     const userId = identity.id;
     // C4: project gate before the session :id; the prompt runs in the
     // project jail (client ?directory ignored).
-    const projectDir = await this.requireProjectDir(projectId, userId, cid);
+    const { directory: projectDir } = await this.access.resolveProjectDirectory(
+      projectId,
+      userId,
+      cid,
+    );
     const client = await this.sdk.create(userId, cid);
     try {
       // zod keeps `format` as unknown (upstream OutputFormat passthrough) —
@@ -688,7 +673,11 @@ export class OpencodeController {
     const userId = identity.id;
     // C4: project gate before the session :id; the prompt runs in the
     // project jail (client ?directory ignored).
-    const projectDir = await this.requireProjectDir(projectId, userId, cid);
+    const { directory: projectDir } = await this.access.resolveProjectDirectory(
+      projectId,
+      userId,
+      cid,
+    );
     const client = await this.sdk.create(userId, cid);
     try {
       const { format, ...rest } = body;
@@ -730,7 +719,11 @@ export class OpencodeController {
     const userId = identity.id;
     // C4: project gate before the session :id; the command runs in the
     // project jail (client ?directory ignored).
-    const projectDir = await this.requireProjectDir(projectId, userId, cid);
+    const { directory: projectDir } = await this.access.resolveProjectDirectory(
+      projectId,
+      userId,
+      cid,
+    );
     const client = await this.sdk.create(userId, cid);
     try {
       const res = await client.session.command({
@@ -769,7 +762,11 @@ export class OpencodeController {
     const userId = identity.id;
     // C4: project gate before the session :id; the shell runs in the
     // project jail (client ?directory ignored).
-    const projectDir = await this.requireProjectDir(projectId, userId, cid);
+    const { directory: projectDir } = await this.access.resolveProjectDirectory(
+      projectId,
+      userId,
+      cid,
+    );
     const client = await this.sdk.create(userId, cid);
     try {
       const res = await client.session.shell({
@@ -806,7 +803,11 @@ export class OpencodeController {
     const userId = identity.id;
     // C4: project gate before the session :id; upstream abort runs in the
     // project jail (client ?directory ignored).
-    const projectDir = await this.requireProjectDir(projectId, userId, cid);
+    const { directory: projectDir } = await this.access.resolveProjectDirectory(
+      projectId,
+      userId,
+      cid,
+    );
     const client = await this.sdk.create(userId, cid);
     try {
       const res = await client.session.abort({
@@ -842,7 +843,11 @@ export class OpencodeController {
     const userId = identity.id;
     // C4: project gate (the provider list takes a location directory — it
     // always uses the project jail; client ?directory ignored).
-    const projectDir = await this.requireProjectDir(projectId, userId, cid);
+    const { directory: projectDir } = await this.access.resolveProjectDirectory(
+      projectId,
+      userId,
+      cid,
+    );
     const client = await this.sdk.create(userId, cid);
     try {
       // v2 namespace (GET /api/provider): legacy ?directory maps to the v2

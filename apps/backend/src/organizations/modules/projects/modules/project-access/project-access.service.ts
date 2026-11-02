@@ -1,12 +1,18 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { AppLogger } from "../../../../../common/logger";
 import {
   DbService,
   dbUnavailable,
   type DbClient,
 } from "../../../../../common/db/db.service";
+import { WorkspacePathService } from "../../../../../common/storage/workspace-path.service";
 import { OrganizationsGuard } from "../../../../organizations.guard";
 import type { OrgRole } from "../../../../organizations.types";
+import { ownerKeyOrThrow } from "../../projects.service";
 
 /** uuid shape check (mirrors UsersService.isUserId — non-uuid keys never match a row). */
 function isUuidKey(value: string): boolean {
@@ -24,9 +30,11 @@ function isUuidKey(value: string): boolean {
  * points projects → project-access only).
  *
  * Reads the 1:1 `projects` table directly (dynamic imports, no
- * ProjectsService dependency, no module cycle) and delegates membership to
+ * ProjectsService injection, no module cycle) and delegates membership to
  * OrganizationsGuard.getRole (the guard is stateless, provided directly by
- * ProjectAccessModule — same pattern as WorkspacePathService).
+ * ProjectAccessModule — same pattern as WorkspacePathService). The only
+ * import from the parent projects module is the pure ownerKeyOrThrow layout
+ * mapping (no service instance, no cycle).
  *
  * Postgres outages funnel through `dbUnavailable` → 503
  * EXTERNAL_UNAVAILABLE (Retry-After 30 via ApiErrorFilter), logged once with
@@ -39,6 +47,7 @@ export class ProjectAccessService {
     private readonly logger: AppLogger = new AppLogger(ProjectAccessService.name),
     private readonly db: DbService,
     private readonly guard: OrganizationsGuard,
+    private readonly paths: WorkspacePathService,
   ) {}
 
   /** Live drizzle client — throws 503 EXTERNAL_UNAVAILABLE when Postgres is down. */
@@ -139,6 +148,49 @@ export class ProjectAccessService {
       correlationId,
     );
     return { ownerId: row.ownerId, orgIds: row.orgId ? [row.orgId] : [] };
+  }
+
+  /**
+   * Gate + directory jail for project-scoped session surfaces (C4).
+   *
+   * - Missing/blank projectId → 400 PROJECT_REQUIRED (session routes are
+   *   project-scoped; there is no cross-project listing).
+   * - assertProjectAccessById → 404 for strangers (no existence leak).
+   * - The owner home maps through ownerKeyOrThrow (same user layout the
+   *   projects domain writes) and resolves via resolveUserStrict, then the
+   *   content dir is re-asserted against the strict storage root — a path
+   *   that escapes the jail answers 403.
+   * - Unconfigured storage fails closed (500) before any upstream call.
+   *
+   * Returns the accepted projectId alongside the jailed content directory so
+   * callers pass it as the upstream location instead of a client-supplied
+   * path.
+   */
+  async resolveProjectDirectory(
+    projectId: string | undefined,
+    userId: string,
+    correlationId?: string,
+  ): Promise<{ projectId: string; directory: string }> {
+    if (!projectId || projectId.trim() === "") {
+      throw new BadRequestException({
+        code: "PROJECT_REQUIRED",
+        message: "projectId is required — session routes are project-scoped",
+      });
+    }
+    const { ownerId } = await this.assertProjectAccessById(
+      projectId,
+      userId,
+      correlationId,
+    );
+    const resolved = await this.paths.resolveUserStrict(
+      ownerKeyOrThrow(ownerId),
+      projectId,
+    );
+    await this.paths.assertInsideJail(
+      resolved.absRepo,
+      await this.paths.realStrictRoot(),
+    );
+    return { projectId, directory: resolved.absRepo };
   }
 
   /**

@@ -7,7 +7,6 @@ import { OpencodeSdkClient } from './opencode-sdk-client';
 import { OpencodeController } from './opencode.controller';
 import { OpencodeService } from './opencode.service';
 import { OrganizationsModule } from '../../../../../organizations/organizations.module';
-import { WorkspacePathService } from '../../../../../common/storage/workspace-path.service';
 
 /**
  * Global opencode module (mirrors CommonModule) — OpencodeService is
@@ -39,15 +38,14 @@ import { WorkspacePathService } from '../../../../../common/storage/workspace-pa
  * OrganizationsModule is imported for the C4 project gate, which reaches
  * ProjectAccessService transitively (OrganizationsModule → ProjectsModule →
  * ProjectAccessModule; assertProjectAccessById — no cycle, orgs has no ai
- * import).
- * WorkspacePathService is provided directly (stateless, same pattern as
- * ProjectsModule) for the C4 project directory jail.
+ * import). The project directory jail (gate + WorkspacePathService) lives
+ * in ProjectAccessService.resolveProjectDirectory.
  */
 @Global()
 @Module({
   imports: [BillingModule, ServeAuthModule, OrganizationsModule],
   controllers: [OpencodeController, OpencodeKeysController],
-  providers: [OpencodeService, OpencodeSdkClient, WorkspacePathService],
+  providers: [OpencodeService, OpencodeSdkClient],
   exports: [BillingModule, ServeAuthModule, OpencodeService, OpencodeSdkClient],
 })
 export class OpencodeModule implements OnModuleInit {

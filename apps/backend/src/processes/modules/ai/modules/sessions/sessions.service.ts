@@ -2,8 +2,6 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
 import type { OpencodeClient } from '@opencode-ai/sdk/v2';
 import { ProjectAccessService } from '../../../../../organizations/modules/projects/modules/project-access/project-access.service';
-import { ownerKeyOrThrow } from '../../../../../organizations/modules/projects/projects.service';
-import { WorkspacePathService } from '../../../../../common/storage/workspace-path.service';
 import { OpencodeSdkClient } from '../opencode/opencode-sdk-client';
 import { OpencodeService } from '../opencode/opencode.service';
 import {
@@ -130,7 +128,6 @@ export class SessionsService {
     private readonly sdk: OpencodeSdkClient,
     private readonly opencode: OpencodeService,
     private readonly access: ProjectAccessService,
-    private readonly paths: WorkspacePathService,
     private readonly auth: ServeAuthService,
     private readonly logger: AppLogger = new AppLogger(SessionsService.name),
   ) {}
@@ -143,41 +140,6 @@ export class SessionsService {
       throw new BadRequestException('Query "limit" must be a non-negative integer');
     }
     return limit;
-  }
-
-  /**
-   * C4 project gate + directory jail — the same fail-closed composition as
-   * OpencodeController.requireProjectDir (gateway convention: each surface
-   * composes ProjectAccessService.assertProjectAccessById + WorkspacePath
-   * itself; extraction to a shared helper is a follow-up, the semantics
-   * here are identical and must not drift). Returns the narrowed projectId
-   * (uuid the gate accepted) alongside the jailed content dir.
-   */
-  private async requireProject(
-    projectId: string | undefined,
-    userId: string,
-    correlationId?: string,
-  ): Promise<{ projectId: string; directory: string }> {
-    if (!projectId || projectId.trim() === '') {
-      throw new BadRequestException({
-        code: 'PROJECT_REQUIRED',
-        message: 'projectId is required — session routes are project-scoped',
-      });
-    }
-    const { ownerId } = await this.access.assertProjectAccessById(
-      projectId,
-      userId,
-      correlationId,
-    );
-    const resolved = await this.paths.resolveUserStrict(
-      ownerKeyOrThrow(ownerId),
-      projectId,
-    );
-    await this.paths.assertInsideJail(
-      resolved.absRepo,
-      await this.paths.realStrictRoot(),
-    );
-    return { projectId, directory: resolved.absRepo };
   }
 
   private isUpstreamOk<T>(data: T | undefined, error: unknown): data is T {
@@ -264,7 +226,7 @@ export class SessionsService {
 
   /** GET /api/sessions?projectId — list scoped to the gated jail. */
   async list(userId: string, projectId: string | undefined, cid: string): Promise<SessionInfo[]> {
-    const project = await this.requireProject(projectId, userId, cid);
+    const project = await this.access.resolveProjectDirectory(projectId, userId, cid);
     const client = await this.sdk.create(userId, cid);
     return this.listWithClient(client, project, cid);
   }
@@ -289,7 +251,7 @@ export class SessionsService {
    * silently drops every field except id/agent/model/location.
    */
   async create(userId: string, body: CreateSessionInput, cid: string): Promise<SessionInfo> {
-    const project = await this.requireProject(body.projectId, userId, cid);
+    const project = await this.access.resolveProjectDirectory(body.projectId, userId, cid);
     const client = await this.sdk.create(userId, cid);
     const active = await this.activeSessionIds(client, cid);
     const payload: Record<string, unknown> = { location: { directory: project.directory } };
@@ -371,7 +333,7 @@ export class SessionsService {
     cursor: string | undefined,
     cid: string,
   ): Promise<SessionMessage[]> {
-    await this.requireProject(projectId, userId, cid);
+    await this.access.resolveProjectDirectory(projectId, userId, cid);
     const client = await this.sdk.create(userId, cid);
     try {
       const limit = this.parseLimit(limitRaw);
@@ -412,7 +374,7 @@ export class SessionsService {
     body: SendMessageInput,
     cid: string,
   ): Promise<SessionMessage> {
-    await this.requireProject(body.projectId, userId, cid);
+    await this.access.resolveProjectDirectory(body.projectId, userId, cid);
     // Same real-user gate OpencodeSdkClient.create applies (this path posts
     // below the generator, so assert it here explicitly).
     this.auth.assertServeUser(userId, cid);
@@ -509,7 +471,7 @@ export class SessionsService {
     req: ExpressRequest,
     res: ExpressResponse,
   ): Promise<void> {
-    const project = await this.requireProject(projectId, userId, cid);
+    const project = await this.access.resolveProjectDirectory(projectId, userId, cid);
     const client = await this.sdk.create(userId, cid);
     const rows = await this.listWithClient(client, project, cid);
     const allowedSessions = new Set(rows.map((row) => row.id));
@@ -581,7 +543,7 @@ export class SessionsService {
     body: InterruptSessionInput,
     cid: string,
   ): Promise<SessionInterruptResult> {
-    await this.requireProject(body.projectId, userId, cid);
+    await this.access.resolveProjectDirectory(body.projectId, userId, cid);
     const client = await this.sdk.create(userId, cid);
     try {
       const res = await client.v2.session.interrupt({ sessionID: sessionId });
@@ -611,7 +573,7 @@ export class SessionsService {
    * silently skipped or defaulted row.
    */
   async providers(userId: string, projectId: string | undefined, cid: string): Promise<SessionRunnerProvider[]> {
-    const project = await this.requireProject(projectId, userId, cid);
+    const project = await this.access.resolveProjectDirectory(projectId, userId, cid);
     const client = await this.sdk.create(userId, cid);
     try {
       const res = await client.v2.provider.list({ location: { directory: project.directory } });
@@ -647,7 +609,7 @@ export class SessionsService {
    * the provider inventory above) scoped to the gated jail.
    */
   async models(userId: string, projectId: string | undefined, cid: string): Promise<Array<{ id: string; name: string; providerID: string }>> {
-    const project = await this.requireProject(projectId, userId, cid);
+    const project = await this.access.resolveProjectDirectory(projectId, userId, cid);
     const client = await this.sdk.create(userId, cid);
     try {
       const res = await client.v2.model.list({ location: { directory: project.directory } });

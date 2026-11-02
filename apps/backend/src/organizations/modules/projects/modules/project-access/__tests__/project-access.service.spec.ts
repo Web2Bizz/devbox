@@ -19,13 +19,22 @@
  * - (g) non-uuid requester on an org-linked project → 404, guard untouched
  *       (a non-uuid key can never match a uuid column — querying would 503);
  * - (h) assertProjectAccessById returns {ownerId, orgIds} and gates;
- * - (i) org-linked + owner but org soft-deleted → 404 (no owner resurrection).
+ * - (i) org-linked + owner but org soft-deleted → 404 (no owner resurrection);
+ * - (j) resolveProjectDirectory: blank projectId → 400 PROJECT_REQUIRED,
+ *       stranger → 404, owner → {projectId, directory} inside the jail,
+ *       escaping path → 403.
  *
  * Logs are silent; no secrets or PII appear anywhere in this file.
  */
 import assert from "node:assert/strict";
-import { NotFoundException } from "@nestjs/common";
+import path from "node:path";
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from "@nestjs/common";
 import type { DbService } from "../../../../../../common/db/db.service";
+import { WorkspacePathService } from "../../../../../../common/storage/workspace-path.service";
 import type { OrganizationsGuard } from "../../../../../organizations.guard";
 import { ProjectAccessService } from "../project-access.service";
 
@@ -97,9 +106,15 @@ function service(
   rows: ProjectRow[],
   roles: Record<string, string> = {},
   deletedOrgs: string[] = [],
+  paths: WorkspacePathService = new WorkspacePathService(),
 ) {
   const fake = fakeGuard(roles, deletedOrgs);
-  const svc = new ProjectAccessService(silentLogger(), fakeDb(rows), fake.guard);
+  const svc = new ProjectAccessService(
+    silentLogger(),
+    fakeDb(rows),
+    fake.guard,
+    paths,
+  );
   return { svc, calls: fake.calls };
 }
 
@@ -251,6 +266,80 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
       );
       // The member lookup still ran, but the owner fallback never rescued it.
       assert.deepEqual(calls, [{ orgId: ORG_ID, userId: OWNER_ID }]);
+    },
+  },
+  {
+    name: "(j) resolveProjectDirectory: blank → 400, stranger → 404, owner → jail dir, escape → 403",
+    run: async () => {
+      const previousRoot = process.env.REPOS_ROOT;
+      process.env.REPOS_ROOT = "/tmp/opencode/c4-project-access-jail";
+      try {
+        const root = path.resolve(process.env.REPOS_ROOT);
+        const { svc } = service([{ orgId: null, ownerId: OWNER_ID }]);
+
+        // Blank (or absent) projectId → 400 PROJECT_REQUIRED before any gate.
+        for (const blank of ["", "   ", undefined]) {
+          await assert.rejects(
+            () => svc.resolveProjectDirectory(blank, OWNER_ID, "cid-j1"),
+            (err: unknown) => {
+              assert.ok(err instanceof BadRequestException);
+              assert.deepEqual((err as BadRequestException).getResponse(), {
+                code: "PROJECT_REQUIRED",
+                message:
+                  "projectId is required — session routes are project-scoped",
+              });
+              return true;
+            },
+          );
+        }
+
+        // Stranger → 404 (no existence leak).
+        await assert.rejects(
+          () => svc.resolveProjectDirectory(PROJECT_ID, STRANGER_ID, "cid-j2"),
+          isNotFound,
+        );
+
+        // Owner → the jailed content dir for this project.
+        assert.deepEqual(
+          await svc.resolveProjectDirectory(PROJECT_ID, OWNER_ID, "cid-j3"),
+          {
+            projectId: PROJECT_ID,
+            directory: path.join(
+              root,
+              "users",
+              OWNER_ID,
+              "projects",
+              PROJECT_ID,
+              "content",
+            ),
+          },
+        );
+
+        // A resolved path outside the strict root → 403 from the real jail.
+        const realPaths = new WorkspacePathService();
+        const escaping = {
+          async resolveUserStrict() {
+            return { absRepo: path.resolve(root, "..", "escaped", "content") };
+          },
+          realStrictRoot: async () => root,
+          assertInsideJail: (abs: string, jail: string) =>
+            realPaths.assertInsideJail(abs, jail),
+        } as unknown as WorkspacePathService;
+        const { svc: escapingSvc } = service(
+          [{ orgId: null, ownerId: OWNER_ID }],
+          {},
+          [],
+          escaping,
+        );
+        await assert.rejects(
+          () =>
+            escapingSvc.resolveProjectDirectory(PROJECT_ID, OWNER_ID, "cid-j4"),
+          (err: unknown) => err instanceof ForbiddenException,
+        );
+      } finally {
+        if (previousRoot === undefined) delete process.env.REPOS_ROOT;
+        else process.env.REPOS_ROOT = previousRoot;
+      }
     },
   },
 ];

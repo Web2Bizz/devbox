@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { WorkspacePathService } from "../../../../../common/storage/workspace-path.service";
 import { OrganizationsGuard } from "../../../../organizations.guard";
 import { ProjectAccessService } from "./project-access.service";
 
@@ -8,17 +9,18 @@ import { ProjectAccessService } from "./project-access.service";
  *
  * No imports: DbService + AppLogger come from the global CommonModule.
  * OrganizationsGuard is stateless (a policy helper over DbService) and is
- * provided directly here instead of pulling the organizations module in —
- * the same "provided directly" pattern as WorkspacePathService, and the
- * reason ProjectsModule/chats/sessions/files no longer point back up at the
- * organizations module.
+ * provided directly here instead of pulling the organizations module in.
+ * WorkspacePathService is likewise provided directly (stateless) for the
+ * resolveProjectDirectory jail — the same "provided directly" pattern as
+ * ProjectsModule, and the reason ProjectsModule/chats/sessions/files no
+ * longer point back up at the organizations module.
  *
  * Exported by ProjectsModule, so project-internal consumers import
  * ProjectAccessModule and external domains reach it transitively via
  * the organizations module → ProjectsModule → ProjectAccessModule.
  */
 @Module({
-  providers: [ProjectAccessService, OrganizationsGuard],
+  providers: [ProjectAccessService, OrganizationsGuard, WorkspacePathService],
   exports: [ProjectAccessService],
 })
 export class ProjectAccessModule {}

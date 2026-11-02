@@ -169,31 +169,15 @@ function harness(sessionIds: Array<string>, frames: Array<unknown>): Harness {
     checkConnectivity: async (): Promise<'up' | 'down'> => 'up',
   };
   const access = {
-    assertProjectAccessById: async (projectId: string, userId: string): Promise<unknown> => {
+    resolveProjectDirectory: async (
+      projectId: string,
+      userId: string,
+    ): Promise<unknown> => {
       calls.push(`access:${projectId}:${userId}`);
-      return { ownerId: UID, projectId };
+      return { projectId, directory: DIR };
     },
   };
-  const paths = {
-    resolveUserStrict: async (ownerKey: string, projectId: string): Promise<unknown> => {
-      calls.push(`resolve:${ownerKey}:${projectId}`);
-      const absBase = `${JAIL}/users/${ownerKey}/projects/${projectId}`;
-      return {
-        scope: 'user',
-        scopeId: ownerKey,
-        projectId,
-        absBase,
-        absRepo: `${absBase}/content`,
-        absSecrets: `${absBase}/.secrets`,
-        scopeSecrets: `${JAIL}/users/${ownerKey}/.secrets`,
-        abs: `${absBase}/content`,
-        rel: '.',
-      };
-    },
-    realStrictRoot: async (): Promise<string> => JAIL,
-    assertInsideJail: async (abs: string): Promise<string> => abs,
-  };
-  const args: Array<unknown> = [sdk, opencode, access, paths, {}, silentLogger()];
+  const args: Array<unknown> = [sdk, opencode, access, {}, silentLogger()];
   const svc = new SessionsService(
     ...(args as unknown as ConstructorParameters<typeof SessionsService>),
   );

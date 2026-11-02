@@ -28,7 +28,7 @@ function isUserId(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
-/** Postgres unique-violation (email / users_email_lower_idx) → caller answers 409. */
+/** Postgres unique-violation (email) → caller answers 409. */
 function isUniqueViolation(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
   // node-postgres surfaces `code` directly; drizzle-orm wraps it as `cause`.

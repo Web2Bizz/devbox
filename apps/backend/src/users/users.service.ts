@@ -31,7 +31,9 @@ export function toPublicUser(user: StoredUser): PublicUser {
  * unconfigured/unreachable the repository throws and `dbUnavailable` funnels it
  * to 503 EXTERNAL_UNAVAILABLE (Retry-After 30 via ApiErrorFilter), logged once
  * with the correlationId.
- * Lookup key is the lowercased email (mirrors users_email_lower_idx).
+ * Lookup key is the lowercased email: rows are stored lowercased, so the
+ * `users_email_unique` constraint makes registration case-insensitive and
+ * `findByEmail` (`lower(email) = lower($1)`) reads legacy mixed-case rows.
  */
 @Injectable()
 export class UsersService {
@@ -47,7 +49,7 @@ export class UsersService {
   ): Promise<StoredUser | null> {
     const firstName = input.firstName.trim();
     const lastName = input.lastName.trim();
-    const email = input.email.trim();
+    const email = input.email.trim().toLowerCase();
     const passwordHash = await hashPassword(input.password, this.logger);
     try {
       const user = await this.usersRepository.insertLocal({

@@ -10,10 +10,11 @@
  * `utils/password` util (needs the bun runtime) and only the Postgres edge is
  * stubbed (same convention as invites.service.spec.ts):
  * - createLocal duplicate (SQLSTATE 23505) → null (caller answers 409);
+ * - createLocal stores a lowercased email (case-insensitive registration);
  * - createLocal maps the inserted row to ISO-8601 timestamps;
  * - any other DB failure → 503 EXTERNAL_UNAVAILABLE (dbUnavailable);
  * - findByEmail compares `lower(email) = lower($1)` (case-insensitive lookup
- *   mirrors users_email_lower_idx; asserted on the drizzle-built SQL);
+ *   for legacy mixed-case rows; asserted on the drizzle-built SQL);
  * - findById with a non-uuid key → null without touching the DB;
  * - updateProfile trims, sets only the provided fields + updatedAt and maps
  *   the row back to ISO-8601.
@@ -54,15 +55,21 @@ function untouchedDb() {
 }
 
 /** insert().values().returning() → rows, or throws `error` (409 detection). */
-function insertDb(outcome: { rows?: Array<unknown>; error?: unknown }) {
+function insertDb(
+  outcome: { rows?: Array<unknown>; error?: unknown },
+  capture?: (values: Record<string, unknown>) => void,
+) {
   const client = {
     insert: () => ({
-      values: () => ({
-        returning: async (): Promise<Array<unknown>> => {
-          if (outcome.error !== undefined) throw outcome.error;
-          return outcome.rows ?? [];
-        },
-      }),
+      values: (values: Record<string, unknown>) => {
+        capture?.(values);
+        return {
+          returning: async (): Promise<Array<unknown>> => {
+            if (outcome.error !== undefined) throw outcome.error;
+            return outcome.rows ?? [];
+          },
+        };
+      },
     }),
   };
   return {
@@ -149,6 +156,27 @@ const checks: Array<{ name: string; run: () => Promise<void> }> = [
         "cid-1",
       );
       assert.equal(created, null);
+    },
+  },
+  {
+    name: "createLocal stores a lowercased email (case-insensitive registration)",
+    run: async () => {
+      let inserted: Record<string, unknown> | undefined;
+      const service = makeService(
+        insertDb({ rows: [row()] }, (values) => {
+          inserted = values;
+        }),
+      );
+      await service.createLocal(
+        {
+          firstName: "Ada",
+          lastName: "Lovelace",
+          email: " ADA@Rush-Code.Local ",
+          password: "s3cret-p4ss",
+        },
+        "cid-1",
+      );
+      assert.equal(inserted?.email, "ada@rush-code.local");
     },
   },
   {

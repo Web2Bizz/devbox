@@ -132,9 +132,10 @@ export const githubInstallations = pgTable("github_installations", {
 
 /**
  * Internal accounts (durable contract for the Postgres-backed UsersService).
- * Email lookup key is the lowercased email
- * (CITEXT-style unique index) — github_installations.user_id stays a
- * nullable text FK-less column carrying the same string key (no backfill).
+ * Email is stored lowercased (`createLocal` normalizes), so the raw unique
+ * constraint gives case-insensitive identity; lookup still uses
+ * `lower(email) = lower($1)` for legacy rows. github_installations.user_id
+ * stays a nullable text FK-less column carrying the same string key.
  */
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),

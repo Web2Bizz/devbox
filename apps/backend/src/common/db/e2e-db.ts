@@ -1,15 +1,18 @@
 /**
- * Shared e2e Postgres harness (strict-Postgres suites only: auth, projects,
- * github). Not imported by production code — e2e runners only.
+ * Shared e2e Postgres primitives (strict-Postgres suites: auth,
+ * organizations, projects, github, keys). Not imported by production code.
  *
- * - `resolveTestDb(preferred)` — prefers TEST_DATABASE_URL (isolated PG,
- *   e.g. `docker run -p 5544:5432 -e POSTGRES_PASSWORD=... postgres:16`),
- *   falls back to DATABASE_URL. Probes reachability with a short budget:
- *   reachable → `{ mode: 'live', url }` (caller applies migrations and runs
- *   the full CRUD suite); otherwise → `{ mode: 'unreachable', url }`
- *   pointing at a dead port, and the caller must assert the strict-503
- *   surface (503 EXTERNAL_UNAVAILABLE + Retry-After 30 + correlationId)
- *   instead of silently passing. Never logs secrets (URLs carry
+ * Suites do not call this module's URL resolution directly — they go through
+ * `startTestDb()` in `e2e-db.container.ts`, which starts a throwaway
+ * `postgres:16-alpine` container by default and applies migrations once.
+ *
+ * - `resolveTestDb(preferred)` — probed reachability (short budget) for the
+ *   explicit `TEST_DATABASE_URL` override: reachable → `{ mode: 'live' }`,
+ *   otherwise `{ mode: 'unreachable' }` pointing at a dead port. The container
+ *   harness turns the unreachable outcome into a hard error (no silent 503
+ *   fallback); `unreachable` remains only for the explicit
+ *   `E2E_DB_MODE=unreachable` outage surface (503 EXTERNAL_UNAVAILABLE +
+ *   Retry-After 30 + correlationId). Never logs secrets (URLs carry
  *   credentials — only reachability outcomes are logged).
  * - `applyTestMigrations(url)` — applies the active Drizzle migration set in
  *   drizzle so the suite starts from the code-first schema.
@@ -68,9 +71,13 @@ export async function resolveTestDb(preferredUrl: string): Promise<TestDb> {
   return { mode: "unreachable", url: UNREACHABLE_TEST_DB_URL };
 }
 
-/** Locates apps/backend/drizzle from src/ or dist/ layouts. */
+/**
+ * Locates apps/backend/drizzle from src/ or dist/ layouts:
+ * `<backend>/src/common/db` and `<backend>/dist/common/db` are both three
+ * levels below the backend package root.
+ */
 function drizzleDir(): string {
-  return joinPath(__dirname, "..", "..", "drizzle");
+  return joinPath(__dirname, "..", "..", "..", "drizzle");
 }
 
 /**

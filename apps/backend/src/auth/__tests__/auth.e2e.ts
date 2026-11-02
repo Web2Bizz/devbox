@@ -25,11 +25,8 @@ process.env.JWT_REFRESH_TTL = "7d";
 process.env.AUTH_LEGACY_MOCK_FALLBACK = "false";
 
 async function main(): Promise<void> {
-  const { resolveTestDb, applyTestMigrations } =
-    await import("../../common/db/e2e-db");
-  const testDb = await resolveTestDb(
-    process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL ?? "",
-  );
+  const { startTestDb } = await import("../../common/db/e2e-db.container");
+  const testDb = await startTestDb();
   process.env.DATABASE_URL = testDb.url;
   for (const key of [
     "POSTGRES_USER",
@@ -38,9 +35,6 @@ async function main(): Promise<void> {
     "POSTGRES_HOST",
   ]) {
     delete process.env[key];
-  }
-  if (testDb.mode === "live") {
-    await applyTestMigrations(testDb.url);
   }
   console.log(`[auth e2e] db mode: ${testDb.mode}`);
 
@@ -145,6 +139,7 @@ async function main(): Promise<void> {
       });
     } finally {
       await app.close();
+      await testDb.stop();
     }
 
     console.log(`\nauth e2e: ${passed}/${passed + failed} passed`);
@@ -444,6 +439,7 @@ async function main(): Promise<void> {
     });
   } finally {
     await app.close();
+    await testDb.stop();
   }
 
   // --- Dual-mode: legacy fallback ON → mock identity accepted --------------

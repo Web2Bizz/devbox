@@ -117,6 +117,21 @@ logger.error(`[external] failure service=${service} operation=${op} status=${sta
 | `bun run keys:reencrypt` | перешифровка opencode-ключей |
 | `bun run db:check-integrity` | проверка целостности Drizzle-схемы |
 
+### e2e и Postgres
+
+Строгие сьюты (`auth`, `organizations`, `projects`, `github`, `keys`) поднимают
+одноразовый `postgres:16-alpine` через testcontainers
+(`src/common/db/e2e-db.container.ts`), применяют `drizzle/`-миграции и гасят
+контейнер в `stop()`; Ryuk добирает его при аварийном выходе. Нужен запущенный
+Docker — без него сьют падает с явной ошибкой (не скипает).
+
+- `TEST_DATABASE_URL=postgres://…` — переиспользовать внешний Postgres вместо
+  контейнера (недоступный override → ошибка, не тихий фолбэк).
+- `E2E_DB_MODE=unreachable` — явная проверка outage-поверхности
+  (503 + Retry-After 30), не дефолт.
+- `DATABASE_URL` в e2e не читается: контейнер по умолчанию, чтобы миграции не
+  уехали в dev-базу.
+
 ## Scope-правила (кратко)
 
 - Три слоя: `processes/` → `organizations/` (⊃ `modules/projects/`) → `common/`.

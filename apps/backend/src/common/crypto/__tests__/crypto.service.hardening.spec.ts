@@ -169,7 +169,7 @@ async function main(): Promise<void> {
   await check("hostile: encrypt null/undefined/non-string throws (no envelope)", () => {
     setKeyring(ACTIVE_A);
     const svc = new CryptoService();
-    for (const bad of [null, undefined, 123, true, {}, []] as unknown as string[]) {
+    for (const bad of [null, undefined, 123, true, {}, []] as unknown as Array<string>) {
       assert.throws(() => svc.encrypt(bad));
     }
   });
@@ -392,14 +392,14 @@ async function main(): Promise<void> {
     setKeyring(ACTIVE_A);
     const svc = new CryptoService();
     const enc = svc.encrypt(PLAINTEXT);
-    const captured: unknown[] = [];
+    const captured: Array<unknown> = [];
     const methods = ["debug", "info", "warn", "error"] as const;
     const originals = methods.map((m) => AppLogger.prototype[m]);
     methods.forEach((m, i) => {
-      (AppLogger.prototype as unknown as Record<string, (...a: unknown[]) => void>)[m] =
-        function (...args: unknown[]) {
+      (AppLogger.prototype as unknown as Record<string, (...a: Array<unknown>) => void>)[m] =
+        function (...args: Array<unknown>) {
           captured.push(args);
-          return (originals[i] as (...a: unknown[]) => unknown).apply(this, args);
+          return (originals[i] as (...a: Array<unknown>) => unknown).apply(this, args);
         };
     });
     try {
@@ -407,8 +407,8 @@ async function main(): Promise<void> {
       assert.equal(codeOf(() => new CryptoService().decrypt(enc)), "opencode_key_unreadable");
     } finally {
       methods.forEach((m, i) => {
-        (AppLogger.prototype as unknown as Record<string, (...a: unknown[]) => void>)[m] =
-          originals[i] as (...a: unknown[]) => void;
+        (AppLogger.prototype as unknown as Record<string, (...a: Array<unknown>) => void>)[m] =
+          originals[i] as (...a: Array<unknown>) => void;
       });
       setKeyring(ACTIVE_A);
     }

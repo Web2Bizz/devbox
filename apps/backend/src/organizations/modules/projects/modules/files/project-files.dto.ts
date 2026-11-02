@@ -23,5 +23,5 @@ export class FileNodeDto {
   type!: string;
 
   @ApiProperty({ required: false, type: () => [FileNodeDto] })
-  children?: FileNodeDto[];
+  children?: Array<FileNodeDto>;
 }

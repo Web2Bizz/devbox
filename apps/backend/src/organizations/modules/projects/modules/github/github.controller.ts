@@ -248,7 +248,7 @@ export class GithubController {
     query: ListReposQueryInput,
     @ReqUser() identity: RequestIdentity,
     @Headers("x-correlation-id") correlationId?: string,
-  ): Promise<GithubRepoDto[]> {
+  ): Promise<Array<GithubRepoDto>> {
     if (!this.appAuth.isConfigured()) {
       throw new UnauthorizedException("GitHub App is not configured");
     }

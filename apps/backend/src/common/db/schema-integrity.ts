@@ -27,18 +27,18 @@ export type IntegrityCheck = {
 
 type ExpectedTable = {
   name: string;
-  columns: string[];
-  primaryKeys: string[][];
+  columns: Array<string>;
+  primaryKeys: Array<Array<string>>;
   foreignKeys: Array<{
-    columns: string[];
+    columns: Array<string>;
     foreignTable: string;
-    foreignColumns: string[];
+    foreignColumns: Array<string>;
     onDelete: string;
   }>;
-  uniqueKeys: string[][];
+  uniqueKeys: Array<Array<string>>;
   indexes: Array<{
     name: string;
-    columns: string[];
+    columns: Array<string>;
     unique: boolean;
     predicate: string | null | undefined;
   }>;
@@ -46,12 +46,12 @@ type ExpectedTable = {
 
 type CatalogTable = {
   name: string;
-  columns: string[];
+  columns: Array<string>;
 };
 
 type CatalogKey = {
   table: string;
-  columns: string[];
+  columns: Array<string>;
   primary: boolean;
   unique: boolean;
   name: string;
@@ -59,16 +59,16 @@ type CatalogKey = {
 
 type CatalogForeignKey = {
   table: string;
-  columns: string[];
+  columns: Array<string>;
   foreignTable: string;
-  foreignColumns: string[];
+  foreignColumns: Array<string>;
   onDelete: string;
 };
 
 type CatalogIndex = {
   table: string;
   name: string;
-  columns: string[];
+  columns: Array<string>;
   unique: boolean;
   keyColumnCount: number;
   totalColumnCount: number;
@@ -76,10 +76,10 @@ type CatalogIndex = {
 };
 
 export type CatalogSnapshot = {
-  tables: CatalogTable[];
-  keys: CatalogKey[];
-  foreignKeys: CatalogForeignKey[];
-  indexes: CatalogIndex[];
+  tables: Array<CatalogTable>;
+  keys: Array<CatalogKey>;
+  foreignKeys: Array<CatalogForeignKey>;
+  indexes: Array<CatalogIndex>;
 };
 
 const DRIZZLE_TABLES = [
@@ -179,7 +179,7 @@ function normalizePredicate(predicate: string): string {
 }
 
 /** The deprecated projectsAndOrganizations stub is deliberately excluded. */
-export function getExpectedSchema(): ExpectedTable[] {
+export function getExpectedSchema(): Array<ExpectedTable> {
   return DRIZZLE_TABLES.map((table) => {
     const config = getTableConfig(table);
     const uniqueKeys = [
@@ -230,22 +230,22 @@ export function getExpectedSchema(): ExpectedTable[] {
   });
 }
 
-function sorted(values: string[]): string[] {
+function sorted(values: Array<string>): Array<string> {
   return [...values].sort();
 }
 
-function sameColumns(left: string[], right: string[]): boolean {
+function sameColumns(left: Array<string>, right: Array<string>): boolean {
   return left.length === right.length && left.every((value, i) => value === right[i]);
 }
 
-function sameKey(left: string[], right: string[]): boolean {
+function sameKey(left: Array<string>, right: Array<string>): boolean {
   return sameColumns(sorted(left), sorted(right));
 }
 
 function hasKey(
-  keys: CatalogKey[],
+  keys: Array<CatalogKey>,
   table: string,
-  columns: string[],
+  columns: Array<string>,
   primary: boolean,
   unique: boolean,
 ): boolean {
@@ -259,10 +259,10 @@ function hasKey(
 }
 
 export function compareSchema(
-  expected: ExpectedTable[],
+  expected: Array<ExpectedTable>,
   actual: CatalogSnapshot,
-): IntegrityCheck[] {
-  const checks: IntegrityCheck[] = [];
+): Array<IntegrityCheck> {
+  const checks: Array<IntegrityCheck> = [];
   const actualTables = new Map(actual.tables.map((table) => [table.name, table]));
 
   for (const expectedTable of expected) {
@@ -360,8 +360,8 @@ type Journal = {
 
 export function auditMigrationMetadata(
   journalContents: string,
-  migrationFiles: string[],
-): IntegrityCheck[] {
+  migrationFiles: Array<string>,
+): Array<IntegrityCheck> {
   let journal: Journal;
   try {
     journal = JSON.parse(journalContents) as Journal;
@@ -400,16 +400,16 @@ export function auditMigrationMetadata(
     ];
   }
 
-  const duplicateTags = [...new Set(tags.filter((tag, i) => tags.indexOf(tag) !== i))] as string[];
-  const missingFiles = [...new Set(tags as string[])].filter(
+  const duplicateTags = [...new Set(tags.filter((tag, i) => tags.indexOf(tag) !== i))] as Array<string>;
+  const missingFiles = [...new Set(tags as Array<string>)].filter(
     (tag) => !sqlFiles.includes(`${tag}.sql`),
   );
-  const journalFiles = new Set((tags as string[]).map((tag) => `${tag}.sql`));
+  const journalFiles = new Set((tags as Array<string>).map((tag) => `${tag}.sql`));
   const orphanFiles = sqlFiles.filter((file) => !journalFiles.has(file));
 
   const emptyStatus: CheckStatus =
     tags.length === 0 && sqlFiles.length > 0 ? "FAIL" : "PASS";
-  const checks: IntegrityCheck[] = [
+  const checks: Array<IntegrityCheck> = [
     {
       name: "migrations.journal_entries",
       status: emptyStatus,
@@ -445,7 +445,7 @@ export function auditMigrationMetadata(
   return checks;
 }
 
-export function formatReport(checks: IntegrityCheck[]): string {
+export function formatReport(checks: Array<IntegrityCheck>): string {
   const overall = checks.some((check) => check.status === "FAIL")
     ? "FAIL"
     : checks.some((check) => check.status === "WARN")
@@ -462,13 +462,13 @@ export function formatReport(checks: IntegrityCheck[]): string {
 // `src/db` — keep this in sync with the source location).
 const drizzleDir = joinPath(__dirname, "..", "..", "..", "drizzle");
 
-function keyArray(row: QueryResultRow, field: string): string[] {
+function keyArray(row: QueryResultRow, field: string): Array<string> {
   const value: unknown = row[field];
   return Array.isArray(value) ? value.filter((part): part is string => typeof part === "string") : [];
 }
 
 async function readCatalog(client: PoolClient): Promise<CatalogSnapshot> {
-  const tablesResult = await client.query<{ table_name: string; columns: string[] }>(`
+  const tablesResult = await client.query<{ table_name: string; columns: Array<string> }>(`
     SELECT c.relname AS table_name,
            ARRAY(SELECT a.attname::text
                  FROM pg_attribute a
@@ -562,7 +562,7 @@ async function readCatalog(client: PoolClient): Promise<CatalogSnapshot> {
   };
 }
 
-async function checkTarget(url: string): Promise<IntegrityCheck[]> {
+async function checkTarget(url: string): Promise<Array<IntegrityCheck>> {
   const pool = new Pool({
     connectionString: url,
     connectionTimeoutMillis: 8000,
@@ -584,7 +584,7 @@ async function checkTarget(url: string): Promise<IntegrityCheck[]> {
   }
 }
 
-function migrationChecks(): IntegrityCheck[] {
+function migrationChecks(): Array<IntegrityCheck> {
   const journalPath = joinPath(drizzleDir, "meta", "_journal.json");
   const journal = readFileSync(journalPath, "utf8");
   const migrationFiles = readdirSync(drizzleDir).filter((file) => file.endsWith(".sql"));
@@ -613,12 +613,12 @@ function safeErrorCode(error: unknown): string {
 export async function runSchemaIntegrityCheck(
   databaseUrl: string | undefined,
   dependencies: {
-    readMigrations?: () => IntegrityCheck[];
-    checkDatabase?: (url: string) => Promise<IntegrityCheck[]>;
+    readMigrations?: () => Array<IntegrityCheck>;
+    checkDatabase?: (url: string) => Promise<Array<IntegrityCheck>>;
   } = {},
-): Promise<{ checks: IntegrityCheck[]; exitCode: number }> {
+): Promise<{ checks: Array<IntegrityCheck>; exitCode: number }> {
   if (!databaseUrl?.trim()) {
-    const checks: IntegrityCheck[] = [
+    const checks: Array<IntegrityCheck> = [
       {
         name: "config.database_url",
         status: "FAIL",
@@ -628,7 +628,7 @@ export async function runSchemaIntegrityCheck(
     return { checks, exitCode: 1 };
   }
 
-  let checks: IntegrityCheck[];
+  let checks: Array<IntegrityCheck>;
   try {
     checks = (dependencies.readMigrations ?? migrationChecks)();
   } catch {

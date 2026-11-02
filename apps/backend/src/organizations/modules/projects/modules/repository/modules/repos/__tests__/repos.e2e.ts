@@ -114,7 +114,7 @@ async function main(): Promise<void> {
       // corrupted siblings are filtered out first, so the suffix is unique.
       const hit = await fetch(`${base}/api/v1/repos?q=${E2E_PID.slice(-4)}`, auth);
       assert.equal(hit.status, 200);
-      assert.equal(((await readJson(hit)) as unknown[]).length, 1);
+      assert.equal(((await readJson(hit)) as Array<unknown>).length, 1);
       const miss = await fetch(`${base}/api/v1/repos?q=zzz-nope`, auth);
       assert.equal(miss.status, 200);
       assert.deepEqual(await readJson(miss), []);
@@ -123,7 +123,7 @@ async function main(): Promise<void> {
     await check('GET /api/v1/repos/:userSpace scopes to one space', async () => {
       const res = await fetch(`${base}/api/v1/repos/${E2E_UID}`, auth);
       assert.equal(res.status, 200);
-      assert.equal(((await readJson(res)) as unknown[]).length, 1);
+      assert.equal(((await readJson(res)) as Array<unknown>).length, 1);
       // Foreign space: the member gate needs PG — without DB it denies 503
       // (same EXTERNAL_UNAVAILABLE envelope); with DB a stranger gets 404.
       const empty = await fetch(`${base}/api/v1/repos/nobody-here`, auth);

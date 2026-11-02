@@ -63,7 +63,7 @@ function untouchedDb() {
  * orgRows, `select().from(organizationMembers)` → memberRows
  * (select().from().where().limit() is the only shape the guard uses).
  */
-function fakeDb(orgRows: unknown[], memberRows: unknown[]) {
+function fakeDb(orgRows: Array<unknown>, memberRows: Array<unknown>) {
   const rowsFor = (table: unknown) =>
     table === organizations
       ? orgRows

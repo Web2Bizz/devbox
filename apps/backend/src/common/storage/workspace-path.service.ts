@@ -210,7 +210,7 @@ export class WorkspacePathService {
   }
 
   /** `readdir` with dirents (names + type predicates) for a jailed path. */
-  async readDir(abs: string): Promise<DirEntry[]> {
+  async readDir(abs: string): Promise<Array<DirEntry>> {
     return readdir(abs, { withFileTypes: true });
   }
 

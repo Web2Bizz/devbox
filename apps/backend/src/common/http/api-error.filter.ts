@@ -34,7 +34,7 @@ function statusToCode(status: number): string {
 
 @Catch()
 export class ApiErrorFilter implements ExceptionFilter {
-  private readonly logger = new AppLogger('Http');
+  private readonly logger = new AppLogger(ApiErrorFilter.name);
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
@@ -46,7 +46,7 @@ export class ApiErrorFilter implements ExceptionFilter {
       setHeader: (name: string, value: string) => void;
     }>();
     const req = ctx.getRequest<{
-      headers: Record<string, string | string[] | undefined>;
+      headers: Record<string, string | Array<string> | undefined>;
       correlationId?: string;
       destroyed?: boolean;
     }>();
@@ -151,7 +151,7 @@ export class ApiErrorFilter implements ExceptionFilter {
       const status = exception.getStatus();
       const response = exception.getResponse() as
         | string
-        | { code?: string; message?: string | string[]; error?: string };
+        | { code?: string; message?: string | Array<string>; error?: string };
       let code = statusToCode(status);
       let message: string;
       if (typeof response === 'string') {

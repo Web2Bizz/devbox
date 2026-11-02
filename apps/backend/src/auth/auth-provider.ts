@@ -24,7 +24,7 @@ export class LocalAuthProvider implements AuthProvider {
 
   constructor(
     private readonly users: UsersService,
-    private readonly logger: AppLogger = new AppLogger("LocalAuthProvider"),
+    private readonly logger: AppLogger = new AppLogger(LocalAuthProvider.name),
   ) {}
 
   async verify(

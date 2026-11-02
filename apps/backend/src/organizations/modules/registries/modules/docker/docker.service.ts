@@ -51,10 +51,10 @@ export class DockerRegistryService implements OnModuleInit {
 
   constructor(
     @Optional() private readonly config?: ConfigService,
-    private readonly logger: AppLogger = new AppLogger('DockerRegistryService'),
+    private readonly logger: AppLogger = new AppLogger(DockerRegistryService.name),
     @Optional() private readonly externalClient?: ExternalClient,
   ) {
-    this.external = this.externalClient ?? new ExternalClient(new AppLogger('ExternalClient'));
+    this.external = this.externalClient ?? new ExternalClient(new AppLogger(DockerRegistryService.name));
   }
 
   private resolvedEnv(): AppEnv | null {
@@ -187,7 +187,7 @@ export class DockerRegistryService implements OnModuleInit {
    * filter) — never returns mock data. A successful call after a 'down'
    * period flips the status back to 'up' (reconnect log).
    */
-  async listCatalog(correlationId?: string): Promise<string[]> {
+  async listCatalog(correlationId?: string): Promise<Array<string>> {
     const cfg = this.resolved();
     if (!cfg.url) {
       this.logger.warn(

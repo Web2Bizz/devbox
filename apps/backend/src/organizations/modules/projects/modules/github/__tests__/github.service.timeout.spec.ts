@@ -12,7 +12,7 @@ process.env.EXTERNAL_RETRY_MAX_DELAY_MS = "0";
 
 type Case = { name: string; run: () => Promise<void> | void };
 
-const cases: Case[] = [];
+const cases: Array<Case> = [];
 let currentSuite = "";
 
 function describe(name: string, fn: () => void): void {

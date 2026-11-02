@@ -151,7 +151,7 @@ function decryptWith(
  */
 @Injectable()
 export class CryptoService {
-  constructor(private readonly logger: AppLogger = new AppLogger("CryptoService")) {}
+  constructor(private readonly logger: AppLogger = new AppLogger(CryptoService.name)) {}
 
   /** Active KEK id new rows are wrapped with (fail-closed when unconfigured). */
   activeKeyId(): string {
@@ -199,7 +199,7 @@ export class CryptoService {
     // Candidate order: envelope's KEK first, then the other known KEK
     // (dual-read across the rotation window); legacy envelopes without an
     // id try active → previous.
-    const ordered: KeyEntry[] =
+    const ordered: Array<KeyEntry> =
       input.keyId && input.keyId === ring.previous?.id
         ? [ring.previous, ring.active]
         : ring.previous

@@ -45,12 +45,12 @@ export class SessionsController {
     @Param("projectId") projectId: string,
     @ReqUser() identity: RequestIdentity,
     @Headers("x-correlation-id") correlationId?: string,
-  ): Promise<ProjectSessionDto[]> {
+  ): Promise<Array<ProjectSessionDto>> {
     return (await this.sessions.list(
       projectId,
       correlationId,
       identity.id,
-    )) as ProjectSessionDto[];
+    )) as Array<ProjectSessionDto>;
   }
 
   @Post()

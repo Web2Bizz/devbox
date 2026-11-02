@@ -51,12 +51,12 @@ export class ChatsController {
     @Param("projectId") projectId: string,
     @ReqUser() identity: RequestIdentity,
     @Headers("x-correlation-id") correlationId?: string,
-  ): Promise<ProjectChatDto[]> {
+  ): Promise<Array<ProjectChatDto>> {
     return (await this.chats.list(
       projectId,
       correlationId,
       identity.id,
-    )) as ProjectChatDto[];
+    )) as Array<ProjectChatDto>;
   }
 
   @Post()

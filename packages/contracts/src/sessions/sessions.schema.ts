@@ -46,7 +46,7 @@ export const sessionModelSchema = z.object({
 }) satisfies z.ZodType<SessionModel>;
 
 export const sessionModelListSchema = z.array(sessionModelSchema) satisfies z.ZodType<
-  SessionModel[]
+  Array<SessionModel>
 >;
 
 export const sessionInfoSchema = z.object({

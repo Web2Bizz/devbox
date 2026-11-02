@@ -76,8 +76,8 @@ export class OrganizationsController {
   async list(
     @ReqUser() identity: RequestIdentity,
     @Req() req?: { correlationId?: string },
-  ): Promise<OrganizationDto[]> {
-    return (await this.orgs.listForUser(identity.id, req?.correlationId)) as OrganizationDto[];
+  ): Promise<Array<OrganizationDto>> {
+    return (await this.orgs.listForUser(identity.id, req?.correlationId)) as Array<OrganizationDto>;
   }
 
   @Get(":id")

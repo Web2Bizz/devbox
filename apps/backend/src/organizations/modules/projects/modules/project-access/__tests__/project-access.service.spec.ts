@@ -63,7 +63,7 @@ function silentLogger() {
  * DbService stub for the only shape the gate uses:
  * `select({...}).from(projects).where(...)` → rows (no .limit()).
  */
-function fakeDb(rows: ProjectRow[]) {
+function fakeDb(rows: Array<ProjectRow>) {
   const client = {
     select: () => ({
       from: () => ({
@@ -84,7 +84,7 @@ function fakeDb(rows: ProjectRow[]) {
  */
 function fakeGuard(
   roles: Record<string, string> = {},
-  deletedOrgs: string[] = [],
+  deletedOrgs: Array<string> = [],
 ) {
   const calls: Array<{ orgId: string; userId: string }> = [];
   const guard = {
@@ -103,9 +103,9 @@ function fakeGuard(
 }
 
 function service(
-  rows: ProjectRow[],
+  rows: Array<ProjectRow>,
   roles: Record<string, string> = {},
-  deletedOrgs: string[] = [],
+  deletedOrgs: Array<string> = [],
   paths: WorkspacePathService = new WorkspacePathService(),
 ) {
   const fake = fakeGuard(roles, deletedOrgs);

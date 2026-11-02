@@ -47,10 +47,10 @@ export class ReposController {
     @Query(new ZodValidationPipe(reposQuerySchema)) query: ReposQuery,
     @ReqUser() identity: RequestIdentity,
     @Headers('x-correlation-id') correlationId?: string,
-  ): Promise<RepoDto[]> {
+  ): Promise<Array<RepoDto>> {
     // Own space only — org spaces are reachable via GET /repos/:userSpace
     // behind the member gate below (paging semantics stay per-space).
-    return this.repos.list(identity.id, query, correlationId) as Promise<RepoDto[]>;
+    return this.repos.list(identity.id, query, correlationId) as Promise<Array<RepoDto>>;
   }
 
   @Get(':userSpace')
@@ -68,7 +68,7 @@ export class ReposController {
     @Query(new ZodValidationPipe(reposQuerySchema)) query: ReposQuery,
     @ReqUser() identity: RequestIdentity,
     @Headers('x-correlation-id') correlationId?: string,
-  ): Promise<RepoDto[]> {
+  ): Promise<Array<RepoDto>> {
     const parsed = userSpaceSchema.safeParse(userSpace);
     if (!parsed.success) {
       throw new BadRequestException(
@@ -81,6 +81,6 @@ export class ReposController {
       const role = await this.access.getRole(parsed.data, identity.id, correlationId);
       if (!role) throw new NotFoundException(`Repo space ${parsed.data} not found`);
     }
-    return this.repos.list(parsed.data, query, correlationId) as Promise<RepoDto[]>;
+    return this.repos.list(parsed.data, query, correlationId) as Promise<Array<RepoDto>>;
   }
 }

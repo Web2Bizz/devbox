@@ -59,7 +59,7 @@ export class ProjectAccessService {
   async orgIdsForProject(
     projectId: string,
     correlationId?: string,
-  ): Promise<string[]> {
+  ): Promise<Array<string>> {
     try {
       const { projects } = await import("../../../../../common/db/schema");
       const { eq: eqOp } = await import("drizzle-orm");
@@ -139,7 +139,7 @@ export class ProjectAccessService {
     projectId: string,
     userId: string,
     correlationId?: string,
-  ): Promise<{ ownerId: string | null; orgIds: string[] }> {
+  ): Promise<{ ownerId: string | null; orgIds: Array<string> }> {
     const row = await this.projectAccessRow(projectId, correlationId);
     await this.assertProjectAccess(
       projectId,

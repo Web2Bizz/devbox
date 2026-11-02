@@ -189,15 +189,15 @@ async function main(): Promise<void> {
   // secrets AND normal-path shape: warn/error are one-liners with
   // operation/status/code and no stack (`\n at ` only ever appears on debug).
   const { AppLogger } = await import("../../../../../../common/logger");
-  const captured: Array<{ method: string; args: unknown[] }> = [];
+  const captured: Array<{ method: string; args: Array<unknown> }> = [];
   const methods = ["debug", "info", "warn", "error"] as const;
   const originals = methods.map((m) => AppLogger.prototype[m]);
   methods.forEach((m, i) => {
     (
-      AppLogger.prototype as unknown as Record<string, (...a: unknown[]) => void>
-    )[m] = function (...args: unknown[]) {
+      AppLogger.prototype as unknown as Record<string, (...a: Array<unknown>) => void>
+    )[m] = function (...args: Array<unknown>) {
       captured.push({ method: m, args });
-      return (originals[i] as (...a: unknown[]) => unknown).apply(this, args);
+      return (originals[i] as (...a: Array<unknown>) => unknown).apply(this, args);
     };
   });
 
@@ -646,8 +646,8 @@ async function main(): Promise<void> {
   } finally {
     methods.forEach((m, i) => {
       (
-        AppLogger.prototype as unknown as Record<string, (...a: unknown[]) => void>
-      )[m] = originals[i] as (...a: unknown[]) => void;
+        AppLogger.prototype as unknown as Record<string, (...a: Array<unknown>) => void>
+      )[m] = originals[i] as (...a: Array<unknown>) => void;
     });
     await app.close();
     billing.close();

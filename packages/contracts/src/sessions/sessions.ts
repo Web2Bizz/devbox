@@ -51,7 +51,7 @@ export type SessionInfo = {
 };
 
 /** GET /api/sessions — domain session list. */
-export type SessionInfoList = SessionInfo[];
+export type SessionInfoList = Array<SessionInfo>;
 
 /** POST /api/sessions body (projectId is required — sessions are project-scoped). */
 export type CreateSessionRequest = {
@@ -106,7 +106,7 @@ export type SessionMessage = {
 };
 
 /** GET /api/sessions/{id}/messages — normalized message list. */
-export type SessionMessageList = SessionMessage[];
+export type SessionMessageList = Array<SessionMessage>;
 
 /**
  * POST /api/sessions/{id}/messages body — the domain chat prompt. `text`
@@ -199,4 +199,4 @@ export type SessionRunnerProvider = {
 };
 
 /** GET /api/sessions/providers — provider inventory list. */
-export type SessionRunnerProviderList = SessionRunnerProvider[];
+export type SessionRunnerProviderList = Array<SessionRunnerProvider>;

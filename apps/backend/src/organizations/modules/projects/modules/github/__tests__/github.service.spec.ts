@@ -13,7 +13,7 @@ process.env.EXTERNAL_RETRY_MAX_DELAY_MS = "0";
 
 type Case = { name: string; run: () => Promise<void> | void };
 
-const cases: Case[] = [];
+const cases: Array<Case> = [];
 let currentSuite = "";
 
 function describe(name: string, fn: () => void): void {
@@ -53,8 +53,8 @@ type GithubServiceCtor = new (
 ) => GithubService;
 
 function service(stored: GithubInstallation | null) {
-  const tokenCalls: number[] = [];
-  const lookupCalls: number[] = [];
+  const tokenCalls: Array<number> = [];
+  const lookupCalls: Array<number> = [];
   const appAuth = {
     async getInstallationToken(installationId?: number): Promise<string> {
       tokenCalls.push(installationId ?? 0);
@@ -84,7 +84,7 @@ function service(stored: GithubInstallation | null) {
 
 const QUERY: ListReposQueryInput = { page: 1, per_page: 30 };
 
-function stubFetchRepos(repositories: unknown[]): void {
+function stubFetchRepos(repositories: Array<unknown>): void {
   __setGithubFetchForTests((async () =>
     new Response(JSON.stringify({ total_count: repositories.length, repositories }), {
       status: 200,

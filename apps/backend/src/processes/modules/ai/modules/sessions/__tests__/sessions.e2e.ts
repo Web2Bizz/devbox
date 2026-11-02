@@ -132,7 +132,7 @@ const MESSAGE_SHELL = {
 };
 
 /** v2 SSE frames the relay must translate. */
-const EVENT_FRAMES: unknown[] = [
+const EVENT_FRAMES: Array<unknown> = [
   {
     id: 'evt_1',
     type: 'message.part.delta',
@@ -164,25 +164,25 @@ function parseBody(raw: string): unknown {
 function startStandStub(): Promise<{
   server: Server;
   url: string;
-  listDirs: string[];
-  creates: Captured[];
+  listDirs: Array<string>;
+  creates: Array<Captured>;
   prompts: Array<Captured & { url: string }>;
-  eventConns: EventConn[];
+  eventConns: Array<EventConn>;
   interrupts: Array<Captured & { url: string }>;
-  providerDirs: string[];
+  providerDirs: Array<string>;
   setMode: (m: 'normal' | 'reject' | 'conflict' | 'bad-provider') => void;
   close: () => Promise<void>;
 }> {
-  const listDirs: string[] = [];
-  const creates: Captured[] = [];
+  const listDirs: Array<string> = [];
+  const creates: Array<Captured> = [];
   const prompts: Array<Captured & { url: string }> = [];
-  const eventConns: EventConn[] = [];
+  const eventConns: Array<EventConn> = [];
   const interrupts: Array<Captured & { url: string }> = [];
-  const providerDirs: string[] = [];
+  const providerDirs: Array<string> = [];
   let mode: 'normal' | 'reject' | 'conflict' | 'bad-provider' = 'normal';
   return new Promise((resolve) => {
     const server = createServer((req, res) => {
-      const chunks: Buffer[] = [];
+      const chunks: Array<Buffer> = [];
       req.on('data', (c: Buffer) => chunks.push(c));
       req.on('end', () => {
         const raw = Buffer.concat(chunks).toString('utf8');
@@ -419,7 +419,7 @@ async function main(): Promise<void> {
   setupSwagger(app);
   await app.listen(0);
   const base = await app.getUrl();
-  const results: CheckResult[] = [];
+  const results: Array<CheckResult> = [];
 
   const { TokenService } = await import('../../../../../../auth/token.service');
   const tokens = app.get(TokenService, { strict: false }) as {
@@ -478,7 +478,7 @@ async function main(): Promise<void> {
   // requests really reach the stub (same convention as opencode.e2e).
   const { ProjectAccessService } = await import('../../../../../../organizations/modules/projects/modules/project-access/project-access.service');
   const { WorkspacePathService } = await import('../../../../../../common/storage/workspace-path.service');
-  const allowAccess = async (): Promise<{ ownerId: string; orgIds: string[] }> => ({
+  const allowAccess = async (): Promise<{ ownerId: string; orgIds: Array<string> }> => ({
     ownerId: E2E_USER_ID,
     orgIds: [],
   });
@@ -497,15 +497,15 @@ async function main(): Promise<void> {
   // warn/error stay one-liners, planted secrets never appear anywhere.
   const logged: Array<{ method: string; text: string }> = [];
   const logMethods = ['debug', 'info', 'warn', 'error'] as const;
-  const logProto = AppLogger.prototype as unknown as Record<string, (...a: unknown[]) => void>;
+  const logProto = AppLogger.prototype as unknown as Record<string, (...a: Array<unknown>) => void>;
   const logOriginals = logMethods.map((m) => logProto[m]);
   logMethods.forEach((m, i) => {
-    logProto[m] = function (...args: unknown[]) {
+    logProto[m] = function (...args: Array<unknown>) {
       logged.push({
         method: m,
         text: args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '),
       });
-      return (logOriginals[i] as (...a: unknown[]) => void).apply(this, args);
+      return (logOriginals[i] as (...a: Array<unknown>) => void).apply(this, args);
     };
   });
 
@@ -584,7 +584,7 @@ async function main(): Promise<void> {
 
     // --- providers & interrupt (card 6 domain routes) ----------------------
     await check('GET /api/sessions/providers → required artifact subset only, jail location forwarded', '/api/sessions/providers?projectId=' + E2E_PROJECT_ID, undefined, 200, (_res, body) => {
-      const rows = body as unknown[];
+      const rows = body as Array<unknown>;
       assert.deepEqual(rows, [
         { id: 'prov-openai', name: 'OpenAI', activation: 'enabled', package: '@ai-sdk/openai' },
         { id: 'prov-anthropic', name: '', activation: 'auto', package: '' },
@@ -845,7 +845,7 @@ async function main(): Promise<void> {
 
     // Swagger surface: domain paths present + mirror marked deprecated.
     await check('swagger exposes /api/sessions and deprecates the mirror', '/swagger/v1.json', undefined, 200, (_res, body) => {
-      const doc = body as { paths?: Record<string, Record<string, { deprecated?: boolean; tags?: string[] }>> };
+      const doc = body as { paths?: Record<string, Record<string, { deprecated?: boolean; tags?: Array<string> }>> };
       const paths = doc.paths ?? {};
       assert.ok(paths['/api/sessions'], 'missing /api/sessions in swagger');
       assert.ok(paths['/api/sessions/status'], 'missing /api/sessions/status in swagger');

@@ -287,7 +287,7 @@ export class ProjectsService {
   async list(
     correlationId?: string,
     opts?: { orgId?: string; includeDeleted?: boolean },
-  ): Promise<Project[]> {
+  ): Promise<Array<Project>> {
     try {
       const conds = [];
       if (opts?.orgId) conds.push(eq(projects.orgId, opts.orgId));
@@ -636,7 +636,7 @@ export class ProjectsService {
     orgId: string,
     projectId: string,
     correlationId?: string,
-  ): Promise<EffectiveConfigEntry[]> {
+  ): Promise<Array<EffectiveConfigEntry>> {
     await this.assertProjectBelongsToOrg(orgId, projectId, correlationId);
     // Org-level + project-level key sources are intentionally minimal:
     // github link (non-secret) at both levels is out of scope — this

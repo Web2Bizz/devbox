@@ -99,7 +99,7 @@ async function main(): Promise<void> {
   setupSwagger(app);
   await app.listen(0);
   const base = await app.getUrl();
-  const results: CheckResult[] = [];
+  const results: Array<CheckResult> = [];
 
   // Bearer for the guarded domain routes (guard passes, gate denies 503 w/o DB).
   const { TokenService } = await import('../../auth/token.service');
@@ -286,7 +286,7 @@ async function main(): Promise<void> {
           projectId: string,
           userId: string,
           correlationId?: string,
-        ) => Promise<{ ownerId: string | null; orgIds: string[] }>;
+        ) => Promise<{ ownerId: string | null; orgIds: Array<string> }>;
       };
       orgsProto.assertProjectAccessById = async () => ({ ownerId: E2E_USER_ID, orgIds: [] });
       const pathsProto = WorkspacePathService.prototype as unknown as {

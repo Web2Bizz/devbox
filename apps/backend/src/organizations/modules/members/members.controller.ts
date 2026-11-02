@@ -62,8 +62,8 @@ export class MembersController {
     @Param("id") id: string,
     @ReqUser() identity: RequestIdentity,
     @Req() req?: { correlationId?: string },
-  ): Promise<OrganizationMemberDto[]> {
-    return (await this.members.listMembers(id, identity.id, req?.correlationId)) as OrganizationMemberDto[];
+  ): Promise<Array<OrganizationMemberDto>> {
+    return (await this.members.listMembers(id, identity.id, req?.correlationId)) as Array<OrganizationMemberDto>;
   }
 
   @Post(":id/members")

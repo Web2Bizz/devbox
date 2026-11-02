@@ -78,7 +78,7 @@ export class OrgProjectsController {
     @ReqUser() identity: RequestIdentity,
     @Headers("x-correlation-id") correlationId?: string,
     @Query("includeDeleted") includeDeleted?: string,
-  ): Promise<ProjectDto[]> {
+  ): Promise<Array<ProjectDto>> {
     await this.memberOrThrow(id, identity.id, correlationId);
     const flag = includeDeleted === "true" || includeDeleted === "1";
     return this.projects.list(correlationId, {
@@ -182,8 +182,8 @@ export class OrgProjectsController {
     @Param("projectId") projectId: string,
     @ReqUser() identity: RequestIdentity,
     @Headers("x-correlation-id") correlationId?: string,
-  ): Promise<EffectiveConfigDto[]> {
+  ): Promise<Array<EffectiveConfigDto>> {
     await this.memberOrThrow(id, identity.id, correlationId);
-    return (await this.projects.effectiveConfig(id, projectId, correlationId)) as EffectiveConfigDto[];
+    return (await this.projects.effectiveConfig(id, projectId, correlationId)) as Array<EffectiveConfigDto>;
   }
 }

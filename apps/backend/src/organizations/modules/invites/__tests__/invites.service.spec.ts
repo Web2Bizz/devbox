@@ -58,7 +58,7 @@ function untouchedDb() {
 }
 
 /** Minimal query-builder stub: select().from().where().limit() → rows. */
-function mockDb(selectRows: unknown[] = []) {
+function mockDb(selectRows: Array<unknown> = []) {
   const client = {
     select: () => ({
       from: () => ({

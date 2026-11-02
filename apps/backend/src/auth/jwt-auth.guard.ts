@@ -50,7 +50,7 @@ export class JwtAuthGuard implements CanActivate {
   constructor(
     private readonly tokens: TokenService,
     private readonly users: UsersService,
-    private readonly logger: AppLogger = new AppLogger("JwtAuthGuard"),
+    private readonly logger: AppLogger = new AppLogger(JwtAuthGuard.name),
   ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {

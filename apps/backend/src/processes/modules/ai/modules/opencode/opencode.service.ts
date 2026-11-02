@@ -391,7 +391,7 @@ export class OpencodeService {
     projectId: string | undefined,
     userId: string,
     cid: string,
-  ): Promise<SessionV2Info[]> {
+  ): Promise<Array<SessionV2Info>> {
     // C4: project gate first; the listing is scoped to the project jail
     // (client ?directory ignored — see resolveProjectDirectory).
     const { directory: projectDir } = await this.projectDirectory(projectId, userId, cid);

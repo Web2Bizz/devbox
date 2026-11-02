@@ -119,7 +119,7 @@ export class WorkspaceTreeNodeDto {
   type!: string;
 
   @ApiProperty({ required: false, type: [WorkspaceTreeNodeDto] })
-  children?: WorkspaceTreeNodeDto[];
+  children?: Array<WorkspaceTreeNodeDto>;
 }
 
 export class WorkspaceSubmoduleDto {

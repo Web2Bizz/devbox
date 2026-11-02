@@ -22,7 +22,7 @@ export type HealthResponse = {
 
 /** GET /api/v1/registry/catalog — live Docker Registry /v2/_catalog (503 when unreachable) */
 export type RegistryCatalogResponse = {
-  repositories: string[];
+  repositories: Array<string>;
 };
 
 /** GET /api/v1/registry/npm/status — live Verdaccio /-/ping reachability (503 when unreachable) */

@@ -15,7 +15,7 @@ import { APP_STATE_TTL_MS, signAppState } from "../utils/app-state";
 
 type Case = { name: string; run: () => Promise<void> | void };
 
-const cases: Case[] = [];
+const cases: Array<Case> = [];
 let currentSuite = "";
 
 function describe(name: string, fn: () => void): void {
@@ -57,7 +57,7 @@ function controller(opts: {
   known: GithubInstallation | null;
   lookupError?: Error;
 }) {
-  const upserts: UpsertCall[] = [];
+  const upserts: Array<UpsertCall> = [];
   const github = {
     async listRepos() {
       return [];

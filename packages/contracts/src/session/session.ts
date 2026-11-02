@@ -30,7 +30,7 @@ export type ChatMessage = {
 };
 
 /** GET /api/v1/sessions — live upstream session list (503 when opencode unreachable) */
-export type SessionsResponse = Session[];
+export type SessionsResponse = Array<Session>;
 
 /** POST /api/v1/chat request body */
 export type SendChatRequest = {
@@ -49,5 +49,5 @@ export type SendChatResponse = {
 /** GET /api/v1/messages?sessionId=… */
 export type MessagesResponse = {
   sessionId: string;
-  messages: ChatMessage[];
+  messages: Array<ChatMessage>;
 };

@@ -22,7 +22,7 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
         name: string;
         unique: boolean;
         predicate: string | null;
-        columns: string[];
+        columns: Array<string>;
       }) =>
         compareSchema([expected], {
           tables: [{ name: expected.name, columns: expected.columns }],

@@ -10,9 +10,9 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "biome.json"
-  ],
-  "keywords": [
+    "biome.json",
+    "plugins/"
+  ],  "keywords": [
     "biome",
     "biome-config"
   ],

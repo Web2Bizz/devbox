@@ -17,7 +17,7 @@ import { ProjectsService, ownerKeyOrThrow } from '../../projects.service';
 export type FileNode = {
   path: string;
   type: 'file' | 'dir';
-  children?: FileNode[];
+  children?: Array<FileNode>;
 };
 
 const MAX_DEPTH = 5;

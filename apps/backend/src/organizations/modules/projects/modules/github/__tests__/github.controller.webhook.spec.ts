@@ -14,7 +14,7 @@ process.env.GITHUB_WEBHOOK_SECRET = WEBHOOK_SECRET;
 
 type Case = { name: string; run: () => Promise<void> | void };
 
-const cases: Case[] = [];
+const cases: Array<Case> = [];
 let currentSuite = "";
 
 function describe(name: string, fn: () => void): void {

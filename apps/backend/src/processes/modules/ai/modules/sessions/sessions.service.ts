@@ -206,7 +206,7 @@ export class SessionsService {
     client: OpencodeClient,
     project: { projectId: string; directory: string },
     cid: string,
-  ): Promise<SessionInfo[]> {
+  ): Promise<Array<SessionInfo>> {
     try {
       const [res, active] = await Promise.all([
         client.v2.session.list({ directory: project.directory }),
@@ -215,7 +215,7 @@ export class SessionsService {
       if (!this.isUpstreamOk(res.data, res.error)) {
         throw this.upstreamError('sessionsList', res.error, this.sdkStatus(res));
       }
-      const rows = (res.data as unknown as UpstreamEnvelope<UpstreamSession[]>).data ?? [];
+      const rows = (res.data as unknown as UpstreamEnvelope<Array<UpstreamSession>>).data ?? [];
       return rows.map((s) => this.toSessionInfo(s, project.projectId, active));
     } catch (err) {
       this.logger.warn('[sessions] list failed', cid);
@@ -225,7 +225,7 @@ export class SessionsService {
   }
 
   /** GET /api/sessions?projectId — list scoped to the gated jail. */
-  async list(userId: string, projectId: string | undefined, cid: string): Promise<SessionInfo[]> {
+  async list(userId: string, projectId: string | undefined, cid: string): Promise<Array<SessionInfo>> {
     const project = await this.access.resolveProjectDirectory(projectId, userId, cid);
     const client = await this.sdk.create(userId, cid);
     return this.listWithClient(client, project, cid);
@@ -332,7 +332,7 @@ export class SessionsService {
     limitRaw: string | undefined,
     cursor: string | undefined,
     cid: string,
-  ): Promise<SessionMessage[]> {
+  ): Promise<Array<SessionMessage>> {
     await this.access.resolveProjectDirectory(projectId, userId, cid);
     const client = await this.sdk.create(userId, cid);
     try {
@@ -345,7 +345,7 @@ export class SessionsService {
       if (!this.isUpstreamOk(res.data, res.error)) {
         throw this.upstreamError('sessionMessages', res.error, this.sdkStatus(res));
       }
-      const rows = (res.data as unknown as UpstreamEnvelope<UpstreamMessage[]>).data ?? [];
+      const rows = (res.data as unknown as UpstreamEnvelope<Array<UpstreamMessage>>).data ?? [];
       return rows.map((m) => this.toSessionMessage(m));
     } catch (err) {
       this.logger.warn('[sessions] messages list failed', cid);
@@ -572,7 +572,7 @@ export class SessionsService {
    * none of it). A row violating the required set fails loud — never a
    * silently skipped or defaulted row.
    */
-  async providers(userId: string, projectId: string | undefined, cid: string): Promise<SessionRunnerProvider[]> {
+  async providers(userId: string, projectId: string | undefined, cid: string): Promise<Array<SessionRunnerProvider>> {
     const project = await this.access.resolveProjectDirectory(projectId, userId, cid);
     const client = await this.sdk.create(userId, cid);
     try {
@@ -581,7 +581,7 @@ export class SessionsService {
         throw this.upstreamError('sessionProviders', res.error, this.sdkStatus(res));
       }
       const env = res.data as unknown as UpstreamProviderEnvelope;
-      const rows = Array.isArray(env?.data) ? (env.data as UpstreamProviderInfo[]) : null;
+      const rows = Array.isArray(env?.data) ? (env.data as Array<UpstreamProviderInfo>) : null;
       if (!rows) throw this.upstreamError('sessionProviders', new Error('bad_providers_shape'));
       return rows.map((p) => {
         if (

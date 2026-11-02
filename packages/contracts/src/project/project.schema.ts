@@ -63,11 +63,13 @@ export const projectSchema = z.object({
   githubUrl: z.string().nullable(),
   ownerId: z.string().nullable(),
   status: projectStatusSchema,
-  deletedAt: z.string().nullable(),
+  deletedAt: z.iso
+    .datetime({ error: 'Field "deletedAt" must be an ISO-8601 timestamp' })
+    .nullable(),
   /** ISO-8601 timestamp */
-  createdAt: z.string().min(1),
+  createdAt: z.iso.datetime({ error: 'Field "createdAt" must be an ISO-8601 timestamp' }),
   /** ISO-8601 timestamp */
-  updatedAt: z.string().min(1),
+  updatedAt: z.iso.datetime({ error: 'Field "updatedAt" must be an ISO-8601 timestamp' }),
   corrupted: z.boolean(),
   corruptedReason: z.string().nullable(),
 }) satisfies z.ZodType<Project>;

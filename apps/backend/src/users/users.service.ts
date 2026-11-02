@@ -37,7 +37,7 @@ export function toPublicUser(user: StoredUser): PublicUser {
 export class UsersService {
   constructor(
     private readonly usersRepository: UsersRepository,
-    private readonly logger: AppLogger = new AppLogger("UsersService"),
+    private readonly logger: AppLogger = new AppLogger(UsersService.name),
   ) {}
 
   /** Creates a local user; null when the email is taken (caller answers 409). */

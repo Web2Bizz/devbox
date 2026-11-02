@@ -156,20 +156,20 @@ const E2E_PROJECT_DIR = '/tmp/rush-code-e2e-project';
 function startV2StandStub(): Promise<{
   server: Server;
   url: string;
-  paths: string[];
+  paths: Array<string>;
   creates: Array<{ contentType: string | null; body: unknown }>;
   infos: Array<{ authOk: boolean }>;
   setMode: (mode: 'normal' | 'reject' | 'reject-auth' | 'spa-info') => void;
   close: () => Promise<void>;
 }> {
-  const paths: string[] = [];
+  const paths: Array<string> = [];
   const creates: Array<{ contentType: string | null; body: unknown }> = [];
   const infos: Array<{ authOk: boolean }> = [];
   let mode: 'normal' | 'reject' | 'reject-auth' | 'spa-info' = 'normal';
   const expectedBasic = `Basic ${Buffer.from(`opencode:${E2E_BASIC_PASSWORD}`, 'utf8').toString('base64')}`;
   return new Promise((resolve) => {
     const server = createServer((req, res) => {
-      const chunks: Buffer[] = [];
+      const chunks: Array<Buffer> = [];
       req.on('data', (c: Buffer) => chunks.push(c));
       req.on('end', () => {
         const path = (req.url ?? '').split('?')[0];
@@ -281,7 +281,7 @@ async function main(): Promise<void> {
   setupSwagger(app);
   await app.listen(0);
   const base = await app.getUrl();
-  const results: CheckResult[] = [];
+  const results: Array<CheckResult> = [];
 
   // Bearer for the guarded mirror routes (guard passes, gate denies 503 w/o DB).
   const { TokenService } = await import('../../../../../../auth/token.service');
@@ -350,7 +350,7 @@ async function main(): Promise<void> {
 
     // Swagger surface includes the sdk mirror (opencode tag).
     await check('GET /swagger/v1.json exposes opencode mirror', '/swagger/v1.json', undefined, 200, (_res, body) => {
-      const doc = body as { paths?: Record<string, Record<string, { tags?: string[]; parameters?: Array<{ name?: string; in?: string }> }>> };
+      const doc = body as { paths?: Record<string, Record<string, { tags?: Array<string>; parameters?: Array<{ name?: string; in?: string }> }>> };
       const paths = Object.keys(doc.paths ?? {});
       for (const p of [
         '/api/opencode/session',
@@ -425,7 +425,7 @@ async function main(): Promise<void> {
             projectId: string,
             userId: string,
             correlationId?: string,
-          ) => Promise<{ ownerId: string | null; orgIds: string[] }>;
+          ) => Promise<{ ownerId: string | null; orgIds: Array<string> }>;
         };
         orgsProto.assertProjectAccessById = async () => ({ ownerId: E2E_USER_ID, orgIds: [] });
         const pathsProto = WorkspacePathService.prototype as unknown as {
@@ -476,17 +476,17 @@ async function main(): Promise<void> {
       const stand = await startV2StandStub();
       process.env.OPENCODE_URL = stand.url;
       const { AppLogger } = await import('../../../../../../common/logger');
-      const logged: Array<{ method: string; args: unknown[] }> = [];
+      const logged: Array<{ method: string; args: Array<unknown> }> = [];
       const logMethods = ['debug', 'info', 'warn', 'error'] as const;
       const logOriginals = logMethods.map(
         (m) => (AppLogger.prototype as unknown as Record<string, unknown>)[m],
       );
       logMethods.forEach((m, i) => {
         (
-          AppLogger.prototype as unknown as Record<string, (...a: unknown[]) => void>
-        )[m] = function (...args: unknown[]) {
+          AppLogger.prototype as unknown as Record<string, (...a: Array<unknown>) => void>
+        )[m] = function (...args: Array<unknown>) {
           logged.push({ method: m, args });
-          return (logOriginals[i] as (...a: unknown[]) => void).apply(this, args);
+          return (logOriginals[i] as (...a: Array<unknown>) => void).apply(this, args);
         };
       });
       try {

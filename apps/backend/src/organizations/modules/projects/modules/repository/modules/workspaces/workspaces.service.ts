@@ -10,7 +10,7 @@ import { readSubmodules, type SubmoduleEntry } from '../../utils/submodules';
 export type WorkspaceTreeNode = {
   path: string;
   type: 'file' | 'dir';
-  children?: WorkspaceTreeNode[];
+  children?: Array<WorkspaceTreeNode>;
 };
 
 const MAX_DEPTH = 5;
@@ -33,7 +33,7 @@ const MAX_ENTRIES = 200;
 export class WorkspacesService {
   constructor(
     private readonly paths: WorkspacePathService,
-    private readonly logger: AppLogger = new AppLogger('WorkspacesService'),
+    private readonly logger: AppLogger = new AppLogger(WorkspacesService.name),
   ) {}
 
   async tree(
@@ -66,7 +66,7 @@ export class WorkspacesService {
     userId: string,
     repo: string,
     correlationId?: string,
-  ): Promise<SubmoduleEntry[]> {
+  ): Promise<Array<SubmoduleEntry>> {
     let resolved: Awaited<ReturnType<typeof this.paths.resolveUser>>;
     try {
       resolved = await this.paths.resolveUser(userId, repo);

@@ -50,7 +50,7 @@ const SCOPE_DIR_PATTERN = /^[a-zA-Z0-9_-]+$/;
  */
 @Injectable()
 export class ReposService {
-  constructor(private readonly logger: AppLogger = new AppLogger('ReposService')) {}
+  constructor(private readonly logger: AppLogger = new AppLogger(ReposService.name)) {}
 
   /**
    * Unified jail root — REPOS_ROOT only, no fallback. Empty REPOS_ROOT →
@@ -92,7 +92,7 @@ export class ReposService {
    * Scoped scan: root → (users|orgs) → <scope-uuid> → projects →
    * <project-uuid> → content. `.secrets` reserves are never candidates.
    */
-  private async scan(userSpace?: string, correlationId?: string): Promise<Candidate[]> {
+  private async scan(userSpace?: string, correlationId?: string): Promise<Array<Candidate>> {
     let root: string;
     try {
       root = this.resolveRoot();
@@ -111,7 +111,7 @@ export class ReposService {
       // (Unconfigured REPOS_ROOT never reaches here — denied above with 503.)
       return [];
     }
-    const out: Candidate[] = [];
+    const out: Array<Candidate> = [];
     const wanted = userSpace?.trim();
     for (const s of scopes.sort((a, b) => a.name.localeCompare(b.name))) {
       if (!s.isDirectory()) continue;
@@ -163,7 +163,7 @@ export class ReposService {
     userSpace?: string,
     query?: ReposQuery,
     correlationId?: string,
-  ): Promise<RepoEntry[]> {
+  ): Promise<Array<RepoEntry>> {
     if (userSpace !== undefined) {
       const parsed = userSpaceSchema.safeParse(userSpace);
       if (!parsed.success) {
@@ -177,7 +177,7 @@ export class ReposService {
     const q = (query?.q ?? '').trim().toLowerCase();
 
     const candidates = await this.scan(userSpace, correlationId);
-    const valid: RepoEntry[] = [];
+    const valid: Array<RepoEntry> = [];
     for (const c of candidates) {
       const check = await isValidGitRepo(c.absPath, this.logger);
       if (!check.ok) continue; // no-git/corrupted → skip, never 500

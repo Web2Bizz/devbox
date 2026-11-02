@@ -69,7 +69,7 @@ export class OpencodeController {
     @Query('projectId') projectId?: string,
     @Query('directory') _directory?: string,
     @Headers('x-correlation-id') correlationId?: string,
-  ): Promise<SessionV2Info[]> {
+  ): Promise<Array<SessionV2Info>> {
     return this.opencode.listSessions(projectId, identity.id, correlationId ?? '');
   }
 

@@ -116,7 +116,7 @@ export type OpencodeSessionRevert = {
   messageID: string;
   partID?: string;
   snapshot?: string;
-  files?: OpencodeFileDiff[];
+  files?: Array<OpencodeFileDiff>;
 };
 
 /** Free-form session metadata (upstream Session.Metadata — `{type: object}`). */
@@ -150,14 +150,14 @@ export type OpencodeSession = {
   /** relative subpath inside the jail once known */
   subpath?: string;
   metadata?: OpencodeSessionMetadata;
-  permissions?: OpencodePermissionRule[];
+  permissions?: Array<OpencodePermissionRule>;
   fork?: OpencodeSessionFork;
   revert?: OpencodeSessionRevert;
   location: OpencodeLocationRef;
 };
 
 /** GET /api/opencode/session — the mirror unwraps the upstream {data,cursor} envelope to a bare array (cursor dropped). */
-export type OpencodeSessionList = OpencodeSession[];
+export type OpencodeSessionList = Array<OpencodeSession>;
 
 /** Retry action detail carried by a `retry` status (upstream session.status payload). */
 export type OpencodeSessionStatusAction = {

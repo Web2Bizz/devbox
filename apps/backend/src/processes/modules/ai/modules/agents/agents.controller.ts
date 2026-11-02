@@ -31,7 +31,7 @@ export class AgentsController {
   @Get()
   @ApiOperation({ summary: 'List available AI agents' })
   @ApiResponse({ status: 200, type: [AgentDto] })
-  list(): AgentDto[] {
+  list(): Array<AgentDto> {
     return this.agents.list();
   }
 

@@ -157,7 +157,7 @@ export class BillingService {
     private readonly keys: OpencodeKeysService,
     private readonly crypto: CryptoService,
     private readonly external: ExternalClient,
-    private readonly logger: AppLogger = new AppLogger("BillingService"),
+    private readonly logger: AppLogger = new AppLogger(BillingService.name),
   ) {}
 
   private billingUrl(): string {

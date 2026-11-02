@@ -82,9 +82,9 @@ export const organizationSchema = z.object({
   ownerId: z.uuid().nullable(),
   isPrivate: z.boolean(),
   /** ISO-8601 timestamp */
-  createdAt: z.string().min(1),
+  createdAt: z.iso.datetime({ error: 'Field "createdAt" must be an ISO-8601 timestamp' }),
   /** ISO-8601 timestamp */
-  updatedAt: z.string().min(1),
+  updatedAt: z.iso.datetime({ error: 'Field "updatedAt" must be an ISO-8601 timestamp' }),
 }) satisfies z.ZodType<Organization>;
 
 export const organizationMemberSchema = z.object({
@@ -92,7 +92,7 @@ export const organizationMemberSchema = z.object({
   userId: z.uuid(),
   role: orgRoleSchema,
   /** ISO-8601 timestamp */
-  createdAt: z.string().min(1),
+  createdAt: z.iso.datetime({ error: 'Field "createdAt" must be an ISO-8601 timestamp' }),
 }) satisfies z.ZodType<OrganizationMember>;
 
 export const organizationInviteSchema = z.object({
@@ -101,5 +101,5 @@ export const organizationInviteSchema = z.object({
   email: z.string().max(320).nullable(),
   role: orgRoleSchema,
   /** ISO-8601 timestamp */
-  createdAt: z.string().min(1),
+  createdAt: z.iso.datetime({ error: 'Field "createdAt" must be an ISO-8601 timestamp' }),
 }) satisfies z.ZodType<OrganizationInvite>;

@@ -30,7 +30,8 @@ function isAbortLike(e: unknown): boolean {
 
 // Process-level logger: usable before DI exists; sanitizes + respects
 // LOG_LEVEL like every other AppLogger (never raw console.* in runtime code).
-const processLogger = new AppLogger('Process');
+const PROCESS_CONTEXT = 'Process';
+const processLogger = new AppLogger(PROCESS_CONTEXT);
 
 // SSE downstream disconnect (GET /api/opencode/global/event) surfaces as
 // DOMException AbortError outside Nest context (EventEmitter close →
@@ -58,7 +59,8 @@ process.on('uncaughtException', (err: unknown) => {
 });
 
 async function bootstrap(): Promise<void> {
-  const logger = new AppLogger('Bootstrap');
+  const BOOTSTRAP_CONTEXT = 'Bootstrap';
+  const logger = new AppLogger(BOOTSTRAP_CONTEXT);
   try {
     // validateEnvWithWarnings() runs FIRST: fail-fast on bad ports/URLs (never logs secrets).
     // WARNs (fallbacks, deprecated/unknown keys) are scrubbed by AppLogger like everything else.

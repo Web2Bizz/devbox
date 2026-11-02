@@ -39,7 +39,7 @@ import { isPgForeignKeyViolation, isPgUniqueViolation } from "../../utils/pg-err
 @Injectable()
 export class MembersService {
   constructor(
-    private readonly logger: AppLogger = new AppLogger("MembersService"),
+    private readonly logger: AppLogger = new AppLogger(MembersService.name),
     private readonly db: DbService,
     private readonly paths: WorkspacePathService,
     private readonly users: UsersService,
@@ -55,7 +55,7 @@ export class MembersService {
     orgId: string,
     requesterId: string,
     correlationId?: string,
-  ): Promise<OrganizationMember[]> {
+  ): Promise<Array<OrganizationMember>> {
     await this.guard.memberRowOrThrow(orgId, requesterId, correlationId);
     try {
       const rows = await this.client()

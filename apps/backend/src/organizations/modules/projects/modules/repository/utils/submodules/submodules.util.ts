@@ -100,7 +100,7 @@ export function isSubmodulePathSafe(subPath: string): boolean {
 export async function readSubmodules(
   absRepo: string,
   logger?: WarnLogger | AppLogger,
-): Promise<SubmoduleEntry[]> {
+): Promise<Array<SubmoduleEntry>> {
   let statusOut = '';
   try {
     const res = await execFileAsync('git', ['submodule', 'status'], {
@@ -127,7 +127,7 @@ export async function readSubmodules(
     ...gitmodules.map((g) => g.path),
   ]);
   const shaByPath = new Map(rows.map((r) => [r.path, r]));
-  const out: SubmoduleEntry[] = [];
+  const out: Array<SubmoduleEntry> = [];
   for (const p of [...paths].sort()) {
     if (!isSubmodulePathSafe(p)) {
       (logger as WarnLogger | undefined)?.warn?.({

@@ -85,7 +85,7 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
   {
     name: 'GET retries 500s then succeeds (attempt numbers 1..3)',
     run: async () => {
-      const seen: number[] = [];
+      const seen: Array<number> = [];
       const res = await withRetry(
         async (attempt) => {
           seen.push(attempt);

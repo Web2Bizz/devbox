@@ -21,7 +21,7 @@ import { isValidGitRepo } from '..';
 type WarnCall = { path?: string; reason?: string };
 
 function makeLogger() {
-  const warns: WarnCall[] = [];
+  const warns: Array<WarnCall> = [];
   return {
     warns,
     logger: {

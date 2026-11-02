@@ -9,7 +9,7 @@ import { GithubLinkService } from "../modules/github/github-link.service";
 
 type Case = { name: string; run: () => Promise<void> | void };
 
-const cases: Case[] = [];
+const cases: Array<Case> = [];
 let currentSuite = "";
 
 function describe(name: string, fn: () => void): void {
@@ -44,7 +44,7 @@ function controller(opts: {
   roleError?: Error;
 }) {
   const roleCalls: Array<{ orgId: string; userId: string; correlationId?: string }> = [];
-  const createCalls: CreateCall[] = [];
+  const createCalls: Array<CreateCall> = [];
   const access = {
     async getRole(orgId: string, userId: string, correlationId?: string) {
       if (opts.roleError) throw opts.roleError;

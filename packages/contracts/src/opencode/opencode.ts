@@ -67,7 +67,7 @@ export type OpencodePrompt = {
   variant?: string;
   /** Upstream OutputFormat passthrough (live only). */
   format?: unknown;
-  parts: OpencodePart[];
+  parts: Array<OpencodePart>;
 };
 
 /**

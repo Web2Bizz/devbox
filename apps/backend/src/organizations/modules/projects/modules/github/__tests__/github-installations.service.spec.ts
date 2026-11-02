@@ -6,7 +6,7 @@ import { GithubInstallationsService } from "../github-installations.service";
 
 type Case = { name: string; run: () => Promise<void> | void };
 
-const cases: Case[] = [];
+const cases: Array<Case> = [];
 let currentSuite = "";
 
 function describe(name: string, fn: () => void): void {

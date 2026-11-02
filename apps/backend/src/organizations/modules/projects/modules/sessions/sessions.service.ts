@@ -101,7 +101,7 @@ export class SessionsService {
     projectId: string,
     correlationId?: string,
     requesterId?: string,
-  ): Promise<ProjectSession[]> {
+  ): Promise<Array<ProjectSession>> {
     const project = await this.projects.getOrThrow(projectId, correlationId);
     await this.checkAccess(project.id, project.ownerId, requesterId, correlationId);
     try {

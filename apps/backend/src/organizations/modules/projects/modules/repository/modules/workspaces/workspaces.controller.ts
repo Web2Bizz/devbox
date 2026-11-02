@@ -185,7 +185,7 @@ export class WorkspacesController {
     @Param('repo') repo: string,
     @ReqUser() identity: RequestIdentity,
     @Headers('x-correlation-id') correlationId?: string,
-  ): Promise<WorkspaceSubmoduleDto[]> {
+  ): Promise<Array<WorkspaceSubmoduleDto>> {
     const parsed = workspaceRepoSchema.safeParse(repo);
     if (!parsed.success) {
       throw new NotFoundException(`Repo ${repo} not found`);

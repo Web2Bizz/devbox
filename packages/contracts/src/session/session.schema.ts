@@ -35,7 +35,7 @@ export const sessionSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
   /** ISO-8601 timestamp */
-  createdAt: z.string().min(1),
+  createdAt: z.iso.datetime({ error: 'Field "createdAt" must be an ISO-8601 timestamp' }),
   model: z.string().min(1).optional(),
 }) satisfies z.ZodType<Session>;
 
@@ -45,7 +45,7 @@ export const chatMessageSchema = z.object({
   role: chatRoleSchema,
   content: z.string(),
   /** ISO-8601 timestamp */
-  createdAt: z.string().min(1),
+  createdAt: z.iso.datetime({ error: 'Field "createdAt" must be an ISO-8601 timestamp' }),
 }) satisfies z.ZodType<ChatMessage>;
 
 export const sendChatResponseSchema = z.object({

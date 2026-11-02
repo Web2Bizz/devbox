@@ -13,6 +13,26 @@
   // (files under apps/<name>/ are governed by the nearest config, and
   // shared override globs resolve from each extending package directory).
   "extends": ["./packages/biome-config/biome.json"],
+  // Plugin paths resolve from THIS config (not from the shared one), so the
+  // shared plugins entry is repeated here with a root-relative path.
+  "plugins": [
+    {
+      "path": "./packages/biome-config/plugins/no-literal-args.grit",
+      "includes": [
+        "apps/backend/**",
+        "apps/frontend/**",
+        "apps/cli/**",
+        "packages/contracts/**",
+        "packages/biome-config/**",
+        "!**/*.spec.ts",
+        "!**/*.spec.tsx",
+        "!**/*.e2e.ts",
+        "!**/*.test.ts",
+        "!**/*.test.tsx",
+        "!**/__tests__/**"
+      ]
+    }
+  ],
   "vcs": {
     "enabled": true,
     "clientKind": "git",

@@ -490,7 +490,7 @@ async function main(): Promise<void> {
         assert.equal(res.status, 200);
         const body = (await readJson(res)) as {
           type?: string;
-          children?: unknown[];
+          children?: Array<unknown>;
         };
         assert.equal(body.type, "dir");
         assert.ok(Array.isArray(body.children));

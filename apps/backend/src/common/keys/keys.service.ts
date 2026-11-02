@@ -42,7 +42,7 @@ function toStored(row: UserOpencodeKeyRow): StoredOpencodeKey {
 @Injectable()
 export class OpencodeKeysService {
   constructor(
-    private readonly logger: AppLogger = new AppLogger("OpencodeKeysService"),
+    private readonly logger: AppLogger = new AppLogger(OpencodeKeysService.name),
     private readonly db: DbService,
   ) {}
 
@@ -109,7 +109,7 @@ export class OpencodeKeysService {
     activeKeyId: string,
     limit = 500,
     correlationId?: string,
-  ): Promise<string[]> {
+  ): Promise<Array<string>> {
     try {
       const rows = await this.client()
         .select({ userId: userOpencodeKeys.userId })

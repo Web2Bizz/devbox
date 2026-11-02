@@ -57,8 +57,8 @@ function makeService(url: string): OpencodeService {
  */
 function startStub(
   mode: 'info' | 'spa' | '404' | '401' | 'array' | 'bad',
-): Promise<{ server: Server; url: string; paths: string[]; close: () => Promise<void> }> {
-  const paths: string[] = [];
+): Promise<{ server: Server; url: string; paths: Array<string>; close: () => Promise<void> }> {
+  const paths: Array<string> = [];
   return new Promise((resolve) => {
     const server = createServer((req, res) => {
       req.resume();

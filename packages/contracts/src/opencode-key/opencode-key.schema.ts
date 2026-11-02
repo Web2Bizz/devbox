@@ -29,7 +29,7 @@ export type OpencodeKeyInput = z.infer<typeof opencodeKeySchema>;
 export const opencodeKeyResultSchema = z.object({
   ok: z.boolean(),
   /** ISO-8601 timestamp */
-  updatedAt: z.string().min(1),
+  updatedAt: z.iso.datetime({ error: 'Field "updatedAt" must be an ISO-8601 timestamp' }),
 }) satisfies z.ZodType<OpencodeKeyResult>;
 
 export const opencodeKeyDeleteResultSchema = z.object({
@@ -39,7 +39,9 @@ export const opencodeKeyDeleteResultSchema = z.object({
 export const opencodeKeyStatusSchema = z.object({
   configured: z.boolean(),
   /** ISO-8601 timestamp (present only when configured). */
-  updatedAt: z.string().min(1).optional(),
+  updatedAt: z.iso
+    .datetime({ error: 'Field "updatedAt" must be an ISO-8601 timestamp' })
+    .optional(),
 }) satisfies z.ZodType<OpencodeKeyStatus>;
 
 export const opencodeLimitBucketSchema = z.object({
@@ -51,7 +53,7 @@ export const opencodeUsageSchema = z.object({
   balance: z.number().optional(),
   usage: z.number().optional(),
   /** ISO-8601 time of the upstream response */
-  updatedAt: z.string().min(1),
+  updatedAt: z.iso.datetime({ error: 'Field "updatedAt" must be an ISO-8601 timestamp' }),
   rolling: opencodeLimitBucketSchema.optional(),
   daily: opencodeLimitBucketSchema.optional(),
   weekly: opencodeLimitBucketSchema.optional(),

@@ -152,13 +152,13 @@ export abstract class AgentBase {
   /** Системный промпт задающий поведение агента */
   readonly systemPrompt: string;
   /** Разрешённые инструменты доступные для вызова */
-  readonly allowedTools: readonly string[];
+  readonly allowedTools: ReadonlyArray<string>;
   /** Запрещённые инструменты недоступные для вызова */
-  readonly deniedTools: readonly string[];
+  readonly deniedTools: ReadonlyArray<string>;
   /** Поддерживаемые модели доступные для запуска */
-  readonly models: readonly string[];
+  readonly models: ReadonlyArray<string>;
   /** Допустимые уровни effort для модели */
-  readonly effort?: readonly string[];
+  readonly effort?: ReadonlyArray<string>;
   /** Модель по умолчанию для генерации */
   readonly defaultModel: string;
   /** Effort по умолчанию для генерации */
@@ -225,8 +225,8 @@ export abstract class AgentBase {
   /** Собирает сообщения для запроса модели */
   protected buildMessages(
     input: string,
-    history: readonly AgentMessage[] = [],
-  ): readonly AgentMessage[] {
+    history: ReadonlyArray<AgentMessage> = [],
+  ): ReadonlyArray<AgentMessage> {
     const parsed = z.array(agentMessageSchema).max(100).parse([...history]);
     return [
       { role: "system", content: this.systemPrompt },

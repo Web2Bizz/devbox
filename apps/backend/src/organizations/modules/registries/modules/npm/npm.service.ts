@@ -75,10 +75,10 @@ export class NpmRegistryService implements OnModuleInit {
 
   constructor(
     @Optional() private readonly config?: ConfigService,
-    private readonly logger: AppLogger = new AppLogger('NpmRegistryService'),
+    private readonly logger: AppLogger = new AppLogger(NpmRegistryService.name),
     @Optional() private readonly externalClient?: ExternalClient,
   ) {
-    this.external = this.externalClient ?? new ExternalClient(new AppLogger('ExternalClient'));
+    this.external = this.externalClient ?? new ExternalClient(new AppLogger(NpmRegistryService.name));
   }
 
   private resolvedEnv(): AppEnv | null {

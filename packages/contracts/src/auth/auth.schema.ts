@@ -76,7 +76,7 @@ export const authUserSchema = z.object({
   email: emailField,
   provider: z.enum(['local', 'sso-oauth', 'github-app']),
   /** ISO-8601 timestamp */
-  createdAt: z.string().min(1),
+  createdAt: z.iso.datetime({ error: 'Field "createdAt" must be an ISO-8601 timestamp' }),
 }) satisfies z.ZodType<AuthUser>;
 
 export const authTokensSchema = z.object({

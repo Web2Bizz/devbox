@@ -23,5 +23,5 @@ export const repoEntrySchema = z.object({
   /** Path relative to REPOS_ROOT, e.g. "alice/workspace/demo" */
   path: z.string().min(1),
   /** ISO-8601 mtime of the repo directory */
-  updatedAt: z.string().min(1),
+  updatedAt: z.iso.datetime({ error: 'Field "updatedAt" must be an ISO-8601 timestamp' }),
 }) satisfies z.ZodType<RepoEntry>;

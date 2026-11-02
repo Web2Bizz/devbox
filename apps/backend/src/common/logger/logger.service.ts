@@ -84,8 +84,8 @@ function isEnabled(level: AppLogLevel): boolean {
 }
 
 /** Collects live secret values (never logged, only used for redaction). */
-function liveSecrets(): string[] {
-  const out: string[] = [];
+function liveSecrets(): Array<string> {
+  const out: Array<string> = [];
   for (const v of [
     process.env.DATABASE_URL,
     process.env.POSTGRES_PASSWORD,
@@ -179,7 +179,7 @@ function formatMessage(message: unknown, correlationId?: string): string {
  * Maps our LOG_LEVEL to Nest framework log levels for `NestFactory.create()`.
  * debug → everything; info → log/warn/error/fatal; warn → warn+; error → error+.
  */
-export function nestLogLevels(level: AppLogLevel = currentLevel()): LogLevel[] {
+export function nestLogLevels(level: AppLogLevel = currentLevel()): Array<LogLevel> {
   switch (level) {
     case 'debug':
       return ['verbose', 'debug', 'log', 'warn', 'error', 'fatal'];

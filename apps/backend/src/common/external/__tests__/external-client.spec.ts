@@ -26,15 +26,15 @@ async function withLogCapture<T>(
 ): Promise<{ result: T; logged: Array<{ method: string; text: string }> }> {
   const logged: Array<{ method: string; text: string }> = [];
   const methods = ['debug', 'info', 'warn', 'error'] as const;
-  const proto = AppLogger.prototype as unknown as Record<string, (...a: unknown[]) => void>;
+  const proto = AppLogger.prototype as unknown as Record<string, (...a: Array<unknown>) => void>;
   const originals = methods.map((m) => proto[m]);
   methods.forEach((m, i) => {
-    proto[m] = function (...args: unknown[]) {
+    proto[m] = function (...args: Array<unknown>) {
       logged.push({
         method: m,
         text: args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '),
       });
-      return (originals[i] as (...a: unknown[]) => void).apply(this, args);
+      return (originals[i] as (...a: Array<unknown>) => void).apply(this, args);
     };
   });
   try {
@@ -42,7 +42,7 @@ async function withLogCapture<T>(
     return { result, logged };
   } finally {
     methods.forEach((m, i) => {
-      proto[m] = originals[i] as (...a: unknown[]) => void;
+      proto[m] = originals[i] as (...a: Array<unknown>) => void;
     });
   }
 }

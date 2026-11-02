@@ -90,7 +90,7 @@ export class ChatsService {
     projectId: string,
     correlationId?: string,
     requesterId?: string,
-  ): Promise<ProjectChat[]> {
+  ): Promise<Array<ProjectChat>> {
     const project = await this.projects.getOrThrow(projectId, correlationId);
     await this.checkAccess(project.id, project.ownerId, requesterId, correlationId);
     try {

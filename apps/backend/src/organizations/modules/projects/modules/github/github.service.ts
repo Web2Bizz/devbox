@@ -73,7 +73,7 @@ export class GithubService {
     query: ListReposQueryInput,
     installationId: number,
     userId: string,
-  ): Promise<GithubRepo[]> {
+  ): Promise<Array<GithubRepo>> {
     const stored = await this.installations.findByInstallationId(installationId);
     if (stored === null || stored.userId === null || stored.userId !== userId) {
       throw new NotFoundException({

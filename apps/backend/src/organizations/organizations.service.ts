@@ -207,14 +207,14 @@ export class OrganizationsService {
   async listForUser(
     requesterId: string,
     correlationId?: string,
-  ): Promise<Organization[]> {
+  ): Promise<Array<Organization>> {
     try {
       const links = await this.client()
         .select()
         .from(organizationMembers)
         .where(eq(organizationMembers.userId, requesterId));
       if (links.length === 0) return [];
-      const out: Organization[] = [];
+      const out: Array<Organization> = [];
       for (const link of links) {
         try {
           const row = await this.guard.orgRowOrThrow(link.orgId, correlationId);
@@ -331,7 +331,7 @@ export class OrganizationsService {
     orgId: string,
     requesterId: string,
     correlationId?: string,
-  ): Promise<OrganizationMember[]> {
+  ): Promise<Array<OrganizationMember>> {
     return this.members.listMembers(orgId, requesterId, correlationId);
   }
 

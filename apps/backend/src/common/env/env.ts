@@ -58,7 +58,7 @@ export type AppEnv = {
   opencodeKeysPreviousKeyId: string;
   /** May be '' when no credentials/host configured — pg stub stays skipped. */
   databaseUrl: string;
-  corsOrigins: string[];
+  corsOrigins: Array<string>;
   requestTimeoutMs: number;
   /** Total attempts for idempotent upstream calls (GET + 429/5xx/timeout). */
   externalRetryMaxAttempts: number;
@@ -481,7 +481,7 @@ export function resolveGithubPrivateKey(
       }
       return normalizeGithubPrivateKey(content);
     }
-    const bases: string[] = [];
+    const bases: Array<string> = [];
     const pushBase = (b: string) => {
       if (b && !bases.includes(b)) bases.push(b);
     };
@@ -509,7 +509,7 @@ export function resolveGithubPrivateKey(
       }
     }
     const candidates = bases.map((b) => resolvePath(b, p));
-    const tried: string[] = [];
+    const tried: Array<string> = [];
     for (const abs of candidates) {
       if (tried.includes(abs)) continue;
       tried.push(abs);
@@ -619,8 +619,8 @@ const APP_ENV_PREFIXES = [
 ] as const;
 
 /** App-prefixed keys outside the known contract (probable typos) — unrelated OS vars ignored. */
-export function findSuspiciousUnknownKeys(source: NodeJS.ProcessEnv): string[] {
-  const out: string[] = [];
+export function findSuspiciousUnknownKeys(source: NodeJS.ProcessEnv): Array<string> {
+  const out: Array<string> = [];
   for (const key of Object.keys(source)) {
     if (KNOWN_ENV_KEYS.has(key)) continue;
     if (APP_ENV_PREFIXES.some((p) => key === p || key.startsWith(p)))
@@ -636,7 +636,7 @@ export type EnvValidation = {
    * Collected — not logged — so per-request validateEnv() callers stay quiet;
    * main.ts logs them once at boot via AppLogger.
    */
-  warnings: string[];
+  warnings: Array<string>;
 };
 
 /**
@@ -666,7 +666,7 @@ export function parseCloneAllowedHosts(raw: string | undefined): Array<string> {
 export function validateEnvWithWarnings(
   source: NodeJS.ProcessEnv = process.env,
 ): EnvValidation {
-  const warnings: string[] = [];
+  const warnings: Array<string> = [];
   const warn = (msg: string): void => {
     warnings.push(msg);
   };
@@ -917,7 +917,7 @@ export function validateEnvWithWarnings(
   const nextPortRaw = firstNonEmpty(env.NEXT_PUBLIC_PORT) || "3001";
   const nextPublicPort = parsePortWithZod(nextPortRaw, "NEXT_PUBLIC_PORT");
   const corsRaw = firstNonEmpty(env.CORS_ORIGINS);
-  let corsOrigins: string[];
+  let corsOrigins: Array<string>;
   if (corsRaw) {
     const corsParsed = corsOriginsSchema.safeParse(corsRaw);
     if (!corsParsed.success) {
@@ -1029,7 +1029,7 @@ export function validateEnvWithWarnings(
       hasPrivateKey
         ? null
         : "GITHUB_APP_PRIVATE_KEY or GITHUB_APP_PRIVATE_KEY_PATH",
-    ].filter(Boolean) as string[];
+    ].filter(Boolean) as Array<string>;
     // Names only — values (ids/keys) are never echoed.
     throw new Error(
       `[env] GITHUB_APP_* is partially configured (missing: ${missing.join(", ")}). ` +

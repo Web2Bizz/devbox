@@ -15,7 +15,7 @@
  */
 export const DEFAULT_API_VERSION = '1';
 
-export const SUPPORTED_API_VERSIONS: readonly string[] = ['1'] as const;
+export const SUPPORTED_API_VERSIONS: ReadonlyArray<string> = ['1'] as const;
 
 /** Canonical v1 prefix (for docs, frontend client, openapi.yaml). */
 export const API_V1_PREFIX = '/api/v1';

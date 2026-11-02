@@ -28,7 +28,7 @@ export function getRawBody(req: unknown): Buffer | null {
  */
 export function verifyWebhookSignature(
   rawBody: Buffer | string | null | undefined,
-  signatureHeader: string | string[] | undefined,
+  signatureHeader: string | Array<string> | undefined,
   secret: string,
 ): boolean {
   if (!secret || !rawBody) return false;

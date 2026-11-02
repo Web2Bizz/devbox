@@ -25,7 +25,7 @@ type WarnCall = {
 };
 
 function makeLogger() {
-  const warns: WarnCall[] = [];
+  const warns: Array<WarnCall> = [];
   return {
     warns,
     logger: {

@@ -11,7 +11,7 @@ import type { Observable } from 'rxjs';
 export class CorrelationInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     const req = context.switchToHttp().getRequest<{
-      headers: Record<string, string | string[] | undefined>;
+      headers: Record<string, string | Array<string> | undefined>;
       correlationId?: string;
     }>();
     const res = context.switchToHttp().getResponse<{

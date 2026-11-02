@@ -25,7 +25,7 @@ const NOW = Date.parse("2025-01-01T00:00:00.000Z");
 
 type Case = { name: string; run: () => Promise<void> | void };
 
-const cases: Case[] = [];
+const cases: Array<Case> = [];
 
 function it(name: string, run: () => Promise<void> | void): void {
   cases.push({ name, run });

@@ -78,7 +78,7 @@ export class DbService {
 
   constructor(
     private readonly config: ConfigService,
-    private readonly logger: AppLogger = new AppLogger("DbService"),
+    private readonly logger: AppLogger = new AppLogger(DbService.name),
   ) {
     const databaseUrl = this.resolveDatabaseUrl();
     if (!databaseUrl) {

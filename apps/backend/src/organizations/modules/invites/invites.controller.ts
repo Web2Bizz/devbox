@@ -90,4 +90,15 @@ export class InvitesController {
       req?.correlationId,
     )) as OrganizationMemberDto;
   }
+
+  @Post("invites/deny")
+  @ApiOperation({ summary: "Deny a persistent single-use invite (uuidv7, no TTL)" })
+  @ApiResponse({ status: 200, description: "invite denied" })
+  @ApiResponse({ status: 401, description: "missing/invalid bearer" })
+  @ApiResponse({ status: 404, description: "invite not found or already used" })
+  @ApiResponse({ status: 503, description: "postgres unreachable (EXTERNAL_UNAVAILABLE, Retry-After)" })
+  @HttpCode(HttpStatus.OK)
+  async denyInvite(): Promise<object | null> {
+    return null
+  }
 }

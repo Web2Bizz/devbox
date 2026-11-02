@@ -57,7 +57,7 @@ import { SessionsService } from './sessions.service';
 export class SessionsController {
   constructor(
     private readonly sessions: SessionsService,
-    private readonly logger: AppLogger = new AppLogger('SessionsController'),
+    private readonly logger: AppLogger = new AppLogger(SessionsController.name),
   ) {}
 
   @UseGuards(JwtAuthGuard)
@@ -72,7 +72,7 @@ export class SessionsController {
     @ReqUser() identity: RequestIdentity,
     @Query('projectId') projectId?: string,
     @Headers('x-correlation-id') correlationId?: string,
-  ): Promise<SessionInfo[]> {
+  ): Promise<Array<SessionInfo>> {
     const cid = correlationId ?? '';
     const rows = await this.sessions.list(identity.id, projectId, cid);
     this.logger.info(`[sessions] list count=${rows.length}`, cid);
@@ -126,7 +126,7 @@ export class SessionsController {
     @ReqUser() identity: RequestIdentity,
     @Query('projectId') projectId?: string,
     @Headers('x-correlation-id') correlationId?: string,
-  ): Promise<SessionRunnerProvider[]> {
+  ): Promise<Array<SessionRunnerProvider>> {
     return this.sessions.providers(identity.id, projectId, correlationId ?? '');
   }
 
@@ -158,7 +158,7 @@ export class SessionsController {
     @Query('limit') limit?: string,
     @Query('cursor') cursor?: string,
     @Headers('x-correlation-id') correlationId?: string,
-  ): Promise<SessionMessage[]> {
+  ): Promise<Array<SessionMessage>> {
     return this.sessions.listMessages(identity.id, id, projectId, limit, cursor, correlationId ?? '');
   }
 

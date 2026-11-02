@@ -34,7 +34,7 @@ function isUserId(value: string): boolean {
 @Injectable()
 export class ServeAuthService {
   constructor(
-    private readonly logger: AppLogger = new AppLogger("ServeAuthService"),
+    private readonly logger: AppLogger = new AppLogger(ServeAuthService.name),
   ) {}
 
   assertServeUser(userId: string, correlationId?: string): void {

@@ -53,7 +53,7 @@ export async function isValidGitRepo(
     return { ok: false, reason: 'no-git' };
   }
 
-  const run = async (args: string[], reason: GitInvalidReason): Promise<GitCheck | null> => {
+  const run = async (args: Array<string>, reason: GitInvalidReason): Promise<GitCheck | null> => {
     try {
       await execFileAsync('git', args, {
         cwd: absRepoPath,

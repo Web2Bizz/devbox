@@ -62,7 +62,7 @@ function baseEnv(): Source {
   } as Source;
 }
 
-function without(source: Source, ...keys: string[]): Source {
+function without(source: Source, ...keys: Array<string>): Source {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(source)) {
     if (!keys.includes(k) && typeof v === 'string') out[k] = v;

@@ -9,7 +9,7 @@ import type { AgentDto } from './agents.dto';
 export class AgentsService {
   constructor(private readonly ask: AskAgent) {}
 
-  list(): AgentDto[] {
+  list(): Array<AgentDto> {
     return [
       { id: this.ask.id, name: this.ask.name, description: this.ask.description },
     ];

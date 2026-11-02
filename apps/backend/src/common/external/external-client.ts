@@ -80,7 +80,7 @@ function resolveRetryDefaults(): { maxAttempts: number; baseDelayMs: number; max
 
 @Injectable()
 export class ExternalClient {
-  constructor(private readonly logger: AppLogger = new AppLogger('ExternalClient')) {}
+  constructor(private readonly logger: AppLogger = new AppLogger(ExternalClient.name)) {}
 
   /**
    * GET/… with retry; POST/PUT/PATCH/DELETE exactly once unless

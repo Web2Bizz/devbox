@@ -131,8 +131,17 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
       delete process.env.PROJECTS_ROOT;
       try {
         const fakeProjects = { getOrThrow: async () => ({ id: 'x' }) } as never;
-        const svc = new ProjectFilesService(fakeProjects, new WorkspacePathService(), silentLogger() as never);
-        await assert.rejects(() => svc.tree('any-id', '.', 1, 'cid-1'), expectStorageDeny);
+        const access = { assertProjectAccess: async () => {} } as never;
+        const svc = new ProjectFilesService(
+          fakeProjects,
+          new WorkspacePathService(),
+          silentLogger() as never,
+          access,
+        );
+        await assert.rejects(
+          () => svc.tree('any-id', '.', 1, 'cid-1', '123e4567-e89b-12d3-a456-426614174001'),
+          expectStorageDeny,
+        );
       } finally {
         if (prevRepos === undefined) delete process.env.REPOS_ROOT;
         else process.env.REPOS_ROOT = prevRepos;
@@ -187,8 +196,14 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
         await assert.rejects(() => svc.tree(uid, pid, '../../etc', 1, 'cid-pos'), /forbidden/i);
         // project-files positive over the same unified root.
         const fakeProjects = { getOrThrow: async () => ({ id: pid, ownerId: uid }) } as never;
-        const files = new ProjectFilesService(fakeProjects, paths, silentLogger() as never);
-        const fnode = await files.tree(pid, '.', 0, 'cid-pos');
+        const access = { assertProjectAccess: async () => {} } as never;
+        const files = new ProjectFilesService(
+          fakeProjects,
+          paths,
+          silentLogger() as never,
+          access,
+        );
+        const fnode = await files.tree(pid, '.', 0, 'cid-pos', uid);
         assert.equal(fnode.type, 'dir');
       } finally {
         if (prevRepos === undefined) delete process.env.REPOS_ROOT;

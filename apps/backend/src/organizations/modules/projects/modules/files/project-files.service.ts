@@ -1,4 +1,11 @@
-import { ForbiddenException, Inject, Injectable, NotFoundException, forwardRef } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+  forwardRef,
+} from '@nestjs/common';
 import path from 'node:path';
 import { AppLogger } from '../../../../../common/logger';
 import { ExternalServiceError } from '../../../../../common/external/external-error';
@@ -32,8 +39,8 @@ export class ProjectFilesService {
     @Inject(forwardRef(() => ProjectsService))
     private readonly projects: ProjectsService,
     private readonly paths: WorkspacePathService,
-    private readonly logger: AppLogger = new AppLogger('ProjectFilesService'),
-    private readonly access?: ProjectAccessService,
+    private readonly logger: AppLogger = new AppLogger(ProjectFilesService.name),
+    private readonly access: ProjectAccessService,
   ) {}
 
   /**
@@ -55,21 +62,25 @@ export class ProjectFilesService {
     correlationId?: string,
     requesterId?: string,
   ): Promise<FileNode> {
-    const project = await this.projects.getOrThrow(projectId, correlationId);
-    // Card 5 access layer: org-linked → any linked-org member, user-space →
-    // owner only, strangers → 404 (existence is not leaked). Skipped only
-    // when the requester is absent (internal/test callers) or the access
-    // service is not wired (manual `new` in unit specs like
-    // storage-unavailable.spec). Disk homes are NOT moved by linking
-    // (metadata-only join rows) — the user home below stays canonical.
-    if (requesterId && this.access) {
-      await this.access.assertProjectAccess(
-        project.id,
-        project.ownerId,
-        requesterId,
-        correlationId,
-      );
+    if (!requesterId) {
+      throw new UnauthorizedException({
+        code: 'unauthorized',
+        message: 'Authentication required',
+      });
     }
+    const project = await this.projects.getOrThrow(projectId, correlationId);
+    // Card 5 access layer, always enforced: org-linked → any linked-org
+    // member, user-space → owner only, strangers → 404 (existence is not
+    // leaked). A missing requester is a fail-closed 401 (checked above);
+    // there is no internal/test bypass and no optional access dependency.
+    // Disk homes are NOT moved by linking (metadata-only join rows) — the
+    // user home below stays canonical.
+    await this.access.assertProjectAccess(
+      project.id,
+      project.ownerId,
+      requesterId,
+      correlationId,
+    );
     const clamped = Math.min(Math.max(depth, 0), MAX_DEPTH);
     // Owner home determines the content jail (access already gated above
     // via ProjectAccessService.assertProjectAccess — Card 5; legacy non-uuid

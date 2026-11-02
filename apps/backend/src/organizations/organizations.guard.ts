@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from "@nestjs/common";
 import { and, eq, isNull } from "drizzle-orm";
 import { readIdentity } from "../auth/identity.service";
@@ -49,8 +50,8 @@ export class OrganizationsGuard implements CanActivate {
   /**
    * HTTP guard: GET on an org-scoped route needs membership, every other
    * method needs the maintainer role. Routes without a `:id` param (create,
-   * list, invite accept) are not gated here, and an anonymous request is
-   * left to JwtAuthGuard (guard order keeps auth first → 401).
+   * list, invite accept) are not gated here. An anonymous request is
+   * fail-closed 401 `unauthorized` — no pass-through, no DB lookups.
    */
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<{
@@ -61,7 +62,12 @@ export class OrganizationsGuard implements CanActivate {
     const orgId = req.params?.id;
     if (!orgId) return true;
     const identity = readIdentity(req);
-    if (!identity) return true;
+    if (!identity) {
+      throw new UnauthorizedException({
+        code: "unauthorized",
+        message: "Authentication required",
+      });
+    }
     if (req.method === "GET") {
       await this.memberRowOrThrow(orgId, identity.id, req.correlationId);
       return true;

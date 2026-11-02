@@ -1,5 +1,12 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
-import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
+import { JwtAuthGuard } from '../../../../../auth/jwt-auth.guard';
 import { ZodValidationPipe } from '../../../../../common/validation';
 import { AgentsService } from './agents.service';
 import {
@@ -11,9 +18,13 @@ import {
 
 /**
  * AgentsController — list available AI agents + ask a question (mock).
+ * Bearer-guarded (JwtAuthGuard from the global auth module) and documented
+ * with @ApiBearerAuth — no anonymous access to the agent registry.
  */
 @ApiTags('agents')
+@ApiBearerAuth()
 @Controller('agents')
+@UseGuards(JwtAuthGuard)
 export class AgentsController {
   constructor(private readonly agents: AgentsService) {}
 

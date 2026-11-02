@@ -165,6 +165,31 @@ export class OpencodeController {
   }
 
   /**
+   * Runs one upstream call and maps its failure to ExternalServiceError.
+   *
+   * Wraps every route's call site: the warn/debug lines stay the same
+   * (`[opencode] <METHOD> upstream failed` + the message only, never URLs
+   * or bodies), and the throw goes through upstreamError — an
+   * ExternalServiceError raised inside `run` (e.g. the status-carrying
+   * `upstreamError(op, res.error, sdkStatus(res))`) passes through
+   * fromUnknown unchanged, so the real upstream status is not lost.
+   */
+  private async runUpstream<T>(
+    operation: string,
+    method: string,
+    correlationId: string | undefined,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await run();
+    } catch (error) {
+      this.logger.warn(`[opencode] ${method} upstream failed`, correlationId);
+      this.logger.debug((error as Error).message, correlationId);
+      throw this.upstreamError(operation, error);
+    }
+  }
+
+  /**
    * Copy upstream cursor headers (x-next-cursor/Link, when present) onto
    * the downstream JSON response. The v2 client defaults to
    * `responseStyle: 'fields'`, so the raw fetch Response rides on the
@@ -244,18 +269,14 @@ export class OpencodeController {
       cid,
     );
     const client = await this.sdk.create(userId, cid);
-    try {
+    return this.runUpstream('listSessions', 'GET /session', cid, async () => {
       // v2 namespace (GET /api/session): the v2 envelope is { data, cursor }
       // — unwrap .data so the route still answers an array (external
       // signature unchanged).
       const res = await client.v2.session.list({ directory: projectDir });
       if (this.isUpstreamOk(res.data, res.error)) return res.data.data;
       throw this.upstreamError('listSessions', res.error, this.sdkStatus(res));
-    } catch (err) {
-      this.logger.warn('[opencode] GET /session upstream failed', cid);
-      this.logger.debug((err as Error).message, cid);
-      throw this.upstreamError('listSessions', err);
-    }
+    });
   }
 
   @UseGuards(JwtAuthGuard)
@@ -290,7 +311,7 @@ export class OpencodeController {
       cid,
     );
     const client = await this.sdk.create(userId, cid);
-    try {
+    return this.runUpstream('createSession', 'POST /session', cid, async () => {
       // v2 namespace (POST /api/session): the legacy POST /session answers
       // 405, so create goes through `client.v2.session.create`. The body
       // carries only `location` — the v2 create accepts id/agent/model/
@@ -309,11 +330,7 @@ export class OpencodeController {
         return res.data.data as unknown as Session;
       }
       throw this.upstreamError('createSession', res.error, this.sdkStatus(res));
-    } catch (err) {
-      this.logger.warn('[opencode] POST /session upstream failed', cid);
-      this.logger.debug((err as Error).message, cid);
-      throw this.upstreamError('createSession', err);
-    }
+    });
   }
 
   @UseGuards(JwtAuthGuard)
@@ -340,15 +357,11 @@ export class OpencodeController {
       cid,
     );
     const client = await this.sdk.create(userId, cid);
-    try {
+    return this.runUpstream('sessionStatus', 'GET /session/status', cid, async () => {
       const res = await client.session.status({ directory: projectDir });
       if (this.isUpstreamOk(res.data, res.error)) return res.data;
       throw this.upstreamError('sessionStatus', res.error, this.sdkStatus(res));
-    } catch (err) {
-      this.logger.warn('[opencode] GET /session/status upstream failed', cid);
-      this.logger.debug((err as Error).message, cid);
-      throw this.upstreamError('sessionStatus', err);
-    }
+    });
   }
 
   @UseGuards(JwtAuthGuard)
@@ -372,7 +385,7 @@ export class OpencodeController {
     // gate is the binding; client ?directory ignored).
     await this.access.resolveProjectDirectory(projectId, userId, cid);
     const client = await this.sdk.create(userId, cid);
-    try {
+    return this.runUpstream('getSession', 'GET /session/:id', cid, async () => {
       // v2 namespace (GET /api/session/{sessionID}, path-only — ?directory
       // stays on the route for signature stability, v2 takes no query).
       // Envelope is { data } — unwrap (route still answers one object).
@@ -381,11 +394,7 @@ export class OpencodeController {
       });
       if (this.isUpstreamOk(res.data, res.error)) return res.data.data;
       throw this.upstreamError('getSession', res.error, this.sdkStatus(res));
-    } catch (err) {
-      this.logger.warn('[opencode] GET /session/:id upstream failed', cid);
-      this.logger.debug((err as Error).message, cid);
-      throw this.upstreamError('getSession', err);
-    }
+    });
   }
 
   @UseGuards(JwtAuthGuard)
@@ -413,18 +422,14 @@ export class OpencodeController {
       cid,
     );
     const client = await this.sdk.create(userId, cid);
-    try {
+    return this.runUpstream('deleteSession', 'DELETE /session/:id', cid, async () => {
       const res = await client.session.delete({
         sessionID: id,
         directory: projectDir,
       });
       if (res.error === undefined) return { deleted: true };
       throw this.upstreamError('deleteSession', res.error, this.sdkStatus(res));
-    } catch (err) {
-      this.logger.warn('[opencode] DELETE /session/:id upstream failed', cid);
-      this.logger.debug((err as Error).message, cid);
-      throw this.upstreamError('deleteSession', err);
-    }
+    });
   }
 
   @UseGuards(JwtAuthGuard)
@@ -454,7 +459,7 @@ export class OpencodeController {
       cid,
     );
     const client = await this.sdk.create(userId, cid);
-    try {
+    return this.runUpstream('updateSession', 'PATCH /session/:id', cid, async () => {
       const res = await client.session.update({
         sessionID: id,
         ...body,
@@ -462,11 +467,7 @@ export class OpencodeController {
       });
       if (this.isUpstreamOk(res.data, res.error)) return res.data;
       throw this.upstreamError('updateSession', res.error, this.sdkStatus(res));
-    } catch (err) {
-      this.logger.warn('[opencode] PATCH /session/:id upstream failed', cid);
-      this.logger.debug((err as Error).message, cid);
-      throw this.upstreamError('updateSession', err);
-    }
+    });
   }
 
   @UseGuards(JwtAuthGuard)
@@ -497,7 +498,7 @@ export class OpencodeController {
       cid,
     );
     const client = await this.sdk.create(userId, cid);
-    try {
+    return this.runUpstream('forkSession', 'POST /session/:id/fork', cid, async () => {
       const res = await client.session.fork({
         sessionID: id,
         ...body,
@@ -505,11 +506,7 @@ export class OpencodeController {
       });
       if (this.isUpstreamOk(res.data, res.error)) return res.data;
       throw this.upstreamError('forkSession', res.error, this.sdkStatus(res));
-    } catch (err) {
-      this.logger.warn('[opencode] POST /session/:id/fork upstream failed', cid);
-      this.logger.debug((err as Error).message, cid);
-      throw this.upstreamError('forkSession', err);
-    }
+    });
   }
 
   // --- messages -----------------------------------------------------------
@@ -538,6 +535,10 @@ export class OpencodeController {
     // directory — the gate is the binding; client ?directory ignored).
     await this.access.resolveProjectDirectory(projectId, userId, cid);
     const client = await this.sdk.create(userId, cid);
+    // NOTE: this route keeps its own try/catch instead of runUpstream — the
+    // in-try ?limit validation (parseLimit) throws BadRequestException and
+    // MUST stay a 400 bad_request, not be normalized to EXTERNAL_UNAVAILABLE;
+    // runUpstream's upstreamError path has no Nest-exception passthrough.
     try {
       const limit = this.parseLimit(limitRaw);
       // v2 namespace (GET /api/session/{sessionID}/message): limit maps 1:1;
@@ -587,7 +588,7 @@ export class OpencodeController {
     // the gate is the binding; client ?directory ignored).
     await this.access.resolveProjectDirectory(projectId, userId, cid);
     const client = await this.sdk.create(userId, cid);
-    try {
+    return this.runUpstream('getMessage', 'GET /session/:id/message/:messageID', cid, async () => {
       // v2 namespace (GET /api/session/{sessionID}/message/{messageID},
       // path-only — ?directory stays on the route, v2 takes no query).
       // Envelope is { data } — unwrap (route still answers one object).
@@ -597,11 +598,7 @@ export class OpencodeController {
       });
       if (this.isUpstreamOk(res.data, res.error)) return res.data.data;
       throw this.upstreamError('getMessage', res.error, this.sdkStatus(res));
-    } catch (err) {
-      this.logger.warn('[opencode] GET /session/:id/message/:messageID upstream failed', cid);
-      this.logger.debug((err as Error).message, cid);
-      throw this.upstreamError('getMessage', err);
-    }
+    });
   }
 
   @UseGuards(JwtAuthGuard)
@@ -632,7 +629,7 @@ export class OpencodeController {
       cid,
     );
     const client = await this.sdk.create(userId, cid);
-    try {
+    return this.runUpstream('prompt', 'POST /session/:id/message', cid, async () => {
       // zod keeps `format` as unknown (upstream OutputFormat passthrough) —
       // narrow it at the boundary so the flat v2 params stay typed.
       const { format, ...rest } = body;
@@ -644,11 +641,7 @@ export class OpencodeController {
       });
       if (this.isUpstreamOk(res.data, res.error)) return res.data;
       throw this.upstreamError('prompt', res.error, this.sdkStatus(res));
-    } catch (err) {
-      this.logger.warn('[opencode] POST /session/:id/message upstream failed', cid);
-      this.logger.debug((err as Error).message, cid);
-      throw this.upstreamError('prompt', err);
-    }
+    });
   }
 
   @UseGuards(JwtAuthGuard)
@@ -679,7 +672,7 @@ export class OpencodeController {
       cid,
     );
     const client = await this.sdk.create(userId, cid);
-    try {
+    return this.runUpstream('promptAsync', 'POST /session/:id/prompt_async', cid, async () => {
       const { format, ...rest } = body;
       const res = await client.session.promptAsync({
         sessionID: id,
@@ -690,11 +683,7 @@ export class OpencodeController {
       if (res.error !== undefined) {
         throw this.upstreamError('promptAsync', res.error, this.sdkStatus(res));
       }
-    } catch (err) {
-      this.logger.warn('[opencode] POST /session/:id/prompt_async upstream failed', cid);
-      this.logger.debug((err as Error).message, cid);
-      throw this.upstreamError('promptAsync', err);
-    }
+    });
   }
 
   @UseGuards(JwtAuthGuard)
@@ -725,7 +714,7 @@ export class OpencodeController {
       cid,
     );
     const client = await this.sdk.create(userId, cid);
-    try {
+    return this.runUpstream('runCommand', 'POST /session/:id/command', cid, async () => {
       const res = await client.session.command({
         sessionID: id,
         ...body,
@@ -733,11 +722,7 @@ export class OpencodeController {
       });
       if (this.isUpstreamOk(res.data, res.error)) return res.data;
       throw this.upstreamError('runCommand', res.error, this.sdkStatus(res));
-    } catch (err) {
-      this.logger.warn('[opencode] POST /session/:id/command upstream failed', cid);
-      this.logger.debug((err as Error).message, cid);
-      throw this.upstreamError('runCommand', err);
-    }
+    });
   }
 
   @UseGuards(JwtAuthGuard)
@@ -768,7 +753,7 @@ export class OpencodeController {
       cid,
     );
     const client = await this.sdk.create(userId, cid);
-    try {
+    return this.runUpstream('runShell', 'POST /session/:id/shell', cid, async () => {
       const res = await client.session.shell({
         sessionID: id,
         ...body,
@@ -776,11 +761,7 @@ export class OpencodeController {
       });
       if (this.isUpstreamOk(res.data, res.error)) return res.data;
       throw this.upstreamError('runShell', res.error, this.sdkStatus(res));
-    } catch (err) {
-      this.logger.warn('[opencode] POST /session/:id/shell upstream failed', cid);
-      this.logger.debug((err as Error).message, cid);
-      throw this.upstreamError('runShell', err);
-    }
+    });
   }
 
   @UseGuards(JwtAuthGuard)
@@ -809,18 +790,14 @@ export class OpencodeController {
       cid,
     );
     const client = await this.sdk.create(userId, cid);
-    try {
+    return this.runUpstream('abortSession', 'POST /session/:id/abort', cid, async () => {
       const res = await client.session.abort({
         sessionID: id,
         directory: projectDir,
       });
       if (res.error === undefined) return res.data ?? { aborted: true };
       throw this.upstreamError('abortSession', res.error, this.sdkStatus(res));
-    } catch (err) {
-      this.logger.warn('[opencode] POST /session/:id/abort upstream failed', cid);
-      this.logger.debug((err as Error).message, cid);
-      throw this.upstreamError('abortSession', err);
-    }
+    });
   }
 
   // --- providers ----------------------------------------------------------
@@ -849,7 +826,7 @@ export class OpencodeController {
       cid,
     );
     const client = await this.sdk.create(userId, cid);
-    try {
+    return this.runUpstream('listProviders', 'GET /config/providers', cid, async () => {
       // v2 namespace (GET /api/provider): legacy ?directory maps to the v2
       // `location` object; the v2 envelope ({ location, data }) is returned
       // as-is (route type is unknown — external signature unchanged).
@@ -858,11 +835,7 @@ export class OpencodeController {
       });
       if (this.isUpstreamOk(res.data, res.error)) return res.data;
       throw this.upstreamError('listProviders', res.error, this.sdkStatus(res));
-    } catch (err) {
-      this.logger.warn('[opencode] GET /config/providers upstream failed', cid);
-      this.logger.debug((err as Error).message, cid);
-      throw this.upstreamError('listProviders', err);
-    }
+    });
   }
 
   // --- events (SSE re-stream) ---------------------------------------------
@@ -960,7 +933,7 @@ export class OpencodeController {
     // honest signal). Same pattern as every other serve call
     // (sessions.service, OpencodeSdkClient.create).
     const cid = correlationId ?? '';
-    try {
+    return this.runUpstream('globalHealth', 'GET /global/health', cid, async () => {
       const res = await this.opencode.fetchWithRetry(
         `${this.opencode.dialUrl()}/api/info`,
         { method: 'GET', headers: { ...serveBasicAuthHeader() } },
@@ -981,10 +954,6 @@ export class OpencodeController {
         throw this.upstreamError('globalHealth', new Error('bad_health_shape'));
       }
       return { healthy: true, version };
-    } catch (err) {
-      this.logger.warn('[opencode] GET /global/health upstream failed', cid);
-      this.logger.debug((err as Error).message, cid);
-      throw this.upstreamError('globalHealth', err);
-    }
+    });
   }
 }

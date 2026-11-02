@@ -28,10 +28,12 @@ import {
   RegisterBodyDto,
   UpdateMeBodyDto,
   loginSchema,
+  logoutSchema,
   refreshSchema,
   registerSchema,
   updateMeSchema,
   type LoginInput,
+  type LogoutInput,
   type RefreshInput,
   type RegisterInput,
   type UpdateMeInput,
@@ -298,7 +300,7 @@ export class AuthController {
   @ApiOperation({ summary: "Log out (revoke the refresh token, idempotent)" })
   @ApiResponse({ status: 200, description: "logged out" })
   async logout(
-    @Body() body: Partial<RefreshInput>,
+    @Body(new ZodValidationPipe(logoutSchema)) body: LogoutInput,
     @Res({ passthrough: true }) res: Response,
     @Req() req?: unknown,
   ): Promise<{ ok: boolean }> {

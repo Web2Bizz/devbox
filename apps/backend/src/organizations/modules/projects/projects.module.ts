@@ -39,8 +39,7 @@ import { SessionsModule } from "./modules/sessions/sessions.module";
  * Both project surfaces (top-level /projects and the canonical nested
  * /organizations/:id/projects) are served by this module with one
  * controller per entity (CoC §1.1): ProjectsController owns /projects*,
- * OrgProjectsController owns /organizations/:id/projects* (incl. the two
- * 410 attach/detach stubs).
+ * OrgProjectsController owns /organizations/:id/projects*.
  */
 @Module({
   imports: [

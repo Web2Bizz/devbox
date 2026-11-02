@@ -94,3 +94,25 @@ export class GithubWebhookAckDto {
   @ApiProperty({ example: true })
   ok!: boolean;
 }
+
+/**
+ * POST /projects/github/webhook body — minimal lenient shape.
+ *
+ * GitHub sends many event variants (ping, installation_repositories, …) that
+ * must still be acked, so every field is optional and unknown keys are kept
+ * (`installation.account.login/type` are read by the handler). Runtime
+ * validation runs in the controller AFTER signature verification — unverified
+ * payloads never reach it.
+ */
+export const installationWebhookSchema = z
+  .object({
+    action: z.string().optional(),
+    installation: z
+      .object({
+        id: z.number().optional(),
+      })
+      .loose()
+      .optional(),
+  })
+  .loose();
+

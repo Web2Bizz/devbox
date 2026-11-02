@@ -3,7 +3,6 @@ import {
   Controller,
   Delete,
   Get,
-  GoneException,
   Headers,
   HttpCode,
   HttpStatus,
@@ -45,8 +44,6 @@ import { ProjectsService } from "./projects.service";
  *   POST   /organizations/:id/projects (orgId forced from path)
  *   GET    /organizations/:id/projects/:projectId (assertBelongs, mismatch → 404)
  *   PATCH/DELETE (soft) + POST .../restore (API only) + GET .../effective-config
- *   POST/DELETE .../projects/:projectId — 410 stubs for the removed
- *   attach/detach feature (1:1 model; kept in the projects domain).
  *
  * Membership enforced via ProjectAccessService.getRole (404 for strangers).
  * Class-level JwtAuthGuard + @ReqUser() identity only — there is no
@@ -70,30 +67,6 @@ export class OrgProjectsController {
     if (!role) {
       throw new NotFoundException(`Organization ${orgId} not found`);
     }
-  }
-
-  // The two 410 stubs are declared BEFORE the live nested routes on purpose:
-  // they used to live in OrganizationsController, which Nest instantiates
-  // (and therefore registers routes for) before ProjectsModule, so
-  // DELETE /organizations/:id/projects/:projectId answered 410 — declaring
-  // them first preserves that exact status code (the soft-delete handler
-  // below stays shadowed, as it was before the split).
-  @ApiTags("org-projects")
-  @Post("organizations/:id/projects/:projectId")
-  @ApiOperation({ summary: "Attach a project (removed — 1:1, 410)" })
-  @ApiResponse({ status: 410, description: "link/unlink removed (1:1 model)" })
-  @HttpCode(HttpStatus.GONE)
-  async linkProject(): Promise<void> {
-    throw new GoneException("project links removed — project belongs to exactly one org");
-  }
-
-  @ApiTags("org-projects")
-  @Delete("organizations/:id/projects/:projectId")
-  @ApiOperation({ summary: "Detach a project (removed — 1:1, 410)" })
-  @ApiResponse({ status: 410, description: "link/unlink removed (1:1 model)" })
-  @HttpCode(HttpStatus.GONE)
-  async unlinkProject(): Promise<void> {
-    throw new GoneException("project links removed — project belongs to exactly one org");
   }
 
   @ApiTags("org-projects")

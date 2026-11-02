@@ -53,7 +53,8 @@ export type GithubLinkInput = z.infer<typeof githubLinkSchema>;
 
 export const projectSchema = z.object({
   id: z.uuid(),
-  orgId: z.uuid(),
+  /** null for user-space projects. */
+  orgId: z.uuid().nullable(),
   name: z.string().min(1),
   description: z.string().nullable(),
   githubOwner: z.string().nullable(),

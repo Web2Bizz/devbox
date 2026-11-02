@@ -33,6 +33,7 @@ import {
   InstallCallbackQueryDto,
   ListReposQueryDto,
   installCallbackQuerySchema,
+  installationWebhookSchema,
   listReposQuerySchema,
   type InstallCallbackQueryInput,
   type ListReposQueryInput,
@@ -47,6 +48,13 @@ import {
 } from "./utils/webhook";
 import { GithubAppService } from "./github-app.service";
 import { GithubService } from "./github.service";
+
+/**
+ * Webhook body validation runs manually (not as a @Body() pipe) because the
+ * raw-bytes signature check MUST stay the first gate: unverified payloads
+ * never reach validation.
+ */
+const installationWebhookPipe = new ZodValidationPipe(installationWebhookSchema);
 
 /**
  * GithubController — multi-tenant GitHub App surface.
@@ -164,10 +172,15 @@ export class GithubController {
     if (!verifyWebhookSignature(raw, signature, env.githubWebhookSecret)) {
       throw new UnauthorizedException("Invalid webhook signature");
     }
+    // Signature passed — now enforce the minimal body shape (zod, not a TS
+    // type). Unknown keys are preserved, so installation.account.* stays
+    // readable below. Non-installation events are acked before this point.
+    if (event !== undefined && event !== "installation") return { ok: true };
+    const payload = (await installationWebhookPipe.transform(
+      body ?? {},
+    )) as InstallationWebhookPayload;
     // Only `installation` events mutate the registry; everything else
     // (ping, installation_repositories, …) is acked without side effects.
-    if (event !== undefined && event !== "installation") return { ok: true };
-    const payload = body ?? {};
     const action = typeof payload.action === "string" ? payload.action : "";
     if (action !== "" && !INSTALLATION_ACTIONS.has(action)) return { ok: true };
     // Unknown-event shape without an action (e.g. ping) → ack.

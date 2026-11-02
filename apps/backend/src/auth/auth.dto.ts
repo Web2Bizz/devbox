@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { z } from 'zod';
 
 /**
  * Auth DTO — single source of truth is @rush-code/contracts (verbatim trims,
@@ -16,6 +17,19 @@ export {
   type RegisterInput,
   type UpdateMeInput,
 } from '@rush-code/contracts';
+
+/**
+ * POST /auth/logout body — the refresh token is optional (cookie fallback),
+ * and the whole body is optional (idempotent logout). `.default({})` keeps
+ * bodyless requests working through the zod pipe.
+ */
+export const logoutSchema = z
+  .object({
+    refreshToken: z.string().min(1).optional(),
+  })
+  .default({});
+
+export type LogoutInput = z.infer<typeof logoutSchema>;
 
 /** Public user DTO — never carries passwordHash (never logged, never serialized). */
 export class AuthUserDto {

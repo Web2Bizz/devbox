@@ -104,18 +104,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
   /api/v1/projects:
-    get:
-      summary: List projects (400 ORG_REQUIRED — use nested GET /organizations/{id}/projects)
-      operationId: listProjectsV1
-      responses:
-        '200':
-          description: projects
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Project'
     post:
       summary: Create project
       operationId: createProjectV1
@@ -1386,111 +1374,6 @@ paths:
                 $ref: '#/components/schemas/ApiError'
         '409':
           description: org already has a maintainer (maintainer-role invite)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '503':
-          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-  /api/v1/organizations/{id}/projects/{projectId}:
-    post:
-      summary: Attach a project (REMOVED — 410, 1:1 model)
-      description: >-
-        Project homes resolve per scope (ProjectScope user|org):
-        users/<uuid>/projects/<id>/content vs
-        orgs/<uuid>/projects/<id>/content. Linking writes only the
-        projects_and_organizations join row — disk homes are NOT moved (see
-        docs/manual-migration-orgs-layout.md). Sessions/chats/files of a
-        linked project admit any member of a linked org; user-space projects
-        admit only the owner.
-      operationId: linkOrganizationProjectV1
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - name: projectId
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        '204':
-          description: linked
-        '401':
-          description: missing/invalid bearer
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '403':
-          description: member without the maintainer role
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '404':
-          description: not found (org, requester membership, or project)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '409':
-          description: project is already linked to this organization
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '503':
-          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-    delete:
-      summary: Detach a project (REMOVED — 410, 1:1 model)
-      operationId: unlinkOrganizationProjectV1
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - name: projectId
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        '204':
-          description: unlinked
-        '401':
-          description: missing/invalid bearer
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '403':
-          description: member without the maintainer role
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '404':
-          description: not found (org, requester membership, or link row)
           content:
             application/json:
               schema:
@@ -3033,6 +2916,310 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+  /api/v1/workspaces/clone:
+    post:
+      summary: Clone a repo into the per-user workspace (idempotent, per-user lock)
+      operationId: cloneWorkspaceV1
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CloneWorkspace'
+      responses:
+        '202':
+          description: clone job enqueued (or already running — idempotent per user+repo)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceCloneJob'
+        '400':
+          description: bad repoUrl/repoName
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: installation belongs to another user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: storage unconfigured (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/workspaces/{repo}/clone-status:
+    get:
+      summary: Clone job status for a repo in the per-user workspace
+      operationId: getWorkspaceCloneStatusV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: repo
+          in: path
+          required: true
+          example: demo
+          schema:
+            type: string
+      responses:
+        '200':
+          description: clone job row for this repo+user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceCloneJob'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: no clone job for this repo+user (also for a malformed repo name)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/workspaces/{repo}/tree:
+    get:
+      summary: Readonly workspace file tree (jailed per-user, depth 0-5)
+      operationId: getWorkspaceTreeV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: repo
+          in: path
+          required: true
+          example: demo
+          schema:
+            type: string
+        - name: path
+          in: query
+          required: false
+          example: '.'
+          schema:
+            type: string
+            default: '.'
+        - name: depth
+          in: query
+          required: false
+          example: 1
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 5
+            default: 1
+      responses:
+        '200':
+          description: jailed directory tree (recursive via children)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceTreeNode'
+        '400':
+          description: invalid query (depth must be an integer 0-5)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: traversal forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: storage unconfigured (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/workspaces/{repo}/submodules:
+    get:
+      summary: Workspace repo submodules (.gitmodules + status, jailed paths)
+      operationId: listWorkspaceSubmodulesV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: repo
+          in: path
+          required: true
+          example: demo
+          schema:
+            type: string
+      responses:
+        '200':
+          description: parsed submodule rows (always an array; empty when the repo has none)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WorkspaceSubmodule'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: repo not found (also for a malformed repo name)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: storage unconfigured (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/agents:
+    get:
+      summary: List available AI agents
+      operationId: listAgentsV1
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: agent registry rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Agent'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/agents/{agentId}/ask:
+    post:
+      summary: Ask an AI agent a question (mock answer)
+      operationId: askAgentV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          example: ask
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentAskRequest'
+      responses:
+        '200':
+          description: agent answer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentAskAnswer'
+        '400':
+          description: invalid body (question must be non-empty, at most 4000 chars)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/sessions/models:
+    get:
+      summary: List session-runner models filtered to the OpenCode Go/Zen family
+      operationId: listSessionModelsDomain
+      tags: [sessions]
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          description: Owning project uuid — the C4 gate; missing answers 400 PROJECT_REQUIRED.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: domain model rows (always an array; empty when the runner reports none)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SessionModel'
+        '400':
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or the session runner rejected the request (code EXTERNAL_BAD_REQUEST) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: session runner unreachable (code EXTERNAL_UNAVAILABLE, Retry-After) or it refused our credentials (code EXTERNAL_UNAUTHORIZED, no Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
 components:
   securitySchemes:
     bearerAuth:
@@ -3984,6 +4171,114 @@ components:
           type: string
         lastName:
           type: string
+    CloneWorkspace:
+      type: object
+      required: [repoUrl, repoName]
+      properties:
+        repoUrl:
+          type: string
+          description: 'Clone source: https://…, ssh://git@host/… or git@host:path (exact-host allow-list).'
+        repoName:
+          type: string
+          description: Repo dir name inside the user workspace (no slashes/traversal).
+        installationId:
+          type: integer
+          description: GitHub App installation id; must belong to the caller (403 otherwise).
+    WorkspaceCloneJob:
+      type: object
+      required: [userSpace, repoName, status, progress, error, updatedAt]
+      properties:
+        userSpace:
+          type: string
+          example: alice
+        repoName:
+          type: string
+          example: demo
+        status:
+          type: string
+          enum: [queued, cloning, ready, failed]
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        error:
+          type: string
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+    WorkspaceTreeNode:
+      type: object
+      required: [path, type]
+      properties:
+        path:
+          type: string
+          example: README.md
+        type:
+          type: string
+          enum: [file, dir]
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkspaceTreeNode'
+    WorkspaceSubmodule:
+      type: object
+      required: [path, url, sha, status]
+      properties:
+        path:
+          type: string
+          example: libs/shared
+        url:
+          type: string
+          nullable: true
+        sha:
+          type: string
+          nullable: true
+        status:
+          type: string
+    Agent:
+      type: object
+      required: [id, name, description]
+      properties:
+        id:
+          type: string
+          example: ask
+        name:
+          type: string
+          example: Ask
+        description:
+          type: string
+    AgentAskRequest:
+      type: object
+      required: [question]
+      properties:
+        question:
+          type: string
+          minLength: 1
+          maxLength: 4000
+    AgentAskAnswer:
+      type: object
+      required: [agentId, answer]
+      properties:
+        agentId:
+          type: string
+          example: ask
+        answer:
+          type: string
+    SessionModel:
+      type: object
+      required: [id, name, providerID]
+      description: >-
+        GET /api/sessions/models row — runner model inventory entry filtered to the
+        OpenCode Go/Zen family (providerID opencode / opencode-go / opencode-zen).
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        providerID:
+          type: string
+          enum: [opencode, opencode-go, opencode-zen]
     Project:
       type: object
       required: [id, orgId, name, status, createdAt, updatedAt]
@@ -3993,8 +4288,8 @@ components:
           format: uuid
         orgId:
           type: string
-          format: uuid
-          description: Owning organization (1:1, immutable after create)
+          nullable: true
+          description: Owning organization (1:1, immutable after create). null for user-space projects
         status:
           $ref: '#/components/schemas/ProjectStatus'
         deletedAt:

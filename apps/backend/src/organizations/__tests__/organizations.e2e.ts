@@ -531,19 +531,6 @@ async function main(): Promise<void> {
         assert.equal(ownerlessStranger.status, 404);
       });
 
-      await check("link/unlink removed (1:1) → 410", async () => {
-        const link = await fetch(
-          `${base}/api/v1/organizations/${orgId}/projects/${projectId}`,
-          { method: "POST", ...auth(a.token) },
-        );
-        assert.equal(link.status, 410);
-        const unlink = await fetch(
-          `${base}/api/v1/organizations/${orgId}/projects/${projectId}`,
-          { method: "DELETE", ...auth(a.token) },
-        );
-        assert.equal(unlink.status, 410);
-      });
-
       await check("GET /api/v1/users/:id — own 200, чужой 403, без токена 401", async () => {
         const own = await fetch(`${base}/api/v1/users/${a.id}`, auth(a.token));
         assert.equal(own.status, 200);

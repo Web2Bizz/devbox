@@ -69,7 +69,7 @@ export class ProjectDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
 
-  @ApiProperty({ format: 'uuid' })
+  @ApiProperty({ format: 'uuid', nullable: true, description: 'null for user-space projects' })
   orgId!: string | null;
 
   @ApiProperty({ enum: ['active', 'deleted'], example: 'active' })

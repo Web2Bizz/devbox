@@ -17,8 +17,8 @@ export type ProjectStatus = 'active' | 'deleted';
 
 export type Project = {
   id: string;
-  /** Owning organization (1:1, required). */
-  orgId: string;
+  /** Owning organization (1:1). null for user-space projects. */
+  orgId: string | null;
   name: string;
   description: string | null;
   githubOwner: string | null;

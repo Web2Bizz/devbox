@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -12,7 +11,6 @@ import {
   Param,
   Patch,
   Post,
-  Query,
   UseGuards,
   UseInterceptors,
 } from "@nestjs/common";
@@ -27,10 +25,8 @@ import {
   GithubLinkStatusDto,
   ProjectDto,
   createProjectSchema,
-  githubLinkSchema,
   updateProjectSchema,
   type CreateProjectInput,
-  type GithubLinkInput,
   type UpdateProjectInput,
 } from "./projects.dto";
 import { GithubLinkService } from "./modules/github/github-link.service";
@@ -100,22 +96,6 @@ export class ProjectsController {
     if (!role) {
       throw new NotFoundException(`Organization ${orgId} not found`);
     }
-  }
-
-  @ApiTags("projects")
-  @Get("projects")
-  @ApiOperation({ summary: "List projects (org-scoped — use /organizations/:id/projects)" })
-  @ApiResponse({ status: 200, type: [ProjectDto] })
-  async list(
-    @Headers("x-correlation-id") correlationId?: string,
-    @Query("orgId") _orgId?: string,
-  ): Promise<ProjectDto[]> {
-    // Canonical list is GET /organizations/:id/projects. The global list
-    // cannot guess an org (no fallback to first org) → 400 ORG_REQUIRED.
-    throw new BadRequestException({
-      code: "ORG_REQUIRED",
-      message: "orgId is required — list via GET /api/v1/organizations/:id/projects",
-    });
   }
 
   @ApiTags("projects")

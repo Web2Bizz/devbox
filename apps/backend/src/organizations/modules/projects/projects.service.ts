@@ -21,7 +21,6 @@ import { isValidGitRepo } from "./modules/repository/utils/repos-git";
 import { WorkspacePathService } from "../../../common/storage/workspace-path.service";
 import type {
   CreateProjectInput,
-  GithubLinkInput,
   UpdateProjectInput,
 } from "./projects.dto";
 
@@ -644,75 +643,6 @@ export class ProjectsService {
     // endpoint merges a fixed key set (currently empty upstream) so the
     // contract + masking rule is enforced backend-side. Secrets masked.
     return [];
-  }
-
-  async linkGithub(
-    id: string,
-    input: GithubLinkInput,
-    correlationId?: string,
-  ): Promise<Project> {
-    const current = await this.getOrThrow(id, correlationId);
-    const branch = input.branch ?? "main";
-    const next: Project = {
-      ...current,
-      githubOwner: input.owner,
-      githubRepo: input.repo,
-      githubBranch: branch,
-      githubUrl: `https://github.com/${input.owner}/${input.repo}`,
-      updatedAt: new Date().toISOString(),
-    };
-    try {
-      const rows = await this.client()
-        .update(projects)
-        .set({
-          githubOwner: next.githubOwner,
-          githubRepo: next.githubRepo,
-          githubBranch: next.githubBranch,
-          githubUrl: next.githubUrl,
-          updatedAt: new Date(next.updatedAt),
-        })
-        .where(eq(projects.id, id))
-        .returning();
-      if (rows.length === 0)
-        throw new NotFoundException(`Project ${id} not found`);
-      this.logger.info(`[projects] github linked ${id}`, correlationId);
-      return await this.enrich(toProject(rows[0]), correlationId);
-    } catch (err) {
-      if (err instanceof NotFoundException) throw err;
-      dbUnavailable("projects.linkGithub", err, this.logger, correlationId);
-    }
-  }
-
-  async unlinkGithub(id: string, correlationId?: string): Promise<Project> {
-    const current = await this.getOrThrow(id, correlationId);
-    const next: Project = {
-      ...current,
-      githubOwner: null,
-      githubRepo: null,
-      githubBranch: null,
-      githubUrl: null,
-      updatedAt: new Date().toISOString(),
-    };
-    try {
-      const rows = await this.client()
-        .update(projects)
-        .set({
-          githubOwner: null,
-          githubRepo: null,
-          githubBranch: null,
-          githubUrl: null,
-          updatedAt: new Date(next.updatedAt),
-        })
-        .where(eq(projects.id, id))
-        .returning();
-      if (rows.length === 0)
-        throw new NotFoundException(`Project ${id} not found`);
-      this.logger.info(`[projects] github unlinked ${id}`, correlationId);
-      return await this.enrich(toProject(rows[0]), correlationId);
-    } catch (err) {
-      if (err instanceof NotFoundException) throw err;
-      dbUnavailable("projects.unlinkGithub", err, this.logger, correlationId);
-    }
   }
 
   /** Test/e2e seam — DELETE FROM projects (children first; requires live Postgres). */

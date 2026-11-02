@@ -190,21 +190,9 @@ async function main(): Promise<void> {
         );
       });
 
-      await check("GET /api/v1/projects anon → 401 (guard before ORG_REQUIRED)", async () => {
-        const res = await fetch(`${base}/api/v1/projects`);
-        assert.equal(res.status, 401);
-      });
-
-      await check("GET /api/v1/projects with Bearer → 400 ORG_REQUIRED (canonical list is nested)", async () => {
-        const res = await fetch(
-          `${base}/api/v1/projects`,
-          auth(probe),
-        );
-        assert.equal(res.status, 400);
-        assert.equal(
-          ((await readJson(res)) as { code?: string }).code,
-          "ORG_REQUIRED",
-        );
+      await check("GET /api/v1/projects → 404 (top-level list removed; canonical list is nested)", async () => {
+        const res = await fetch(`${base}/api/v1/projects`, auth(probe));
+        assert.equal(res.status, 404);
       });
 
       await check("GET /health reports db:down (still 200)", async () => {

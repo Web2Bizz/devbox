@@ -1,4 +1,4 @@
-import { Module, forwardRef } from "@nestjs/common";
+import { Module } from "@nestjs/common";
 import { GithubModule } from "../../../github/github.module";
 import { WorkspacePathService } from "../../../../../../../common/storage/workspace-path.service";
 import { CloneJobsRepository } from "./modules/clone/clone-jobs.repository";
@@ -17,14 +17,14 @@ import { WorkspacesService } from "./workspaces.service";
  * - WorkspaceCloneService + CloneJobsRepository: idempotent
  *   `git clone --recurse-submodules` lifecycle (queued→cloning→ready/failed).
  * - WorkspacesService: readonly jailed tree + submodule reads.
- * - Imports GithubModule (forwardRef) for the installation-ownership check
- *   only (installation must belong to the requesting userId, else 403);
+ * - Imports GithubModule for the installation-ownership check only
+ *   (installation must belong to the requesting userId, else 403);
  *   GithubModule stays the single owner of the installations registry —
- *   no second instance, no forked state. forwardRef breaks the
- *   ProjectsModule → RepositoryModule → GithubModule → ProjectsModule cycle.
+ *   no second instance, no forked state. GithubModule depends on nothing in
+ *   the projects domain, so this import is direct (no forwardRef, no cycle).
  */
 @Module({
-  imports: [forwardRef(() => GithubModule)],
+  imports: [GithubModule],
   controllers: [WorkspacesController],
   providers: [
     WorkspacePathService,

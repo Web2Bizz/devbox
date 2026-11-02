@@ -6,6 +6,7 @@ import { ProjectsService } from "./projects.service";
 import { ChatsModule } from "./modules/chats/chats.module";
 import { ProjectFilesModule } from "./modules/files/project-files.module";
 import { GithubModule } from "./modules/github/github.module";
+import { GithubLinkService } from "./modules/github/github-link.service";
 import { ProjectAccessModule } from "./modules/project-access/project-access.module";
 import { RepositoryModule } from "./modules/repository/repository.module";
 import { SessionsModule } from "./modules/sessions/sessions.module";
@@ -45,13 +46,13 @@ import { SessionsModule } from "./modules/sessions/sessions.module";
   imports: [
     forwardRef(() => ChatsModule),
     forwardRef(() => SessionsModule),
-    forwardRef(() => GithubModule),
+    GithubModule,
     ProjectAccessModule,
     ProjectFilesModule,
     RepositoryModule,
   ],
   controllers: [ProjectsController, OrgProjectsController],
-  providers: [ProjectsService, WorkspacePathService],
+  providers: [ProjectsService, GithubLinkService, WorkspacePathService],
   exports: [
     ProjectsService,
     ProjectAccessModule,

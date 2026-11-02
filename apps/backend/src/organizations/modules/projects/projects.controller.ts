@@ -95,8 +95,9 @@ export class ProjectsController {
     projectId: string,
     userId: string,
     correlationId?: string,
+    opts?: { includeDeleted?: boolean },
   ) {
-    const project = await this.projects.getOrThrow(projectId, correlationId);
+    const project = await this.projects.getOrThrow(projectId, correlationId, opts);
     await this.access.assertProjectAccess(
       project.id,
       project.ownerId,
@@ -176,7 +177,7 @@ export class ProjectsController {
 
   @ApiTags("projects")
   @Delete("projects/:id")
-  @ApiOperation({ summary: "Delete project (cascades chats/sessions)" })
+  @ApiOperation({ summary: "Soft-delete project (rows are never physically removed)" })
   @ApiResponse({ status: 204 })
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(
@@ -184,11 +185,13 @@ export class ProjectsController {
     @ReqUser() identity: RequestIdentity,
     @Headers("x-correlation-id") correlationId?: string,
   ): Promise<void> {
-    // Gate first (404 for strangers), then the explicit cascade + row.
-    // (Postgres FK cascade covers any leftovers).
-    await this.assertAccess(id, identity.id, correlationId);
-    await this.sessions.removeByProject(id, correlationId);
-    await this.chats.removeByProject(id, correlationId);
+    // Gate first (404 for strangers), then the single soft-delete write.
+    // Chats/sessions are owned by the project: they are not touched here and
+    // hide together with the project (no physical DELETE anywhere). The gate
+    // includes deleted rows so a repeated DELETE stays idempotent (204).
+    await this.assertAccess(id, identity.id, correlationId, {
+      includeDeleted: true,
+    });
     await this.projects.remove(id, correlationId);
   }
 
@@ -307,9 +310,10 @@ export class ProjectsController {
     @Headers("x-correlation-id") correlationId?: string,
   ): Promise<void> {
     await this.memberOrThrow(id, identity.id, correlationId);
-    await this.projects.assertProjectBelongsToOrg(id, projectId, correlationId);
-    await this.sessions.removeByProject(projectId, correlationId);
-    await this.chats.removeByProject(projectId, correlationId);
+    // includeDeleted keeps a repeated DELETE idempotent (204) instead of 404.
+    await this.projects.assertProjectBelongsToOrg(id, projectId, correlationId, {
+      includeDeleted: true,
+    });
     await this.projects.remove(projectId, correlationId);
   }
 

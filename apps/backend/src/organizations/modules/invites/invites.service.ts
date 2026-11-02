@@ -34,7 +34,7 @@ function isUuidV7(value: string): boolean {
 
 /**
  * InvitesService — persistent single-use uuidv7 invite links backed by
- * `organization_invites` (drizzle/0007). Extracted verbatim from
+ * `organization_invites` (see `common/db/schema.ts`). Extracted verbatim from
  * OrganizationsService (phase 3, CoC v2); the access gate comes from
  * OrganizationsGuard. Lives in InvitesModule
  * (`organizations/modules/invites/`, CoC §2) — imported by
@@ -53,7 +53,7 @@ function isUuidV7(value: string): boolean {
 @Injectable()
 export class InvitesService {
   constructor(
-    private readonly logger: AppLogger = new AppLogger("InvitesService"),
+    private readonly logger: AppLogger = new AppLogger(InvitesService.name),
     private readonly db: DbService,
     private readonly paths: WorkspacePathService,
     private readonly users: UsersService,
@@ -102,7 +102,8 @@ export class InvitesService {
   /**
    * Mint a persistent single-use invite (maintainer-only, no TTL).
    * The uuidv7 token is returned ONCE (never logged) and lives until
-   * accept (row deleted) or org deletion (cascade). `email` binds the
+   * accept (row deleted); a soft-deleted org (deleted_at set) is treated as
+   * missing, so its pending invites can never grant access. `email` binds the
    * invite to one address (lowercased, mismatch → 404); absent = open
    * link-invite for any session user.
    */
@@ -169,6 +170,10 @@ export class InvitesService {
     if (!stored) {
       throw new NotFoundException("Invite not found or already used");
     }
+    // Soft-deleted org behaves as missing: a pending invite never grants
+    // access to an org whose `deleted_at` is set (404, same no-leak rule as
+    // the guard).
+    await this.guard.orgRowOrThrow(stored.orgId, correlationId);
     // Strict-503 (see OrganizationsService.create()): DB outage propagates,
     // live null → 404.
     let known: Awaited<ReturnType<UsersService["findById"]>>;

@@ -3,22 +3,28 @@
  *
  * Tables:
  * - projects: registry of projects (chats/sessions live underneath).
- * - project_chats: chats bound to a project (FK cascade on project delete).
+ * - project_chats: chats bound to a project (FK RESTRICT on project delete).
  * - project_sessions: sessions bound to project (+ optional chat),
- *   cascade on project delete, SET NULL on chat delete.
+ *   RESTRICT on project delete, SET NULL on chat delete.
  * - github_installations: multi-tenant GitHub App installs — one row per
  *   GitHub installation (unique installation_id), linked to our userId
  *   (nullable until users table exists; MVP resolves a mock userId from
  *   the x-user-id header / ?userId query).
- * - organizations / organization_members: orgs epic (0004); projects belong
- *   to an organization through projects.org_id (1:1). The former M2M table
- *   was removed by migration 0008.
+ * - organizations / organization_members: orgs epic; projects belong to an
+ *   organization through projects.org_id (1:1). The former M2M table is gone.
  *
  * Strict Postgres runtime (ProjectsService / GithubInstallationsService /
  * UsersService hit these tables only — no memory fallback); the tables are
  * the durable contract whose code-first source is this schema and whose
  * active migrations live in drizzle/ (`drizzle-kit migrate` in
  * production).
+ *
+ * Soft-delete rule (project rule): rows are NEVER physically deleted —
+ * removal sets `deleted_at = now()` on organizations / projects /
+ * project_chats / project_sessions. Reads hide such rows with
+ * `isNull(<table>.deletedAt)` (opt-in `includeDeleted` where the API needs
+ * history). projects.org_id and the chats/sessions project_id FKs are
+ * ON DELETE RESTRICT so hard deletes fail instead of wiping history.
  */
 import { sql } from "drizzle-orm";
 import {
@@ -35,8 +41,11 @@ import {
 
 export const projects = pgTable("projects", {
   id: uuid("id").primaryKey().defaultRandom(),
+  // RESTRICT (not cascade): rows are never physically deleted, so a hard
+  // delete of an organization must fail loudly instead of silently wiping
+  // its projects. Org removal soft-deletes (`deleted_at`) instead.
   orgId: uuid("org_id").references(() => organizations.id, {
-    onDelete: "cascade",
+    onDelete: "restrict",
   }),
   name: text("name").notNull(),
   description: text("description"),
@@ -60,20 +69,25 @@ export const projects = pgTable("projects", {
 
 export const projectChats = pgTable("project_chats", {
   id: uuid("id").primaryKey().defaultRandom(),
+  // RESTRICT (not cascade): rows are never physically deleted, so a hard
+  // delete of a project must fail loudly instead of wiping chat history.
   projectId: uuid("project_id")
     .notNull()
-    .references(() => projects.id, { onDelete: "cascade" }),
+    .references(() => projects.id, { onDelete: "restrict" }),
   title: text("title").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });
 
 export const projectSessions = pgTable("project_sessions", {
   id: uuid("id").primaryKey().defaultRandom(),
+  // RESTRICT (not cascade): rows are never physically deleted, so a hard
+  // delete of a project must fail loudly instead of wiping session history.
   projectId: uuid("project_id")
     .notNull()
-    .references(() => projects.id, { onDelete: "cascade" }),
+    .references(() => projects.id, { onDelete: "restrict" }),
   chatId: uuid("chat_id").references(() => projectChats.id, {
     onDelete: "set null",
   }),
@@ -85,6 +99,7 @@ export const projectSessions = pgTable("project_sessions", {
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });
 
 export type ProjectRow = typeof projects.$inferSelect;
@@ -93,7 +108,7 @@ export type ProjectSessionRow = typeof projectSessions.$inferSelect;
 
 /**
  * Multi-tenant GitHub App installations (durable contract for the
- * Postgres-backed GithubInstallationsService; see drizzle/0002_github_installations.sql).
+ * Postgres-backed GithubInstallationsService).
  * userId stays a nullable text FK-less column until the users table exists.
  */
 export const githubInstallations = pgTable("github_installations", {
@@ -114,8 +129,8 @@ export const githubInstallations = pgTable("github_installations", {
 });
 
 /**
- * Internal accounts (durable contract for the Postgres-backed UsersService;
- * see drizzle/0003_users.sql). Email lookup key is the lowercased email
+ * Internal accounts (durable contract for the Postgres-backed UsersService).
+ * Email lookup key is the lowercased email
  * (CITEXT-style unique index) — github_installations.user_id stays a
  * nullable text FK-less column carrying the same string key (no backfill).
  */
@@ -137,8 +152,7 @@ export const users = pgTable("users", {
 export type UserRow = typeof users.$inferSelect;
 
 /**
- * Per-user OpenCode API keys (durable contract; see
- * drizzle/0005_user_opencode_keys.sql + 0006_user_opencode_keys_key_id.sql).
+ * Per-user OpenCode API keys (durable contract).
  * One row per user (user_id is both PK and FK → users(id) ON DELETE CASCADE,
  * so deleting a user drops their key). The API key itself is stored ONLY as
  * AES-256-GCM ciphertext (encrypted_key = base64(ct || tag), iv =
@@ -164,7 +178,7 @@ export type UserOpencodeKeyRow = typeof userOpencodeKeys.$inferSelect;
 export type GithubInstallationRow = typeof githubInstallations.$inferSelect;
 
 /**
- * Organizations epic (durable contract; see drizzle/0004_organizations.sql).
+ * Organizations epic (durable contract).
  *
  * Tables:
  * - organizations: registry of orgs (id uuid, owner user_id uuid, privacy
@@ -173,8 +187,7 @@ export type GithubInstallationRow = typeof githubInstallations.$inferSelect;
  * - organization_members: membership (org_id, user_id, role maintainer|user).
  *   Unique (org_id, user_id); role is CHECK-constrained in SQL.
  * - projects: organization ownership is represented by projects.org_id
- *   (1:1); the former projects_and_organizations M2M table was removed by
- *   migration 0008.
+ *   (1:1); the former projects_and_organizations M2M table is gone.
  *
  * Single-maintainer constraint (partial unique index):
  *   CREATE UNIQUE INDEX ... ON organization_members (org_id)
@@ -201,6 +214,7 @@ export const organizations = pgTable("organizations", {
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });
 
 export const organizationMembers = pgTable(
@@ -232,7 +246,7 @@ export const organizationMembers = pgTable(
 );
 
 /**
- * Organization invites (durable contract; see drizzle/0007_organization_invites.sql).
+ * Organization invites (durable contract).
  *
  * - `token` is the uuidv7 invite id (generated in app, PK — no TTL column,
  *   links never expire).
@@ -240,7 +254,9 @@ export const organizationMembers = pgTable(
  *   the lowercased bound address for email-invites (only that user accepts;
  *   mismatch → 404, no enumeration).
  * - Single-use: the row is DELETED on accept; replay/missing → 404.
- * - `org_id` CASCADE — deleting the org drops pending invites.
+ * - `org_id` CASCADE — a hard delete of the org would drop pending invites
+ *   (app-level org removal is a soft delete, so invites are kept but a
+ *   soft-deleted org never accepts them).
  */
 export const organizationInvites = pgTable(
   "organization_invites",

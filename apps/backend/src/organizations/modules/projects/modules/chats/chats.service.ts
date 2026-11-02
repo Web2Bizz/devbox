@@ -1,10 +1,11 @@
 import {
   Injectable,
   NotFoundException,
+  UnauthorizedException,
   forwardRef,
   Inject,
 } from "@nestjs/common";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { AppLogger } from "../../../../../common/logger";
 import {
   DbService,
@@ -34,7 +35,8 @@ function toChat(row: ProjectChatRow): ProjectChat {
 
 /**
  * Chats live inside ProjectsModule — every op verifies the parent project.
- * Strict Postgres `project_chats` (FK cascade on project delete).
+ * Strict Postgres `project_chats` (FK RESTRICT on project delete: rows are
+ * soft-deleted, so a hard delete must fail instead of wiping history).
  * Outages funnel through `dbUnavailable` → 503 EXTERNAL_UNAVAILABLE
  * (Retry-After 30 via ApiErrorFilter), logged once with the correlationId.
  *
@@ -50,9 +52,9 @@ export class ChatsService {
   constructor(
     @Inject(forwardRef(() => ProjectsService))
     private readonly projects: ProjectsService,
-    private readonly logger: AppLogger = new AppLogger("ChatsService"),
+    private readonly logger: AppLogger = new AppLogger(ChatsService.name),
     private readonly db: DbService,
-    private readonly access?: ProjectAccessService,
+    private readonly access: ProjectAccessService,
   ) {}
 
   /** Live drizzle client — throws 503 EXTERNAL_UNAVAILABLE when Postgres is down. */
@@ -61,9 +63,8 @@ export class ChatsService {
   }
 
   /**
-   * Card 5 gate (see SessionsService.checkAccess for the rule). Skipped
-   * only when the requester is absent (internal/test callers) or the access
-   * service is not wired (manual `new` in unit specs).
+   * Card 5 gate (see SessionsService.checkAccess for the rule). A missing
+   * requester is a fail-closed 401 — there is no anonymous/service bypass.
    */
   private async checkAccess(
     projectId: string,
@@ -71,7 +72,12 @@ export class ChatsService {
     requesterId: string | undefined,
     correlationId?: string,
   ): Promise<void> {
-    if (!requesterId || !this.access) return;
+    if (!requesterId) {
+      throw new UnauthorizedException({
+        code: "unauthorized",
+        message: "Authentication required",
+      });
+    }
     await this.access.assertProjectAccess(
       projectId,
       ownerId,
@@ -91,7 +97,12 @@ export class ChatsService {
       const rows = await this.client()
         .select()
         .from(projectChats)
-        .where(eq(projectChats.projectId, projectId));
+        .where(
+          and(
+            eq(projectChats.projectId, projectId),
+            isNull(projectChats.deletedAt),
+          ),
+        );
       return rows
         .map(toChat)
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -132,7 +143,8 @@ export class ChatsService {
     const project = await this.projects.getOrThrow(projectId, correlationId);
     await this.checkAccess(project.id, project.ownerId, requesterId, correlationId);
     try {
-      // project_sessions.chat_id FK is SET NULL — sessions survive with chat detached.
+      // Soft delete (project rule): the row keeps its history; sessions are
+      // detached by the caller (sessions.detachChat) and the FK stays intact.
       const rows = await this.client()
         .select()
         .from(projectChats)
@@ -140,6 +152,7 @@ export class ChatsService {
           and(
             eq(projectChats.id, chatId),
             eq(projectChats.projectId, projectId),
+            isNull(projectChats.deletedAt),
           ),
         )
         .limit(1);
@@ -149,7 +162,8 @@ export class ChatsService {
         );
       }
       await this.client()
-        .delete(projectChats)
+        .update(projectChats)
+        .set({ deletedAt: new Date() })
         .where(eq(projectChats.id, chatId));
       // Per-request success on a hot path → debug (not info); cid-bound.
       this.logger.debug(`[projects] chat removed`, correlationId);
@@ -159,15 +173,21 @@ export class ChatsService {
     }
   }
 
-  /** Cascade helper — called when a project is deleted (FK cascade covers PG). */
+  /** Cascade helper — soft-deletes the project's chats (no physical DELETE). */
   async removeByProject(
     projectId: string,
     correlationId?: string,
   ): Promise<void> {
     try {
       await this.client()
-        .delete(projectChats)
-        .where(eq(projectChats.projectId, projectId));
+        .update(projectChats)
+        .set({ deletedAt: new Date() })
+        .where(
+          and(
+            eq(projectChats.projectId, projectId),
+            isNull(projectChats.deletedAt),
+          ),
+        );
     } catch (err) {
       dbUnavailable("chats.removeByProject", err, this.logger, correlationId);
     }
@@ -186,6 +206,7 @@ export class ChatsService {
           and(
             eq(projectChats.id, chatId),
             eq(projectChats.projectId, projectId),
+            isNull(projectChats.deletedAt),
           ),
         )
         .limit(1);

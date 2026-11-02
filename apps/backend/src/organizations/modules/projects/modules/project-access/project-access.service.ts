@@ -36,7 +36,7 @@ function isUuidKey(value: string): boolean {
 @Injectable()
 export class ProjectAccessService {
   constructor(
-    private readonly logger: AppLogger = new AppLogger("ProjectAccessService"),
+    private readonly logger: AppLogger = new AppLogger(ProjectAccessService.name),
     private readonly db: DbService,
     private readonly guard: OrganizationsGuard,
   ) {}
@@ -84,7 +84,8 @@ export class ProjectAccessService {
    * project id (no org path, no owner): selects { orgId, ownerId } from
    * the 1:1 `projects` table (same dynamic-import pattern as
    * orgIdsForProject — no ProjectsService dependency, no module cycle).
-   * Missing rows → 404; DB outages → 503 via dbUnavailable (never 404).
+   * Missing (or soft-deleted) rows → 404; DB outages → 503 via dbUnavailable
+   * (never 404).
    */
   async projectAccessRow(
     projectId: string,
@@ -92,11 +93,13 @@ export class ProjectAccessService {
   ): Promise<{ orgId: string | null; ownerId: string | null }> {
     try {
       const { projects } = await import("../../../../../common/db/schema");
-      const { eq: eqOp } = await import("drizzle-orm");
+      const { and: andOp, eq: eqOp, isNull: isNullOp } = await import("drizzle-orm");
       const rows = await this.client()
         .select({ orgId: projects.orgId, ownerId: projects.ownerId })
         .from(projects)
-        .where(eqOp(projects.id, projectId));
+        .where(
+          andOp(eqOp(projects.id, projectId), isNullOp(projects.deletedAt)),
+        );
       if (rows.length === 0)
         throw new NotFoundException(`Project ${projectId} not found`);
       return {
@@ -153,7 +156,8 @@ export class ProjectAccessService {
    * - Org-linked project (org_id set): access to any member of that org
    *   (`getRole` non-null). The owner-equality fallback also passes — the
    *   creator is a maintainer in practice, so this never widens the member
-   *   rule.
+   *   rule. A soft-deleted org (guard `orgRowOrThrow` → 404) admits nobody,
+   *   including its owner.
    * - User-space project (org_id NULL, owner set): owner-only
    *   (ownerId === userId).
    * - Ownerless rows (ownerId NULL, pre-auth legacy): DENY by default → 404
@@ -179,10 +183,19 @@ export class ProjectAccessService {
   ): Promise<void> {
     const orgIds = await this.orgIdsForProject(projectId, correlationId);
     if (orgIds.length > 0) {
-      if (isUuidKey(userId)) {
-        for (const orgId of orgIds) {
+      for (const orgId of orgIds) {
+        if (isUuidKey(userId)) {
           const role = await this.getRole(orgId, userId, correlationId);
           if (role) return;
+        }
+        // A soft-deleted org authorizes nobody — not even its owner (the
+        // owner-equality fallback below must not resurrect a removed org).
+        try {
+          await this.guard.orgRowOrThrow(orgId, correlationId);
+        } catch (err) {
+          if (err instanceof NotFoundException)
+            throw new NotFoundException(`Project ${projectId} not found`);
+          throw err;
         }
       }
       if (

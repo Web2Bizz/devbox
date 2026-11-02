@@ -18,7 +18,8 @@
  * - (f) ownerless row → 404 for everyone (C5 deny-by-default);
  * - (g) non-uuid requester on an org-linked project → 404, guard untouched
  *       (a non-uuid key can never match a uuid column — querying would 503);
- * - (h) assertProjectAccessById returns {ownerId, orgIds} and gates.
+ * - (h) assertProjectAccessById returns {ownerId, orgIds} and gates;
+ * - (i) org-linked + owner but org soft-deleted → 404 (no owner resurrection).
  *
  * Logs are silent; no secrets or PII appear anywhere in this file.
  */
@@ -68,20 +69,36 @@ function fakeDb(rows: ProjectRow[]) {
   } as unknown as DbService;
 }
 
-/** Fake guard — returns the configured role and counts getRole calls. */
-function fakeGuard(roles: Record<string, string> = {}) {
+/**
+ * Fake guard — returns the configured role and counts getRole calls.
+ * `deletedOrgs` models a soft-deleted organization: orgRowOrThrow → 404.
+ */
+function fakeGuard(
+  roles: Record<string, string> = {},
+  deletedOrgs: string[] = [],
+) {
   const calls: Array<{ orgId: string; userId: string }> = [];
   const guard = {
     async getRole(orgId: string, userId: string): Promise<string | null> {
       calls.push({ orgId, userId });
       return roles[`${orgId}:${userId}`] ?? null;
     },
+    async orgRowOrThrow(orgId: string) {
+      if (deletedOrgs.includes(orgId)) {
+        throw new NotFoundException(`Organization ${orgId} not found`);
+      }
+      return { id: orgId };
+    },
   } as unknown as OrganizationsGuard;
   return { guard, calls };
 }
 
-function service(rows: ProjectRow[], roles: Record<string, string> = {}) {
-  const fake = fakeGuard(roles);
+function service(
+  rows: ProjectRow[],
+  roles: Record<string, string> = {},
+  deletedOrgs: string[] = [],
+) {
+  const fake = fakeGuard(roles, deletedOrgs);
   const svc = new ProjectAccessService(silentLogger(), fakeDb(rows), fake.guard);
   return { svc, calls: fake.calls };
 }
@@ -218,6 +235,22 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
       // orgIdsForProject reads the same 1:1 row / answers [] for user-space.
       assert.deepEqual(await svc.orgIdsForProject(PROJECT_ID, "cid-h5"), [ORG_ID]);
       assert.deepEqual(await userSpace.svc.orgIdsForProject(PROJECT_ID, "cid-h6"), []);
+    },
+  },
+  {
+    name: "(i) org-linked + owner but org soft-deleted → 404",
+    run: async () => {
+      const { svc, calls } = service(
+        [{ orgId: ORG_ID, ownerId: OWNER_ID }],
+        {},
+        [ORG_ID],
+      );
+      await assert.rejects(
+        () => svc.assertProjectAccess(PROJECT_ID, OWNER_ID, OWNER_ID, "cid-i"),
+        isNotFound,
+      );
+      // The member lookup still ran, but the owner fallback never rescued it.
+      assert.deepEqual(calls, [{ orgId: ORG_ID, userId: OWNER_ID }]);
     },
   },
 ];

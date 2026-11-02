@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { readIdentity } from "../auth/identity.service";
 import { AppLogger } from "../common/logger";
 import { DbService, dbUnavailable, type DbClient } from "../common/db/db.service";
@@ -42,7 +42,7 @@ import type { OrgRole } from "./organizations.types";
 @Injectable()
 export class OrganizationsGuard implements CanActivate {
   constructor(
-    private readonly logger: AppLogger = new AppLogger("OrganizationsGuard"),
+    private readonly logger: AppLogger = new AppLogger(OrganizationsGuard.name),
     private readonly db: DbService,
   ) {}
 
@@ -84,7 +84,7 @@ export class OrganizationsGuard implements CanActivate {
       const rows = await this.client()
         .select()
         .from(organizations)
-        .where(eq(organizations.id, orgId))
+        .where(and(eq(organizations.id, orgId), isNull(organizations.deletedAt)))
         .limit(1);
       if (rows.length === 0)
         throw new NotFoundException(`Organization ${orgId} not found`);
@@ -101,13 +101,21 @@ export class OrganizationsGuard implements CanActivate {
     correlationId?: string,
   ): Promise<OrgRole | null> {
     try {
+      // Join the org row: a member row alone must not authorize an org that
+      // was soft-deleted (its projects are cascaded at removal, but a direct
+      // getRole/repos lookup must fail closed too).
       const rows = await this.client()
-        .select()
+        .select({ role: organizationMembers.role })
         .from(organizationMembers)
+        .innerJoin(
+          organizations,
+          eq(organizationMembers.orgId, organizations.id),
+        )
         .where(
           and(
             eq(organizationMembers.orgId, orgId),
             eq(organizationMembers.userId, userId),
+            isNull(organizations.deletedAt),
           ),
         )
         .limit(1);

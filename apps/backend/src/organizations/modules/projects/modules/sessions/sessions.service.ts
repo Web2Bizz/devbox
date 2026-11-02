@@ -2,10 +2,11 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
   forwardRef,
   Inject,
 } from "@nestjs/common";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { AppLogger } from "../../../../../common/logger";
 import {
   DbService,
@@ -42,10 +43,10 @@ function toSession(row: ProjectSessionRow): ProjectSession {
 
 /**
  * Sessions live inside ProjectsModule — bound to projectId (+ optional chatId).
- * Strict Postgres `project_sessions` (cascade on project delete, SET NULL on
- * chat delete). Outages funnel through `dbUnavailable` → 503
- * EXTERNAL_UNAVAILABLE (Retry-After 30 via ApiErrorFilter), logged once with
- * the correlationId.
+ * Strict Postgres `project_sessions` (RESTRICT on project delete, SET NULL on
+ * chat delete: rows are soft-deleted, so hard deletes must fail loudly).
+ * Outages funnel through `dbUnavailable` → 503 EXTERNAL_UNAVAILABLE
+ * (Retry-After 30 via ApiErrorFilter), logged once with the correlationId.
  *
  * Scope (Card 5 access layer): every user-facing op gates on
  * ProjectAccessService.assertProjectAccess — org-linked projects admit any
@@ -61,9 +62,9 @@ export class SessionsService {
     private readonly projects: ProjectsService,
     @Inject(forwardRef(() => ChatsService))
     private readonly chats: ChatsService,
-    private readonly logger: AppLogger = new AppLogger("SessionsService"),
+    private readonly logger: AppLogger = new AppLogger(SessionsService.name),
     private readonly db: DbService,
-    private readonly access?: ProjectAccessService,
+    private readonly access: ProjectAccessService,
   ) {}
 
   /** Live drizzle client — throws 503 EXTERNAL_UNAVAILABLE when Postgres is down. */
@@ -73,9 +74,8 @@ export class SessionsService {
 
   /**
    * Card 5 gate: org-linked → any linked-org member; user-space → owner
-   * only; strangers → 404 (no existence leak). Skipped only when the
-   * requester is absent (internal/test callers without an identity) or the
-   * access service is not wired (manual `new` in unit specs).
+   * only; strangers → 404 (no existence leak). A missing requester is a
+   * fail-closed 401 — there is no anonymous/service bypass.
    */
   private async checkAccess(
     projectId: string,
@@ -83,7 +83,12 @@ export class SessionsService {
     requesterId: string | undefined,
     correlationId?: string,
   ): Promise<void> {
-    if (!requesterId || !this.access) return;
+    if (!requesterId) {
+      throw new UnauthorizedException({
+        code: "unauthorized",
+        message: "Authentication required",
+      });
+    }
     await this.access.assertProjectAccess(
       projectId,
       ownerId,
@@ -103,7 +108,12 @@ export class SessionsService {
       const rows = await this.client()
         .select()
         .from(projectSessions)
-        .where(eq(projectSessions.projectId, projectId));
+        .where(
+          and(
+            eq(projectSessions.projectId, projectId),
+            isNull(projectSessions.deletedAt),
+          ),
+        );
       return rows
         .map(toSession)
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -129,6 +139,7 @@ export class SessionsService {
           and(
             eq(projectSessions.id, sessionId),
             eq(projectSessions.projectId, projectId),
+            isNull(projectSessions.deletedAt),
           ),
         )
         .limit(1);
@@ -214,15 +225,21 @@ export class SessionsService {
     }
   }
 
-  /** Cascade helper — called when a project is deleted (FK cascade covers PG). */
+  /** Cascade helper — soft-deletes the project's sessions (no physical DELETE). */
   async removeByProject(
     projectId: string,
     correlationId?: string,
   ): Promise<void> {
     try {
       await this.client()
-        .delete(projectSessions)
-        .where(eq(projectSessions.projectId, projectId));
+        .update(projectSessions)
+        .set({ deletedAt: new Date(), updatedAt: new Date() })
+        .where(
+          and(
+            eq(projectSessions.projectId, projectId),
+            isNull(projectSessions.deletedAt),
+          ),
+        );
     } catch (err) {
       dbUnavailable(
         "sessions.removeByProject",

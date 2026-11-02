@@ -64,18 +64,21 @@ function untouchedDb() {
  * (select().from().where().limit() is the only shape the guard uses).
  */
 function fakeDb(orgRows: unknown[], memberRows: unknown[]) {
+  const rowsFor = (table: unknown) =>
+    table === organizations
+      ? orgRows
+      : table === organizationMembers
+        ? memberRows
+        : [];
   const client = {
     select: () => ({
-      from: (table: unknown) => ({
-        where: () => ({
-          limit: async () =>
-            table === organizations
-              ? orgRows
-              : table === organizationMembers
-                ? memberRows
-                : [],
-        }),
-      }),
+      from: (table: unknown) => {
+        const builder = {
+          innerJoin: () => builder,
+          where: () => ({ limit: async () => rowsFor(table) }),
+        };
+        return builder;
+      },
     }),
   };
   return { get client() { return client as never; } } as never;

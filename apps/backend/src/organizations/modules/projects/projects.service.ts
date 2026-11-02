@@ -4,13 +4,19 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from "@nestjs/common";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { AppLogger } from "../../../common/logger";
 import { DbService, dbUnavailable, type DbClient } from "../../../common/db/db.service";
-import { projects, type ProjectRow } from "../../../common/db/schema";
+import {
+  organizations,
+  projectChats,
+  projectSessions,
+  projects,
+  type ProjectRow,
+} from "../../../common/db/schema";
 import { isValidGitRepo } from "./modules/repository/utils/repos-git";
 import { WorkspacePathService } from "../../../common/storage/workspace-path.service";
 import type {
@@ -160,7 +166,7 @@ function toProject(row: ProjectRow): Project {
  * ProjectsService — Postgres-backed registry (strict, no memory fallback)
  * with disk-first repo initialization.
  *
- * Every method hits the `projects` table (drizzle/0001_projects.sql); data
+ * Every method hits the `projects` table (see `common/db/schema.ts`); data
  * survives restarts. When Postgres is unconfigured/unreachable the drizzle
  * throw funnels through `dbUnavailable` → 503 EXTERNAL_UNAVAILABLE
  * (Retry-After 30 via ApiErrorFilter), logged once with the correlationId.
@@ -172,13 +178,13 @@ function toProject(row: ProjectRow): Project {
  * argv only, no shell, plus empty `.secrets` reserves) and only then
  * INSERTs the row. Reads surface the computed
  * `corrupted` flag when the row outlives its directory (`storage-unconfigured`
- * when REPOS_ROOT is empty); remove() DELETEs the row first and cleans the
- * directory best-effort inside the strict jail.
+ * when REPOS_ROOT is empty); remove() only marks `deleted_at` (rows are
+ * never physically deleted) and keeps the directory for restore.
  */
 @Injectable()
 export class ProjectsService {
   constructor(
-    private readonly logger: AppLogger = new AppLogger("ProjectsService"),
+    private readonly logger: AppLogger = new AppLogger(ProjectsService.name),
     private readonly db: DbService,
     private readonly paths: WorkspacePathService,
   ) {}
@@ -286,7 +292,12 @@ export class ProjectsService {
     try {
       const conds = [];
       if (opts?.orgId) conds.push(eq(projects.orgId, opts.orgId));
-      if (!opts?.includeDeleted) conds.push(eq(projects.status, "active"));
+      if (!opts?.includeDeleted) {
+        // `deleted_at` is the source of truth; the legacy `status` predicate
+        // stays for rows soft-deleted before the column existed.
+        conds.push(eq(projects.status, "active"));
+        conds.push(isNull(projects.deletedAt));
+      }
       const rows =
         conds.length > 0
           ? await this.client().select().from(projects).where(and(...conds))
@@ -402,10 +413,14 @@ export class ProjectsService {
     opts?: { includeDeleted?: boolean },
   ): Promise<Project> {
     try {
+      // Soft-deleted rows read as missing (404) unless history is requested;
+      // `deleted_at` is authoritative, `status` is the legacy marker.
+      const conds = [eq(projects.id, id)];
+      if (!opts?.includeDeleted) conds.push(isNull(projects.deletedAt));
       const rows = await this.client()
         .select()
         .from(projects)
-        .where(eq(projects.id, id))
+        .where(and(...conds))
         .limit(1);
       if (rows.length === 0)
         throw new NotFoundException(`Project ${id} not found`);
@@ -445,7 +460,7 @@ export class ProjectsService {
     const current = opts?.orgId
       ? await this.assertProjectBelongsToOrg(opts.orgId, id, correlationId, { includeDeleted: true })
       : await this.getOrThrow(id, correlationId, { includeDeleted: true });
-    if (current.status === "deleted")
+    if (current.status === "deleted" || current.deletedAt !== null)
       throw new NotFoundException(`Project ${id} not found`);
     // orgId + ownerId are IMMUTABLE after create.
     // ownerId: userSpace derives from it, so a change would
@@ -535,7 +550,9 @@ export class ProjectsService {
    */
   async remove(id: string, correlationId?: string): Promise<void> {
     const current = await this.getOrThrow(id, correlationId, { includeDeleted: true });
-    if (current.status === "deleted") return;
+    // Idempotent: a row already carrying deleted_at keeps its original
+    // deletion timestamp (no re-stamping on repeated DELETE).
+    if (current.status === "deleted" || current.deletedAt !== null) return;
     await this.stopRunningContainers(id, correlationId);
     try {
       await this.client()
@@ -548,9 +565,32 @@ export class ProjectsService {
     }
   }
 
-  /** Restore a soft-deleted project (API only, no UI). */
+  /**
+   * Restore a soft-deleted project (API only, no UI). A project cannot be
+   * revived while its organization is soft-deleted — that org is hidden, so
+   * revive the org first (404 keeps the no-leak rule).
+   */
   async restore(id: string, correlationId?: string): Promise<Project> {
     const current = await this.getOrThrow(id, correlationId, { includeDeleted: true });
+    if (current.orgId !== null) {
+      try {
+        const orgRows = await this.client()
+          .select({ id: organizations.id })
+          .from(organizations)
+          .where(
+            and(
+              eq(organizations.id, current.orgId),
+              isNull(organizations.deletedAt),
+            ),
+          )
+          .limit(1);
+        if (orgRows.length === 0)
+          throw new NotFoundException(`Project ${id} not found`);
+      } catch (err) {
+        if (err instanceof NotFoundException) throw err;
+        dbUnavailable("projects.restore.org", err, this.logger, correlationId);
+      }
+    }
     if (current.status === "active") return current;
     try {
       const rows = await this.client()
@@ -564,28 +604,6 @@ export class ProjectsService {
     } catch (err) {
       if (err instanceof NotFoundException) throw err;
       dbUnavailable("projects.restore", err, this.logger, correlationId);
-    }
-  }
-
-  /** Cascade soft-delete for org removal (maintainer-only caller). */
-  async softDeleteByOrg(orgId: string, correlationId?: string): Promise<number> {
-    try {
-      const rows = await this.client()
-        .select()
-        .from(projects)
-        .where(and(eq(projects.orgId, orgId), eq(projects.status, "active")));
-      for (const r of rows) {
-        await this.stopRunningContainers(r.id, correlationId);
-      }
-      if (rows.length === 0) return 0;
-      await this.client()
-        .update(projects)
-        .set({ status: "deleted", deletedAt: new Date(), updatedAt: new Date() })
-        .where(and(eq(projects.orgId, orgId), eq(projects.status, "active")));
-      this.logger.info(`[projects] cascade soft-deleted org=${orgId} count=${rows.length}`, correlationId);
-      return rows.length;
-    } catch (err) {
-      dbUnavailable("projects.softDeleteByOrg", err, this.logger, correlationId);
     }
   }
 
@@ -625,8 +643,6 @@ export class ProjectsService {
     // github link (non-secret) at both levels is out of scope — this
     // endpoint merges a fixed key set (currently empty upstream) so the
     // contract + masking rule is enforced backend-side. Secrets masked.
-    const mask = (v: string) => (v.length <= 4 ? "****" : `${v.slice(0, 2)}****${v.slice(-2)}`);
-    void mask;
     return [];
   }
 
@@ -699,8 +715,13 @@ export class ProjectsService {
     }
   }
 
-  /** Test/e2e seam — DELETE FROM projects (cascades chats/sessions; requires live Postgres). */
+  /** Test/e2e seam — DELETE FROM projects (children first; requires live Postgres). */
   async clearAllForTests(): Promise<void> {
-    await this.client().delete(projects);
+    const c = this.client();
+    // project_chats/project_sessions are ON DELETE RESTRICT (hard deletes must
+    // fail in production), so the test-only cleanup removes them explicitly.
+    await c.delete(projectSessions);
+    await c.delete(projectChats);
+    await c.delete(projects);
   }
 }

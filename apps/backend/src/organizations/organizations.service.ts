@@ -1,11 +1,14 @@
 import { Injectable, InternalServerErrorException, NotFoundException } from "@nestjs/common";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { AppLogger } from "../common/logger";
 import { DbService, dbUnavailable, type DbClient } from "../common/db/db.service";
 import {
   organizationInvites,
   organizationMembers,
   organizations,
+  projectChats,
+  projectSessions,
+  projects,
   type OrganizationRow,
 } from "../common/db/schema";
 import { UsersService } from "../users/users.service";
@@ -56,7 +59,7 @@ function toOrganization(row: OrganizationRow): Organization {
  * organization-member) — SQL/tables are unchanged.
  *
  * Every method hits `organizations` / `organization_members` /
- * `organization_invites` (drizzle/0004 + 0007). Postgres outages funnel
+ * `organization_invites` (see `common/db/schema.ts`). Postgres outages funnel
  * through `dbUnavailable` → 503 EXTERNAL_UNAVAILABLE (Retry-After 30 via
  * ApiErrorFilter), logged once with the correlationId.
  *
@@ -79,7 +82,7 @@ function toOrganization(row: OrganizationRow): Organization {
 @Injectable()
 export class OrganizationsService {
   constructor(
-    private readonly logger: AppLogger = new AppLogger("OrganizationsService"),
+    private readonly logger: AppLogger = new AppLogger(OrganizationsService.name),
     private readonly db: DbService,
     private readonly paths: WorkspacePathService,
     private readonly users: UsersService,
@@ -96,8 +99,14 @@ export class OrganizationsService {
   /** Test/e2e seam — DELETE FROM org tables (requires live Postgres). */
   async clearAllForTests(): Promise<void> {
     const c = this.client();
+    // Dependent rows first: project_chats/project_sessions and projects.org_id
+    // are ON DELETE RESTRICT (hard deletes must fail in production), so this
+    // test-only cleanup removes them explicitly before the projects/orgs.
     await c.delete(organizationInvites);
     await c.delete(organizationMembers);
+    await c.delete(projectSessions);
+    await c.delete(projectChats);
+    await c.delete(projects);
     await c.delete(organizations);
   }
 
@@ -138,30 +147,26 @@ export class OrganizationsService {
     }
     let orgId = "";
     try {
-      const orgRows = await this.client()
-        .insert(organizations)
-        .values({
-          name: input.name,
-          description: input.description ?? null,
-          ownerId: owner,
-          isPrivate: input.isPrivate ?? true,
-        })
-        .returning();
-      orgId = orgRows[0].id;
-      try {
-        await this.client().insert(organizationMembers).values({
-          orgId,
+      // Org + owner-as-maintainer are one unit: the transaction rolls the
+      // org back if the membership insert fails (no compensating DELETE).
+      orgId = await this.client().transaction(async (tx) => {
+        const orgRows = await tx
+          .insert(organizations)
+          .values({
+            name: input.name,
+            description: input.description ?? null,
+            ownerId: owner,
+            isPrivate: input.isPrivate ?? true,
+          })
+          .returning();
+        const id = orgRows[0].id;
+        await tx.insert(organizationMembers).values({
+          orgId: id,
           userId: owner,
           role: "maintainer",
         });
-      } catch (memberErr) {
-        // Owner membership must never fail silently — roll the org back.
-        await this.client()
-          .delete(organizations)
-          .where(eq(organizations.id, orgId))
-          .catch(() => undefined);
-        throw memberErr;
-      }
+        return id;
+      });
     } catch (err) {
       dbUnavailable("organizations.create", err, this.logger, correlationId);
     }
@@ -173,10 +178,22 @@ export class OrganizationsService {
         (err as Error).stack,
         correlationId,
       );
-      await this.client()
-        .delete(organizations)
-        .where(eq(organizations.id, orgId))
-        .catch(() => undefined);
+      // No physical delete: hide the half-created row with a soft delete
+      // (project rule — rows are never physically removed).
+      try {
+        const now = new Date();
+        await this.client()
+          .update(organizations)
+          .set({ deletedAt: now, updatedAt: now })
+          .where(eq(organizations.id, orgId));
+      } catch (rollbackErr) {
+        dbUnavailable(
+          "organizations.create.diskRollback",
+          rollbackErr,
+          this.logger,
+          correlationId,
+        );
+      }
       throw new InternalServerErrorException(
         "Failed to initialize organization storage",
       );
@@ -261,45 +278,35 @@ export class OrganizationsService {
     correlationId?: string,
   ): Promise<void> {
     await this.guard.maintainerOrThrow(orgId, requesterId, correlationId);
+    let cascadedProjects = 0;
     try {
-      // Soft org delete: mark org row deleted-at via description? Orgs table
-      // has no status column (project-level soft-delete only) — org delete
-      // removes the org row (FK cascade drops members/invites) + cascade
-      // SOFT-deletes member projects (status=deleted, rows+disk kept for
-      // restore, running containers stopped best-effort).
-      const { projects } = await import("../common/db/schema");
-      const { and: andOp, eq: eqOp } = await import("drizzle-orm");
-      const rows = await this.client()
-        .select({ id: projects.id })
-        .from(projects)
-        .where(andOp(eqOp(projects.orgId, orgId), eqOp(projects.status, "active")));
-      for (const r of rows) {
-        this.logger.info(`[organizations] stopping containers project=${r.id}`, correlationId);
-      }
-      if (rows.length > 0) {
-        await this.client()
+      // Soft org delete (project rule: DB rows are NEVER physically
+      // removed). One transaction marks the org and its still-live projects
+      // with `deleted_at = now()`. Chats and sessions are left untouched —
+      // they are part of the projects' history and hide together with the
+      // project reads. No container stop happens on this path (the old
+      // "stopping containers" log had no docker call behind it).
+      const now = new Date();
+      await this.client().transaction(async (tx) => {
+        await tx
+          .update(organizations)
+          .set({ deletedAt: now, updatedAt: now })
+          .where(eq(organizations.id, orgId));
+        const rows = await tx
           .update(projects)
-          .set({ status: "deleted", deletedAt: new Date(), updatedAt: new Date() })
-          .where(andOp(eqOp(projects.orgId, orgId), eqOp(projects.status, "active")));
-      }
-      await this.client().delete(organizations).where(eq(organizations.id, orgId));
-      this.logger.info(`[organizations] removed org=${orgId} cascadeSoft=${rows.length}`, correlationId);
+          .set({ status: "deleted", deletedAt: now, updatedAt: now })
+          .where(and(eq(projects.orgId, orgId), isNull(projects.deletedAt)))
+          .returning({ id: projects.id });
+        cascadedProjects = rows.length;
+      });
+      this.logger.info(
+        `[organizations] soft-removed org=${orgId} cascadeSoft=${cascadedProjects}`,
+        correlationId,
+      );
     } catch (err) {
       dbUnavailable("organizations.remove", err, this.logger, correlationId);
     }
-    // Disk cleanup is best-effort AFTER the row is gone (warn-only).
-    try {
-      const scoped = await this.paths.orgScopeStrict(orgId);
-      const jailReal = await this.paths.realStrictRoot();
-      await this.paths.assertInsideJail(scoped.absHome, jailReal);
-      await this.paths.removeDir(scoped.absHome);
-    } catch (err) {
-      const reason =
-        err instanceof InternalServerErrorException
-          ? "storage-unconfigured"
-          : `rm-failed: ${(err as Error).message}`.slice(0, 120);
-      this.logger.warn({ projectId: orgId, path: "", reason }, correlationId);
-    }
+    // The org home (orgs/<orgId>) is kept: restore promises live project data.
   }
 
   /**

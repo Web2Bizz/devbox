@@ -60,8 +60,8 @@ src/
       ├─ modules/agents/ — AgentBase/AskAgent + /agents
       ├─ modules/opencode/ — deprecated-зеркало /opencode/* + транспорт раннера
       │  ├─ opencode.{controller,service}.ts, opencode-sdk-client.ts (lazy @opencode-ai/sdk/v2)
-      │  ├─ keys.controller.ts — HTTP /api/v1/key + /api/v1/usage (store — в common/keys)
-      │  └─ modules/{auth,billing}/ — OpencodeAuthService (gate + Basic), OpencodeBillingService
+      │  ├─ keys.controller.ts — HTTP /api/v1/key (store — в common/keys)
+      │  └─ modules/{auth,billing}/ — OpencodeAuthService (gate + Basic), BillingService + BillingController (HTTP /api/v1/usage)
       └─ modules/sessions/ — доменный /api/sessions* (VERSION_NEUTRAL, SSE через common/sse)
    └─ modules/workers/ — workers.module.ts
 ```

@@ -3,7 +3,6 @@ import {
   Controller,
   Delete,
   Get,
-  HttpCode,
   Put,
   Req,
   UnauthorizedException,
@@ -13,17 +12,14 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagg
 import { JwtAuthGuard } from "../../../../../auth/jwt-auth.guard";
 import type { RequestIdentity } from "../../../../../auth/identity.service";
 import { ReqUser } from "../../../../../auth/req-user.decorator";
-import { AppLogger } from "../../../../../common/logger";
 import { ZodValidationPipe } from "../../../../../common/validation";
 import { CryptoService } from "../../../../../common/crypto/crypto.service";
 import { opencodeKeySchema, type OpencodeKeyInput } from "../../../../../common/keys/keys.schema";
-import { BillingService } from "./modules/billing/billing.service";
 import {
   OpencodeKeyBodyDto,
   OpencodeKeyDeleteResultDto,
   OpencodeKeyResultDto,
   OpencodeKeyStatusDto,
-  OpencodeUsageDto,
 } from "./keys.dto";
 import { OpencodeKeysService } from "../../../../../common/keys/keys.service";
 
@@ -32,7 +28,7 @@ function isUserId(value: string): boolean {
 }
 
 /**
- * OpencodeKeysController — the caller's own OpenCode API key + live usage.
+ * OpencodeKeysController — the caller's own OpenCode API key.
  *
  * - All routes require JwtAuthGuard (login/password auth, Bearer access
  *   token). Only the identity's own user_id is ever read/written — there is
@@ -43,13 +39,8 @@ function isUserId(value: string): boolean {
  *   (the key is never returned, never logged).
  * - GET /api/v1/key — { configured, updatedAt? } (existence only).
  * - DELETE /api/v1/key — idempotent { ok: true }.
- * - GET /api/v1/usage — live Zen Go usage via the
- *   per-user key (missing → 404 opencode_key_missing; rejected → 401
- *   opencode_key_invalid; upstream 429 → 429 EXTERNAL_RATE_LIMITED;
- *   upstream 5xx → EXTERNAL_UPSTREAM_5XX (status passthrough: 502/500…);
- *   timeout → 504 EXTERNAL_TIMEOUT; network/non-JSON/shape-mismatch →
- *   503 EXTERNAL_UNAVAILABLE with Retry-After 30, fixed message
- *   «сервис временно недоступен, повторите позже», never a mock 200).
+ * - GET /api/v1/usage lives in the billing domain (modules/billing/
+ *   billing.controller.ts, BillingController).
  */
 @ApiTags("opencode-keys")
 @ApiBearerAuth()
@@ -59,8 +50,6 @@ export class OpencodeKeysController {
   constructor(
     private readonly keys: OpencodeKeysService,
     private readonly crypto: CryptoService,
-    private readonly billing: BillingService,
-    private readonly logger: AppLogger = new AppLogger("OpencodeKeysController"),
   ) {}
 
   private ownUserId(identity: RequestIdentity): string {
@@ -123,25 +112,5 @@ export class OpencodeKeysController {
   ): Promise<OpencodeKeyDeleteResultDto> {
     await this.keys.deleteByUserId(this.ownUserId(identity), req?.correlationId);
     return { ok: true };
-  }
-
-  @Get("usage")
-  @HttpCode(200)
-  @ApiOperation({ summary: "Live OpenCode balance+usage for your stored key" })
-  @ApiResponse({ status: 200, type: OpencodeUsageDto })
-  @ApiResponse({ status: 401, description: "missing/invalid bearer or rejected key" })
-  @ApiResponse({ status: 404, description: "no key stored (opencode_key_missing)" })
-  @ApiResponse({ status: 429, description: "upstream rate limit (EXTERNAL_RATE_LIMITED, Retry-After)" })
-  @ApiResponse({ status: 502, description: "upstream server error passthrough (EXTERNAL_UPSTREAM_5XX, Retry-After)" })
-  @ApiResponse({ status: 503, description: "upstream unavailable or shape mismatch (EXTERNAL_UNAVAILABLE, Retry-After)" })
-  @ApiResponse({ status: 504, description: "upstream timeout (EXTERNAL_TIMEOUT, Retry-After)" })
-  async usage(
-    @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
-  ): Promise<OpencodeUsageDto> {
-    const correlationId = req?.correlationId;
-    const out = await this.billing.getUsage(this.ownUserId(identity), correlationId);
-    this.logger.debug("[opencode-keys] usage ok", correlationId);
-    return out;
   }
 }

@@ -24,8 +24,9 @@ import { OrganizationsModule } from '../../../../../organizations/organizations.
  * billing (BillingService, live usage), auth (ServeAuthService
  * real-user gate: non-uuid mock → 401 before any upstream call +
  * serveBasicAuthHeader, server Basic from OPENCODE_PASSWORD).
- * The keys HTTP surface (keys.controller/keys.dto: /api/v1/key +
- * /api/v1/usage) lives here, while the reusable crypto envelope
+ * The keys HTTP surface (keys.controller/keys.dto: /api/v1/key) lives here,
+ * while GET /api/v1/usage is owned by BillingController in BillingModule;
+ * the reusable crypto envelope
  * (common/crypto) and key store (common/keys) come from the global
  * CommonModule — no explicit imports. Root providers: OpencodeConfig (dial
  * url + REQUEST_TIMEOUT_MS budget, shared by the two below without an import

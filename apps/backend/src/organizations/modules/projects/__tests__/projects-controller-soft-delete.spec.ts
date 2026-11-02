@@ -4,9 +4,7 @@ import { OrgProjectsController } from "../org-projects.controller";
 import { ProjectsController } from "../projects.controller";
 import { ProjectsService } from "../projects.service";
 import { ProjectAccessService } from "../modules/project-access/project-access.service";
-import { ChatsService } from "../modules/chats/chats.service";
 import { GithubLinkService } from "../modules/github/github-link.service";
-import { SessionsService } from "../modules/sessions/sessions.service";
 
 type Case = { name: string; run: () => Promise<void> | void };
 
@@ -33,8 +31,6 @@ const IDENTITY: RequestIdentity = {
 
 type Calls = {
   removed: Array<{ id: string; correlationId?: string }>;
-  sessions: Array<string>;
-  chats: Array<string>;
   getOrThrow: Array<{ id: string; includeDeleted?: boolean }>;
   belongs: Array<{ orgId: string; projectId: string; includeDeleted?: boolean }>;
 };
@@ -42,8 +38,6 @@ type Calls = {
 function makeController() {
   const calls: Calls = {
     removed: [],
-    sessions: [],
-    chats: [],
     getOrThrow: [],
     belongs: [],
   };
@@ -82,21 +76,9 @@ function makeController() {
     },
     async assertProjectAccess() {},
   };
-  const sessions = {
-    async removeByProject(id: string) {
-      calls.sessions.push(id);
-    },
-  };
-  const chats = {
-    async removeByProject(id: string) {
-      calls.chats.push(id);
-    },
-  };
   const ctl = new ProjectsController(
     projects as unknown as ProjectsService,
     {} as unknown as GithubLinkService,
-    chats as unknown as ChatsService,
-    sessions as unknown as SessionsService,
     access as unknown as ProjectAccessService,
   );
   const orgCtl = new OrgProjectsController(
@@ -118,8 +100,6 @@ describe("ProjectsController.remove has no cascade of its own", () => {
       [{ id: PROJECT_ID, includeDeleted: true }],
       "repeated DELETE must stay idempotent (gate includes deleted rows)",
     );
-    assert.deepEqual(calls.sessions, [], "sessions.removeByProject must not run");
-    assert.deepEqual(calls.chats, [], "chats.removeByProject must not run");
   });
 });
 
@@ -140,8 +120,6 @@ describe("OrgProjectsController.removeOrgProject has no cascade of its own", () 
       [{ orgId: ORG_ID, projectId: PROJECT_ID, includeDeleted: true }],
       "repeated DELETE must stay idempotent (gate includes deleted rows)",
     );
-    assert.deepEqual(calls.sessions, [], "sessions.removeByProject must not run");
-    assert.deepEqual(calls.chats, [], "chats.removeByProject must not run");
   });
 });
 

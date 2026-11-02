@@ -35,8 +35,6 @@ import {
 } from "./projects.dto";
 import { GithubLinkService } from "./modules/github/github-link.service";
 import { ProjectsService } from "./projects.service";
-import { ChatsService } from "./modules/chats/chats.service";
-import { SessionsService } from "./modules/sessions/sessions.service";
 
 /**
  * Top-level project surface — /projects* only (CoC §1.1: the canonical
@@ -73,8 +71,6 @@ export class ProjectsController {
   constructor(
     private readonly projects: ProjectsService,
     private readonly github: GithubLinkService,
-    private readonly chats: ChatsService,
-    private readonly sessions: SessionsService,
     private readonly access: ProjectAccessService,
   ) {}
 

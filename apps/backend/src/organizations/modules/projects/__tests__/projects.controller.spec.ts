@@ -5,9 +5,7 @@ import { ProjectsController } from "../projects.controller";
 import type { CreateProjectInput } from "../projects.dto";
 import { ProjectsService } from "../projects.service";
 import { ProjectAccessService } from "../modules/project-access/project-access.service";
-import { ChatsService } from "../modules/chats/chats.service";
 import { GithubLinkService } from "../modules/github/github-link.service";
-import { SessionsService } from "../modules/sessions/sessions.service";
 
 type Case = { name: string; run: () => Promise<void> | void };
 
@@ -64,8 +62,6 @@ function controller(opts: {
   const ctl = new ProjectsController(
     projects as unknown as ProjectsService,
     {} as unknown as GithubLinkService,
-    {} as unknown as ChatsService,
-    {} as unknown as SessionsService,
     access as unknown as ProjectAccessService,
   );
   return { ctl, roleCalls, createCalls };

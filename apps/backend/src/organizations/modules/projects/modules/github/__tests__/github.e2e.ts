@@ -6,7 +6,7 @@
  *
  * Covers:
  *  - Phase A (no GITHUB_APP_*): GET repos → 401, install-url → 503,
- *    webhook → 503, callback still binds (200, harmless without config),
+ *    webhook → 503, callback → 401 (app unconfigured),
  *    format-only github-link still 200 (no regression vs projects.e2e).
  *  - Phase B (APP_ID + PRIVATE_KEY + SLUG + WEBHOOK_SECRET, no legacy
  *    single-install, network stubbed): install-url 200, callback binds
@@ -14,8 +14,8 @@
  *    GITHUB_NOT_INSTALLED, webhook verify (bad sig → 401, created preserves
  *    callback ownership, suspend → 401, unsuspend → 200, deleted → 404),
  *    per_page=999 / page=0 → 400 (zod query validation).
- *  - Phase C (legacy GITHUB_APP_INSTALLATION_ID dev fallback): default user
- *    repos → 200 via the fallback install, other users → 404.
+ *  - Phase C (legacy GITHUB_APP_INSTALLATION_ID is ignored): users without a
+ *    registry binding get 404 GITHUB_NOT_INSTALLED (fail-closed).
  * Strict Postgres: needs a live PG (TEST_DATABASE_URL wins, DATABASE_URL
  * fallback; drizzle/0002 applied automatically). Without a reachable PG it
  * asserts the outage surface instead: the install callback answers 503
@@ -44,10 +44,14 @@ for (const key of [
   "GITHUB_APP_INSTALLATION_ID",
   "GITHUB_APP_SLUG",
   "GITHUB_WEBHOOK_SECRET",
+  "GITHUB_STATE_SECRET",
   "GITHUB_API_URL",
 ]) {
   delete process.env[key];
 }
+
+const STATE_SECRET = "e2e-state-secret-not-real";
+process.env.GITHUB_STATE_SECRET = STATE_SECRET;
 
 const FIXTURE_REPOS = [
   {
@@ -101,6 +105,7 @@ async function main(): Promise<void> {
   const { GithubInstallationsService } =
     await import("../github-installations.service");
   const { __setGithubFetchForTests } = await import("../github.service");
+  const { signAppState } = await import("../utils/app-state");
 
   let passed = 0;
   let failed = 0;
@@ -123,6 +128,26 @@ async function main(): Promise<void> {
   });
   const readJson = async (res: Response): Promise<unknown> =>
     (await res.json().catch(() => null)) as unknown;
+
+  async function installStateFor(
+    url: string,
+    headers: Record<string, string>,
+  ): Promise<string> {
+    const res = await fetch(`${url}/api/v1/projects/github/install-url`, {
+      headers,
+    });
+    assert.equal(res.status, 200);
+    const body = (await readJson(res)) as { url?: string };
+    const installUrl = typeof body.url === "string" ? body.url : "";
+    const parsed = new URL(installUrl);
+    assert.equal(
+      `${parsed.origin}${parsed.pathname}`,
+      "https://github.com/apps/rush-code-test-app/installations/new",
+    );
+    const state = parsed.searchParams.get("state");
+    assert.ok(state, `expected a signed state in ${installUrl}`);
+    return state;
+  }
 
   // Bearer minting per phase (JWT sub = the caller's user key; installations
   // bind to the same string — C2 identity-only, no x-user-id / ?userId).
@@ -181,8 +206,9 @@ async function main(): Promise<void> {
         "callback without PG → 503 EXTERNAL_UNAVAILABLE",
         async () => {
           const cid = "e2e-github-503-0001";
+          const state = signAppState("alice", STATE_SECRET);
           const res = await fetch(
-            `${base}/api/v1/projects/github/callback?installation_id=111&setup_action=install`,
+            `${base}/api/v1/projects/github/callback?installation_id=111&setup_action=install&state=${encodeURIComponent(state)}`,
             { headers: { "x-correlation-id": cid, ...alice } },
           );
           assert.equal(res.status, 503);
@@ -247,7 +273,9 @@ async function main(): Promise<void> {
       });
 
       await check("GET install-url w/o slug → 503", async () => {
-        const res = await fetch(`${base}/api/v1/projects/github/install-url`);
+        const res = await fetch(`${base}/api/v1/projects/github/install-url`, {
+          headers: { ...alice },
+        });
         assert.equal(res.status, 503);
       });
 
@@ -259,18 +287,13 @@ async function main(): Promise<void> {
         assert.equal(res.status, 503);
       });
 
-      await check("GET callback binds alice (200, harmless w/o config)", async () => {
+      await check("GET callback w/o app config → 401 (app unconfigured)", async () => {
+        const state = signAppState("alice", STATE_SECRET);
         const res = await fetch(
-          `${base}/api/v1/projects/github/callback?installation_id=111&setup_action=install`,
+          `${base}/api/v1/projects/github/callback?installation_id=999111&setup_action=install&state=${encodeURIComponent(state)}`,
           { headers: { ...alice } },
         );
-        assert.equal(res.status, 200);
-        const body = (await readJson(res)) as {
-          ok?: boolean;
-          installationId?: number;
-        };
-        assert.equal(body.ok, true);
-        assert.equal(body.installationId, 111);
+        assert.equal(res.status, 401);
       });
 
       await check("GET callback bad installation_id → 400", async () => {
@@ -309,7 +332,20 @@ async function main(): Promise<void> {
         expiresAtMs: number,
         installationId?: number,
       ) => void;
+      getInstallation: (installationId: number) => Promise<{
+        id: number;
+        account: { login: string; type: string } | null;
+        createdAt: string | null;
+      }>;
     };
+    appAuth.getInstallation = async (installationId: number) => ({
+      id: installationId,
+      account: {
+        login: installationId === 333 ? "carol" : "alice",
+        type: "User",
+      },
+      createdAt: new Date().toISOString(),
+    });
     const installs = app.get(GithubInstallationsService, { strict: false }) as {
       clearAllForTests: () => Promise<void>;
     };
@@ -354,19 +390,25 @@ async function main(): Promise<void> {
     const bob = await bearerFor(app, "bob");
     const carol = await bearerFor(app, "carol");
     try {
-      await check("GET install-url → 200 with slug", async () => {
-        const res = await fetch(`${base}/api/v1/projects/github/install-url`);
-        assert.equal(res.status, 200);
-        const body = (await readJson(res)) as { url?: string };
-        assert.equal(
-          body.url,
-          "https://github.com/apps/rush-code-test-app/installations/new",
+      await check("GET install-url → 200 with slug and signed state", async () => {
+        const state = await installStateFor(base, alice);
+        assert.ok(state.length > 0);
+      });
+
+      await check("callback without state → 400 (state is required)", async () => {
+        const res = await fetch(
+          `${base}/api/v1/projects/github/callback?installation_id=111&setup_action=install`,
+          { headers: { ...alice } },
         );
+        assert.equal(res.status, 400);
+        const body = (await readJson(res)) as { code?: string };
+        assert.equal(body.code, "bad_request");
       });
 
       await check("callback binds alice → install 111", async () => {
+        const state = await installStateFor(base, alice);
         const res = await fetch(
-          `${base}/api/v1/projects/github/callback?installation_id=111&setup_action=install`,
+          `${base}/api/v1/projects/github/callback?installation_id=111&setup_action=install&state=${encodeURIComponent(state)}`,
           { headers: { ...alice } },
         );
         assert.equal(res.status, 200);
@@ -474,8 +516,9 @@ async function main(): Promise<void> {
       await check(
         "callback carol → 333, webhook created keeps owner carol",
         async () => {
+          const state = await installStateFor(base, carol);
           const cb = await fetch(
-            `${base}/api/v1/projects/github/callback?installation_id=333&setup_action=install`,
+            `${base}/api/v1/projects/github/callback?installation_id=333&setup_action=install&state=${encodeURIComponent(state)}`,
             { headers: { ...carol } },
           );
           assert.equal(cb.status, 200);
@@ -540,7 +583,7 @@ async function main(): Promise<void> {
     }
   }
 
-  // --- Phase C: legacy single-install dev fallback ---------------------------
+  // --- Phase C: legacy single-install env id is ignored (fail-closed) --------
   process.env.GITHUB_APP_INSTALLATION_ID = "789012";
   {
     const app = await NestFactory.create(AppModule, { logger: false });
@@ -564,16 +607,16 @@ async function main(): Promise<void> {
     stubOctokitFetch();
     await app.listen(0);
     const base = await app.getUrl();
-    // Legacy single-install: only the 'default' Bearer identity rides the
-    // fallback install (C2: no header/query spoofing — identity only).
     const def = await bearerFor(app, "default");
     const stranger = await bearerFor(app, "stranger");
     try {
-      await check("legacy fallback: default user repos → 200", async () => {
+      await check("legacy fallback: default user without binding → 404", async () => {
         const res = await fetch(`${base}/api/v1/projects/github/repos`, {
           headers: { ...def },
         });
-        assert.equal(res.status, 200);
+        assert.equal(res.status, 404);
+        const body = (await readJson(res)) as { code?: string };
+        assert.equal(body.code, "GITHUB_NOT_INSTALLED");
       });
 
       await check("legacy fallback: other user still 404", async () => {

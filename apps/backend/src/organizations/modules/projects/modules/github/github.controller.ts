@@ -19,7 +19,6 @@ import {
   ApiResponse,
   ApiTags,
 } from "@nestjs/swagger";
-import { DEFAULT_MOCK_USER_ID } from "../../../../../auth/identity.service";
 import { JwtAuthGuard } from "../../../../../auth/jwt-auth.guard";
 import { ReqUser } from "../../../../../auth/req-user.decorator";
 import type { RequestIdentity } from "../../../../../auth/identity.service";
@@ -37,6 +36,7 @@ import {
   type InstallCallbackQueryInput,
   type ListReposQueryInput,
 } from "./github.dto";
+import { GithubBindingService } from "./github-binding.service";
 import { GithubInstallationsService } from "./github-installations.service";
 import {
   INSTALLATION_ACTIONS,
@@ -46,16 +46,6 @@ import {
 } from "./utils/webhook";
 import { GithubAppService } from "./github-app.service";
 import { GithubService } from "./github.service";
-
-/** MVP mock user key when no identity is supplied (dev single-user). */
-export { DEFAULT_MOCK_USER_ID };
-
-/**
- * resolveUserId re-export kept for import compat only — the controller no
- * longer calls it (C2: userId comes from @ReqUser(), header/query
- * spoofing removed).
- */
-export { resolveIdentityUserId as resolveUserId } from "../../../../../auth/identity.service";
 
 /**
  * GithubController — multi-tenant GitHub App surface.
@@ -80,25 +70,20 @@ export class GithubController {
     private readonly github: GithubService,
     private readonly appAuth: GithubAppService,
     private readonly installations: GithubInstallationsService,
+    private readonly binding: GithubBindingService,
   ) {}
 
   @Get("install-url")
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: "Get the GitHub App install URL for the current user" })
+  @ApiBearerAuth()
   @ApiResponse({ status: 200, type: GithubInstallUrlDto })
   @ApiResponse({
     status: 503,
-    description: "GitHub App slug is not configured",
+    description: "GitHub App slug / state secret is not configured",
   })
-  installUrl(): GithubInstallUrlDto {
-    const env = validateEnv(process.env);
-    if (!env.githubAppId || !env.githubPrivateKey || !env.githubAppSlug) {
-      throw new ServiceUnavailableException(
-        "GitHub App install is not configured",
-      );
-    }
-    return {
-      url: `https://github.com/apps/${env.githubAppSlug}/installations/new`,
-    };
+  installUrl(@ReqUser() identity: RequestIdentity): GithubInstallUrlDto {
+    return { url: this.binding.buildInstallUrl(identity.id) };
   }
 
   @Get("callback")
@@ -117,10 +102,22 @@ export class GithubController {
     type: String,
     example: "install",
   })
+  @ApiQuery({
+    name: "state",
+    required: true,
+    type: String,
+    description: "Signed install state issued by GET /projects/github/install-url",
+  })
   @ApiResponse({ status: 200, type: GithubCallbackResultDto })
   @ApiResponse({
     status: 400,
-    description: "bad query (installation_id / setup_action)",
+    description:
+      "bad query (installation_id / setup_action / state) or invalid GITHUB_STATE_INVALID",
+  })
+  @ApiResponse({
+    status: 403,
+    description:
+      "GITHUB_STATE_FORBIDDEN (state belongs to another user) / GITHUB_INSTALLATION_FORBIDDEN",
   })
   async callback(
     @Query(new ZodValidationPipe(installCallbackQuerySchema))
@@ -128,12 +125,12 @@ export class GithubController {
     @ReqUser() identity: RequestIdentity,
     @Headers("x-correlation-id") correlationId?: string,
   ): Promise<GithubCallbackResultDto> {
-    const userId = identity.id;
-    await this.installations.upsert(
-      { installationId: query.installation_id, userId },
+    const installationId = await this.binding.bindInstallation(
+      identity.id,
+      query,
       correlationId,
     );
-    return { ok: true, installationId: query.installation_id };
+    return { ok: true, installationId };
   }
 
   @Post("webhook")
@@ -234,27 +231,17 @@ export class GithubController {
     }
     const userId = identity.id;
     const stored = await this.installations.findByUserId(userId, correlationId);
-    // Legacy dev fallback: single GITHUB_APP_INSTALLATION_ID install applies
-    // to the default mock user when no per-user binding exists.
-    const env = validateEnv(process.env);
-    const installationId =
-      stored?.installationId ??
-      (userId === DEFAULT_MOCK_USER_ID && env.githubInstallationId
-        ? Number(env.githubInstallationId)
-        : NaN);
-    if (!Number.isInteger(installationId) || installationId <= 0) {
+    if (stored === null) {
       throw new NotFoundException({
         code: "GITHUB_NOT_INSTALLED",
         message: "GitHub App is not installed for this user",
       });
     }
-    if (stored?.suspendedAt) {
+    if (stored.suspendedAt) {
       throw new UnauthorizedException("GitHub App installation is suspended");
     }
     // Zod pipe coerces ?page=2 strings and applies defaults.
-    return this.github.listRepos(query, installationId) as unknown as Promise<
-      GithubRepoDto[]
-    >;
+    return this.github.listRepos(query, stored.installationId, userId);
   }
 }
 

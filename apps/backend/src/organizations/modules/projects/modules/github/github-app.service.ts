@@ -15,6 +15,12 @@ type CachedToken = {
   expiresAtMs: number;
 };
 
+export type GithubAppInstallation = {
+  id: number;
+  account: { login: string; type: string } | null;
+  createdAt: string | null;
+};
+
 /** Refresh skew — never hand out a token expiring within the next minute. */
 const EXPIRY_SKEW_MS = 60_000;
 
@@ -43,7 +49,7 @@ const EXPIRY_SKEW_MS = 60_000;
 export class GithubAppService {
   private readonly cache = new Map<number, CachedToken>();
 
-  constructor(private readonly logger: AppLogger = new AppLogger('GithubAppService')) {}
+  constructor(private readonly logger: AppLogger = new AppLogger(GithubAppService.name)) {}
 
   /** False when the GITHUB_APP_* pair is absent — repos endpoint answers 401. */
   isConfigured(): boolean {
@@ -97,6 +103,59 @@ export class GithubAppService {
       return token;
     } catch (err) {
       this.cache.delete(id);
+      throw this.toHttpError(err);
+    }
+  }
+
+  /**
+   * Looks up one installation through the GitHub App API
+   * (GET /app/installations/{id}) using the App JWT — the callback needs
+   * the account login to verify that the caller may bind this installation.
+   * Returns only the id/account facts (no tokens leave this method).
+   */
+  async getInstallation(installationId: number): Promise<GithubAppInstallation> {
+    const env = validateEnv(process.env);
+    if (!isGithubConfigured(env)) {
+      throw new UnauthorizedException('GitHub App is not configured');
+    }
+    if (!Number.isInteger(installationId) || installationId <= 0) {
+      throw new UnauthorizedException('GitHub App installation is missing');
+    }
+
+    const { githubAppId: appId, githubPrivateKey: privateKey } = env;
+
+    try {
+      const auth = createAppAuth({
+        appId: Number(appId),
+        privateKey,
+        request: octokitRequest.defaults({ baseUrl: env.githubApiUrl }),
+      });
+      const { token } = await auth({ type: 'app' });
+      const request = octokitRequest.defaults({ baseUrl: env.githubApiUrl });
+      const response = await request('GET /app/installations/{installation_id}', {
+        headers: { authorization: `Bearer ${token}` },
+        installation_id: installationId,
+      });
+      const data = response.data as {
+        id?: number;
+        account?: { login?: string; type?: string } | null;
+        created_at?: string;
+      };
+      return {
+        id: typeof data.id === 'number' ? data.id : installationId,
+        account:
+          data.account && typeof data.account.login === 'string'
+            ? {
+                login: data.account.login,
+                type:
+                  typeof data.account.type === 'string' ? data.account.type : 'User',
+              }
+            : null,
+        createdAt:
+          typeof data.created_at === 'string' ? data.created_at : null,
+      };
+    } catch (err) {
+      this.logger.warn('[github] app installation lookup failed');
       throw this.toHttpError(err);
     }
   }

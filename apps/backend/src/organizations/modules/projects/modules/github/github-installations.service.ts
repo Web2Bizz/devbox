@@ -1,5 +1,5 @@
-import { Injectable } from "@nestjs/common";
-import { desc, eq } from "drizzle-orm";
+import { ForbiddenException, Injectable } from "@nestjs/common";
+import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { AppLogger } from "../../../../../common/logger";
 import {
   DbService,
@@ -69,7 +69,7 @@ function parseSuspendedAt(
 @Injectable()
 export class GithubInstallationsService {
   constructor(
-    private readonly logger: AppLogger = new AppLogger("GithubInstallations"),
+    private readonly logger: AppLogger = new AppLogger(GithubInstallationsService.name),
     private readonly db: DbService,
   ) {}
 
@@ -82,24 +82,40 @@ export class GithubInstallationsService {
    * Creates or merges an installation row. Existing userId is preserved
    * unless an explicit userId is supplied (webhook events carry no session,
    * so they must not steal ownership from the callback binding).
+   *
+   * A foreign owner is never overwritten: when the stored row already has a
+   * userId and the incoming userId differs, the write is rejected with
+   * 403 GITHUB_INSTALLATION_FORBIDDEN (no UPDATE, no INSERT).
    */
   async upsert(
     input: UpsertInstallationInput,
     correlationId?: string,
+    prev?: GithubInstallation | null,
   ): Promise<GithubInstallation> {
-    try {
-      const prev = await this.findByInstallationId(
-        input.installationId,
-        correlationId,
-      );
-      const userId = input.userId ?? prev?.userId ?? null;
-      const accountLogin = input.accountLogin ?? prev?.accountLogin ?? null;
-      const accountType = input.accountType ?? prev?.accountType ?? null;
-      const suspendedAt =
-        input.suspendedAt !== undefined
-          ? input.suspendedAt
-          : (prev?.suspendedAt ?? null);
-      if (!prev) {
+    const existing =
+      prev === undefined
+        ? await this.findByInstallationId(input.installationId, correlationId)
+        : prev;
+    if (
+      typeof input.userId === "string" &&
+      existing !== null &&
+      typeof existing.userId === "string" &&
+      existing.userId !== input.userId
+    ) {
+      throw new ForbiddenException({
+        code: "GITHUB_INSTALLATION_FORBIDDEN",
+        message: "GitHub App installation belongs to another user",
+      });
+    }
+    const userId = input.userId ?? existing?.userId ?? null;
+    const accountLogin = input.accountLogin ?? existing?.accountLogin ?? null;
+    const accountType = input.accountType ?? existing?.accountType ?? null;
+    const suspendedAt =
+      input.suspendedAt !== undefined
+        ? input.suspendedAt
+        : (existing?.suspendedAt ?? null);
+    if (!existing) {
+      try {
         const rows = await this.client()
           .insert(githubInstallations)
           .values({
@@ -116,8 +132,28 @@ export class GithubInstallationsService {
           correlationId,
         );
         return record;
+      } catch (err) {
+        dbUnavailable(
+          "github-installations.upsert",
+          err,
+          this.logger,
+          correlationId,
+        );
       }
-      const rows = await this.client()
+    }
+    let rows: Array<GithubInstallationRow>;
+    try {
+      const ownership =
+        typeof input.userId === "string"
+          ? and(
+              eq(githubInstallations.installationId, input.installationId),
+              or(
+                isNull(githubInstallations.userId),
+                eq(githubInstallations.userId, input.userId),
+              ),
+            )
+          : eq(githubInstallations.installationId, input.installationId);
+      rows = await this.client()
         .update(githubInstallations)
         .set({
           userId,
@@ -126,14 +162,8 @@ export class GithubInstallationsService {
           suspendedAt: parseSuspendedAt(suspendedAt) ?? null,
           updatedAt: new Date(),
         })
-        .where(eq(githubInstallations.installationId, input.installationId))
+        .where(ownership)
         .returning();
-      const record = toInstallation(rows[0]);
-      this.logger.info(
-        `[github] installation upserted ${record.installationId}`,
-        correlationId,
-      );
-      return record;
     } catch (err) {
       dbUnavailable(
         "github-installations.upsert",
@@ -142,6 +172,18 @@ export class GithubInstallationsService {
         correlationId,
       );
     }
+    if (rows.length === 0) {
+      throw new ForbiddenException({
+        code: "GITHUB_INSTALLATION_FORBIDDEN",
+        message: "GitHub App installation belongs to another user",
+      });
+    }
+    const record = toInstallation(rows[0]);
+    this.logger.info(
+      `[github] installation upserted ${record.installationId}`,
+      correlationId,
+    );
+    return record;
   }
 
   async findByUserId(
@@ -194,14 +236,10 @@ export class GithubInstallationsService {
   ): Promise<boolean> {
     try {
       const rows = await this.client()
-        .select()
-        .from(githubInstallations)
-        .where(eq(githubInstallations.installationId, installationId))
-        .limit(1);
-      if (rows.length === 0) return false;
-      await this.client()
         .delete(githubInstallations)
-        .where(eq(githubInstallations.installationId, installationId));
+        .where(eq(githubInstallations.installationId, installationId))
+        .returning();
+      if (rows.length === 0) return false;
       this.logger.info(`[github] installation removed ${installationId}`, correlationId);
       return true;
     } catch (err) {

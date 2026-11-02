@@ -56,10 +56,11 @@ export class GithubInstallUrlDto {
   url!: string;
 }
 
-/** GET /projects/github/callback?installation_id=&setup_action= */
+/** GET /projects/github/callback?installation_id=&setup_action=&state= */
 export const installCallbackQuerySchema = z.object({
   installation_id: z.coerce.number().int().positive(),
   setup_action: z.string().trim().min(1).max(50).default('install'),
+  state: z.string().trim().min(1),
   // NOTE (C2): no userId — the binding target is the Bearer identity
   // (@ReqUser()); a ?userId query is stripped by validation and never trusted.
 });
@@ -72,6 +73,13 @@ export class InstallCallbackQueryDto {
 
   @ApiProperty({ required: false, default: 'install', example: 'install' })
   setup_action?: string;
+
+  @ApiProperty({
+    required: true,
+    description: 'Signed install state issued by GET /projects/github/install-url',
+    example: 'eyJ1c2VySWQiOiJhbGljZSIsImV4cCI6MTc2MDAwMDAwMDAwMH0.signature',
+  })
+  state!: string;
 }
 
 export class GithubCallbackResultDto {

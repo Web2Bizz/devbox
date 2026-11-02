@@ -13,6 +13,7 @@ import {
 } from '../../../../../common/external/external-error';
 import { withRetry } from '../../../../../common/external/retry';
 import { GithubAppService } from './github-app.service';
+import { GithubInstallationsService } from './github-installations.service';
 import type { ListReposQueryInput } from './github.dto';
 
 export type GithubRepo = {
@@ -64,10 +65,22 @@ type InstallationReposResponse = {
 export class GithubService {
   constructor(
     private readonly appAuth: GithubAppService,
-    private readonly logger: AppLogger = new AppLogger('GithubService'),
+    private readonly logger: AppLogger = new AppLogger(GithubService.name),
+    private readonly installations: GithubInstallationsService,
   ) {}
 
-  async listRepos(query: ListReposQueryInput, installationId: number): Promise<GithubRepo[]> {
+  async listRepos(
+    query: ListReposQueryInput,
+    installationId: number,
+    userId: string,
+  ): Promise<GithubRepo[]> {
+    const stored = await this.installations.findByInstallationId(installationId);
+    if (stored === null || stored.userId === null || stored.userId !== userId) {
+      throw new NotFoundException({
+        code: 'GITHUB_NOT_INSTALLED',
+        message: 'GitHub App is not installed for this user',
+      });
+    }
     const token = await this.appAuth.getInstallationToken(installationId);
     const env = validateEnv(process.env);
     const { page, per_page } = query;

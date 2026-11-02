@@ -8,6 +8,7 @@ import {
   Headers,
   HttpCode,
   HttpStatus,
+  NotFoundException,
   Param,
   Patch,
   Post,
@@ -108,7 +109,6 @@ export class ProjectsController {
   private async memberOrThrow(orgId: string, userId: string, correlationId?: string): Promise<void> {
     const role = await this.access.getRole(orgId, userId, correlationId);
     if (!role) {
-      const { NotFoundException } = await import("@nestjs/common");
       throw new NotFoundException(`Organization ${orgId} not found`);
     }
   }
@@ -138,12 +138,13 @@ export class ProjectsController {
     @ReqUser() identity: RequestIdentity,
     @Headers("x-correlation-id") correlationId?: string,
   ): Promise<ProjectDto> {
+    await this.memberOrThrow(body.orgId, identity.id, correlationId);
     // ownerId is never trusted from the body — the row is always owned by
     // the Bearer identity (same ownUserId doctrine as OpencodeKeysController).
-    return (await this.projects.create(
+    return this.projects.create(
       { ...body, ownerId: identity.id },
       correlationId,
-    )) as ProjectDto;
+    );
   }
 
   @ApiTags("projects")
@@ -156,7 +157,7 @@ export class ProjectsController {
     @Headers("x-correlation-id") correlationId?: string,
   ): Promise<ProjectDto> {
     const project = await this.assertAccess(id, identity.id, correlationId);
-    return project as unknown as ProjectDto;
+    return project;
   }
 
   @ApiTags("projects")
@@ -170,7 +171,7 @@ export class ProjectsController {
     @Headers("x-correlation-id") correlationId?: string,
   ): Promise<ProjectDto> {
     await this.assertAccess(id, identity.id, correlationId);
-    return (await this.projects.update(id, body, correlationId)) as ProjectDto;
+    return this.projects.update(id, body, correlationId);
   }
 
   @ApiTags("projects")
@@ -236,10 +237,10 @@ export class ProjectsController {
   ): Promise<ProjectDto[]> {
     await this.memberOrThrow(id, identity.id, correlationId);
     const flag = includeDeleted === "true" || includeDeleted === "1";
-    return (await this.projects.list(correlationId, {
+    return this.projects.list(correlationId, {
       orgId: id,
       includeDeleted: flag,
-    })) as ProjectDto[];
+    });
   }
 
   @ApiTags("org-projects")
@@ -255,10 +256,10 @@ export class ProjectsController {
     await this.memberOrThrow(id, identity.id, correlationId);
     // ownerId is never trusted from the body — the row is always owned by
     // the Bearer identity (same rule as top-level POST /projects, C1).
-    return (await this.projects.create(
+    return this.projects.create(
       { ...body, orgId: id, ownerId: identity.id },
       correlationId,
-    )) as ProjectDto;
+    );
   }
 
   @ApiTags("org-projects")
@@ -274,9 +275,9 @@ export class ProjectsController {
   ): Promise<ProjectDto> {
     await this.memberOrThrow(id, identity.id, correlationId);
     const flag = includeDeleted === "true" || includeDeleted === "1";
-    return (await this.projects.assertProjectBelongsToOrg(id, projectId, correlationId, {
+    return this.projects.assertProjectBelongsToOrg(id, projectId, correlationId, {
       includeDeleted: flag,
-    })) as unknown as ProjectDto;
+    });
   }
 
   @ApiTags("org-projects")
@@ -291,7 +292,7 @@ export class ProjectsController {
     @Headers("x-correlation-id") correlationId?: string,
   ): Promise<ProjectDto> {
     await this.memberOrThrow(id, identity.id, correlationId);
-    return (await this.projects.update(projectId, body, correlationId, { orgId: id })) as ProjectDto;
+    return this.projects.update(projectId, body, correlationId, { orgId: id });
   }
 
   @ApiTags("org-projects")
@@ -324,7 +325,7 @@ export class ProjectsController {
   ): Promise<ProjectDto> {
     await this.memberOrThrow(id, identity.id, correlationId);
     await this.projects.assertProjectBelongsToOrg(id, projectId, correlationId, { includeDeleted: true });
-    return (await this.projects.restore(projectId, correlationId)) as ProjectDto;
+    return this.projects.restore(projectId, correlationId);
   }
 
   @ApiTags("org-projects")

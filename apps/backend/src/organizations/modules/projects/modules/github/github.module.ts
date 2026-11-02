@@ -1,6 +1,7 @@
 import { Module, forwardRef } from "@nestjs/common";
 import { ProjectsModule } from "../../projects.module";
 import { GithubAppService } from "./github-app.service";
+import { GithubBindingService } from "./github-binding.service";
 import { GithubInstallationsService } from "./github-installations.service";
 import { GithubLinkService } from "./github-link.service";
 import { GithubController } from "./github.controller";
@@ -14,7 +15,7 @@ import { GithubService } from "./github.service";
 @Module({
   imports: [forwardRef(() => ProjectsModule)],
   controllers: [GithubController],
-  providers: [GithubAppService, GithubInstallationsService, GithubService, GithubLinkService],
-  exports: [GithubAppService, GithubInstallationsService, GithubService, GithubLinkService],
+  providers: [GithubAppService, GithubBindingService, GithubInstallationsService, GithubService, GithubLinkService],
+  exports: [GithubAppService, GithubBindingService, GithubInstallationsService, GithubService, GithubLinkService],
 })
 export class GithubModule {}

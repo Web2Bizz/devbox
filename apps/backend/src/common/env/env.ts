@@ -86,6 +86,11 @@ export type AppEnv = {
   githubAppSlug: string;
   /** Webhook secret for x-hub-signature-256 verify ('' = webhook disabled). */
   githubWebhookSecret: string;
+  /**
+   * Optional HMAC secret for the signed GitHub App install state
+   * ('' = fall back to githubWebhookSecret).
+   */
+  githubStateSecret: string;
   /** GitHub REST base URL, e.g. https://api.github.com (GHE override). */
   githubApiUrl: string;
   /** PROJECTS_ROOT jail root ('' = backend cwd fallback in ProjectFilesService). */
@@ -277,6 +282,7 @@ export const envRawSchema = z.object({
   GITHUB_APP_INSTALLATION_ID: z.string().optional(),
   GITHUB_APP_SLUG: z.string().optional(),
   GITHUB_WEBHOOK_SECRET: z.string().optional(),
+  GITHUB_STATE_SECRET: z.string().optional(),
   GITHUB_API_URL: z.string().optional(),
   DOCKER_REGISTRY_URL: z.string().optional(),
   DOCKER_REGISTRY_USER: z.string().optional(),
@@ -1015,6 +1021,9 @@ export function validateEnvWithWarnings(
     );
   }
   const githubWebhookSecret = firstNonEmpty(env.GITHUB_WEBHOOK_SECRET);
+  // Optional dedicated secret for the signed install state; an empty value
+  // falls back to the webhook secret at the controller (no boot warning).
+  const githubStateSecret = firstNonEmpty(env.GITHUB_STATE_SECRET);
   const githubApiRaw =
     // readonly-исключение: дефолт публичного GitHub REST — read-конфиг (GHE
     // перекрывается через GITHUB_API_URL; set-but-invalid → ERROR в assertValidUrl).
@@ -1498,6 +1507,7 @@ export function validateEnvWithWarnings(
       githubInstallationId,
       githubAppSlug,
       githubWebhookSecret,
+      githubStateSecret,
       githubApiUrl,
       projectsRoot,
       reposRoot,

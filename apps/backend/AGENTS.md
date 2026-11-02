@@ -112,7 +112,7 @@ logger.error(`[external] failure service=${service} operation=${op} status=${sta
 | `bun run start` | запуск собранного `dist/main.js` |
 | `bun run lint` | проверка типов (`tsc --noEmit`) + стиля (`biome`) |
 | `bun run test` | юнит-спеки из `dist` (`*.spec.js`) |
-| `bun run test:e2e` | полный e2e-сьют (build + все e2e/spec) |
+| `bun run test:e2e` | полный e2e-сьют: build + `scripts/e2e.ts` (последовательно, таймаут на сьют) |
 | `bun run test:e2e:auth` / `:projects` / `:github` / `:repos` / `:opencode-keys` | точечные e2e |
 | `bun run keys:reencrypt` | перешифровка opencode-ключей |
 | `bun run db:check-integrity` | проверка целостности Drizzle-схемы |
@@ -131,6 +131,13 @@ Docker — без него сьют падает с явной ошибкой (�
   (503 + Retry-After 30), не дефолт.
 - `DATABASE_URL` в e2e не читается: контейнер по умолчанию, чтобы миграции не
   уехали в dev-базу.
+
+### Запуск e2e
+
+`bun run test:e2e` идёт через `scripts/e2e.ts`: каждый сьют — отдельный процесс
+с жёстким бюджетом `E2E_SUITE_TIMEOUT_MS` (по умолчанию 300000). Зависший сьют
+падает с `[e2e] FAILED … (timed out …)`, а не блокирует прогон и CI. Фильтры:
+`bun scripts/e2e.ts auth.e2e` (подстрока пути), несколько фильтров — OR.
 
 ## Scope-правила (кратко)
 

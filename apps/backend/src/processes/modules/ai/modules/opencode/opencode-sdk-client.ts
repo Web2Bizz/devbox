@@ -7,7 +7,7 @@ import { Injectable } from '@nestjs/common';
 // v2 entry-point is the `./v2` subpath of the pinned 1.18.33 package
 // (dist/v2 + dist/v2/gen on disk); there is no 2.x major.
 import type { OpencodeClient } from '@opencode-ai/sdk/v2';
-import { OpencodeService } from './opencode.service';
+import { OpencodeConfig } from './opencode.config';
 import { AppLogger } from '../../../../../common/logger';
 import { ExternalClient } from '../../../../../common/external/external-client';
 import { ServeAuthService, serveBasicAuthHeader } from './modules/auth/auth.service';
@@ -31,7 +31,7 @@ function loadSdk(): Promise<SdkModule> {
  * OpencodeSdkClient — single owner of the @opencode-ai/sdk (pinned 1.18.33,
  * `./v2` subpath) instance.
  *
- * - `baseUrl` is always `OpencodeService.dialUrl()` (explicit 0.0.0.0 is
+ * - `baseUrl` is always `OpencodeConfig.dialUrl()` (explicit 0.0.0.0 is
  *   preserved in config but undialable — dial 127.0.0.1 instead). The v2
  *   client multiplexes the `/…` legacy paths AND the `/api/…` v2 namespace
  *   against the server root, so no `/api` suffix is appended here — that
@@ -67,10 +67,10 @@ function loadSdk(): Promise<SdkModule> {
 @Injectable()
 export class OpencodeSdkClient {
   constructor(
-    private readonly opencode: OpencodeService,
+    private readonly config: OpencodeConfig,
     private readonly external: ExternalClient,
     private readonly auth: ServeAuthService,
-    private readonly logger: AppLogger = new AppLogger('OpencodeSdkClient'),
+    private readonly logger: AppLogger = new AppLogger(OpencodeSdkClient.name),
   ) {}
 
   /**
@@ -106,7 +106,7 @@ export class OpencodeSdkClient {
     return this.external.fetchWithRetry(req.url, forwardInit, {
       service: 'opencode-sdk',
       operation: 'sdk',
-      timeoutMs: this.opencode.timeoutMs,
+      timeoutMs: this.config.timeoutMs,
       allowNonIdempotentRetry: false,
     });
   };
@@ -130,7 +130,7 @@ export class OpencodeSdkClient {
       correlationId,
     );
     return createOpencodeClient({
-      baseUrl: this.opencode.dialUrl(),
+      baseUrl: this.config.dialUrl(),
       headers,
       // `as typeof fetch`: wrapper matches the call signature; the extra
       // `preconnect` member of the undici fetch type is N/A for a wrapper

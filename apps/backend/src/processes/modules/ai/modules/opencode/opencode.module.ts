@@ -5,6 +5,7 @@ import { BillingModule } from './modules/billing/billing.module';
 import { OpencodeKeysController } from './keys.controller';
 import { OpencodeSdkClient } from './opencode-sdk-client';
 import { OpencodeController } from './opencode.controller';
+import { OpencodeConfig } from './opencode.config';
 import { OpencodeService } from './opencode.service';
 import { OrganizationsModule } from '../../../../../organizations/organizations.module';
 
@@ -26,8 +27,9 @@ import { OrganizationsModule } from '../../../../../organizations/organizations.
  * The keys HTTP surface (keys.controller/keys.dto: /api/v1/key +
  * /api/v1/usage) lives here, while the reusable crypto envelope
  * (common/crypto) and key store (common/keys) come from the global
- * CommonModule — no explicit imports. Root providers: OpencodeService
- * (single owner of OPENCODE_* config + fetch) + OpencodeSdkClient (pinned
+ * CommonModule — no explicit imports. Root providers: OpencodeConfig (dial
+ * url + REQUEST_TIMEOUT_MS budget, shared by the two below without an import
+ * cycle), OpencodeService (upstream fetch) + OpencodeSdkClient (pinned
  * @opencode-ai/sdk instance). The per-user DB Bearer is gone from the serve
  * path: no stored key → no 404 anymore; without OPENCODE_PASSWORD the
  * upstream 401 is the honest signal.
@@ -45,8 +47,8 @@ import { OrganizationsModule } from '../../../../../organizations/organizations.
 @Module({
   imports: [BillingModule, ServeAuthModule, OrganizationsModule],
   controllers: [OpencodeController, OpencodeKeysController],
-  providers: [OpencodeService, OpencodeSdkClient],
-  exports: [BillingModule, ServeAuthModule, OpencodeService, OpencodeSdkClient],
+  providers: [OpencodeService, OpencodeConfig, OpencodeSdkClient],
+  exports: [BillingModule, ServeAuthModule, OpencodeService, OpencodeConfig, OpencodeSdkClient],
 })
 export class OpencodeModule implements OnModuleInit {
   constructor(

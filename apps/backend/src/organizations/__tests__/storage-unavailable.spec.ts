@@ -155,7 +155,7 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
           silentLogger() as never,
         );
         await assert.rejects(
-          () => svc.clone('alice', 'https://example.com/a.git', 'demo', 'cid-1'),
+          () => svc.clone('alice', 'https://github.com/a.git', 'demo', 'cid-1'),
           expectStorageDeny,
         );
       } finally {

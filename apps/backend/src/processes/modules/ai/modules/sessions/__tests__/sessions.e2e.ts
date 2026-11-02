@@ -29,7 +29,8 @@
  *   through the shared mapping);
  * - GET /api/event → four SSE frames (direct data.sessionID, upstream
  *   top-level extras to drop, out-of-spec part-nesting that must NOT be
- *   hoisted, no session) then heartbeats, tracking downstream close;
+ *   hoisted, no session) then heartbeats, tracking downstream close; only
+ *   frames of the requested project's sessions reach the client;
  * - POST /api/session → 400 on a missing location (like the real 2.x
  *   server), echo-create otherwise; 'reject' mode answers 400 with a planted
  *   secret to prove honest EXTERNAL_BAD_REQUEST + never-echo;
@@ -716,11 +717,8 @@ async function main(): Promise<void> {
           const reader = res.body.getReader();
           const dec = new TextDecoder();
           let buf = '';
-          const deadline = Date.now() + 8000;
-          while (frames.length < 4 && Date.now() < deadline) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            buf += dec.decode(value, { stream: true });
+          const consume = (text: string): void => {
+            buf += text;
             let idx: number;
             while ((idx = buf.indexOf('\n\n')) >= 0) {
               const chunk = buf.slice(0, idx);
@@ -728,13 +726,28 @@ async function main(): Promise<void> {
               const line = chunk.split('\n').find((l) => l.startsWith('data:'));
               if (line) frames.push(JSON.parse(line.slice(5).trim()) as Record<string, unknown>);
             }
+          };
+          const deadline = Date.now() + 8000;
+          while (frames.length < 2 && Date.now() < deadline) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            consume(dec.decode(value, { stream: true }));
+          }
+          // After the two expected frames keep reading for ~300ms: a leaked
+          // evt_3/evt_4 must be observed, not raced by the assertion. The
+          // stub emits an 80ms heartbeat, so each read resolves promptly.
+          const settleDeadline = Date.now() + 300;
+          while (Date.now() < settleDeadline) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            if (value) consume(dec.decode(value, { stream: true }));
           }
         }
         try {
           assert.equal(res.status, 200);
           assert.match(res.headers.get('content-type') ?? '', /text\/event-stream/);
-          assert.equal(frames.length, 4, `expected 4 frames, got ${frames.length}`);
-          const [f1, f2, f3, f4] = frames;
+          assert.equal(frames.length, 2, `expected 2 frames, got ${frames.length}`);
+          const [f1, f2] = frames;
           // domain envelope: id/type/data(+session) — upstream top-level
           // extras (metadata/durable/location) dropped, no upstream names.
           assert.deepEqual(Object.keys(f1).sort(), ['data', 'id', 'session', 'type']);
@@ -749,13 +762,19 @@ async function main(): Promise<void> {
             delta: 'Hel',
           });
           assert.deepEqual(Object.keys(f2).sort(), ['data', 'id', 'session', 'type'], 'metadata/durable/location must be dropped');
-          assert.deepEqual(Object.keys(f3).sort(), ['data', 'id', 'type']);
-          assert.equal(f3.session, undefined, 'out-of-spec data.part nesting must NOT be hoisted');
-          assert.deepEqual(Object.keys(f4).sort(), ['data', 'id', 'type'], 'no-session frame must not carry session');
+          assert.equal(f2.id, 'evt_2');
+          assert.equal(f2.session, 'ses_alpha');
+          assert.ok(
+            !frames.some((frame) => frame.id === 'evt_3' || frame.id === 'evt_4'),
+            'frames outside the project scope leaked into the stream',
+          );
           assert.ok(!Object.keys(f1).includes('sessionID'), 'upstream name at top level');
-          push('GET /api/sessions/events → domain frames (hoisted session, extras dropped)', null);
+          push(
+            'GET /api/sessions/events → project-scoped domain frames (hoisted session, extras dropped, unscoped dropped)',
+            null,
+          );
         } catch (err) {
-          push('GET /api/sessions/events → domain frames (hoisted session, extras dropped)', err as Error);
+          push('GET /api/sessions/events → project-scoped domain frames (hoisted session, extras dropped, unscoped dropped)', err as Error);
         } finally {
           ctrl.abort();
         }
@@ -774,7 +793,7 @@ async function main(): Promise<void> {
           sawClose ? null : new Error('upstream SSE connection never saw close'),
         );
       } catch (err) {
-        push('GET /api/sessions/events → domain frames (hoisted session, extras dropped)', err as Error);
+        push('GET /api/sessions/events → project-scoped domain frames (hoisted session, extras dropped, unscoped dropped)', err as Error);
       }
     }
 

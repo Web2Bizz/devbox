@@ -1,14 +1,20 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { execFile } from 'node:child_process';
-import { mkdir, stat } from 'node:fs/promises';
+import { mkdir, readdir, stat } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { AppLogger } from '../../../../../../../../../common/logger';
+import { validateEnv } from '../../../../../../../../../common/env/env';
 import { ExternalServiceError } from '../../../../../../../../../common/external/external-error';
 import { storageUnavailable } from '../../../../../../../../../common/storage/storage-unavailable';
 import { isValidGitRepo } from '../../../../utils/repos-git';
 import { CloneJobsRepository, type CloneJob } from './clone.repository';
 import { WorkspacePathService } from '../../../../../../../../../common/storage/workspace-path.service';
 import { readSubmodules } from '../../../../utils/submodules';
+import {
+  buildGitCloneArgs,
+  createAllowedCloneHosts,
+  normalizeRepoUrl,
+} from './utils/repo-url';
 
 const execFileAsync = promisify(execFile);
 
@@ -19,21 +25,21 @@ function sanitizeForLog(value: string): string {
   return value.replace(/:\/\/([^/\s:@]+)(:[^/\s@]*)?@/g, '://***:***@');
 }
 
-function normalizeRepoUrl(raw: string): string {
-  const url = String(raw ?? '').trim();
-  if (!url) throw new BadRequestException('repoUrl must be non-empty');
-  if (url.length > 2048) throw new BadRequestException('repoUrl must be at most 2048 chars');
-  if (url.includes('\0')) throw new BadRequestException('repoUrl must not contain null bytes');
-  if (!/^(https?:\/\/|git@|ssh:\/\/|file:\/\/|\/)/.test(url)) {
-    throw new BadRequestException(
-      'repoUrl must be https://, git@, ssh://, file:// or an absolute local path',
-    );
+/**
+ * Allow-list host set resolved ONCE from the validated AppEnv (single source:
+ * AppEnv.cloneAllowedHosts, filled at boot by CLONE_ALLOWED_HOSTS validation)
+ * and cached, never rebuilt per clone call.
+ */
+let allowedCloneHostsCache: Set<string> | null = null;
+
+function allowedCloneHosts(): Set<string> {
+  if (!allowedCloneHostsCache) {
+    allowedCloneHostsCache = createAllowedCloneHosts(validateEnv(process.env).cloneAllowedHosts);
   }
-  return url;
+  return allowedCloneHostsCache;
 }
 
 async function dirIsEmpty(abs: string): Promise<boolean> {
-  const { readdir } = await import('node:fs/promises');
   try {
     const entries = await readdir(abs);
     return entries.length === 0;
@@ -53,7 +59,7 @@ async function dirIsEmpty(abs: string): Promise<boolean> {
  * - Lock + job key is (userId, repoName): two users cloning into different
  *   project homes never touch each other's directory; repeat calls while
  *   queued/cloning/ready return the existing job (never re-clone over it).
- * - Clone runs `git clone --recurse-submodules <url> <dest>` + `git submodule
+ * - Clone runs `git clone --recurse-submodules -- <url> <dest>` + `git submodule
  *   update --init --recursive` via execFile (no shell); transitions
  *   queued → cloning → ready/failed with progress hints and AppLogger
  *   entries (URLs sanitized, no tokens/keys; logs carry ids only).
@@ -64,7 +70,7 @@ export class WorkspaceCloneService {
   constructor(
     private readonly paths: WorkspacePathService,
     private readonly jobs: CloneJobsRepository,
-    private readonly logger: AppLogger = new AppLogger('WorkspaceClone'),
+    private readonly logger: AppLogger = new AppLogger(WorkspaceCloneService.name),
   ) {}
 
   status(userId: string, repoName: string): CloneJob | null {
@@ -85,7 +91,6 @@ export class WorkspaceCloneService {
     repoName: string,
     correlationId?: string,
   ): Promise<CloneJob> {
-    const url = normalizeRepoUrl(repoUrl);
     let resolved: Awaited<ReturnType<typeof this.paths.resolveUser>>;
     try {
       // uuid-validated user scope + project-bound dest (400 on garbage);
@@ -99,6 +104,10 @@ export class WorkspaceCloneService {
     }
     const uid = resolved.scopeId;
     const pid = resolved.projectId;
+    await this.paths.assertInsideJail(resolved.absRepo, await this.paths.realStrictRoot());
+    // Storage/jail gates precede the URL allow-list (an unconfigured REPOS_ROOT
+    // stays an honest 503), and only the normalized value travels to git.
+    const url = normalizeRepoUrl(repoUrl, allowedCloneHosts());
     return this.jobs.withLock(uid, pid, async () => {
       const { job, created } = this.jobs.enqueue({
         userId: uid,
@@ -143,7 +152,7 @@ export class WorkspaceCloneService {
       }
       await mkdir(absDest, { recursive: true });
       this.jobs.markProgress(userId, repoName, 30);
-      await execFileAsync('git', ['clone', '--recurse-submodules', repoUrl, absDest], {
+      await execFileAsync('git', buildGitCloneArgs(repoUrl, absDest), {
         timeout: CLONE_TIMEOUT_MS,
       });
       this.jobs.markProgress(userId, repoName, 80);

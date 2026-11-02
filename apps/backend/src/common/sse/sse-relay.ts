@@ -42,6 +42,9 @@ export type SseRelayParams = {
   /** optional per-frame serializer (mirror: none = verbatim passthrough;
    * domain: re-key upstream names into our frame) */
   mapFrame?: (value: unknown) => unknown;
+  /** optional delivery predicate applied AFTER mapFrame; false drops the frame
+   * (never written, never counted) — undefined keeps earlier behaviour */
+  filterFrame?: (frame: unknown) => boolean;
 };
 
 /** True for AbortError shapes (name/code/20, incl. wrapped in cause). */
@@ -59,7 +62,7 @@ export function isAbortError(err: unknown): boolean {
 }
 
 export async function relaySse(p: SseRelayParams): Promise<void> {
-  const { operation, cid, req, res, subscribe, logger, prefix, mapFrame } = p;
+  const { operation, cid, req, res, subscribe, logger, prefix, mapFrame, filterFrame } = p;
   if ((await p.probe()) === 'down') {
     logger.warn(`${prefix} ${operation} upstream failed`, cid);
     throw p.unreachableError();
@@ -91,6 +94,8 @@ export async function relaySse(p: SseRelayParams): Promise<void> {
   res.flushHeaders();
 
   let closed = false;
+  /** Count of frames rejected by filterFrame (metadata only — never content). */
+  let droppedByFilter = 0;
   const onClose = (): void => {
     if (closed) return;
     closed = true;
@@ -135,6 +140,10 @@ export async function relaySse(p: SseRelayParams): Promise<void> {
       if (next.done || closed || req.destroyed) break;
       try {
         const frame = mapFrame ? mapFrame(next.value) : next.value;
+        if (filterFrame && !filterFrame(frame)) {
+          droppedByFilter += 1;
+          continue;
+        }
         res.write(`data: ${JSON.stringify(frame)}\n\n`);
       } catch (err) {
         // Write after downstream close — то же, что disconnect.
@@ -154,6 +163,14 @@ export async function relaySse(p: SseRelayParams): Promise<void> {
       logger.debug(`${prefix} event stream interrupted: ${(err as Error).message}`, cid);
     }
   } finally {
+    // Distinguish "the filter dropped everything" from "upstream was silent":
+    // count only, never frame ids/data.
+    if (droppedByFilter > 0) {
+      logger.debug(
+        `${prefix} ${operation} dropped ${droppedByFilter} frame(s) by filter`,
+        cid,
+      );
+    }
     req.removeListener('close', onCloseSafe);
     if (!closed) {
       closed = true;

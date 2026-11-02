@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { z } from 'zod';
+import { REPO_URL_ALLOWED_FORMS_MESSAGE } from './modules/clone/utils/repo-url';
 
 /** Repo dir name inside a user workspace: no slashes, no traversal. */
 export const workspaceRepoSchema = z
@@ -13,26 +14,37 @@ export const workspaceRepoSchema = z
     error: 'repo must not be . or ..',
   });
 
+/** Mirrors the service-side hostile-input guards (backslash, control chars, encoded separators). */
+const REPO_URL_FORBIDDEN = /[\\\u0000-\u001f\u007f]|%2e|%2f/i;
+
 /**
- * Clone source — https:/git@/ssh:/file: URLs plus absolute local paths
- * (local paths exist only for offline fixtures/tests; production uses URLs).
- * Never logged verbatim (AppLogger masks URL credentials).
+ * Allowed shapes: https://… (no userinfo), ssh://git@host/… and
+ * git@host:path. file:/http:/local paths are rejected here.
+ */
+function isAllowedRepoUrlForm(value: string): boolean {
+  const url = value.trim();
+  if (/^https:\/\/\S+$/.test(url)) return !/^https:\/\/[^/]*@/.test(url);
+  if (/^ssh:\/\/\S+$/.test(url)) {
+    return /^ssh:\/\/git@[A-Za-z0-9.-]+(?::\d+)?\/\S+$/.test(url);
+  }
+  return /^git@[A-Za-z0-9.-]+:\S+$/.test(url);
+}
+
+/**
+ * Clone source — https://, ssh:// and git@host:path only. The service applies
+ * the authoritative host allow-list; this boundary rejects the shapes that
+ * can never be cloned. Never logged verbatim (AppLogger masks URL credentials).
  */
 export const workspaceRepoUrlSchema = z
   .string()
   .min(1, { error: 'repoUrl must be non-empty' })
   .max(2048, { error: 'repoUrl must be at most 2048 chars' })
-  .refine((s) => !s.includes('\0'), {
-    error: 'repoUrl must not contain null bytes',
+  .refine(isAllowedRepoUrlForm, {
+    error: REPO_URL_ALLOWED_FORMS_MESSAGE,
   })
-  .refine(
-    (s) =>
-      /^(https?:\/\/|git@|ssh:\/\/|file:\/\/|\/)/.test(s.trim()),
-    {
-      error:
-        'repoUrl must be https://, git@, ssh://, file:// or an absolute local path',
-    },
-  );
+  .refine((s) => !REPO_URL_FORBIDDEN.test(s), {
+    error: REPO_URL_ALLOWED_FORMS_MESSAGE,
+  });
 
 export const cloneWorkspaceSchema = z.object({
   repoUrl: workspaceRepoUrlSchema,
@@ -65,7 +77,11 @@ export const cloneStatusSchema = z.object({
 });
 
 export class CloneWorkspaceDto {
-  @ApiProperty({ example: 'https://github.com/acme/demo.git' })
+  @ApiProperty({
+    example: 'https://github.com/acme/demo.git',
+    description:
+      'Clone source: https://…, ssh://git@host/… or git@host:path (exact-host allow-list).',
+  })
   repoUrl!: string;
 
   @ApiProperty({ example: 'demo' })

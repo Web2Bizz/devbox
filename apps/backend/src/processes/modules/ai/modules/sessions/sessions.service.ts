@@ -132,7 +132,7 @@ export class SessionsService {
     private readonly access: ProjectAccessService,
     private readonly paths: WorkspacePathService,
     private readonly auth: ServeAuthService,
-    private readonly logger: AppLogger = new AppLogger('SessionsService'),
+    private readonly logger: AppLogger = new AppLogger(SessionsService.name),
   ) {}
 
   /** Same non-negative-integer query guard the mirror uses for ?limit. */
@@ -235,10 +235,16 @@ export class SessionsService {
     };
   }
 
-  /** GET /api/sessions?projectId — list scoped to the gated jail. */
-  async list(userId: string, projectId: string | undefined, cid: string): Promise<SessionInfo[]> {
-    const project = await this.requireProject(projectId, userId, cid);
-    const client = await this.sdk.create(userId, cid);
+  /**
+   * List the gated project's sessions on an already-resolved project + client
+   * (callers that already hold both must not re-run the C4 gate / re-create
+   * the sdk client).
+   */
+  private async listWithClient(
+    client: OpencodeClient,
+    project: { projectId: string; directory: string },
+    cid: string,
+  ): Promise<SessionInfo[]> {
     try {
       const [res, active] = await Promise.all([
         client.v2.session.list({ directory: project.directory }),
@@ -254,6 +260,13 @@ export class SessionsService {
       this.logger.debug((err as Error).message, cid);
       throw this.upstreamError('sessionsList', err);
     }
+  }
+
+  /** GET /api/sessions?projectId — list scoped to the gated jail. */
+  async list(userId: string, projectId: string | undefined, cid: string): Promise<SessionInfo[]> {
+    const project = await this.requireProject(projectId, userId, cid);
+    const client = await this.sdk.create(userId, cid);
+    return this.listWithClient(client, project, cid);
   }
 
   /** GET /api/sessions/status?projectId — sessionId → derived runtime status. */
@@ -477,8 +490,15 @@ export class SessionsService {
   /**
    * GET /api/sessions/events — SSE re-stream of the v2 event bus (flat
    * frames) translated via toStreamFrame. The C4 gate decides WHO may
-   * stream; the bus itself is server-global (like the mirror's /event),
-   * `session` lets the client scope rows. Shared relaySse mechanics:
+   * stream; the bus itself is server-global, so the frame filter narrows
+   * delivery to sessions of the gated project.
+   *
+   * The id set is a snapshot taken ONCE per stream (never re-listed per
+   * frame) and then maintained incrementally: `session.created` adds a
+   * session whose `location.directory` equals the project's jailed directory,
+   * `session.deleted` removes it. A project that had zero sessions at
+   * subscribe time therefore starts receiving its first session's frames.
+   * Frames without a session are dropped. Shared relaySse mechanics:
    * probe-down before headers → honest 503; downstream close → abort +
    * quiet debug, no answer.
    */
@@ -489,8 +509,10 @@ export class SessionsService {
     req: ExpressRequest,
     res: ExpressResponse,
   ): Promise<void> {
-    await this.requireProject(projectId, userId, cid);
+    const project = await this.requireProject(projectId, userId, cid);
     const client = await this.sdk.create(userId, cid);
+    const rows = await this.listWithClient(client, project, cid);
+    const allowedSessions = new Set(rows.map((row) => row.id));
     await relaySse({
       operation: 'GET /api/sessions/events',
       cid,
@@ -509,6 +531,34 @@ export class SessionsService {
         }) as unknown as Promise<{
           stream: AsyncIterable<unknown> & { return?: (v?: unknown) => Promise<unknown> };
         }>,
+      filterFrame: (frame) => {
+        const f = frame as { type?: unknown; data?: unknown; session?: unknown } | null;
+        const type = typeof f?.type === 'string' ? f.type : '';
+        const data =
+          f && typeof f.data === 'object' && f.data !== null
+            ? (f.data as Record<string, unknown>)
+            : {};
+        const sessionId = typeof data.sessionID === 'string' ? data.sessionID : undefined;
+        const infoId = typeof data.id === 'string' ? data.id : undefined;
+        if (type === 'session.created') {
+          const location = data.location as { directory?: unknown } | undefined;
+          // Ownership = the jailed directory the project gate resolved.
+          if (location?.directory === project.directory) {
+            if (sessionId) allowedSessions.add(sessionId);
+            if (infoId) allowedSessions.add(infoId);
+          }
+        } else if (type === 'session.deleted') {
+          if (sessionId) allowedSessions.delete(sessionId);
+          if (infoId) allowedSessions.delete(infoId);
+        }
+        const session =
+          typeof f?.session === 'string'
+            ? f.session
+            : type === 'session.created'
+              ? (sessionId ?? infoId)
+              : undefined;
+        return typeof session === 'string' && allowedSessions.has(session);
+      },
       mapFrame: (value) => this.toStreamFrame(value),
     });
   }

@@ -108,6 +108,12 @@ export type AppEnv = {
    * honestly. Set REPOS_ROOT in .env (see .env.example).
    */
   reposRoot: string;
+  /**
+   * Extra hosts allowed for clone repo URLs (CLONE_ALLOWED_HOSTS, comma
+   * separated), appended to the built-in github.com/gitlab.com/bitbucket.org
+   * base list. Empty array = built-in list only. Hosts compare exactly.
+   */
+  cloneAllowedHosts: Array<string>;
   /** Resolved public backend URL for the frontend (explicit or backendSocket). */
   nextPublicApiUrl: string;
   /**
@@ -268,6 +274,7 @@ export const envRawSchema = z.object({
   POSTGRES_PORT: z.string().optional(),
   PROJECTS_ROOT: z.string().optional(),
   REPOS_ROOT: z.string().optional(),
+  CLONE_ALLOWED_HOSTS: z.string().optional(),
   CORS_ORIGINS: z.string().optional(),
   REQUEST_TIMEOUT_MS: z.string().optional(),
   EXTERNAL_RETRY_MAX_ATTEMPTS: z.string().optional(),
@@ -593,6 +600,7 @@ const APP_ENV_PREFIXES = [
   "PROJECTS_ROOT",
   "REPOS_ROOT",
   "REPOS_",
+  "CLONE_",
 ] as const;
 
 /** App-prefixed keys outside the known contract (probable typos) — unrelated OS vars ignored. */
@@ -615,6 +623,30 @@ export type EnvValidation = {
    */
   warnings: string[];
 };
+
+/**
+ * Single parser for CLONE_ALLOWED_HOSTS: fills AppEnv.cloneAllowedHosts during
+ * boot validation (the clone service reads that validated field, never the
+ * raw env string).
+ */
+export function parseCloneAllowedHosts(raw: string | undefined): Array<string> {
+  const cloneHostsRaw = firstNonEmpty(raw);
+  const cloneAllowedHosts: Array<string> = [];
+  if (cloneHostsRaw) {
+    for (const entry of cloneHostsRaw.split(",")) {
+      const host = entry.trim().toLowerCase();
+      if (!host) continue;
+      if (!/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/.test(host)) {
+        throw new Error(
+          `[env] CLONE_ALLOWED_HOSTS contains an invalid host: ${JSON.stringify(host)}. ` +
+            "Set a comma-separated list of bare hostnames (see .env.example).",
+        );
+      }
+      if (!cloneAllowedHosts.includes(host)) cloneAllowedHosts.push(host);
+    }
+  }
+  return cloneAllowedHosts;
+}
 
 export function validateEnvWithWarnings(
   source: NodeJS.ProcessEnv = process.env,
@@ -1353,6 +1385,7 @@ export function validateEnvWithWarnings(
         "(reads deny with 503, creates answer 500). Set REPOS_ROOT in .env (see .env.example).",
     );
   }
+  const cloneAllowedHosts = parseCloneAllowedHosts(env.CLONE_ALLOWED_HOSTS);
   const nextPublicApiRaw = firstNonEmpty(env.NEXT_PUBLIC_API_URL);
   let nextPublicApiUrl: string;
   if (nextPublicApiRaw && !looksBroken(nextPublicApiRaw)) {
@@ -1511,6 +1544,7 @@ export function validateEnvWithWarnings(
       githubApiUrl,
       projectsRoot,
       reposRoot,
+      cloneAllowedHosts,
       nextPublicApiUrl,
       dockerRegistryUrl,
       dockerRegistryUser,

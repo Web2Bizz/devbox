@@ -101,8 +101,10 @@
  * (no sticky, no 100dvh). Mobile (<768px): single column, sidebar hidden,
  * opened via header menu trigger as fixed drawer + overlay.
  * Radius rule (DESIGN.md): Sidebar + Content use
- * border-radius: var(--radius-lg) — equal to the Header bar radius
+ * border-radius: var(--radius-xl) — equal to the Header bar radius
  * (rounded-xl → --radius-xl = --radius). Only var() refs here.
+ * Outer gutters belong to the layer (`p-2`, 0.5rem on every side); the
+ * Header carries no own offset (`sticky top-0`).
  * All colors via semantic vars only (no hex outside :root/.dark tokens). */
 body:has([data-shell='dashboard']) {
   overflow: hidden;

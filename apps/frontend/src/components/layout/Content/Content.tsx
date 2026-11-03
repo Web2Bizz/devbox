@@ -60,22 +60,28 @@ export function Content({
       data-content=""
       data-content-variant={variant}
       className={cn(
-        'w-full h-full min-w-0 min-h-0 overflow-x-clip overflow-y-auto overscroll-contain border border-border rounded-[var(--radius-xl)] bg-background',
+        'w-full h-full min-w-0 min-h-0 overflow-x-clip overflow-y-auto overscroll-contain',
         // Chat layer: `grid-area` is emitted as a whole (never layered on top
         // of the named area) — the panel takes column 2 and BOTH rows
         // (header row included) and stays under the bar (Header is z-30).
         // Only the panel height changes; its column/width stays the same.
+        // Chat has NO panel chrome (no border, no background — the thread
+        // and the fixed composer float directly on the page); every other
+        // page keeps the bordered `bg-background` card.
         variant === 'chat'
-          ? 'z-0 [grid-area:1/2/-1/3]'
-          : 'grid-area-[content]',
+          ? 'z-0 border-0 bg-transparent [grid-area:1/2/-1/3]'
+          : 'grid-area-[content] border border-border rounded-[var(--radius-xl)] bg-background',
       )}
     >
       <div
         className={cn(
           'w-full max-w-none m-0 px-4 box-border',
-          // Chat: clear the floating Header bar before the thread starts.
+          // Chat: the panel box goes edge-to-edge (under the Header —
+          // Header is z-30 above it); the thread itself clears the bar
+          // with its own top padding inside the scroller (see ChatWindow),
+          // so the first message never hides behind the bar.
           variant === 'chat'
-            ? 'pt-[calc(var(--header-height)+1rem)] pb-6'
+            ? 'pt-2 pb-2'
             : 'py-6',
         )}
       >

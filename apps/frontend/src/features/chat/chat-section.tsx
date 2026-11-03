@@ -71,19 +71,27 @@ export function ChatSection({ sessionId, projectId }: ChatSectionProps) {
           onRetry={reload}
         />
       )}
-      <ChatInput
-        onSend={handleSend}
-        onStop={handleStop}
-        sending={sending || aborting}
-        leftSlot={
-          <ModelSelector
-            projectId={projectId}
-            model={model}
-            onChange={setModel}
-            disabled={sending}
-          />
-        }
-      />
+      {/*
+        Pinned composer: `fixed` to the viewport bottom, inset to the Content
+        column (layer `p-2` + sidebar 300px + grid gap + content `px-4`).
+        `z-20` stays under the Header (`z-30`). The section `pb-36` reserves
+        scroll space so the last message never hides behind the card.
+      */}
+      <div className="fixed right-6 bottom-2 left-6 z-20 bg-background md:left-[calc(300px_+_2rem)]">
+        <ChatInput
+          onSend={handleSend}
+          onStop={handleStop}
+          sending={sending || aborting}
+          leftSlot={
+            <ModelSelector
+              projectId={projectId}
+              model={model}
+              onChange={setModel}
+              disabled={sending}
+            />
+          }
+        />
+      </div>
     </section>
   );
 }

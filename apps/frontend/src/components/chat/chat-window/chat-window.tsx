@@ -41,8 +41,12 @@ export type ChatWindowProps = {
  * (`MessageScrollerProvider autoScroll defaultScrollPosition="end"`). Rows
  * are `MessageScrollerItem`s keyed by message id; the live answer is the
  * last item with `scrollAnchor` so auto-follow tracks it while it streams.
- * The height contract stays app-owned: `max-h-[var(--chat-list-max-h,60dvh)]`
- * caps the panel so `.app-content` keeps the scroll.
+ * The height contract stays app-owned: the scroller fills the column from
+ * the very top of the panel (its box slides UNDER the Header — Header is
+ * `z-30` with a translucent `bg-card/80` + blur, so the thread visibly goes
+ * behind the bar) down to the pinned composer. The scroll content itself
+ * carries `pt-[calc(var(--header-height)_+_1rem)]`, so the first message
+ * starts below the bar and only scrolls underneath it.
  * Loading/error/empty still go through states.tsx (DESIGN §7).
  */
 export function ChatWindow({
@@ -56,7 +60,11 @@ export function ChatWindow({
 
   if (loading && messages.length === 0 && !streamingText) {
     return (
-      <div className="grid gap-2" aria-busy="true" aria-label={t.common.loadingPage}>
+      <div
+        className="grid gap-2 px-1 pt-[calc(var(--header-height)_+_1rem)]"
+        aria-busy="true"
+        aria-label={t.common.loadingPage}
+      >
         <Skeleton className="h-16" />
         <Skeleton className="h-16" />
         <Skeleton className="h-16" />
@@ -65,19 +73,35 @@ export function ChatWindow({
   }
 
   if (error && messages.length === 0 && !streamingText) {
-    return <ErrorState message={error} onRetry={onRetry} retryLabel={t.chat.retry} />;
+    return (
+      <div className="px-1 pt-[calc(var(--header-height)_+_1rem)]">
+        <ErrorState message={error} onRetry={onRetry} retryLabel={t.chat.retry} />
+      </div>
+    );
   }
 
   if (messages.length === 0 && !streamingText) {
-    return <EmptyState title={t.chat.emptyTitle} description={t.chat.emptyDesc} />;
+    // Empty thread: same viewport-bound box as the scroller
+    // (`100dvh − 9rem`, see below) so the placeholder sits in the MIDDLE
+    // of the visible area — between the bar and the pinned composer —
+    // instead of sliding under the Header. `pt` clears the bar, flex
+    // centers the copy in what remains.
+    return (
+      <div className="flex h-[calc(100dvh_-_9rem)] min-h-[20rem] items-center justify-center px-4 pt-[calc(var(--header-height)_+_1rem)]">
+        <EmptyState title={t.chat.emptyTitle} description={t.chat.emptyDesc} />
+      </div>
+    );
   }
 
   return (
     <div className="grid gap-2">
       <MessageScrollerProvider autoScroll defaultScrollPosition="end">
-        <MessageScroller className="max-h-[var(--chat-list-max-h,60dvh)] min-h-0">
+        <MessageScroller className="h-[calc(100dvh_-_9rem)] min-h-[20rem]">
           <MessageScrollerViewport aria-label={t.chat.title} className="px-1">
-            <MessageScrollerContent className="gap-1" aria-live="polite">
+            <MessageScrollerContent
+              className="gap-1 pt-[calc(var(--header-height)_+_1rem)]"
+              aria-live="polite"
+            >
               {messages.map((m) => (
                 <MessageScrollerItem key={m.id} messageId={m.id}>
                   <ChatMessageRow message={m} />

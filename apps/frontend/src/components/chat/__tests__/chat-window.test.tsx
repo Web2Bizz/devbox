@@ -5,7 +5,7 @@
  * Mapping under test (see chat-*.tsx):
  * - ChatWindow → kit `MessageScroller` (Provider autoScroll +
  *   defaultScrollPosition="end", Viewport, Content role=log, Items keyed by
- *   message id), height cap stays app-owned (`--chat-list-max-h`).
+ *   message id), viewport-bound height ends the thread at the pinned composer.
  * - ChatMessageRow{role,text} → Message align (user=end/assistant=start) +
  *   MessageHeader Badge + Bubble (secondary/muted) + MessageText,
  *   code-fences stay local <pre><code>.
@@ -105,8 +105,9 @@ describe('ChatWindow', () => {
     // Items carry the kit scroll metadata.
     const item = container.querySelector('[data-message-id="u1"]') as HTMLElement;
     expect(item).not.toBeNull();
+    // Thread fills the column down to the fixed composer (viewport-bound).
     const scroller = container.querySelector('[data-slot="message-scroller"]') as HTMLElement;
-    expect(scroller.className).toContain('--chat-list-max-h');
+    expect(scroller.className).toContain('100dvh');
   });
 
   test('streaming: kit Marker + ShimmerText status with a cursor', async () => {

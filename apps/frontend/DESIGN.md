@@ -240,7 +240,9 @@ Header (`sm:rounded-xl` в ките). Только `var()`-ссылки; hex —
 route-agnostic). Отличия РОВНО два, все остальные страницы не меняются:
 
 - `Content` (`variant="chat"` → `data-content-variant="chat"`) получает
-  `grid-row: 1 / -1` и `z-index: 0` — панель тянется на всю вертикаль
+  `grid-area: 1/2/-1/3` и `z-index: 0`, БЕЗ хрома панели (без `border`,
+  без `background` — только `overflow/scroll`; радиус при отсутствии фона
+  не играет) — панель тянется на всю вертикаль
   слоя и уходит под Header. Header остаётся `z-30` (выше панели), его
   позиция и размеры не меняются — меняется только высота `Content`.
 - Внутренний padding панели: `padding-top: calc(var(--header-height) + 1rem)`

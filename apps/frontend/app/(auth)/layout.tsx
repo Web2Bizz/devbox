@@ -29,7 +29,7 @@ export default async function AuthGroupLayout({ children }: { children: ReactNod
       </a>
       <AuthHeader />
       <main id="main-content" className="flex-1 flex flex-col min-w-0 min-h-0">
-        <div className="w-full max-w-[28rem] mx-auto box-border p-6 px-4 flex-1 flex flex-col justify-center min-h-[calc(100dvh-var(--header-height)-1.5rem)]">
+        <div className="w-full max-w-[28rem] mx-auto box-border p-6 px-4 flex-1 flex flex-col justify-center min-h-[calc(100dvh_-_var(--header-height)_-_1.5rem)]">
           {children}
         </div>
       </main>

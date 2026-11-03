@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
 import type { AppLogger } from '../../../../../../common/logger';
 import { SessionsService } from '../sessions.service';
+import { SessionHarnessService } from '../session-harness.service';
 
 const UID = '123e4567-e89b-12d3-a456-426614174001';
 const PID = '123e4567-e89b-12d3-a456-426614174003';
@@ -178,9 +179,10 @@ function harness(sessionIds: Array<string>, frames: Array<unknown>): Harness {
     },
   };
   const args: Array<unknown> = [sdk, opencode, access, {}, silentLogger()];
-  const svc = new SessionsService(
-    ...(args as unknown as ConstructorParameters<typeof SessionsService>),
+  const harnessSvc = new SessionHarnessService(
+    ...(args as unknown as ConstructorParameters<typeof SessionHarnessService>),
   );
+  const svc = new SessionsService(harnessSvc);
   return { svc, calls };
 }
 

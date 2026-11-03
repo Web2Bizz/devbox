@@ -41,7 +41,8 @@ import { SessionsService } from './sessions.service';
  * Domain session routes — /api/sessions* (VERSION_NEUTRAL under the global
  * 'api' prefix). This is the product-facing contract that replaces the
  * deprecated /api/opencode/* mirror: our names, our shapes, no opencode
- * vocabulary on the wire (SessionsService owns the translation).
+ * vocabulary on the wire (SessionHarnessService owns the translation,
+ * SessionsService is the thin facade over it).
  *
  * Auth: every route is JwtAuthGuard + the C4 project gate (projectId
  * required; strangers → 404 not_found with no existence leak). Guests →

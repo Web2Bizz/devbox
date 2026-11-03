@@ -16,7 +16,7 @@ export class AgentDto {
   @ApiProperty({ example: 'Ask' })
   name!: string;
 
-  @ApiProperty({ example: 'Answers user questions (mock)' })
+  @ApiProperty({ example: 'Answers user questions' })
   description!: string;
 }
 
@@ -24,6 +24,6 @@ export class AskAnswerDto {
   @ApiProperty({ example: 'ask' })
   agentId!: string;
 
-  @ApiProperty({ example: 'Mock answer to: What is NestJS?' })
+  @ApiProperty({ example: 'NestJS is a progressive Node.js framework…' })
   answer!: string;
 }

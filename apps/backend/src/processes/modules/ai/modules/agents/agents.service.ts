@@ -3,7 +3,7 @@ import { AskAgent } from './ask.agent';
 import type { AgentDto } from './agents.dto';
 
 /**
- * Registry of available AI agents (scaffold: Ask only, mock answers).
+ * Registry of available AI agents (Ask answers through the harness-owned runner).
  */
 @Injectable()
 export class AgentsService {
@@ -15,10 +15,15 @@ export class AgentsService {
     ];
   }
 
-  async askQuestion(agentId: string, question: string): Promise<string> {
+  async askQuestion(
+    agentId: string,
+    question: string,
+    userId: string,
+    correlationId?: string,
+  ): Promise<string> {
     if (agentId !== this.ask.id) {
       throw new NotFoundException(`Agent '${agentId}' not found`);
     }
-    return this.ask.ask(question);
+    return this.ask.ask(question, userId, correlationId);
   }
 }

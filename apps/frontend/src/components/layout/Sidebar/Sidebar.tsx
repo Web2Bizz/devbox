@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import { useState } from 'react';
+import { createContext, useContext, useState, type ReactNode } from 'react';
 import {
   Button,
   Collapsible,
@@ -202,19 +202,39 @@ export type SidebarProps = {
 };
 
 /**
+ * Close callback for custom sidebar content (the chat list): the drawer
+ * must close on navigation, exactly like `SidebarNav` does via `onNavigate`.
+ * `undefined` on desktop, where the aside is always visible.
+ */
+const SidebarCloseContext = createContext<(() => void) | undefined>(undefined);
+
+export function useSidebarClose(): (() => void) | undefined {
+  return useContext(SidebarCloseContext);
+}
+
+/**
  * Visible vertical sidebar:
  * - desktop (md+): plain <aside> grid cell — nav only (the brand row lives
  *   in the Header leadingSlot via SidebarBrand, see dashboard-shell.tsx);
  * - mobile: hidden, opened via header menu trigger as fixed drawer + overlay
  *   (drawer keeps its own SidebarBrand fallback + close button).
+ *
+ * `content` replaces the default `SidebarNav` in BOTH surfaces (the project
+ * chat list lives there on session routes — see SessionsSidebar); the
+ * override gets the drawer-close callback through `useSidebarClose()`.
  */
-export function Sidebar({ open = false, onClose, items }: SidebarProps & { items?: readonly SidebarNavItem[] }) {
+export function Sidebar({
+  open = false,
+  onClose,
+  items,
+  content,
+}: SidebarProps & { items?: readonly SidebarNavItem[]; content?: ReactNode }) {
   const { t } = useI18n();
 
   return (
     <>
-      <aside aria-label={t.nav.sections} className="hidden md:flex grid-area-[sidebar] w-[300px] h-full min-h-0 flex-col gap-6 p-6 px-4 border border-border rounded-[var(--radius-lg)] bg-[var(--sidebar,var(--card))] overflow-y-auto">
-        <SidebarNav items={items} />
+      <aside aria-label={t.nav.sections} className="hidden md:flex grid-area-[sidebar] w-[300px] h-full min-h-0 flex-col gap-6 p-6 px-4 border border-border rounded-[var(--radius-xl)] bg-[var(--sidebar,var(--card))] overflow-y-auto">
+        {content ?? <SidebarNav items={items} />}
       </aside>
 
       {open && (
@@ -224,21 +244,23 @@ export function Sidebar({ open = false, onClose, items }: SidebarProps & { items
             aria-hidden="true"
             onClick={onClose}
           />
-          <aside aria-label={t.nav.sections} className="fixed top-0 left-0 bottom-0 w-68 z-50 flex flex-col gap-6 p-6 px-4 bg-background border-r border-border overflow-y-auto">
-            <div className="flex items-start justify-between gap-2">
-              <SidebarBrand />
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={onClose}
-                aria-label={t.common.cancel}
-              >
-                ✕
-              </Button>
-            </div>
-            <SidebarNav onNavigate={onClose} items={items} />
-          </aside>
+          <SidebarCloseContext.Provider value={onClose}>
+            <aside aria-label={t.nav.sections} className="fixed top-0 left-0 bottom-0 w-68 z-50 flex flex-col gap-6 p-6 px-4 bg-background border-r border-border overflow-y-auto">
+              <div className="flex items-start justify-between gap-2">
+                <SidebarBrand />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={onClose}
+                  aria-label={t.common.cancel}
+                >
+                  ✕
+                </Button>
+              </div>
+              {content ?? <SidebarNav onNavigate={onClose} items={items} />}
+            </aside>
+          </SidebarCloseContext.Provider>
         </div>
       )}
     </>

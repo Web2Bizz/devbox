@@ -251,9 +251,23 @@ export type Dictionary = {
     runningTitle: string;
     runningDesc: string;
     create: string;
+    /** Sidebar panel heading above the chat list (session routes). */
+    chatsTitle: string;
+    /** Content-block hint: the list lives in the sidebar. */
+    pickTitle: string;
+    pickDesc: string;
     open: string;
     abort: string;
     untitled: string;
+    /** Accessible name of the clickable session row (visible name = title). */
+    openSession: (title: string) => string;
+    /** Relative-time buckets of the session row meta line (mobile parity). */
+    time: {
+      justNow: string;
+      minutesAgo: (count: number) => string;
+      hoursAgo: (count: number) => string;
+      daysAgo: (count: number) => string;
+    };
     stop: string;
     emptyAll: string;
     emptyRunning: string;
@@ -278,6 +292,8 @@ export type Dictionary = {
     modelDefault: string;
     modelClear: string;
     modelActive: string;
+    /** Jump-to-latest action of the kit MessageScroller. */
+    scrollToEnd: string;
   };
   language: {
     label: string;

@@ -3,8 +3,8 @@ import { redirect } from 'next/navigation';
 /**
  * Route: /chat → server redirect to /organizations (session = chat).
  * Chats now live at /projects/[id]/sessions/[sessionId], chosen/created
- * from SessionsTab. The t.nav.chat / t.chat.* i18n keys stay until the
- * redirect itself is removed.
+ * from the sidebar chat list (SessionsSidebar). The t.nav.chat / t.chat.*
+ * i18n keys stay until the redirect itself is removed.
  */
 export default function ChatRedirectPage() {
   redirect('/organizations');

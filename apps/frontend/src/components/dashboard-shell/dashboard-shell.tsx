@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { Button, Header } from '@web2bizz/ui/components';
 import { ThemeToggleDefault } from '@web2bizz/ui/features';
 import { Sidebar, SidebarBrand } from '../layout/Sidebar';
@@ -34,6 +35,12 @@ export type DashboardShellProps = {
   content?: Omit<ContentProps, 'children'>;
   /** Project-scoped sidebar items (project shell only; default = org hub). */
   sidebarItems?: { href: string; label: string }[];
+  /**
+   * Replaces the default nav inside the sidebar (desktop aside + mobile
+   * drawer). The project shell passes the session list here on session
+   * routes; `undefined` keeps the plain `SidebarNav`.
+   */
+  sidebar?: ReactNode;
 };
 
 type DashboardHeaderInternalProps = DashboardHeaderProps & {
@@ -55,6 +62,9 @@ type DashboardHeaderInternalProps = DashboardHeaderProps & {
  * className="app-header" keeps the grid-area hook (globals.css) + light/dark
  * tokens. The kit bar keeps its NATIVE radius/border (shape=rounded →
  * sm:rounded-xl) — no radius:0 overrides by design (see DESIGN.md).
+ * `sticky top-0`: the bar carries NO own vertical offset — the outer inset is
+ * the layer's job (`p-2` on .app-shell-container), so the bar keeps its
+ * position while the layer owns the gutters.
  * NOTE 0.25.9 breaking: kit Header dropped variant=sticky|fixed + wide +
  * wrapper helpers (positioning is now the consumer's job — sticky pinning
  * lives in globals.css `.app-header`); shape=rounded preserves the look.
@@ -138,7 +148,7 @@ function DashboardHeader({ title, breadcrumbs, user, actions, onMenu }: Dashboar
   return (
     <Header
       shape="rounded"
-      className="[grid-area:header] min-w-0 sticky top-[var(--header-sticky-top)] z-30"
+      className="[grid-area:header] min-w-0 sticky top-0 z-30"
       menuToggleSlot={menuToggle}
       leadingSlot={leading}
       trailingSlot={trailing}
@@ -161,14 +171,21 @@ function DashboardHeader({ title, breadcrumbs, user, actions, onMenu }: Dashboar
  *   (kit 0.25.9 removed the sticky wrapper — no flatten, grid-area only)
  * - inner grid, row 2: Sidebar.tsx → plain 300px grid cell (nav only, brand
  *   lives in the Header; hidden on mobile, opened via header menu trigger
- *   as drawer + overlay) + Content.tsx → <main> + .page-inner max-width
- *   wrapper, the only scrolling zone.
+ *   as drawer + overlay; `sidebar` prop replaces the nav with custom
+ *   content — the project session/chat list) + Content.tsx → <main> +
+ *   .page-inner max-width wrapper, the only scrolling zone.
  *
  * Flat URLs (/projects, /secrets, …), i18n en/ru via cookie-only dictionaries,
  * force-dynamic lives in app/(dashboard)/layout.tsx.
  */
-export function DashboardShell({ children, header, content, sidebarItems }: DashboardShellProps) {
+export function DashboardShell({ children, header, content, sidebarItems, sidebar }: DashboardShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Chat layer: separate shell variant for /…/sessions/[sessionId] — the
+  // Content panel stretches up under the Header (full vertical range) and
+  // only there. Server layouts stay route-agnostic; the variant is decided
+  // client-side off the path, like SessionsSidebar does.
+  const pathname = usePathname() ?? '';
+  const chatLayer = /\/sessions\/[^/]+\/?$/.test(pathname);
   const openSidebar = useCallback(() => setSidebarOpen(true), []);
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
 
@@ -193,14 +210,23 @@ export function DashboardShell({ children, header, content, sidebarItems }: Dash
   }, []);
 
   return (
-    <div className="mx-auto w-full max-w-none px-2 h-dvh overflow-hidden pb-4 box-border" data-shell="dashboard">
+    <div
+      className="mx-auto w-full max-w-none p-2 h-dvh overflow-hidden box-border"
+      data-shell="dashboard"
+      data-shell-variant={chatLayer ? 'chat' : undefined}
+    >
       <div className="grid grid-rows-[auto_minmax(0,1fr)] grid-cols-[300px_minmax(0,1fr)] [grid-template-areas:'header_header'_'sidebar_content'] gap-y-4 gap-x-2 h-full max-w-full box-border overflow-hidden bg-background text-foreground">
         <a href="#main-content" className="sr-only focus:not-sr-only">
           Skip to content
         </a>
         <DashboardHeader {...header} onMenu={openSidebar} />
-        <Sidebar open={sidebarOpen} onClose={closeSidebar} items={sidebarItems} />
-        <Content {...content}>{children}</Content>
+        <Sidebar open={sidebarOpen} onClose={closeSidebar} items={sidebarItems} content={sidebar} />
+        <Content
+          {...content}
+          variant={chatLayer ? 'chat' : content?.variant}
+        >
+          {children}
+        </Content>
       </div>
     </div>
   );

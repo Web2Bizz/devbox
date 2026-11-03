@@ -1,20 +1,22 @@
 /**
- * ChatWindow + ChatInput — kit 0.26.0 adapters (Message/Bubble/Marker/InputGroup).
+ * ChatWindow + ChatInput — kit 0.26.3 adapters (MessageScroller/Message/
+ * Bubble/Marker/ShimmerText/PromptInput).
  *
  * Mapping under test (see chat-*.tsx):
+ * - ChatWindow → kit `MessageScroller` (Provider autoScroll +
+ *   defaultScrollPosition="end", Viewport, Content role=log, Items keyed by
+ *   message id), height cap stays app-owned (`--chat-list-max-h`).
  * - ChatMessageRow{role,text} → Message align (user=end/assistant=start) +
- *   MessageHeader Badge (t.chat.you/assistant) + Bubble (secondary/muted),
+ *   MessageHeader Badge + Bubble (secondary/muted) + MessageText,
  *   code-fences stay local <pre><code>.
- * - ChatInput outward props unchanged → InputGroup composer
- *   (InputGroupInput textbox + InputGroupButton Send/Stop).
- * - ChatWindow list → kit rows in app-owned scroller (role=log,
- *   sticky-48px, maxHeight var); streaming row = Message + Marker
- *   shimmer + ▍ cursor; states.tsx branches untouched.
+ * - ChatInput outward props unchanged → kit PromptInput composer
+ *   (PromptInputTextarea + PromptInputSubmit that becomes Stop while
+ *   streaming).
  *
  * Covers: empty (EmptyState), loading (Skeleton), error (Alert + retry),
- * thread (kit rows + separators + code-fence), send (Enter/button via
- * onSend, clears, disabled while sending, custom placeholder),
- * streaming (Marker + cursor), autoscroll (sticks/pauses).
+ * thread (kit rows + code-fence), scroller roles + height contract,
+ * streaming (Marker + ShimmerText + cursor), send (Enter/button via onSend,
+ * clears, disabled while sending, custom placeholder).
  */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { GlobalRegistrator } from '@happy-dom/global-registrator';
@@ -25,7 +27,7 @@ try {
   // bun runs test files in one process — second register() throws, ignore.
 }
 
-const { cleanup, render, screen, fireEvent, act } = await import('@testing-library/react');
+const { cleanup, render, screen } = await import('@testing-library/react');
 const userEvent = (await import('@testing-library/user-event')).default;
 const { ChatWindow } = await import('../chat-window');
 const { ChatInput } = await import('../chat-input');
@@ -63,7 +65,7 @@ describe('ChatWindow', () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
-  test('thread: renders kit user/assistant rows with separators', async () => {
+  test('thread: renders kit user/assistant rows', async () => {
     renderWindow({
       messages: [
         { id: 'u1', role: 'user', text: 'hello' },
@@ -72,7 +74,7 @@ describe('ChatWindow', () => {
     });
     expect(await screen.findByText('hello')).toBeDefined();
     expect(await screen.findByText('hi there')).toBeDefined();
-    // Adapter testids preserved through kit Message wrapper.
+    // Adapter testids preserved through the kit Message wrapper.
     expect(screen.getByTestId('chat-message-user')).toBeDefined();
     expect(screen.getByTestId('chat-message-assistant')).toBeDefined();
     // Kit role badges via i18n labels.
@@ -90,7 +92,24 @@ describe('ChatWindow', () => {
     expect(pre?.textContent).toContain('const a = 1;');
   });
 
-  test('streaming: kit Marker status renders with a cursor', async () => {
+  test('scroller: kit MessageScroller roles + app-owned height cap', () => {
+    const { container } = renderWindow({
+      messages: [{ id: 'u1', role: 'user', text: 'go' }],
+    });
+    // Kit Viewport = role=region, Content = role=log (aria-relevant add).
+    expect(container.querySelector('[role="region"]')).not.toBeNull();
+    const log = container.querySelector('[role="log"]') as HTMLElement;
+    expect(log).not.toBeNull();
+    expect(log.getAttribute('aria-live')).toBe('polite');
+    expect(log.getAttribute('aria-relevant')).toBe('additions');
+    // Items carry the kit scroll metadata.
+    const item = container.querySelector('[data-message-id="u1"]') as HTMLElement;
+    expect(item).not.toBeNull();
+    const scroller = container.querySelector('[data-slot="message-scroller"]') as HTMLElement;
+    expect(scroller.className).toContain('--chat-list-max-h');
+  });
+
+  test('streaming: kit Marker + ShimmerText status with a cursor', async () => {
     const { container } = renderWindow({
       messages: [{ id: 'u1', role: 'user', text: 'go' }],
       streamingText: 'partial…',
@@ -98,73 +117,13 @@ describe('ChatWindow', () => {
     expect(await screen.findByTestId('chat-streaming')).toBeDefined();
     expect(await screen.findByText(/partial/)).toBeDefined();
     expect(await screen.findByText('Streaming…')).toBeDefined();
+    // Closes the thread: the live answer is the kit scroll anchor.
+    const anchor = container.querySelector('[data-scroll-anchor="true"]') as HTMLElement;
+    expect(anchor).not.toBeNull();
+    expect(anchor.getAttribute('data-message-id')).toBe('chat-streaming');
     const cursor = container.querySelector('[data-testid="chat-streaming"] .chat-cursor');
     expect(cursor).not.toBeNull();
     expect(cursor?.textContent).toContain('▍');
-  });
-
-  test('scroller: keeps role=log, aria-live and maxHeight contract', () => {
-    const { container } = renderWindow({
-      messages: [{ id: 'u1', role: 'user', text: 'go' }],
-    });
-    const scroller = container.querySelector('[role="log"]') as HTMLElement;
-    expect(scroller).not.toBeNull();
-    expect(scroller.getAttribute('aria-live')).toBe('polite');
-    expect(scroller.style.maxHeight).toContain('--chat-list-max-h');
-  });
-
-  test('autoscroll: sticks to bottom, pauses when scrolled up', () => {
-    const msgs = Array.from({ length: 5 }, (_, i) => ({
-      id: `m${i}`,
-      role: 'user' as const,
-      text: `msg ${i}`,
-    }));
-    const { container, rerender } = render(
-      <I18nProvider>
-        <ChatWindow messages={msgs} streamingText="" />
-      </I18nProvider>,
-    );
-    const scroller = container.querySelector('[role="log"]') as HTMLElement;
-    expect(scroller).not.toBeNull();
-
-    let scrollTop = 0;
-    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 1000 });
-    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 200 });
-    Object.defineProperty(scroller, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTop,
-      set: (v: number) => {
-        scrollTop = v;
-      },
-    });
-
-    // New message while stuck → pinned to bottom.
-    act(() => {
-      rerender(
-        <I18nProvider>
-          <ChatWindow
-            messages={[...msgs, { id: 'm5', role: 'user', text: 'msg 5' }]}
-            streamingText=""
-          />
-        </I18nProvider>,
-      );
-    });
-    expect(scrollTop).toBe(1000);
-
-    // Scroll up → pause: next message must NOT yank to bottom.
-    scrollTop = 0;
-    fireEvent.scroll(scroller);
-    act(() => {
-      rerender(
-        <I18nProvider>
-          <ChatWindow
-            messages={[...msgs, { id: 'm5', role: 'user', text: 'msg 5' }]}
-            streamingText="live…"
-          />
-        </I18nProvider>,
-      );
-    });
-    expect(scrollTop).toBe(0);
   });
 });
 
@@ -178,7 +137,7 @@ describe('ChatInput', () => {
       </I18nProvider>,
     );
 
-    const input = screen.getByRole('textbox') as HTMLInputElement;
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement;
     const sendBtn = screen.getByRole('button', { name: 'Send' });
     expect((sendBtn as HTMLButtonElement).disabled).toBe(true);
 
@@ -198,14 +157,33 @@ describe('ChatInput', () => {
     expect(screen.getByPlaceholderText('Ask kit…')).toBeDefined();
   });
 
-  test('sending: input disabled, Stop button calls onStop', async () => {
+  test('composer: leftSlot lands in the kit action row (Slot.Left)', () => {
+    const { container } = render(
+      <I18nProvider>
+        <ChatInput onSend={() => {}} leftSlot={<span>runner picker</span>} />
+      </I18nProvider>,
+    );
+    const form = container.querySelector('[data-slot="prompt-input"]') as HTMLElement;
+    expect(form).not.toBeNull();
+    const left = form.querySelector('[data-slot="slot-left"]') as HTMLElement;
+    expect(left).not.toBeNull();
+    expect(left.textContent).toContain('runner picker');
+    // The picker sits inside the composer card, before the submit action.
+    const submit = form.querySelector('[data-slot="prompt-input-submit"]') as HTMLElement;
+    expect(submit).not.toBeNull();
+    expect(
+      left.compareDocumentPosition(submit) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  test('sending: input disabled, stop button calls onStop', async () => {
     const onStop = mock(() => {});
     render(
       <I18nProvider>
         <ChatInput onSend={() => {}} onStop={onStop} sending />
       </I18nProvider>,
     );
-    const input = screen.getByRole('textbox') as HTMLInputElement;
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement;
     expect(input.disabled).toBe(true);
     const stopBtn = screen.getByRole('button', { name: 'Stop' });
     const user = userEvent.setup();

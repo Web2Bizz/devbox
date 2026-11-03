@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { Button } from '@web2bizz/ui/components';
 import { ChatInput, ChatWindow, ModelSelector } from '../../components/chat';
 import { ErrorState } from '../../components/states';
 import { useChat } from '../../hooks/useChat';
@@ -59,12 +58,7 @@ export function ChatSection({ sessionId, projectId }: ChatSectionProps) {
   };
 
   return (
-    <section aria-labelledby="chat-title" className="grid gap-2">
-      <h2 id="chat-title" className="text-lg font-semibold">
-        {t.chat.title}
-      </h2>
-      <p className="text-muted-foreground text-sm">{t.chat.subtitle}</p>
-      <ModelSelector projectId={projectId} model={model} onChange={setModel} disabled={sending} />
+    <section aria-label={t.chat.title} className="grid gap-2">
       {error && isEmpty ? (
         <ErrorState message={error} onRetry={reload} retryLabel={t.chat.retry} />
       ) : (
@@ -77,20 +71,19 @@ export function ChatSection({ sessionId, projectId }: ChatSectionProps) {
           onRetry={reload}
         />
       )}
-      <ChatInput onSend={handleSend} onStop={handleStop} sending={sending || aborting} />
-      {!loading && !isEmpty && (
-        <div className="flex justify-end">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={reload}
+      <ChatInput
+        onSend={handleSend}
+        onStop={handleStop}
+        sending={sending || aborting}
+        leftSlot={
+          <ModelSelector
+            projectId={projectId}
+            model={model}
+            onChange={setModel}
             disabled={sending}
-            aria-label={t.common.refresh}
-          >
-            {t.common.refresh}
-          </Button>
-        </div>
-      )}
+          />
+        }
+      />
     </section>
   );
 }

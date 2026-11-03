@@ -2,6 +2,13 @@
 
 import { useQuery } from '@tanstack/react-query';
 import type { SessionInfoModel } from '@rush-code/contracts';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@web2bizz/ui/components';
 import { useI18n } from '../../../i18n';
 import { listSessionModels } from '../../../api/sessions-client';
 import { sessionModelsQueryKey } from '../../../hooks/query-keys';
@@ -13,6 +20,17 @@ export type ModelSelectorProps = {
   disabled?: boolean;
 };
 
+/** Radix cannot carry an empty option value → sentinel for "runner default". */
+const DEFAULT_VALUE = 'default';
+
+/**
+ * Runner (model) picker on the kit `Select` (0.26.3 `components`).
+ *
+ * Sized for the composer: `size="sm"` (h-8 = `PromptInputSlot` height) and
+ * `max-w-48` (the slot's width cap), so it slots into
+ * `PromptInput.SlotActions > Slot.Left` without stretching the card. Data
+ * stays ours (`GET /api/sessions/models` via React Query + `sessionModelsQueryKey`).
+ */
 export function ModelSelector({ projectId, model, onChange, disabled }: ModelSelectorProps) {
   const { t } = useI18n();
   const { data: models = [], isLoading } = useQuery({
@@ -21,38 +39,37 @@ export function ModelSelector({ projectId, model, onChange, disabled }: ModelSel
     enabled: !!projectId,
   });
 
-  const value = model ? `${model.providerID}::${model.id}` : '';
+  const value = model ? `${model.providerID}::${model.id}` : DEFAULT_VALUE;
 
   return (
-    <div className="flex flex-wrap items-center gap-2" aria-label={t.chat.modelLabel}>
-      <select
-        id="chat-model"
-        className="rounded-md border px-2 py-1 text-sm"
-        value={value}
-        disabled={disabled || isLoading}
-        onChange={(e) => {
-          const v = e.target.value;
-          if (!v) {
-            onChange(null);
-            return;
-          }
-          const [providerID, id] = v.split('::');
-          onChange({ providerID, id });
-        }}
+    <Select
+      value={value}
+      disabled={disabled || isLoading}
+      onValueChange={(next) => {
+        if (next === DEFAULT_VALUE) {
+          onChange(null);
+          return;
+        }
+        const [providerID, id] = next.split('::');
+        if (!providerID || !id) return;
+        onChange({ providerID, id });
+      }}
+    >
+      <SelectTrigger
+        size="sm"
         aria-label={t.chat.modelLabel}
+        className="max-w-48 border-0 bg-transparent px-1.5 text-xs shadow-none"
       >
-        <option value="">{t.chat.modelDefault}</option>
+        <SelectValue placeholder={t.chat.modelDefault} />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={DEFAULT_VALUE}>{t.chat.modelDefault}</SelectItem>
         {models.map((m) => (
-          <option key={`${m.providerID}::${m.id}`} value={`${m.providerID}::${m.id}`}>
+          <SelectItem key={`${m.providerID}::${m.id}`} value={`${m.providerID}::${m.id}`}>
             {m.name || m.id}
-          </option>
+          </SelectItem>
         ))}
-      </select>
-      {model && (
-        <span className="text-muted-foreground text-xs">
-          {t.chat.modelActive}: {model.providerID}/{model.id}
-        </span>
-      )}
-    </div>
+      </SelectContent>
+    </Select>
   );
 }

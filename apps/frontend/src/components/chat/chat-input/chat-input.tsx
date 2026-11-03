@@ -1,7 +1,12 @@
 'use client';
 
-import { useState, type FormEvent, type KeyboardEvent } from 'react';
-import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@web2bizz/ui/components';
+import {
+  PromptInput,
+  PromptInputSubmit,
+  PromptInputTextarea,
+} from '@web2bizz/ui/widgets';
+import { Slot } from '@web2bizz/ui/components';
+import type { ReactNode } from 'react';
 import { useI18n } from '../../../i18n';
 
 export type ChatInputProps = {
@@ -9,71 +14,57 @@ export type ChatInputProps = {
   onStop?: () => void;
   sending?: boolean;
   placeholder?: string;
+  /**
+   * Content pinned to the START of the composer's action row — the runner
+   * (model) selector. Kit layout: `PromptInput.SlotActions` splits children
+   * into `Slot.Left` / `Slot.Right`, so the picker sits inside the card next
+   * to the send action instead of above the thread.
+   */
+  leftSlot?: ReactNode;
 };
 
 /**
- * Kit composer (`components` InputGroup): outward `ChatInputProps`
- * unchanged — trim/empty-guard, Enter→send+clear, `sending`→disabled+Stop,
- * t.chat.* labels + aria. Single-line InputGroupInput; Shift+Enter no-op.
+ * Composer on top of the kit `PromptInput` widget (0.26.3 `widgets`).
+ *
+ * Outward props are unchanged — the kit owns everything the local
+ * implementation hand-rolled: auto-growing textarea, trim/empty guard
+ * (`canSubmit`), Enter-to-submit (`submitKey="enter"`), submit↔stop swap
+ * while `isStreaming` + `onCancel`, and clearing after a successful submit.
+ * `disabled={sending}` keeps the old "input locked while streaming" contract
+ * while `onStop` still fires through the stop button.
  */
-export function ChatInput({ onSend, onStop, sending = false, placeholder }: ChatInputProps) {
+export function ChatInput({
+  onSend,
+  onStop,
+  sending = false,
+  placeholder,
+  leftSlot,
+}: ChatInputProps) {
   const { t } = useI18n();
-  const [value, setValue] = useState('');
-  const trimmed = value.trim();
-  const canSend = !sending && trimmed.length > 0;
   const resolvedPlaceholder = placeholder ?? t.chat.placeholder;
 
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    if (!canSend) return;
-    void onSend(trimmed);
-    setValue('');
-  };
-
-  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      if (!canSend) return;
-      void onSend(trimmed);
-      setValue('');
-    }
-  };
-
   return (
-    <form onSubmit={submit} className="flex items-center gap-2" aria-label={t.chat.title}>
-      <InputGroup className="flex-1">
-        <InputGroupInput
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={resolvedPlaceholder}
-          disabled={sending}
-          aria-label={resolvedPlaceholder}
-          aria-busy={sending}
-        />
-        <InputGroupAddon align="inline-end">
-          {sending ? (
-            <InputGroupButton
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={onStop}
-              aria-label={t.chat.stop}
-            >
-              {t.chat.stop}
-            </InputGroupButton>
-          ) : (
-            <InputGroupButton
-              type="submit"
-              size="sm"
-              disabled={!canSend}
-              aria-label={t.chat.send}
-            >
-              {t.chat.send}
-            </InputGroupButton>
-          )}
-        </InputGroupAddon>
-      </InputGroup>
-    </form>
+    <PromptInput
+      aria-label={t.chat.title}
+      onSubmit={(value) => {
+        void onSend(value);
+      }}
+      onCancel={onStop}
+      isStreaming={sending}
+      disabled={sending}
+      submitKey="enter"
+      clearOnSubmit
+      minHeight={44}
+      maxHeight={200}
+    >
+      <PromptInputTextarea
+        placeholder={resolvedPlaceholder}
+        aria-label={resolvedPlaceholder}
+      />
+      <PromptInput.SlotActions>
+        {leftSlot ? <Slot.Left>{leftSlot}</Slot.Left> : null}
+        <PromptInputSubmit label={t.chat.send} stopLabel={t.chat.stop} />
+      </PromptInput.SlotActions>
+    </PromptInput>
   );
 }

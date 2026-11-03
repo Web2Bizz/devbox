@@ -1,8 +1,23 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
-import { Badge, Separator, Skeleton } from '@web2bizz/ui/components';
-import { Bubble, BubbleContent, Marker, MarkerContent, Message, MessageContent, MessageHeader } from '@web2bizz/ui/widgets';
+import { Badge, Skeleton } from '@web2bizz/ui/components';
+import {
+  Bubble,
+  BubbleContent,
+  Marker,
+  MarkerContent,
+  Message,
+  MessageContent,
+  MessageHeader,
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+  MessageText,
+  ShimmerText,
+} from '@web2bizz/ui/widgets';
 import { EmptyState, ErrorState } from '../../states';
 import type { ChatMessage } from '../../../hooks/useChat';
 import { useI18n } from '../../../i18n';
@@ -17,16 +32,18 @@ export type ChatWindowProps = {
   onRetry?: () => void;
 };
 
-const STICK_THRESHOLD_PX = 48;
-
 /**
- * Kit thread list (DESIGN §6 — linear rows + Separator, no Cards).
- * Rows are `ChatMessageRow` kit adapters (Message/Bubble); scroll
- * container stays app-owned to keep the role=log / sticky-48px /
- * maxHeight contracts (kit MessageScroller anchor semantics would
- * replace them — rows use kit, scroller stays custom).
- * `streamingText` renders as a live kit assistant row with a Marker
- * status + block cursor. Loading/error/empty go through states.tsx.
+ * Thread list on top of the kit `MessageScroller` (0.26.3 `widgets`).
+ *
+ * The kit scroller replaces the hand-rolled one: anchoring, streaming
+ * auto-follow, `scroll-fade-*` edges, the "jump to latest" button and the
+ * `role=log` / `aria-relevant` content semantics all come from it
+ * (`MessageScrollerProvider autoScroll defaultScrollPosition="end"`). Rows
+ * are `MessageScrollerItem`s keyed by message id; the live answer is the
+ * last item with `scrollAnchor` so auto-follow tracks it while it streams.
+ * The height contract stays app-owned: `max-h-[var(--chat-list-max-h,60dvh)]`
+ * caps the panel so `.app-content` keeps the scroll.
+ * Loading/error/empty still go through states.tsx (DESIGN §7).
  */
 export function ChatWindow({
   messages,
@@ -36,21 +53,6 @@ export function ChatWindow({
   onRetry,
 }: ChatWindowProps) {
   const { t } = useI18n();
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const stuckRef = useRef(true);
-
-  const handleScroll = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    stuckRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD_PX;
-  };
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (el && stuckRef.current) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, [messages, streamingText]);
 
   if (loading && messages.length === 0 && !streamingText) {
     return (
@@ -71,54 +73,61 @@ export function ChatWindow({
   }
 
   return (
-    <div
-      ref={scrollRef}
-      onScroll={handleScroll}
-      className="overflow-y-auto overscroll-contain"
-      style={{ maxHeight: 'var(--chat-list-max-h, 60dvh)' }}
-      role="log"
-      aria-live="polite"
-      aria-label={t.chat.title}
-    >
-      <ul className="grid">
-        {messages.map((m, i) => (
-          <li key={m.id}>
-            <ChatMessageRow message={m} />
-            {(i < messages.length - 1 || streamingText) && <Separator className="my-1" />}
-          </li>
-        ))}
-        {streamingText && (
-          <li>
-            <Message align="start" className="py-3" data-testid="chat-streaming">
-              <MessageHeader>
-                <Badge color="success" variant="soft">
-                  {t.chat.assistant}
-                </Badge>
-                <Marker>
-                  <MarkerContent className="shimmer">{t.chat.streaming}</MarkerContent>
-                </Marker>
-              </MessageHeader>
-              <MessageContent>
-                <Bubble variant="muted" align="start">
-                  <BubbleContent>
-                    <p className="whitespace-pre-wrap text-sm leading-relaxed">
-                      {streamingText}
-                      <span aria-hidden="true" className="chat-cursor animate-pulse text-muted-foreground">
-                        ▍
-                      </span>
-                    </p>
-                  </BubbleContent>
-                </Bubble>
-              </MessageContent>
-            </Message>
-          </li>
-        )}
-      </ul>
-      {error && onRetry && (
-        <div className="mt-3">
-          <ErrorState message={error} onRetry={onRetry} retryLabel={t.chat.retry} />
-        </div>
-      )}
+    <div className="grid gap-2">
+      <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+        <MessageScroller className="max-h-[var(--chat-list-max-h,60dvh)] min-h-0">
+          <MessageScrollerViewport aria-label={t.chat.title} className="px-1">
+            <MessageScrollerContent className="gap-1" aria-live="polite">
+              {messages.map((m) => (
+                <MessageScrollerItem key={m.id} messageId={m.id}>
+                  <ChatMessageRow message={m} />
+                </MessageScrollerItem>
+              ))}
+              {streamingText && (
+                <MessageScrollerItem messageId="chat-streaming" scrollAnchor>
+                  <Message align="start" className="py-3" data-testid="chat-streaming">
+                    <MessageHeader>
+                      <Badge color="success" variant="soft">
+                        {t.chat.assistant}
+                      </Badge>
+                      <Marker>
+                        <MarkerContent>
+                          <ShimmerText>{t.chat.streaming}</ShimmerText>
+                        </MarkerContent>
+                      </Marker>
+                    </MessageHeader>
+                    <MessageContent>
+                      <Bubble variant="muted" align="start">
+                        <BubbleContent>
+                          <MessageText className="whitespace-pre-wrap text-sm leading-relaxed">
+                            {streamingText}
+                          </MessageText>
+                          <span
+                            aria-hidden="true"
+                            className="chat-cursor animate-pulse text-muted-foreground"
+                          >
+                            ▍
+                          </span>
+                        </BubbleContent>
+                      </Bubble>
+                    </MessageContent>
+                  </Message>
+                </MessageScrollerItem>
+              )}
+            </MessageScrollerContent>
+          </MessageScrollerViewport>
+          <MessageScrollerButton
+            direction="end"
+            variant="outline"
+            size="sm"
+            className="absolute right-3 bottom-3"
+            aria-label={t.chat.scrollToEnd}
+          >
+            {t.chat.scrollToEnd}
+          </MessageScrollerButton>
+        </MessageScroller>
+      </MessageScrollerProvider>
+      {error && onRetry && <ErrorState message={error} onRetry={onRetry} retryLabel={t.chat.retry} />}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { DbService } from './db/db.service';
 import { CryptoService } from './crypto/crypto.service';
 import { OpencodeKeysService } from './keys/opencode-keys.service';
 import { SessionRunnerService } from './zen/session-runner.service';
+import { JevService } from './zen/jev.service';
 import { HealthRegistry } from './health/health-registry';
 
 /**
@@ -20,6 +21,9 @@ import { HealthRegistry } from './health/health-registry';
  * - OpencodeKeysService — per-user OpenCode key store (ciphertext only).
  * - SessionRunnerService — direct per-user Zen model transport (harness-owned
  *   runner; sessions + agents share it, no domain imports).
+  * - JevService — paid System One choice router (ask vs auto; never throws —
+  *   Jev failures degrade to heuristic-fallback, the error envelope is
+  *   untouched).
  * - HealthRegistry — probe registry for HealthController (health/ stays
  *   dependency-free: probes register themselves from their own modules).
  */
@@ -32,6 +36,7 @@ import { HealthRegistry } from './health/health-registry';
     CryptoService,
     OpencodeKeysService,
     SessionRunnerService,
+    JevService,
     HealthRegistry,
   ],
   exports: [
@@ -41,6 +46,7 @@ import { HealthRegistry } from './health/health-registry';
     CryptoService,
     OpencodeKeysService,
     SessionRunnerService,
+    JevService,
     HealthRegistry,
   ],
 })

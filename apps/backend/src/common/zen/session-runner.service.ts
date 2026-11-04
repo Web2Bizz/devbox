@@ -32,6 +32,13 @@ export type ZenChatOptions = {
   /** Traced through every attempt log line (never logged as a secret). */
   correlationId?: string;
   /**
+   * OpenAI-compatible system role: when set, messages become
+   * [{role:'system',content:system},{role:'user',content:prompt}] in both
+   * the stream and the fallback plain POST bodies; omitted → user-only
+   * messages exactly as before (additive, default unchanged).
+   */
+  system?: string;
+  /**
    * Progressive sink: the stream:true attempt calls it per SSE delta chunk
    * (the harness tails message.part.delta frames through it while the answer
    * is still arriving). Best-effort — a throwing sink never fails the answer.
@@ -239,7 +246,16 @@ export class SessionRunnerService {
     // accumulate here AND flow through onDelta). A stream that dies before the
     // first token falls back to one plain POST below (previous behavior);
     // after the first token the accumulator is the answer.
-    const streamed = await this.chatStream(apiKey, model, prompt, cid, opts.onDelta);
+    // OpenAI-compatible system role (optional): system-first messages in
+    // both bodies; without `system` the payload stays user-only as before.
+    const messages =
+      opts.system && opts.system.length > 0
+        ? [
+            { role: 'system', content: opts.system },
+            { role: 'user', content: prompt },
+          ]
+        : [{ role: 'user', content: prompt }];
+    const streamed = await this.chatStream(apiKey, model, messages, cid, opts.onDelta);
     if (streamed !== null) {
       this.logger.info('[zen] chat answered stream', cid);
       return streamed;
@@ -252,7 +268,7 @@ export class SessionRunnerService {
           headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
           body: JSON.stringify({
             model,
-            messages: [{ role: 'user', content: prompt }],
+            messages,
           }),
         },
         { service: 'zen', operation: 'chat', correlationId: cid, timeoutMs: CHAT_TIMEOUT_MS },
@@ -308,7 +324,7 @@ export class SessionRunnerService {
   private async chatStream(
     apiKey: string,
     model: string,
-    prompt: string,
+    messages: ReadonlyArray<{ role: string; content: string }>,
     cid: string | undefined,
     onDelta?: (chunk: string) => void,
   ): Promise<string | null> {
@@ -321,7 +337,7 @@ export class SessionRunnerService {
           headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
           body: JSON.stringify({
             model,
-            messages: [{ role: 'user', content: prompt }],
+            messages,
             stream: true,
           }),
         },

@@ -296,6 +296,12 @@ export type Dictionary = {
     agentDefault: string;
     /** Jump-to-latest action of the kit MessageScroller. */
     scrollToEnd: string;
+    /** Rotating "agent is working" phrases while sending && !streamingText. */
+    thinking: string[];
+    /** Accessible name of the assistant-message like toggle. */
+    like: string;
+    /** Accessible name of the assistant-message dislike toggle. */
+    dislike: string;
   };
   language: {
     label: string;

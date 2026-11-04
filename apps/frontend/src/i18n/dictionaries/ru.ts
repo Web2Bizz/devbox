@@ -291,6 +291,14 @@ export const ru: Dictionary = {
     agentLabel: 'Агент',
     agentDefault: 'Спросить',
     scrollToEnd: 'К последнему сообщению',
+    thinking: [
+      'Думаю…',
+      'Смотрю проект…',
+      'Проверяю контекст…',
+      'Собираю ответ…',
+    ],
+    like: 'Нравится',
+    dislike: 'Не нравится',
   },
   language: {
     label: 'Язык',

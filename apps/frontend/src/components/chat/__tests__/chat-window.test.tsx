@@ -7,16 +7,19 @@
  *   defaultScrollPosition="end", Viewport, Content role=log, Items keyed by
  *   message id), viewport-bound height ends the thread at the pinned composer.
  * - ChatMessageRow{role,text} → Message align (user=end/assistant=start) +
- *   MessageHeader Badge + Bubble (secondary/muted) + MessageText,
+ *   Bubble (secondary/ghost transparent) + MessageText,
  *   code-fences stay local <pre><code>.
  * - ChatInput outward props unchanged → kit PromptInput composer
  *   (PromptInputTextarea + PromptInputSubmit that becomes Stop while
  *   streaming).
  *
  * Covers: empty (EmptyState), loading (Skeleton), error (Alert + retry),
- * thread (kit rows + code-fence), scroller roles + height contract,
- * streaming (Marker + ShimmerText + cursor), send (Enter/button via onSend,
- * clears, disabled while sending, custom placeholder).
+ * thread (kit rows + code-fence + no role badges + ghost assistant bubble),
+ * scroller roles + height contract,
+ * streaming (ghost bubble + ShimmerText status below text + cursor), thinking
+ * (sending && !streamingText bare ShimmerText line with rotating phrases),
+ * send (Enter/button via onSend, clears, disabled while sending, custom
+ * placeholder).
  */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { GlobalRegistrator } from '@happy-dom/global-registrator';
@@ -65,6 +68,22 @@ describe('ChatWindow', () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
+  test('error: replaces a non-empty thread instead of rendering under it', async () => {
+    const onRetry = mock(() => {});
+    const user = userEvent.setup();
+    renderWindow({
+      messages: [{ id: 'u1', role: 'user', text: 'hello' }],
+      error: 'boom',
+      onRetry,
+    });
+    expect(await screen.findByText('boom')).toBeDefined();
+    // The thread is gone — the alert is the only body, so it cannot slide
+    // under the fixed composer.
+    expect(screen.queryByText('hello')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
   test('thread: renders kit user/assistant rows', async () => {
     renderWindow({
       messages: [
@@ -77,9 +96,58 @@ describe('ChatWindow', () => {
     // Adapter testids preserved through the kit Message wrapper.
     expect(screen.getByTestId('chat-message-user')).toBeDefined();
     expect(screen.getByTestId('chat-message-assistant')).toBeDefined();
-    // Kit role badges via i18n labels.
-    expect(await screen.findByText('You')).toBeDefined();
-    expect(await screen.findByText('Assistant')).toBeDefined();
+    // No role badges anymore.
+    expect(screen.queryByText('You')).toBeNull();
+    expect(screen.queryByText('Assistant')).toBeNull();
+  });
+
+  test('thread: assistant message renders a ghost (transparent) bubble', async () => {
+    const { container } = renderWindow({
+      messages: [{ id: 'a1', role: 'assistant', text: 'hi there' }],
+    });
+    expect(await screen.findByText('hi there')).toBeDefined();
+    const content = container.querySelector('[data-slot="bubble-content"]') as HTMLElement;
+    expect(content).not.toBeNull();
+    expect(content.className).not.toContain('bg-muted');
+    expect(screen.queryByText('Assistant')).toBeNull();
+  });
+
+  test('thread: assistant message exposes like/dislike toggles, user does not', async () => {
+    renderWindow({
+      messages: [
+        { id: 'u1', role: 'user', text: 'hello' },
+        { id: 'a1', role: 'assistant', text: 'hi there' },
+      ],
+    });
+    expect(await screen.findByText('hi there')).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Like' })).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Dislike' })).toBeDefined();
+  });
+
+  test('thread: user message has no like/dislike toggles', async () => {
+    renderWindow({
+      messages: [{ id: 'u1', role: 'user', text: 'hello' }],
+    });
+    expect(await screen.findByText('hello')).toBeDefined();
+    expect(screen.queryByRole('button', { name: 'Like' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Dislike' })).toBeNull();
+  });
+
+  test('feedback: like and dislike are mutually exclusive', async () => {
+    const user = userEvent.setup();
+    renderWindow({
+      messages: [{ id: 'a1', role: 'assistant', text: 'hi there' }],
+    });
+    expect(await screen.findByText('hi there')).toBeDefined();
+    const like = screen.getByRole('button', { name: 'Like' });
+    const dislike = screen.getByRole('button', { name: 'Dislike' });
+    expect(like.getAttribute('aria-pressed')).toBe('false');
+    await user.click(like);
+    expect(like.getAttribute('aria-pressed')).toBe('true');
+    expect(dislike.getAttribute('aria-pressed')).toBe('false');
+    await user.click(dislike);
+    expect(like.getAttribute('aria-pressed')).toBe('false');
+    expect(dislike.getAttribute('aria-pressed')).toBe('true');
   });
 
   test('thread: code fences render as pre/code blocks inside kit Bubble', async () => {
@@ -110,7 +178,7 @@ describe('ChatWindow', () => {
     expect(scroller.className).toContain('100dvh');
   });
 
-  test('streaming: kit Marker + ShimmerText status with a cursor', async () => {
+  test('streaming: ghost bubble + ShimmerText status below the text', async () => {
     const { container } = renderWindow({
       messages: [{ id: 'u1', role: 'user', text: 'go' }],
       streamingText: 'partial…',
@@ -125,6 +193,46 @@ describe('ChatWindow', () => {
     const cursor = container.querySelector('[data-testid="chat-streaming"] .chat-cursor');
     expect(cursor).not.toBeNull();
     expect(cursor?.textContent).toContain('▍');
+    // The shimmer status sits AFTER the streamed text in the DOM.
+    const status = container.querySelector('[data-testid="chat-streaming-status"]') as HTMLElement;
+    const text = cursor as HTMLElement;
+    expect(status).not.toBeNull();
+    expect(
+      text.compareDocumentPosition(status) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  test('thinking: a bare ShimmerText status closes the thread, no badge', async () => {
+    const { container } = renderWindow({
+      messages: [{ id: 'u1', role: 'user', text: 'go' }],
+      sending: true,
+    });
+    const thinking = await screen.findByTestId('chat-thinking');
+    expect(thinking).toBeDefined();
+    expect(thinking.getAttribute('aria-busy')).toBe('true');
+    // First rotating phrase lives in the kit ShimmerText; no role badge.
+    expect(await screen.findByText('Thinking…')).toBeDefined();
+    expect(screen.queryByText('Assistant')).toBeNull();
+    // The live placeholder closes the thread as the kit scroll anchor.
+    const anchor = container.querySelector('[data-scroll-anchor="true"]') as HTMLElement;
+    expect(anchor).not.toBeNull();
+    expect(anchor.getAttribute('data-message-id')).toBe('chat-thinking');
+  });
+
+  test('thinking: first request on an empty thread skips the empty state', async () => {
+    renderWindow({ sending: true });
+    expect(await screen.findByTestId('chat-thinking')).toBeDefined();
+    expect(screen.queryByText('Start a conversation')).toBeNull();
+  });
+
+  test('thinking: placeholder disappears once streamingText arrives', async () => {
+    renderWindow({
+      messages: [{ id: 'u1', role: 'user', text: 'go' }],
+      sending: true,
+      streamingText: 'partial…',
+    });
+    expect(await screen.findByTestId('chat-streaming')).toBeDefined();
+    expect(screen.queryByTestId('chat-thinking')).toBeNull();
   });
 });
 

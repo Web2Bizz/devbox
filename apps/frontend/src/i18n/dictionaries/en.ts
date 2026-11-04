@@ -291,6 +291,14 @@ export const en: Dictionary = {
     agentLabel: 'Agent',
     agentDefault: 'Ask',
     scrollToEnd: 'Jump to latest',
+    thinking: [
+      'Thinking…',
+      'Looking at the project…',
+      'Checking context…',
+      'Composing the answer…',
+    ],
+    like: 'Like',
+    dislike: 'Dislike',
   },
   language: {
     label: 'Language',

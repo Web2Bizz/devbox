@@ -1,14 +1,11 @@
 'use client';
 
-import { Badge, Skeleton } from '@web2bizz/ui/components';
+import { Skeleton } from '@web2bizz/ui/components';
 import {
   Bubble,
   BubbleContent,
-  Marker,
-  MarkerContent,
   Message,
   MessageContent,
-  MessageHeader,
   MessageScroller,
   MessageScrollerButton,
   MessageScrollerContent,
@@ -22,6 +19,7 @@ import { EmptyState, ErrorState } from '../../states';
 import type { ChatMessage } from '../../../hooks/useChat';
 import { useI18n } from '../../../i18n';
 import { ChatMessageRow } from '../chat-message';
+import { AgentThinking } from './agent-thinking';
 
 export type ChatWindowProps = {
   messages: ChatMessage[];
@@ -48,15 +46,33 @@ export type ChatWindowProps = {
  * carries `pt-[calc(var(--header-height)_+_1rem)]`, so the first message
  * starts below the bar and only scrolls underneath it.
  * Loading/error/empty still go through states.tsx (DESIGN §7).
+ *
+ * Role badges are gone: the thread is a plain list of chat rows. The agent
+ * status (thinking / streaming) lives UNDER the assistant message, as in
+ * the mobile app — the thinking row is a bare `ShimmerText` line and the
+ * streaming row renders its `ShimmerText` after the ghost bubble, not in a
+ * header marker.
+ *
+ * Error replaces the thread instead of being appended below it. The
+ * scroller already fills the viewport down to the pinned composer
+ * (fixed, `z-20`, `chat-section.tsx`), so anything rendered after the
+ * scroller lands under/below the composer and is invisible. The error
+ * branch is therefore checked first and renders `ErrorState` in the same
+ * viewport-bound box as loading/empty (`100dvh − 9rem`, `min-h`, `pt`),
+ * so the alert sits in the visible area above the composer. `onRetry` is
+ * passed through optional — `ErrorState` only draws the button when the
+ * callback exists.
  */
 export function ChatWindow({
   messages,
   streamingText,
   loading = false,
+  sending = false,
   error = null,
   onRetry,
 }: ChatWindowProps) {
   const { t } = useI18n();
+  const thinking = sending && !streamingText;
 
   if (loading && messages.length === 0 && !streamingText) {
     return (
@@ -72,15 +88,15 @@ export function ChatWindow({
     );
   }
 
-  if (error && messages.length === 0 && !streamingText) {
+  if (error) {
     return (
-      <div className="px-1 pt-[calc(var(--header-height)_+_1rem)]">
+      <div className="h-[calc(100dvh_-_9rem)] min-h-[20rem] px-1 pt-[calc(var(--header-height)_+_1rem)]">
         <ErrorState message={error} onRetry={onRetry} retryLabel={t.chat.retry} />
       </div>
     );
   }
 
-  if (messages.length === 0 && !streamingText) {
+  if (messages.length === 0 && !streamingText && !thinking) {
     // Empty thread: same viewport-bound box as the scroller
     // (`100dvh − 9rem`, see below) so the placeholder sits in the MIDDLE
     // of the visible area — between the bar and the pinned composer —
@@ -107,21 +123,18 @@ export function ChatWindow({
                   <ChatMessageRow message={m} />
                 </MessageScrollerItem>
               ))}
+              {thinking && (
+                <MessageScrollerItem messageId="chat-thinking" scrollAnchor>
+                  <div data-testid="chat-thinking" aria-busy="true" className="py-2">
+                    <AgentThinking />
+                  </div>
+                </MessageScrollerItem>
+              )}
               {streamingText && (
                 <MessageScrollerItem messageId="chat-streaming" scrollAnchor>
                   <Message align="start" className="py-3" data-testid="chat-streaming">
-                    <MessageHeader>
-                      <Badge color="success" variant="soft">
-                        {t.chat.assistant}
-                      </Badge>
-                      <Marker>
-                        <MarkerContent>
-                          <ShimmerText>{t.chat.streaming}</ShimmerText>
-                        </MarkerContent>
-                      </Marker>
-                    </MessageHeader>
                     <MessageContent>
-                      <Bubble variant="muted" align="start">
+                      <Bubble variant="ghost" align="start">
                         <BubbleContent>
                           <MessageText className="whitespace-pre-wrap text-sm leading-relaxed">
                             {streamingText}
@@ -134,6 +147,9 @@ export function ChatWindow({
                           </span>
                         </BubbleContent>
                       </Bubble>
+                      <div className="pt-1" data-testid="chat-streaming-status">
+                        <ShimmerText>{t.chat.streaming}</ShimmerText>
+                      </div>
                     </MessageContent>
                   </Message>
                 </MessageScrollerItem>
@@ -151,7 +167,6 @@ export function ChatWindow({
           </MessageScrollerButton>
         </MessageScroller>
       </MessageScrollerProvider>
-      {error && onRetry && <ErrorState message={error} onRetry={onRetry} retryLabel={t.chat.retry} />}
     </div>
   );
 }

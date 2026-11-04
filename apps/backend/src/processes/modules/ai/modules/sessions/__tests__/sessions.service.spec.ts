@@ -178,7 +178,27 @@ function harness(sessionIds: Array<string>, frames: Array<unknown>): Harness {
       return { projectId, directory: DIR };
     },
   };
-  const args: Array<unknown> = [sdk, opencode, access, {}, silentLogger()];
+  // History store is empty here: these checks exercise the live-stand path.
+  const history = {
+    async listLocalSessions(): Promise<Array<unknown>> {
+      return [];
+    },
+    async listSessionIdsWithMessages(): Promise<Array<string>> {
+      return [];
+    },
+    async listAgents(): Promise<Map<string, string>> {
+      return new Map();
+    },
+  } as unknown as ConstructorParameters<typeof SessionHarnessService>[4];
+  const args: Array<unknown> = [
+    sdk,
+    opencode,
+    access,
+    {},
+    history,
+    undefined,
+    silentLogger(),
+  ];
   const harnessSvc = new SessionHarnessService(
     ...(args as unknown as ConstructorParameters<typeof SessionHarnessService>),
   );

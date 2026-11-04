@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
 import { OrganizationsModule } from '../../../../../organizations/organizations.module';
+import { AgentsModule } from '../agents/agents.module';
 import { OpencodeModule } from '../opencode/opencode.module';
 import { SessionHarnessService } from './session-harness.service';
+import { SessionHistoryRepository } from './session-history.repository';
 import { SessionsController } from './sessions.controller';
 import { SessionsService } from './sessions.service';
 
@@ -22,8 +24,8 @@ import { SessionsService } from './sessions.service';
  * ProjectAccessService.resolveProjectDirectory.
  */
 @Module({
-  imports: [OpencodeModule, OrganizationsModule],
+  imports: [AgentsModule, OpencodeModule, OrganizationsModule],
   controllers: [SessionsController],
-  providers: [SessionHarnessService, SessionsService],
+  providers: [SessionHarnessService, SessionHistoryRepository, SessionsService],
 })
 export class SessionsModule {}

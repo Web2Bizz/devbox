@@ -5,7 +5,13 @@
  * - projects: registry of projects (chats/sessions live underneath).
  * - project_chats: chats bound to a project (FK RESTRICT on project delete).
  * - project_sessions: sessions bound to project (+ optional chat),
- *   RESTRICT on project delete, SET NULL on chat delete.
+ *   RESTRICT on project delete, SET NULL on chat delete. `origin` marks who
+ *   owns the row: 'upstream' (lives on the opencode serve stand) or
+ *   'harness' (created by the harness while the stand was unreachable).
+ * - session_messages: durable chat history keyed by the DOMAIN session id
+ *   (upstream `ses_*` or a harness uuid) — text column, NOT uuid, because
+ *   upstream ids are not uuids. project_id carries the gate scope.
+ * - session_agents: the agent chosen for a session (one row per session id).
  * - github_installations: multi-tenant GitHub App installs — one row per
  *   GitHub installation (unique installation_id), linked to our userId
  *   (nullable until users table exists; MVP resolves a mock userId from
@@ -23,7 +29,7 @@
  *
  * Soft-delete rule (project rule): rows are NEVER physically deleted —
  * removal sets `deleted_at = now()` on organizations / projects /
- * project_chats / project_sessions. Reads hide such rows with
+ * project_chats / project_sessions / session_messages. Reads hide such rows with
  * `isNull(<table>.deletedAt)` (opt-in `includeDeleted` where the API needs
  * history). projects.org_id and the chats/sessions project_id FKs are
  * ON DELETE RESTRICT so hard deletes fail instead of wiping history.
@@ -95,6 +101,10 @@ export const projectSessions = pgTable("project_sessions", {
   }),
   status: text("status").notNull().default("open"),
   metadata: jsonb("metadata").$type<Record<string, unknown> | null>(),
+  // Session ownership: 'upstream' (the row only mirrors a serve-stand
+  // session) vs 'harness' (created locally while the stand was unreachable).
+  // Existing rows predate the split and are upstream sessions.
+  origin: text("origin").notNull().default("upstream"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -104,9 +114,64 @@ export const projectSessions = pgTable("project_sessions", {
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });
 
+/**
+ * Durable session chat history.
+ *
+ * Separate from project_sessions because the two id domains differ:
+ * project_sessions.id is a uuid, while messages are addressed by the DOMAIN
+ * session id (upstream `ses_*` or a harness uuid) — hence a text session_id.
+ * project_id keeps every row inside the C4 gate scope (messages are never
+ * read across projects) and RESTRICTs a hard project delete, matching the
+ * soft-delete rule used by every history table.
+ */
+export const sessionMessages = pgTable(
+  "session_messages",
+  {
+    id: text("id").primaryKey(),
+    // Domain session id: `ses_*` (upstream) or a uuid (harness) — never a
+    // uuid column, so both id shapes are addressable.
+    sessionId: text("session_id").notNull(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "restrict" }),
+    // FK-less text, same convention as projects.owner_id /
+    // github_installations.user_id / refresh_tokens.user_id.
+    userId: text("user_id").notNull(),
+    role: text("role").notNull(),
+    agentId: text("agent_id"),
+    text: text("text").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("session_messages_session_idx").on(t.sessionId, t.createdAt),
+    index("session_messages_project_idx").on(t.projectId),
+  ],
+);
+
+/**
+ * Agent chosen per session (upserted on create/explicit per-turn agentId).
+ * session_id is the same text domain id as session_messages.session_id, so
+ * the choice survives a backend restart for both upstream and harness rows.
+ */
+export const sessionAgents = pgTable("session_agents", {
+  sessionId: text("session_id").primaryKey(),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "restrict" }),
+  agentId: text("agent_id").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
 export type ProjectRow = typeof projects.$inferSelect;
 export type ProjectChatRow = typeof projectChats.$inferSelect;
 export type ProjectSessionRow = typeof projectSessions.$inferSelect;
+export type SessionMessageRow = typeof sessionMessages.$inferSelect;
+export type SessionAgentRow = typeof sessionAgents.$inferSelect;
 
 /**
  * Multi-tenant GitHub App installations (durable contract for the

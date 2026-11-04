@@ -13,6 +13,8 @@ import {
   projects,
   projectSessions,
   refreshTokens,
+  sessionAgents,
+  sessionMessages,
   userOpencodeKeys,
   users,
 } from "./schema";
@@ -86,6 +88,8 @@ const DRIZZLE_TABLES = [
   projects,
   projectChats,
   projectSessions,
+  sessionMessages,
+  sessionAgents,
   githubInstallations,
   users,
   userOpencodeKeys,

@@ -11,7 +11,13 @@ import {
 } from '../opencode/modules/auth/serve-auth.service';
 import { AppLogger } from '../../../../../common/logger';
 import { relaySse } from '../../../../../common/sse/sse-relay';
-import { fromStatus, fromUnknown } from '../../../../../common/external/external-error';
+import {
+  ExternalServiceError,
+  fromStatus,
+  fromUnknown,
+} from '../../../../../common/external/external-error';
+import { AgentsService } from '../agents/agents.service';
+import { SessionHistoryRepository } from './session-history.repository';
 import type {
   CreateSessionInput,
   InterruptSessionInput,
@@ -147,9 +153,10 @@ function isMissingKey(err: unknown): boolean {
  * caller's decrypted key, same rotation as billing). Transport selection is
  * explicit, never silent: a stored key → direct answer (no stand needed);
  * 404 opencode_key_missing → the prompt queues on the serve stand while it
- * lives (legacy path). History/statuses/SSE additionally overlay the
- * harness-owned memory store below so a dead stand still serves what the
- * harness itself created (gate-scoped first — strangers never read it).
+ * lives (legacy path). History/statuses/SSE additionally overlay the durable
+ * Postgres history (SessionHistoryRepository) so a dead stand AND a backend
+ * restart still serve what the harness itself created (gate-scoped first —
+ * strangers never read it). No process-memory fallback remains.
  */
 @Injectable()
 export class SessionHarnessService implements SessionHarness {
@@ -158,20 +165,20 @@ export class SessionHarnessService implements SessionHarness {
     private readonly opencode: OpencodeService,
     private readonly access: ProjectAccessService,
     private readonly auth: ServeAuthService,
+    private readonly history: SessionHistoryRepository,
     @Optional() private readonly runner?: SessionRunnerService,
     private readonly logger: AppLogger = new AppLogger(SessionHarnessService.name),
+    // Registry of AI agents (sessions→agents DI edge via AgentsModule; the
+    // Ask agent answers through the harness-owned runner). Optional only so
+    // unit specs wiring the harness by hand keep compiling — in the app the
+    // module always provides it, and agent paths fail loud without it.
+    @Optional() private readonly agents?: AgentsService,
   ) {}
 
-  /** Harness-owned thread overlay: sessionId → domain rows answered directly. */
-  private readonly threads = new Map<string, Array<SessionMessage>>();
-
-  /** Owning project per overlaid thread (gate binding for the SSE/history merge). */
-  private readonly threadProjects = new Map<string, string>();
-
-  /** Harness-owned sessions created while the serve stand was unreachable. */
-  private readonly localSessions = new Map<string, SessionInfo>();
-
-  /** Buffered direct-runner SSE frames (message-part deltas + snapshot). */
+  /**
+   * Buffered direct-runner SSE frames (message-part deltas + snapshot).
+   * Live transport only — durable history lives in SessionHistoryRepository.
+   */
   private readonly localFrames: Array<{
     id: string;
     type: string;
@@ -219,11 +226,12 @@ export class SessionHarnessService implements SessionHarness {
   }
 
   /** Upstream row + our projectId (the gate-bound uuid, NOT the upstream
-   * project hash) + derived status → domain SessionInfo. */
+   * project hash) + stored agent + derived status → domain SessionInfo. */
   private toSessionInfo(
     s: UpstreamSession,
     projectId: string,
     active: Set<string>,
+    agentId: string | null = null,
   ): SessionInfo {
     let model: SessionInfoModel | null = null;
     const m = s.model;
@@ -242,8 +250,26 @@ export class SessionHarnessService implements SessionHarness {
       directory: s.location.directory,
       projectId,
       model,
+      agentId,
       status,
     };
+  }
+
+  /**
+   * Validate a client-supplied agentId against the registry (AgentsService —
+   * sessions→agents DI edge). Unknown ids fail loud as an honest 404 (never
+   * a fallback to another agent); undefined passes through (caller applies
+   * the session/default resolution). Without the registry wired (hand-rolled
+   * unit specs only) any explicit id is unknown — same honest 404.
+   */
+  private resolveAgentId(agentId: string | undefined, cid: string): string | undefined {
+    if (agentId === undefined) return undefined;
+    const known = this.agents?.list().some((a) => a.id === agentId) ?? false;
+    if (!known) {
+      this.logger.warn(`[sessions] unknown agent agentId=${agentId}`, cid);
+      throw new NotFoundException(`Agent '${agentId}' not found`);
+    }
+    return agentId;
   }
 
   /**
@@ -256,29 +282,34 @@ export class SessionHarnessService implements SessionHarness {
     project: { projectId: string; directory: string },
     cid: string,
   ): Promise<Array<SessionInfo>> {
+    let rows: Array<UpstreamSession>;
+    let active: Set<string>;
     try {
-      const [res, active] = await Promise.all([
+      const [res, activeIds] = await Promise.all([
         client.v2.session.list({ directory: project.directory }),
         this.activeSessionIds(client, cid),
       ]);
       if (!this.isUpstreamOk(res.data, res.error)) {
         throw this.upstreamError('sessionsList', res.error, this.sdkStatus(res));
       }
-      const rows = (res.data as unknown as UpstreamEnvelope<Array<UpstreamSession>>).data ?? [];
-      return rows.map((s) => this.toSessionInfo(s, project.projectId, active));
+      rows = (res.data as unknown as UpstreamEnvelope<Array<UpstreamSession>>).data ?? [];
+      active = activeIds;
     } catch (err) {
       this.logger.warn('[sessions] list failed', cid);
       this.logger.debug((err as Error).message, cid);
       throw this.upstreamError('sessionsList', err);
     }
+    // Stored agent choice is durable (survives restart) — one project-scoped
+    // query instead of N lookups; DB errors propagate as 503 outside the
+    // upstream mapping above.
+    const agents = await this.history.listAgents(project.projectId);
+    return rows.map((s) => this.toSessionInfo(s, project.projectId, active, agents.get(s.id) ?? null));
   }
 
   /** GET /api/sessions?projectId — list scoped to the gated jail. */
   async list(userId: string, projectId: string | undefined, cid: string): Promise<Array<SessionInfo>> {
     const project = await this.access.resolveProjectDirectory(projectId, userId, cid);
-    const memory = [...this.localSessions.values()].filter(
-      (s) => s.projectId === project.projectId,
-    );
+    const memory = await this.history.listLocalSessions(project.projectId);
     try {
       const client = await this.sdk.create(userId, cid);
       const rows = await this.listWithClient(client, project, cid);
@@ -286,12 +317,12 @@ export class SessionHarnessService implements SessionHarness {
       return [...rows, ...memory.filter((s) => !seen.has(s.id))];
     } catch (err) {
       // Serve stand unreachable but this project owns harness sessions: serve
-      // our own store (already gate-scoped above) instead of failing. Nest
+      // the durable store (already gate-scoped above) instead of failing. Nest
       // HTTP throws (the C4 gate 404, the real-user 401) stay honest — they
-      // never read the memory store.
+      // never read the store.
       if (err instanceof HttpException) throw err;
       if (memory.length > 0) {
-        this.logger.warn('[sessions] list served from harness store', cid);
+        this.logger.warn('[sessions] list served from durable store', cid);
         return memory;
       }
       throw err;
@@ -321,6 +352,9 @@ export class SessionHarnessService implements SessionHarness {
    */
   async create(userId: string, body: CreateSessionInput, cid: string): Promise<SessionInfo> {
     const project = await this.access.resolveProjectDirectory(body.projectId, userId, cid);
+    // Fail fast on an unknown agent (honest 404, no side effects) before any
+    // upstream work; undefined keeps the pre-agent behavior (agentId null).
+    const agentId = this.resolveAgentId(body.agentId, cid);
     const payload: Record<string, unknown> = { location: { directory: project.directory } };
     if (body.title !== undefined) payload.title = body.title;
     if (body.parentID !== undefined) payload.parentID = body.parentID;
@@ -355,11 +389,26 @@ export class SessionHarnessService implements SessionHarness {
         throw this.upstreamError('sessionsCreate', new Error('bad_create_shape'));
       }
       this.logger.info('[sessions] created', cid);
-      return this.toSessionInfo(json.data, project.projectId, active);
+      const created = this.toSessionInfo(
+        json.data,
+        project.projectId,
+        active,
+        agentId ?? null,
+      );
+      // The upstream row carries no agent — the durable store overlays it so
+      // the answered row (and every later list after a restart) is never
+      // missing the key (contract: nullable, never absent).
+      if (agentId !== undefined) {
+        await this.history.setAgent(created.id, project.projectId, agentId);
+      }
+      return created;
     } catch (err) {
       // Gate/validation stays honest (never a local session): Nest HTTP throws
-      // (C4 404, real-user 401) propagate unmapped.
+      // (C4 404, real-user 401) propagate unmapped. A Postgres outage from the
+      // agent upsert is already a 503 — never reinterpret it as an unreachable
+      // stand.
       if (err instanceof HttpException) throw err;
+      if (err instanceof ExternalServiceError && err.service === 'db') throw err;
       // Serve stand unreachable: the harness owns the session itself (same
       // domain shape, gate-bound project, idle until the first direct turn).
       // Upstream request-level 4xx keep their honest mapping — only transport
@@ -374,9 +423,15 @@ export class SessionHarnessService implements SessionHarness {
         directory: project.directory,
         projectId: project.projectId,
         model: body.model ?? null,
+        agentId: agentId ?? null,
         status: { type: 'idle' },
       };
-      this.localSessions.set(local.id, local);
+      // Durable registry row (origin='harness') so a backend restart keeps
+      // the session; the agent choice gets its own row.
+      await this.history.saveLocalSession(local);
+      if (agentId !== undefined) {
+        await this.history.setAgent(local.id, project.projectId, agentId);
+      }
       this.logger.warn('[sessions] created in harness store', cid);
       this.logger.debug((err as Error).message, cid);
       return local;
@@ -423,7 +478,9 @@ export class SessionHarnessService implements SessionHarness {
     cid: string,
   ): Promise<Array<SessionMessage>> {
     await this.access.resolveProjectDirectory(projectId, userId, cid);
-    const memory = this.threads.get(sessionId) ?? [];
+    // Durable history first: direct turns never reach the serve stand, and
+    // the rows must survive a backend restart (previously process memory).
+    const stored = await this.history.listMessages(sessionId);
     const client = await this.sdk.create(userId, cid);
     try {
       const limit = this.parseLimit(limitRaw);
@@ -436,17 +493,17 @@ export class SessionHarnessService implements SessionHarness {
         throw this.upstreamError('sessionMessages', res.error, this.sdkStatus(res));
       }
       const rows = (res.data as unknown as UpstreamEnvelope<Array<UpstreamMessage>>).data ?? [];
-      return [...rows.map((m) => this.toSessionMessage(m)), ...memory];
+      return this.mergeMessages(rows.map((m) => this.toSessionMessage(m)), stored);
     } catch (err) {
       // Our own validation + the gate keep their identity (400 bad_request /
-      // gate HTTP — never mapped to EXTERNAL_* and never served from memory).
+      // gate HTTP — never mapped to EXTERNAL_* and never served from the store).
       if (err instanceof HttpException) throw err;
-      // Stand unreachable but the harness answered this thread directly:
-      // serve our own rows (same domain shape) instead of failing.
-      if (memory.length > 0) {
-        this.logger.warn('[sessions] messages served from harness store', cid);
+      // Stand unreachable but this session has durable rows: serve them (same
+      // domain shape) instead of failing.
+      if (stored.length > 0) {
+        this.logger.warn('[sessions] messages served from durable store', cid);
         this.logger.debug((err as Error).message, cid);
-        return memory;
+        return stored;
       }
       this.logger.warn('[sessions] messages list failed', cid);
       this.logger.debug((err as Error).message, cid);
@@ -455,15 +512,33 @@ export class SessionHarnessService implements SessionHarness {
   }
 
   /**
-   * POST /api/sessions/{id}/messages — v2 prompt (POST
-   * /api/session/{sessionID}/prompt) via fetchWithRetry (the legacy
-   * /session/{id}/message surface the mirror still rides is not served by
-   * 2.x). `text` is the prompt's only required payload field (artifact
-   * requestBody); files/agents/skills/delivery stay unexposed until a
-   * consumer exists. `model` (same SessionInfoModel ref as on create) rides
-   * the same prompt body when provided — without it the body is text-only
-   * and the runner keeps the session model. The 200 `Session.Inbox.User`
-   * receipt is projected to the domain message form (queued user row).
+   * Upstream rows + durable rows → one ascending thread, de-duplicated by
+   * message id (upstream wins on the unlikely overlap). Direct turns exist
+   * only in the durable store; serve turns only upstream.
+   */
+  private mergeMessages(
+    upstream: Array<SessionMessage>,
+    stored: Array<SessionMessage>,
+  ): Array<SessionMessage> {
+    const byId = new Map<string, SessionMessage>();
+    for (const row of upstream) byId.set(row.id, row);
+    for (const row of stored) if (!byId.has(row.id)) byId.set(row.id, row);
+    return [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  /**
+   * POST /api/sessions/{id}/messages — prompt the session's agent (direct
+   * agent turn when a per-user key exists, otherwise queued on the serve
+   * stand while it lives — see sendMessageDirect / sendMessageViaServe).
+   * `text` is the prompt's only required payload field; files/skills/
+   * delivery stay unexposed until a consumer exists. `model` (same
+   * SessionInfoModel ref as on create) is accepted for backward compat but
+   * ignored on both paths (the agent owns its model; the upstream prompt
+   * rejects it). `agentId` selects the answering agent for this turn
+   * (validated up front — unknown ids fail loud before any transport work);
+   * without it the session keeps its stored agent (default 'ask'). The 200
+   * receipt is projected to the domain message form (queued user row); the
+   * answer itself streams over events.
    */
   async sendMessage(
     userId: string,
@@ -475,6 +550,10 @@ export class SessionHarnessService implements SessionHarness {
     // Same real-user gate OpencodeSdkClient.create applies (the serve path
     // posts below the generator, so assert it here explicitly).
     this.auth.assertServeUser(userId, cid);
+    // Fail fast on an unknown agent (honest 404, no side effects) before any
+    // transport work — both the direct agent turn and the serve fallback
+    // share this gate; undefined keeps the session/default resolution.
+    this.resolveAgentId(body.agentId, cid);
     // Transport selection (explicit, user-sanctioned): a stored per-user Zen
     // key answers through the direct runner (no serve stand needed); without
     // a key (404 opencode_key_missing) the prompt queues on the serve stand
@@ -491,11 +570,22 @@ export class SessionHarnessService implements SessionHarness {
   }
 
   /**
-   * Direct turn: the answer comes from SessionRunnerService (per-user Zen key,
-   * no stand). The receipt keeps the domain shape; the thread overlay + the
-   * token frames land in the harness store so history/SSE serve them without
-   * the stand. A late answer after interrupt() is dropped (the partial commit
-   * already belongs to stop()).
+   * Direct turn: the answer comes from the session's agent (AgentsService —
+   * sessions→agents DI edge; the Ask agent answers through the
+   * harness-owned runner behind the caller's key, so its model guard and
+   * timeouts are preserved, no mock). The receipt keeps the domain shape;
+   * both turns land in the durable Postgres history (survives restart) and
+   * the token frames stay in the live SSE buffer, so history/SSE serve them
+   * without the stand. A late answer after interrupt() is dropped (the
+   * partial commit already belongs to stop()).
+   *
+   * Agent resolution: explicit per-turn agentId wins (validated against the
+   * registry, honest 404 otherwise — never a fallback), then the session's
+   * stored agent, then the default 'ask'. The resolved agent is stored back
+   * on the session so SessionInfo.agentId always answers the truth. NOTE:
+   * `body.model` is accepted by the domain signature for backward compat
+   * but is intentionally ignored on the agent path (the agent owns its
+   * model) — same stance as the serve path below.
    */
   private async sendMessageDirect(
     userId: string,
@@ -510,40 +600,45 @@ export class SessionHarnessService implements SessionHarness {
         message: 'No OpenCode API key configured for this user',
       });
     }
+    if (!this.agents) throw new Error('AgentsService is not wired');
+    // Explicit per-turn agentId wins, then the durable stored agent (survives
+    // restart), then the default. Reading the store is a DB call → 503 on
+    // outage, never a silent memory fallback.
+    const agentId =
+      this.resolveAgentId(body.agentId, cid) ??
+      (await this.history.getAgent(sessionId)) ??
+      'ask';
+    // An explicit per-turn agent becomes the session's stored agent.
+    await this.history.setAgent(sessionId, body.projectId, agentId);
+    void body.model;
     const receipt: SessionMessage = {
       id: Bun.randomUUIDv7(),
       type: 'user',
       createdAt: new Date().toISOString(),
       text: body.text,
     };
-    const thread = this.threads.get(sessionId) ?? [];
-    thread.push(receipt);
-    this.threads.set(sessionId, thread);
-    this.threadProjects.set(sessionId, body.projectId);
+    // Persist the user turn BEFORE the agent runs: an interrupt drops the
+    // answer but the question already belongs to the durable thread.
+    await this.history.appendMessage({
+      id: receipt.id,
+      sessionId,
+      projectId: body.projectId,
+      userId,
+      role: 'user',
+      agentId,
+      text: body.text,
+      createdAt: receipt.createdAt,
+    });
     this.busyDirect.add(sessionId);
-    // Pre-allocated assistant identity: the runner's progressive onDelta tails
-    // message.part.delta frames under this id while the answer is still
-    // arriving (Fix B — the live stream no longer waits for the full POST).
+    // Pre-allocated assistant identity for the token frames below.
     const assistantId = Bun.randomUUIDv7();
-    const assistantPartId = `prt_${assistantId}`;
-    let streamed = false;
     try {
-      const answer = await runner.chat(
-        userId,
-        body.text,
-        {
-          ...(body.model ? { model: body.model.id } : {}),
-          correlationId: cid,
-          onDelta: (chunk) => {
-            streamed = true;
-            this.bufferDirectDelta(sessionId, assistantId, assistantPartId, chunk);
-          },
-        },
-      );
-      // Inference API requires the plain Model ID from the models table
-      // (docs: https://opencode.ai/v2/docs/console/models); the
-      // `opencode/<model-id>` form exists only for opencode.jsonc selection
-      // in the OpenCode client and must never be sent in the API body.
+      // Ask answers whole (no progressive deltas) — the turn therefore
+      // chunks into delta slices + the absolute snapshot (the same fallback
+      // path a non-streamed runner answer always took). Buffer helpers
+      // (bufferDirectDelta/Snapshot/Frames) and the session.idle terminator
+      // below stay untouched.
+      const answer = await this.agents.askQuestion(agentId, body.text, userId, cid);
       if (!this.busyDirect.has(sessionId)) {
         this.logger.info('[sessions] direct answer dropped after interrupt', cid);
         return receipt;
@@ -554,15 +649,19 @@ export class SessionHarnessService implements SessionHarness {
         createdAt: new Date().toISOString(),
         text: answer,
       };
-      thread.push(assistant);
-      // Streamed turns already tailed their deltas via onDelta — only the
-      // absolute snapshot remains; a fallback (non-streamed) answer still
-      // chunks into deltas + snapshot as before.
-      if (streamed) {
-        this.bufferDirectSnapshot(sessionId, assistant);
-      } else {
-        this.bufferDirectFrames(sessionId, assistant);
-      }
+      // The answer joins the durable thread before it streams to the client,
+      // so a reload during the tail still reads the full history.
+      await this.history.appendMessage({
+        id: assistant.id,
+        sessionId,
+        projectId: body.projectId,
+        userId,
+        role: 'assistant',
+        agentId,
+        text: answer,
+        createdAt: assistant.createdAt,
+      });
+      this.bufferDirectFrames(sessionId, assistant);
       // Terminal session.idle so the client send() finalizes (useChat
       // frameText:152 + send():444). Success path only — the direct-error
       // path already clears client sending via the failed POST itself, so no
@@ -571,6 +670,15 @@ export class SessionHarnessService implements SessionHarness {
       this.logger.info('[sessions] prompt answered directly', cid);
       return receipt;
     } catch (err) {
+      // Missing per-user key: the direct transport never started, so the
+      // staged receipt is discarded — the serve fallback (sendMessage) owns
+      // the durable row, and keeping both would duplicate the message.
+      if (isMissingKey(err)) {
+        await this.history.discardMessage(receipt.id);
+        throw err;
+      }
+      // Postgres outage from the durable history write — keep its honest 503.
+      if (err instanceof ExternalServiceError && err.service === 'db') throw err;
       this.logger.warn('[sessions] direct prompt failed', cid);
       this.logger.debug((err as Error).message, cid);
       // Nest HTTP (missing/invalid key) keeps its billing-compatible code;
@@ -786,14 +894,14 @@ export class SessionHarnessService implements SessionHarness {
     res: ExpressResponse,
   ): Promise<void> {
     const project = await this.access.resolveProjectDirectory(projectId, userId, cid);
+    // Harness-owned SSE scope: durable harness sessions + every session with
+    // durable messages, both already project-scoped by the store.
     const localSessionIds = new Set<string>();
-    for (const s of this.localSessions.values()) {
-      if (s.projectId === project.projectId) localSessionIds.add(s.id);
+    for (const s of await this.history.listLocalSessions(project.projectId)) {
+      localSessionIds.add(s.id);
     }
-    for (const [sid, rows] of this.threads) {
-      if (rows.length > 0 && this.threadProjects.get(sid) === project.projectId) {
-        localSessionIds.add(sid);
-      }
+    for (const sid of await this.history.listSessionIdsWithMessages(project.projectId)) {
+      localSessionIds.add(sid);
     }
     const hasLocal = localSessionIds.size > 0;
     // Live framing is best-effort when the harness owns turns: a transport

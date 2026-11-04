@@ -6,7 +6,8 @@
  * TS transpiler does not, so this file must not run via `bun test` on TS
  * sources). Usage: `bun run build && bun dist/processes/modules/ai/modules/sessions/__tests__/sessions.e2e.js`.
  *
- * Down mode (default, no Postgres, no real upstream): boots the real
+ * Strict Postgres (throwaway container, like auth/organizations/keys suites):
+ * the durable session history reads/writes Postgres. Boots the real
  * AppModule through the shared configureApp()/setupSwagger(), patches the
  * C4 gate prototypes (organizations + workspace path, same trick as
  * opencode.e2e) and points OPENCODE_URL at a v2 stand stub that mirrors the
@@ -58,7 +59,8 @@ process.env.APP_BACKEND_PORT ??= '3000';
 process.env.REQUEST_TIMEOUT_MS = '2000';
 process.env.OPENCODE_URL = 'http://127.0.0.1:9'; // replaced with the stub once listening
 process.env.OPENCODE_PASSWORD = 'e2e-basic-secret-never-log-7c1d';
-process.env.DATABASE_URL = '';
+// DATABASE_URL is resolved inside main() from a throwaway Postgres: the
+// durable session history reads/writes Postgres, so this suite is strict.
 for (const key of ['POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB', 'POSTGRES_HOST']) {
   delete process.env[key];
 }
@@ -409,6 +411,14 @@ function startStandStub(): Promise<{
 type CheckResult = { name: string; ok: boolean; detail?: string };
 
 async function main(): Promise<void> {
+  // Strict Postgres: GET /messages and GET /sessions read the durable
+  // history, so the suite needs a live DB (one-time container by default,
+  // TEST_DATABASE_URL override).
+  const { startTestDb } = await import('../../../../../../common/db/e2e-db.container');
+  const testDb = await startTestDb();
+  process.env.DATABASE_URL = testDb.url;
+  console.log(`[sessions e2e] db mode: ${testDb.mode}`);
+
   const { NestFactory } = await import('@nestjs/core');
   const { AppModule } = await import('../../../../../../app/app.module');
   const { configureApp, setupSwagger } = await import('../../../../../../app/app.setup');
@@ -420,6 +430,19 @@ async function main(): Promise<void> {
   await app.listen(0);
   const base = await app.getUrl();
   const results: Array<CheckResult> = [];
+
+  // The C4 gate is patched on the prototype, so the project row the suite
+  // uses does not exist yet — but session_messages / session_agents carry a
+  // real FK to projects. Seed it once (strict Postgres).
+  {
+    const { DbService } = await import('../../../../../../common/db/db.service');
+    const { projects } = await import('../../../../../../common/db/schema');
+    const dbService = app.get(DbService, { strict: false }) as InstanceType<typeof DbService>;
+    await dbService.client
+      .insert(projects)
+      .values({ id: E2E_PROJECT_ID, name: 'sessions-e2e' })
+      .onConflictDoNothing({ target: projects.id });
+  }
 
   const { TokenService } = await import('../../../../../../auth/token.service');
   const tokens = app.get(TokenService, { strict: false }) as {
@@ -522,10 +545,12 @@ async function main(): Promise<void> {
       assert.notEqual(a.projectId, RUNNER_PROJECT_HASH);
       assert.equal(a.createdAt, new Date(BASE_TIME).toISOString());
       assert.deepEqual(a.model, { id: 'model-x', providerID: 'provider-y' });
+      assert.equal(a.agentId, null, 'agentId must be an explicit null, not absent');
       assert.deepEqual(a.status, { type: 'busy' });
       const b = rows[1];
       assert.equal(b.title, null, 'title must be an explicit null, not absent');
       assert.equal(b.model, null);
+      assert.equal(b.agentId, null, 'agentId must be an explicit null, not absent');
       assert.deepEqual(b.status, { type: 'idle' });
     });
     assert.ok(stand.listDirs.at(-1) === JAIL_DIR, 'list must be scoped to the gated jail');
@@ -567,6 +592,12 @@ async function main(): Promise<void> {
       assert.deepEqual((create.body as { model?: unknown }).model, { id: 'model-m', providerID: 'prov-openai' });
       assert.ok(create.basicAuth, 'Basic auth header really sent');
     }
+
+    await check('POST /api/sessions unknown agentId → honest 404 (no fallback, no side effects)', '/api/sessions', jsonBody({ projectId: E2E_PROJECT_ID, agentId: 'ghost' }), 404, (_res, body) => {
+      const b = body as { code?: string; message?: string };
+      assert.equal(b.code, 'not_found');
+      assert.ok((b.message ?? '').includes("Agent 'ghost' not found"), `unexpected message: ${b.message}`);
+    });
 
     await check('POST /api/sessions {} → 400 bad_request (body zod)', '/api/sessions', jsonBody({}), 400, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'bad_request');
@@ -680,6 +711,14 @@ async function main(): Promise<void> {
       assert.ok(prompt.basicAuth, 'Basic auth header really sent');
     }
 
+    // The durable history read runs on every GET — after a serve prompt the
+    // same route must still answer 200 (no Postgres → no silent crash).
+    await check('GET messages after a serve prompt → 200 (durable history read)', '/api/sessions/ses_alpha/messages?projectId=' + E2E_PROJECT_ID, undefined, 200, (_res, body) => {
+      const rows = body as Array<Record<string, unknown>>;
+      assert.ok(Array.isArray(rows), 'messages must stay an array');
+      assert.ok(rows.length >= 3, `expected the upstream rows to survive, got ${rows.length}`);
+    });
+
     await check('POST messages forwards model in the prompt body (model pinned at create, not re-sent on prompt)', '/api/sessions/ses_alpha/messages', jsonBody({ projectId: E2E_PROJECT_ID, text: 'hi model', model: { id: 'model-m', providerID: 'prov-openai', variant: 'v1' } }), 200, (_res, body) => {
       assert.equal((body as Record<string, unknown>).text, 'hi model');
     });
@@ -691,6 +730,12 @@ async function main(): Promise<void> {
       assert.deepEqual(prompt.body, { text: 'hi model' });
       assert.ok(prompt.basicAuth, 'Basic auth header really sent');
     }
+
+    await check('POST messages unknown agentId → honest 404 (validated before any transport)', '/api/sessions/ses_alpha/messages', jsonBody({ projectId: E2E_PROJECT_ID, text: 'hi ghost', agentId: 'ghost' }), 404, (_res, body) => {
+      const b = body as { code?: string; message?: string };
+      assert.equal(b.code, 'not_found');
+      assert.ok((b.message ?? '').includes("Agent 'ghost' not found"), `unexpected message: ${b.message}`);
+    });
 
     await check('POST messages text:"" → 400 bad_request (body zod)', '/api/sessions/ses_alpha/messages', jsonBody({ projectId: E2E_PROJECT_ID, text: '' }), 400, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'bad_request');
@@ -906,10 +951,11 @@ async function main(): Promise<void> {
       assert.ok(!l.text.includes('[object Object]'), 'unserialized object in a log line');
     }
     await app.close();
+    await testDb.stop();
   }
 
   const failed = results.filter((r) => !r.ok);
-  console.log(`\nsessions e2e (down): ${results.length - failed.length}/${results.length} passed`);
+  console.log(`\nsessions e2e (strict): ${results.length - failed.length}/${results.length} passed`);
   // Explicit exit: a cancelled socket may otherwise keep the bun loop alive.
   process.exit(failed.length > 0 ? 1 : 0);
 }

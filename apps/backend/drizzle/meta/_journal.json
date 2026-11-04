@@ -29,6 +29,13 @@
       "when": 1793578200000,
       "tag": "0003_refresh_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793782649418,
+      "tag": "0004_session_history",
+      "breakpoints": true
     }
   ]
 }

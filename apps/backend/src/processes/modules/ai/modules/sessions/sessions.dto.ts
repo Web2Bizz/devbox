@@ -4,9 +4,14 @@
  * re-export pattern as projects/dto.ts.
  */
 export {
+  agentIdSchema,
+  agentInfoListSchema,
+  agentInfoSchema,
   createSessionRequestSchema,
   interruptSessionRequestSchema,
   sendMessageRequestSchema,
+  type AgentInfo,
+  type AgentInfoList,
   type CreateSessionInput,
   type InterruptSessionInput,
   type SendMessageInput,

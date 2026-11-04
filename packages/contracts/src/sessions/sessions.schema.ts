@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
 import type {
+  AgentInfo,
+  AgentInfoList,
   CreateSessionRequest,
   InterruptSessionRequest,
   SendMessageRequest,
@@ -49,6 +51,23 @@ export const sessionModelListSchema = z.array(sessionModelSchema) satisfies z.Zo
   Array<SessionModel>
 >;
 
+/** Agent registry id — mirrors the backend agentIdPattern (letters/digits/_/-). */
+export const agentIdSchema = z
+  .string({ error: 'Field "agentId" is required' })
+  .min(1)
+  .max(64)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/, {
+    error: 'Field "agentId" has forbidden characters',
+  });
+
+export const agentInfoSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  name: z.string({ error: 'Field "name" is required' }),
+  description: z.string({ error: 'Field "description" is required' }),
+}) satisfies z.ZodType<AgentInfo>;
+
+export const agentInfoListSchema = z.array(agentInfoSchema) satisfies z.ZodType<AgentInfoList>;
+
 export const sessionInfoSchema = z.object({
   id: z.string({ error: 'Field "id" is required' }).min(1),
   title: z.string().nullable(),
@@ -63,6 +82,7 @@ export const sessionInfoSchema = z.object({
   // createdAt = new Date(time.created).toISOString()).
   projectId: z.uuid({ error: 'Field "projectId" is required' }),
   model: sessionInfoModelSchema.nullable(),
+  agentId: agentIdSchema.nullable(),
   status: opencodeSessionStatusSchema,
 }) satisfies z.ZodType<SessionInfo>;
 
@@ -84,6 +104,7 @@ export const createSessionRequestSchema = z.object({
   title: z.string().min(1).max(200).optional(),
   parentID: z.string().min(1).max(200).optional(),
   model: sessionInfoModelSchema.optional(),
+  agentId: agentIdSchema.optional(),
 }) satisfies z.ZodType<CreateSessionRequest>;
 
 export type CreateSessionInput = z.infer<typeof createSessionRequestSchema>;
@@ -108,6 +129,7 @@ export const sendMessageRequestSchema = z.object({
   projectId: z.uuid({ error: 'Field "projectId" is required' }),
   text: z.string({ error: 'Field "text" is required' }).min(1),
   model: sessionInfoModelSchema.optional(),
+  agentId: agentIdSchema.optional(),
 }) satisfies z.ZodType<SendMessageRequest>;
 
 /** SSE frame envelope of GET /api/sessions/events — the variant payload

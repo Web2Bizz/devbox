@@ -3458,14 +3458,16 @@ components:
           type: string
     SessionInfo:
       type: object
-      required: [id, title, createdAt, directory, projectId, model, status]
+      required: [id, title, createdAt, directory, projectId, model, agentId, status]
       description: >-
         Domain session row (GET/POST /api/sessions) — OUR shape, stable while
         the runtime behind it changes: title/model are explicitly nullable
         (a fresh session carries neither), createdAt is ISO-8601 (the runtime
         keeps epoch millis; the backend converts), directory is the jailed
         project path the session works in, projectId is OUR uuid (bound by
-        the access gate, not the runtime's internal project hash).
+        the access gate, not the runtime's internal project hash), agentId is
+        the registry agent answering the session (null when created without
+        one — pre-agent rows answer null, never absent).
       properties:
         id:
           type: string
@@ -3484,8 +3486,29 @@ components:
           nullable: true
           allOf:
             - $ref: '#/components/schemas/SessionInfoModel'
+        agentId:
+          type: string
+          nullable: true
+          description: registry agent id (e.g. ask); null when the session was created without an agent
+          example: ask
         status:
           $ref: '#/components/schemas/SessionRunStatus'
+    AgentInfo:
+      type: object
+      required: [id, name, description]
+      description: >-
+        AI agent row of GET /api/v1/agents (same id/name/description shape as
+        the Agent schema — AgentInfo is the sessions-domain alias used by the
+        chat agent picker).
+      properties:
+        id:
+          type: string
+          example: ask
+        name:
+          type: string
+          example: Ask
+        description:
+          type: string
     CreateSessionRequest:
       type: object
       required: [projectId]
@@ -3494,7 +3517,9 @@ components:
         project-scoped); title/parentID are honestly forwarded to the runtime
         create (the deprecated mirror could not forward them). model is the
         SessionInfoModel ref (upstream Model.Ref shape); without it the
-        runner picks its server default.
+        runner picks its server default. agentId is the optional registry
+        agent answering the session (additive — existing clients sending none
+        keep working); without it the session answers through 'ask'.
       properties:
         projectId:
           type: string
@@ -3510,6 +3535,10 @@ components:
         model:
           allOf:
             - $ref: '#/components/schemas/SessionInfoModel'
+        agentId:
+          type: string
+          description: registry agent id (e.g. ask)
+          example: ask
     SessionRunStatus:
       description: >-
         Runtime status snapshot of one session: busy while the server reports
@@ -3553,7 +3582,9 @@ components:
         runner prompt's only required payload field; files/agents/skills/delivery stay unexposed
         until a consumer exists (nothing invented). model is the
         SessionInfoModel ref (same as on create); without it the runner
-        keeps the session model.
+        keeps the session model. agentId is the optional registry agent
+        answering this turn (additive); without it the session keeps its
+        stored agent.
       properties:
         projectId:
           type: string
@@ -3564,6 +3595,10 @@ components:
         model:
           allOf:
             - $ref: '#/components/schemas/SessionInfoModel'
+        agentId:
+          type: string
+          description: registry agent id (e.g. ask)
+          example: ask
     SessionStreamFrame:
       type: object
       required: [id, type, data]

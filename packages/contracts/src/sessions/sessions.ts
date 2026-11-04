@@ -34,6 +34,21 @@ export type SessionModel = {
   providerID: string;
 };
 
+/**
+ * AI agent available to chat, listed by GET /api/v1/agents (backend
+ * AgentsService registry; today the single Ask agent answering through the
+ * harness-owned runner). Mirrors contracts/openapi.yaml AgentInfo
+ * field-for-field (same id/name/description shape as the backend AgentDto).
+ */
+export type AgentInfo = {
+  id: string;
+  name: string;
+  description: string;
+};
+
+/** GET /api/v1/agents — agent registry list. */
+export type AgentInfoList = Array<AgentInfo>;
+
 /** One domain session row (GET /api/sessions items, POST /api/sessions result). */
 export type SessionInfo = {
   id: string;
@@ -47,6 +62,12 @@ export type SessionInfo = {
   projectId: string;
   /** null until the session runs on a model */
   model: SessionInfoModel | null;
+  /**
+   * Agent answering this session (registry id, e.g. 'ask'). Nullable, never
+   * optional: the server always answers the key, null when the session was
+   * created without an agent (pre-agent rows / runner-default turns).
+   */
+  agentId: string | null;
   status: SessionRunStatus;
 };
 
@@ -65,6 +86,12 @@ export type CreateSessionRequest = {
    * picks its server default (nothing invented client-side).
    */
   model?: SessionInfoModel;
+  /**
+   * Agent answering the session (registry id, e.g. 'ask'). Optional and
+   * additive (existing clients sending no agentId keep working): without it
+   * the session answers through the default 'ask' agent.
+   */
+  agentId?: string;
 };
 
 /**
@@ -120,6 +147,11 @@ export type SendMessageRequest = {
   projectId: string;
   text: string;
   model?: SessionInfoModel;
+  /**
+   * Agent answering this turn (registry id, e.g. 'ask'). Optional and
+   * additive: without it the session keeps its stored agent (default 'ask').
+   */
+  agentId?: string;
 };
 
 /**

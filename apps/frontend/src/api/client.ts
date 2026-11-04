@@ -73,6 +73,14 @@ const V1_PREFIX = `/api/${API_VERSION}`;
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
+// Long POST exception: POST /api/sessions/:id/messages returns its receipt
+// only after the whole backend turn (Jev ~10s + an Auto chain of up to 7
+// sequential model calls ~90s each) — the 10s default would abort the wait
+// while the backend keeps computing and streaming frames over SSE. Abort
+// for this call arrives via the caller's AbortSignal (stop()/unmount),
+// never via this timer.
+export const SEND_TIMEOUT_MS = 600_000;
+
 export class ApiClientError extends Error {
   code: string;
   status: number;
@@ -278,7 +286,7 @@ export const api = {
     accessToken: string,
     sessionId: string,
     body: SendMessageRequest,
-    opts?: { signal?: AbortSignal },
+    opts?: { signal?: AbortSignal; timeoutMs?: number },
   ) =>
     parseBoundary(
       'POST /api/sessions/:id/messages',
@@ -291,6 +299,7 @@ export const api = {
           body: JSON.stringify(body),
           ...(opts?.signal ? { signal: opts.signal } : {}),
         },
+        opts?.timeoutMs ?? SEND_TIMEOUT_MS,
       ),
     ),
   // SSE transport exception: request() JSON-buffers the answer — the event

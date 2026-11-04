@@ -1,4 +1,4 @@
-import { ApiClientError, api } from './client';
+import { ApiClientError, SEND_TIMEOUT_MS, api } from './client';
 import { getValidAccessToken, refreshAccessToken } from '../lib/auth-store';
 import { SessionExpiredError } from '../lib/session-expired';
 import type {
@@ -93,18 +93,30 @@ export function listSessionMessages(
   return withAuth((token) => api.listSessionMessages(token, sessionId, projectId, opts));
 }
 
+/**
+ * Long POST: POST /api/sessions/:id/messages returns its receipt only after
+ * the whole backend turn (Jev + an Auto chain of up to 7 sequential model
+ * calls) — the answer itself streams over SSE, `sending` clears on the
+ * session.idle frame (or stop()). The long default timeout (SEND_TIMEOUT_MS)
+ * only guards the wait; abort arrives via the caller's AbortSignal from
+ * stop()/unmount. POST errors stay surfacing (red error block), never
+ * fire-and-forget.
+ */
 export function sendSessionMessage(
   projectId: string,
   sessionId: string,
   text: string,
-  opts?: { signal?: AbortSignal; agentId?: string },
+  opts?: { signal?: AbortSignal; agentId?: string; timeoutMs?: number },
 ): Promise<SessionMessage> {
   return withAuth((token) =>
     api.sendSessionMessage(
       token,
       sessionId,
       opts?.agentId ? { projectId, text, agentId: opts.agentId } : { projectId, text },
-      opts?.signal ? { signal: opts.signal } : {},
+      {
+        ...(opts?.signal ? { signal: opts.signal } : {}),
+        timeoutMs: opts?.timeoutMs ?? SEND_TIMEOUT_MS,
+      },
     ),
   );
 }

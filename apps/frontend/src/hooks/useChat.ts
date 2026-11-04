@@ -439,8 +439,10 @@ export function useChat(options?: UseChatOptions): UseChatResult {
         const sid = await ensureSession(effective);
         const ctrl = new AbortController();
         promptCtrlRef.current = ctrl;
-        // The POST only queues the prompt; the answer streams over events
-        // and `sending` clears on the session.idle frame (or stop()).
+        // The POST returns only after the whole backend turn (long Auto
+        // chains take minutes — hence the long send timeout); the answer
+        // streams over events and `sending` clears on the session.idle
+        // frame (or stop()). Abort arrives via this signal (stop()/unmount).
         await sendSessionMessage(projectId, sid, trimmed, {
           signal: ctrl.signal,
           agentId: effective,

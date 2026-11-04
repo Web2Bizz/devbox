@@ -15,7 +15,7 @@
  * parser (data: frames → SessionStreamFrame, heartbeats skipped, malformed
  * frame throws).
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import { GlobalRegistrator } from '@happy-dom/global-registrator';
 
 try {
@@ -44,7 +44,7 @@ mock.module('../../lib/auth-store', () => ({
 // binding is value-only). client.ts has no auth imports, so hoisting above
 // the auth-store mock is safe; sessions-client stays a mock-first dynamic
 // import below.
-import { ApiClientError } from '../client';
+import { ApiClientError, SEND_TIMEOUT_MS } from '../client';
 const {
   interruptSession,
   listAgents,
@@ -196,6 +196,35 @@ describe('sessions-client domain boundary', () => {
     await sendSessionMessage(PROJECT, 'ses_1', 'hi', { agentId: 'ask' });
     const init = calls[0]?.init as RequestInit;
     expect(JSON.parse(String(init.body))).toEqual({ projectId: PROJECT, text: 'hi', agentId: 'ask' });
+  });
+
+  test('sendSessionMessage: long default timeout (whole-turn wait), custom override forwards', async () => {
+    expect(SEND_TIMEOUT_MS).toBe(600_000);
+    const receiptBody = {
+      id: 'msg_q',
+      type: 'user',
+      createdAt: '2026-10-29T10:01:00.000Z',
+      text: 'hi',
+    };
+    const delays: unknown[] = [];
+    const origSetTimeout = globalThis.setTimeout;
+    const timerSpy = spyOn(globalThis, 'setTimeout').mockImplementation(
+      ((cb: (...args: unknown[]) => void, ms?: number, ...rest: unknown[]) => {
+        delays.push(ms);
+        return (origSetTimeout as (...a: unknown[]) => unknown)(cb, ms, ...rest);
+      }) as typeof setTimeout,
+    );
+    try {
+      stubs = [{ status: 200, body: receiptBody }];
+      await sendSessionMessage(PROJECT, 'ses_1', 'hi');
+      expect(delays.at(-1)).toBe(SEND_TIMEOUT_MS);
+
+      stubs = [{ status: 200, body: receiptBody }];
+      await sendSessionMessage(PROJECT, 'ses_1', 'hi', { timeoutMs: 5_000 });
+      expect(delays.at(-1)).toBe(5_000);
+    } finally {
+      timerSpy.mockRestore();
+    }
   });
 
   test('listAgents: registry rows parse, drift fails loud (never a cast)', async () => {

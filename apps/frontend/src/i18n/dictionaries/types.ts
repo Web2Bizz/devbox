@@ -292,6 +292,8 @@ export type Dictionary = {
     modelDefault: string;
     modelClear: string;
     modelActive: string;
+    agentLabel: string;
+    agentDefault: string;
     /** Jump-to-latest action of the kit MessageScroller. */
     scrollToEnd: string;
   };

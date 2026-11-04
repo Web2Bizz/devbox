@@ -32,6 +32,7 @@ const sessionInfo = (id: string) => ({
   directory: '/srv/projects/p1',
   projectId: PROJECT.projectId,
   model: null,
+  agentId: null,
   status: { type: 'idle' as const },
 });
 
@@ -431,13 +432,12 @@ describe('useChat (domain)', () => {
     expect(result.current.messages[1]).toMatchObject({ role: 'assistant', text: 'Hello world' });
   });
 
-  test('model: picked model rides lazy create + prompt, survives reload', async () => {
-    const picked = { providerID: 'prov-openai', id: 'model-m' };
+  test('agent: picked agent rides lazy create + prompt, survives reload', async () => {
     const { result } = renderHook(() => useChat({ ...PROJECT }));
     await settle();
 
     act(() => {
-      result.current.setModel(picked);
+      result.current.setAgentId('ask');
     });
     act(() => {
       void result.current.send('hi');
@@ -446,16 +446,34 @@ describe('useChat (domain)', () => {
     await settle(16);
 
     expect(createMock).toHaveBeenCalledTimes(1);
-    expect(createMock.mock.calls[0]?.[0]).toMatchObject({ model: picked });
+    expect(createMock.mock.calls[0]?.[0]).toMatchObject({ agentId: 'ask' });
     expect(sendMock).toHaveBeenCalledTimes(1);
-    expect(sendMock.mock.calls[0]?.[3]).toMatchObject({ model: picked });
-    expect(result.current.model).toMatchObject(picked);
+    expect(sendMock.mock.calls[0]?.[3]).toMatchObject({ agentId: 'ask' });
+    expect(result.current.agentId).toBe('ask');
 
     act(() => {
       result.current.reload();
     });
     await settle();
-    // reload refetches history + redials SSE — the picked model persists.
-    expect(result.current.model).toMatchObject(picked);
+    // reload refetches history + redials SSE — the picked agent persists.
+    expect(result.current.agentId).toBe('ask');
+  });
+
+  test('agent: per-send override rides create + prompt without changing the stored agent', async () => {
+    const { result } = renderHook(() => useChat({ ...PROJECT }));
+    await settle();
+
+    act(() => {
+      void result.current.send('hi', { agentId: 'other' });
+    });
+    pushFrames([delta('ses-1', 'yo'), idle('ses-1')]);
+    await settle(16);
+
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(createMock.mock.calls[0]?.[0]).toMatchObject({ agentId: 'other' });
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    expect(sendMock.mock.calls[0]?.[3]).toMatchObject({ agentId: 'other' });
+    // The stored picker value is untouched by the one-off override.
+    expect(result.current.agentId).toBe('ask');
   });
 });

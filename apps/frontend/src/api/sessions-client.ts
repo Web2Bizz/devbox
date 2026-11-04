@@ -2,9 +2,9 @@ import { ApiClientError, api } from './client';
 import { getValidAccessToken, refreshAccessToken } from '../lib/auth-store';
 import { SessionExpiredError } from '../lib/session-expired';
 import type {
+  AgentInfo,
   CreateSessionRequest,
   SessionInfo,
-  SessionInfoModel,
   SessionInterruptResult,
   SessionMessage,
   SessionRunStatusMap,
@@ -78,10 +78,10 @@ export function getSessionStatuses(
 
 export function createSession(
   body: CreateSessionRequest,
-  opts?: { model?: SessionInfoModel },
+  opts?: { agentId?: string },
 ): Promise<SessionInfo> {
   return withAuth((token) =>
-    api.createSession(token, opts?.model ? { ...body, model: opts.model } : body),
+    api.createSession(token, opts?.agentId ? { ...body, agentId: opts.agentId } : body),
   );
 }
 
@@ -97,13 +97,13 @@ export function sendSessionMessage(
   projectId: string,
   sessionId: string,
   text: string,
-  opts?: { signal?: AbortSignal; model?: SessionInfoModel },
+  opts?: { signal?: AbortSignal; agentId?: string },
 ): Promise<SessionMessage> {
   return withAuth((token) =>
     api.sendSessionMessage(
       token,
       sessionId,
-      opts?.model ? { projectId, text, model: opts.model } : { projectId, text },
+      opts?.agentId ? { projectId, text, agentId: opts.agentId } : { projectId, text },
       opts?.signal ? { signal: opts.signal } : {},
     ),
   );
@@ -143,6 +143,23 @@ export function listSessionModels(
 ): Promise<SessionModel[]> {
   return withAuth((token) => api.listSessionModels(token, projectId, opts));
 }
+
+/**
+ * Agent registry for the chat picker (GET /api/v1/agents) — domain
+ * AgentInfo rows, boundary-parsed in ./client. Project-independent (the
+ * registry is global), so no projectId travels.
+ */
+export function listAgents(opts?: { signal?: AbortSignal }): Promise<AgentInfo[]> {
+  return withAuth((token) => api.listAgents(token, opts));
+}
+
+/**
+ * Default agent answering chat turns (registry id of the Ask agent). Shared
+ * by `useChat` (initial state) and the `AgentSelector` (fallback value) —
+ * the server applies the same default when no agentId travels, so the three
+ * never disagree.
+ */
+export const DEFAULT_AGENT_ID = 'ask';
 
 /**
  * SSE live frames of GET /api/sessions/events as domain

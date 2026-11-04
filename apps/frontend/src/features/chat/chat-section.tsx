@@ -1,8 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ChatInput, ChatWindow, ModelSelector } from '../../components/chat';
-import { ErrorState } from '../../components/states';
+import { ChatInput, ChatWindow, AgentSelector } from '../../components/chat';
 import { useChat } from '../../hooks/useChat';
 import { useI18n } from '../../i18n';
 
@@ -23,10 +22,11 @@ export type ChatSectionProps = {
  * `components/chat/*`. No `entities/`/`shared/` — no new deprecated
  * re-exports. Flat Content (§7): linear section, no Card wrappers.
  *
- * States: loading skeleton via `ChatWindow`, upstream failures via
- * `ErrorState` + retry (`reload` redials SSE + refetches history),
- * empty via `ChatWindow` empty copy. STOP keeps the partial stream as the
- * assistant answer (see `useChat.stop`).
+ * States: loading skeleton, upstream failures (ErrorState + retry, `reload`
+ * redials SSE + refetches history) and empty copy are all owned by
+ * `ChatWindow` — the section just wires props so there is a single render
+ * path and the alert is never duplicated under the thread. STOP keeps the
+ * partial stream as the assistant answer (see `useChat.stop`).
  */
 export function ChatSection({ sessionId, projectId }: ChatSectionProps) {
   const { t } = useI18n();
@@ -38,9 +38,8 @@ export function ChatSection({ sessionId, projectId }: ChatSectionProps) {
     loading,
     sending,
     error,
-    isEmpty,
-    model,
-    setModel,
+    agentId,
+    setAgentId,
     send,
     stop,
     reload,
@@ -59,18 +58,14 @@ export function ChatSection({ sessionId, projectId }: ChatSectionProps) {
 
   return (
     <section aria-label={t.chat.title} className="grid gap-2">
-      {error && isEmpty ? (
-        <ErrorState message={error} onRetry={reload} retryLabel={t.chat.retry} />
-      ) : (
-        <ChatWindow
-          messages={messages}
-          streamingText={streamingText}
-          loading={loading}
-          sending={sending}
-          error={error}
-          onRetry={reload}
-        />
-      )}
+      <ChatWindow
+        messages={messages}
+        streamingText={streamingText}
+        loading={loading}
+        sending={sending}
+        error={error}
+        onRetry={reload}
+      />
       {/*
         Pinned composer: `fixed` to the viewport bottom, inset to the Content
         column (layer `p-2` + sidebar 300px + grid gap + content `px-4`).
@@ -83,10 +78,9 @@ export function ChatSection({ sessionId, projectId }: ChatSectionProps) {
           onStop={handleStop}
           sending={sending || aborting}
           leftSlot={
-            <ModelSelector
-              projectId={projectId}
-              model={model}
-              onChange={setModel}
+            <AgentSelector
+              agentId={agentId}
+              onChange={setAgentId}
               disabled={sending}
             />
           }

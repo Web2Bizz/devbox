@@ -288,6 +288,8 @@ export const en: Dictionary = {
     modelDefault: 'Runner default',
     modelClear: 'Clear',
     modelActive: 'Active model',
+    agentLabel: 'Agent',
+    agentDefault: 'Ask',
     scrollToEnd: 'Jump to latest',
   },
   language: {

@@ -1,13 +1,14 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { SessionInfoModel, SessionMessage, SessionStreamFrame } from '@rush-code/contracts';
+import type { SessionMessage, SessionStreamFrame } from '@rush-code/contracts';
 import {
   sessionMessagePartDeltaFrameSchema,
   sessionMessagePartUpdatedFrameSchema,
 } from '@rush-code/contracts';
 import { ApiClientError } from '../api/client';
 import {
+  DEFAULT_AGENT_ID,
   interruptSession,
   createSession,
   ensureSessionAuth,
@@ -40,10 +41,10 @@ export type UseChatResult = {
   isEmpty: boolean;
   /** Active session id (initial option or lazily created). */
   sessionId: string | null;
-  /** Model picked for the next prompt (survives reload; null = runner default). */
-  model: SessionInfoModel | null;
-  setModel: (model: SessionInfoModel | null) => void;
-  send: (text: string, opts?: { model?: SessionInfoModel }) => Promise<void>;
+  /** Agent answering the next prompt (registry id; default 'ask', survives reload). */
+  agentId: string;
+  setAgentId: (agentId: string) => void;
+  send: (text: string, opts?: { agentId?: string }) => Promise<void>;
   stop: () => void;
   reload: () => void;
 };
@@ -213,9 +214,9 @@ export function useChat(options?: UseChatOptions): UseChatResult {
   const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
   const [sessionId, setSessionId] = useState<string | null>(initialSessionId ?? null);
-  // Model picked for the next prompt (null = runner default). Plain state —
-  // survives reload() (reload only refetches history + redials SSE).
-  const [model, setModel] = useState<SessionInfoModel | null>(null);
+  // Agent answering the next prompt (registry id, default 'ask'). Plain
+  // state — survives reload() (reload only refetches history + redials SSE).
+  const [agentId, setAgentId] = useState<string>(DEFAULT_AGENT_ID);
 
   const sessionIdRef = useRef<string | null>(initialSessionId ?? null);
   const promptCtrlRef = useRef<AbortController | null>(null);
@@ -404,31 +405,29 @@ export function useChat(options?: UseChatOptions): UseChatResult {
   );
 
   const ensureSession = useCallback(
-    async (modelOverride?: SessionInfoModel | null): Promise<string> => {
+    async (agentOverride?: string): Promise<string> => {
       if (sessionIdRef.current) return sessionIdRef.current;
       if (!projectId) throw projectGateError();
-      const effective = modelOverride ?? model;
-      const created = await createSession(
-        { projectId, ...(effective ? { model: effective } : {}) },
-      );
+      const effective = agentOverride ?? agentId;
+      const created = await createSession({ projectId, agentId: effective });
       sessionIdRef.current = created.id;
       setSessionId(created.id);
       // Fresh session — deltas accumulate from zero.
       resetStream();
       return created.id;
     },
-    [projectId, resetStream, model],
+    [projectId, resetStream, agentId],
   );
 
   const send = useCallback(
-    async (text: string, opts?: { model?: SessionInfoModel }) => {
+    async (text: string, opts?: { agentId?: string }) => {
       const trimmed = text.trim();
       if (!trimmed || sendingRef.current) return;
       if (!projectId) {
         setError(formatError(projectGateError(), t.errors.unexpected));
         return;
       }
-      const effective = opts?.model ?? model;
+      const effective = opts?.agentId ?? agentId;
       sendingRef.current = true;
       setSending(true);
       setError(null);
@@ -444,7 +443,7 @@ export function useChat(options?: UseChatOptions): UseChatResult {
         // and `sending` clears on the session.idle frame (or stop()).
         await sendSessionMessage(projectId, sid, trimmed, {
           signal: ctrl.signal,
-          ...(effective ? { model: effective } : {}),
+          agentId: effective,
         });
       } catch (e: unknown) {
         if ((e as Error)?.name === 'AbortError') return;
@@ -455,7 +454,7 @@ export function useChat(options?: UseChatOptions): UseChatResult {
         promptCtrlRef.current = null;
       }
     },
-    [projectId, ensureSession, resetStream, t, model],
+    [projectId, ensureSession, resetStream, t, agentId],
   );
 
   const stop = useCallback(() => {
@@ -512,8 +511,8 @@ export function useChat(options?: UseChatOptions): UseChatResult {
     error,
     isEmpty: !loading && !error && messages.length === 0 && !streamingText,
     sessionId,
-    model,
-    setModel,
+    agentId,
+    setAgentId,
     send,
     stop,
     reload,

@@ -288,6 +288,8 @@ export const ru: Dictionary = {
     modelDefault: 'Дефолт раннера',
     modelClear: 'Сбросить',
     modelActive: 'Активная модель',
+    agentLabel: 'Агент',
+    agentDefault: 'Спросить',
     scrollToEnd: 'К последнему сообщению',
   },
   language: {

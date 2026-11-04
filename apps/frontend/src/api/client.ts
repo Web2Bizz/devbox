@@ -23,6 +23,7 @@ import type {
   UpdateOrganizationInput as UpdateOrganizationRequest,
 } from '@rush-code/contracts';
 import {
+  agentInfoListSchema,
   sessionInfoListSchema,
   sessionInfoSchema,
   sessionInterruptResultSchema,
@@ -33,6 +34,7 @@ import {
   sessionModelListSchema,
 } from '@rush-code/contracts';
 import type {
+  AgentInfo,
   CreateSessionRequest,
   InterruptSessionRequest,
   SessionInfo,
@@ -378,6 +380,19 @@ export const api = {
           ...(opts?.signal ? { signal: opts.signal } : {}),
         },
       ),
+    ),
+  // Agent registry (GET /api/v1/agents) — the chat AgentSelector inventory.
+  // Versioned (the agents controller is URI-versioned v1, unlike the
+  // VERSION_NEUTRAL domain session routes), same boundary-parse stance:
+  // a wire drift fails fast as shape_mismatch, never a silent cast.
+  listAgents: async (accessToken: string, opts?: { signal?: AbortSignal }): Promise<AgentInfo[]> =>
+    parseBoundary(
+      'GET /api/v1/agents',
+      agentInfoListSchema,
+      await requestV1<unknown>('/agents', {
+        headers: { authorization: `Bearer ${accessToken}` },
+        ...(opts?.signal ? { signal: opts.signal } : {}),
+      }),
     ),
   // Docker-registry surface: 200 always means live upstream /v2/_catalog
   // data. Unconfigured/unreachable answers 503 EXTERNAL_UNAVAILABLE

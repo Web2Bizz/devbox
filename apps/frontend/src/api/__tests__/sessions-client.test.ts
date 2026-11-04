@@ -47,6 +47,7 @@ mock.module('../../lib/auth-store', () => ({
 import { ApiClientError } from '../client';
 const {
   interruptSession,
+  listAgents,
   listSessionProviders,
   listSessions,
   sendSessionMessage,
@@ -97,6 +98,7 @@ const ROW = {
   directory: '/srv/projects/p1',
   projectId: PROJECT,
   model: null,
+  agentId: null,
   // as const: { type: string } would not satisfy SessionRunStatus asserts.
   status: { type: 'busy' } as const,
 };
@@ -177,6 +179,42 @@ describe('sessions-client domain boundary', () => {
     const init = calls[0]?.init as RequestInit;
     expect(init.method).toBe('POST');
     expect(JSON.parse(String(init.body))).toEqual({ projectId: PROJECT, text: 'hi' });
+  });
+
+  test('sendSessionMessage: agentId rides the body when the picker set one', async () => {
+    stubs = [
+      {
+        status: 200,
+        body: {
+          id: 'msg_q',
+          type: 'user',
+          createdAt: '2026-10-29T10:01:00.000Z',
+          text: 'hi',
+        },
+      },
+    ];
+    await sendSessionMessage(PROJECT, 'ses_1', 'hi', { agentId: 'ask' });
+    const init = calls[0]?.init as RequestInit;
+    expect(JSON.parse(String(init.body))).toEqual({ projectId: PROJECT, text: 'hi', agentId: 'ask' });
+  });
+
+  test('listAgents: registry rows parse, drift fails loud (never a cast)', async () => {
+    stubs = [
+      {
+        status: 200,
+        body: [{ id: 'ask', name: 'Ask', description: 'Answers user questions' }],
+      },
+    ];
+    const rows = await listAgents();
+    expect(rows).toEqual([{ id: 'ask', name: 'Ask', description: 'Answers user questions' }]);
+    expect(calls[0]?.url).toContain('/api/v1/agents');
+    const headers = calls[0]?.init.headers as Record<string, string>;
+    expect(headers.authorization).toBe('Bearer token-1');
+
+    stubs = [{ status: 200, body: [{ id: 'ask' }] }];
+    const err = await listAgents().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiClientError);
+    expect((err as ApiClientError).code).toBe('shape_mismatch');
   });
 
   test('interruptSession: domain POST with {projectId} body, answer {interrupted} parsed', async () => {

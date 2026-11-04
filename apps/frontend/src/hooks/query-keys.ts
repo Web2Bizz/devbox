@@ -60,6 +60,12 @@ export const sessionModelsQueryKey = (projectId?: string) =>
   ['sessions', 'models', projectId ?? 'none'] as const;
 
 /**
+ * GET /api/v1/agents — agent registry (project-independent: the registry is
+ * global, so the key carries no project scope — one shared cache entry).
+ */
+export const agentsQueryKey = ['agents'] as const;
+
+/**
  * GET /api/sessions/{id}/messages — project-scoped session thread.
  * `sessionId`/`projectId` nulls map to stable `'none'` scopes (same
  * convention as above — one entry per real scope, never one per render).

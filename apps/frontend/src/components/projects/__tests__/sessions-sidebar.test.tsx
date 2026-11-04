@@ -35,6 +35,7 @@ const sessionInfo = (id: string, title: string | null) => ({
   directory: `/srv/projects/${PRJ}`,
   projectId: PRJ,
   model: null,
+  agentId: null,
   status: { type: 'idle' as const },
 });
 

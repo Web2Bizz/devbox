@@ -4,9 +4,11 @@ import { MODULE_METADATA } from "@nestjs/common/constants";
 import { WorkspacePathService } from "../../../../common/storage/workspace-path.service";
 import { RunsModule } from "../../runs/runs.module";
 import { RunsClaimLoop } from "../modules/claim-loop";
+import { ExecutorRegistry } from "../modules/executor";
 import { RunWorktreeService } from "../modules/git";
 import { ModelGateway, StubModelGateway } from "../modules/model-gateway";
 import { SandboxProvider } from "../modules/sandbox";
+import { SkillLoader } from "../modules/skills";
 import { McpToolSource, ToolRegistry } from "../modules/tool-registry";
 import { WorkersModule } from "../workers.module";
 
@@ -45,9 +47,11 @@ describe("WorkersModule metadata", () => {
       WorkspacePathService,
       RunWorktreeService,
       ToolRegistry,
-      McpToolSource,
-      SandboxProvider,
+      SkillLoader,
       { provide: ModelGateway, useClass: StubModelGateway },
+      ExecutorRegistry,
+      SandboxProvider,
+      McpToolSource,
       RunsClaimLoop,
     ]);
   });

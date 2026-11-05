@@ -2,9 +2,11 @@ import { Module } from '@nestjs/common';
 import { WorkspacePathService } from '../../../common/storage/workspace-path.service';
 import { RunsModule } from '../runs/runs.module';
 import { RunsClaimLoop } from './modules/claim-loop';
+import { ExecutorRegistry } from './modules/executor';
 import { RunWorktreeService } from './modules/git';
 import { ModelGateway, StubModelGateway } from './modules/model-gateway';
 import { SandboxProvider } from './modules/sandbox';
+import { SkillLoader } from './modules/skills';
 import { McpToolSource, ToolRegistry } from './modules/tool-registry';
 
 /**
@@ -20,7 +22,11 @@ import { McpToolSource, ToolRegistry } from './modules/tool-registry';
  * and another instance claims the run); a hard crash may leave one attempt to
  * be replayed by the operator — TODO(full-fencing) adds epochs. The model port
  * is the stub (one provider, normalized response journaled as the step
- * result), and tools reach the model as ToolView projections only (D3).
+ * result); ExecutorRegistry wraps it as the step-level agent seam (`ask` /
+ * `default`), and SkillLoader resolves the definitions pinned by the run's
+ * definitionSetHash (skill bodies read strictly at that commit; allowed-tools
+ * is deny-by-default). Tools reach the model as filtered ToolView projections
+ * only (D3).
  *
  * sandbox.exec goes through the opencode runner (SandboxProvider →
  * OpencodeService; it is @Global, so no OpencodeModule import is added here);
@@ -33,9 +39,11 @@ import { McpToolSource, ToolRegistry } from './modules/tool-registry';
     WorkspacePathService,
     RunWorktreeService,
     ToolRegistry,
-    McpToolSource,
-    SandboxProvider,
+    SkillLoader,
     { provide: ModelGateway, useClass: StubModelGateway },
+    ExecutorRegistry,
+    SandboxProvider,
+    McpToolSource,
     RunsClaimLoop,
   ],
 })

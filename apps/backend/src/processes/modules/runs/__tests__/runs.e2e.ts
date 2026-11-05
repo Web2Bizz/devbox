@@ -23,6 +23,10 @@
  *   run.started first, then the four run.step.committed frames
  *   (tool request/response hashes 64-hex, attempt 1; sandbox session id +
  *   command; git sha 40-hex on agent/<id> from baseCommit);
+ * - the llm.call frame proves the pinned definition set: the pilot skill
+ *   `skills/runs-probe/SKILL.md` lives in baseCommit, and the journal carries
+ *   resultRef.skills = ['runs-probe'], the run's definitionSetHash and the
+ *   `read` effect — skills are read strictly at the pinned commit;
  * - a second catch-up replays the same committed seqs (no loss) and a cursor
  *   at the last delivered id tails nothing (empty), so replay is
  *   append-only-correct;
@@ -42,7 +46,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
@@ -70,6 +74,23 @@ process.env.AUTH_LEGACY_MOCK_FALLBACK = 'false';
 const E2E_ROOT = '/tmp/rush-code-e2e-runs';
 /** The project's content repo the patched resolver returns (real git repo). */
 const JAIL_DIR = `${E2E_ROOT}/content`;
+
+/**
+ * Pilot skill committed into the fixture BEFORE baseCommit: the run pins its
+ * definition set as `sha256:<baseCommit>`, so the claim loop must find this
+ * file at that exact sha (same content as `skills/runs-probe/SKILL.md`).
+ */
+const PILOT_SKILL_MD = `---
+name: runs-probe
+description: Inspect the run worktree with native:git.recon before the prototype planner advances a step.
+allowed-tools:
+  - native:git.recon
+---
+
+When a run starts, call \`native:git.recon\` to read the worktree HEAD and the
+dirty file list. Use the result to decide whether the next step is safe; never
+commit or reset from this skill.
+`;
 
 // Create the root before boot: validateEnv() fail-fasts on an unreadable
 // REPOS_ROOT, and a stale run from a previous attempt must not leak in.
@@ -267,6 +288,11 @@ async function main(): Promise<void> {
   rmSync(JAIL_DIR, { recursive: true, force: true });
   mkdirSync(JAIL_DIR, { recursive: true });
   git(JAIL_DIR, ['init', '-b', 'main']);
+  // The pilot skill must be part of the initial commit: definitionSetHash pins
+  // the run to this sha, and the SkillLoader reads SKILL.md at that commit.
+  mkdirSync(`${JAIL_DIR}/skills/runs-probe`, { recursive: true });
+  writeFileSync(`${JAIL_DIR}/skills/runs-probe/SKILL.md`, PILOT_SKILL_MD, 'utf8');
+  git(JAIL_DIR, ['add', '-A']);
   git(JAIL_DIR, [
     '-c',
     'user.email=runs-e2e@rush-code.local',
@@ -529,6 +555,26 @@ async function main(): Promise<void> {
       } catch (err) {
         push(
           'SSE journals llm.call → tool.call → sandbox.exec → git.commit as committed steps 1,2,3,4',
+          err as Error,
+        );
+      }
+
+      try {
+        const llmFrame = committed.find((frame) => frameStepSeq(frame) === 1);
+        assert.ok(llmFrame, 'missing llm.call committed frame');
+        const resultRef = (llmFrame.data as JsonRecord).resultRef as JsonRecord | undefined;
+        assert.ok(resultRef, 'llm frame has no resultRef');
+        assert.deepEqual(resultRef.skills, ['runs-probe']);
+        assert.equal(resultRef.definitionSetHash, created.definitionSetHash);
+        const effects = resultRef.effects;
+        assert.ok(Array.isArray(effects) && effects.includes('read'));
+        push(
+          'llm.call frame is pinned to definitionSetHash and carries the runs-probe skill',
+          null,
+        );
+      } catch (err) {
+        push(
+          'llm.call frame is pinned to definitionSetHash and carries the runs-probe skill',
           err as Error,
         );
       }

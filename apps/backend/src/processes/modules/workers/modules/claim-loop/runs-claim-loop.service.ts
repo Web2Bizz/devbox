@@ -6,9 +6,11 @@ import type { RunRow } from '../../../../../common/db/schema';
 import { AppLogger, serializeCause } from '../../../../../common/logger';
 import { RunLeaseFencedError, RunsRepository } from '../../../runs/runs.repository';
 import { isComplete, nextStep, type PrototypeStep } from '../../utils/step-plan';
+import { ExecutorRegistry } from '../executor';
 import { RunWorktreeService } from '../git';
-import { ModelGateway, type ModelMessage } from '../model-gateway';
+import type { ModelMessage } from '../model-gateway';
 import { SandboxProvider } from '../sandbox';
+import { SkillLoader, type SkillBundle } from '../skills';
 import { ToolRegistry } from '../tool-registry';
 
 /** Lease is renewed by every step transaction; this is the ceiling between renewals. */
@@ -35,6 +37,14 @@ function sha256(value: string): string {
  * parked for a human (`awaiting_human`); an unrecoverable step failure leaves
  * the run visible as failed, never silently retried.
  *
+ * The llm.call step resolves its definition set from `run.definitionSetHash`
+ * (`sha256:<base_commit>`): skills are read strictly at that commit through the
+ * SkillLoader, so an in-flight run never sees a fresher SKILL.md, and the
+ * filtered ToolView surface is deny-by-default per each skill's `allowed-tools`.
+ * The executed agent comes from ExecutorRegistry by `run.agentId` (null →
+ * default); the journal records model/text/usage plus the pinned skills and
+ * their effects.
+ *
  * TODO(full-fencing): epoch-based fencing (a stale worker must be fenced by
  * the lease row itself, not just by the holder string).
  * TODO(dual-write-reconcile): git effects are not replayed by a reconcile
@@ -49,9 +59,10 @@ export class RunsClaimLoop implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly repo: RunsRepository,
     private readonly worktree: RunWorktreeService,
-    private readonly gateway: ModelGateway,
+    private readonly executors: ExecutorRegistry,
     private readonly tools: ToolRegistry,
     private readonly sandbox: SandboxProvider,
+    private readonly skills: SkillLoader,
     private readonly logger: AppLogger = new AppLogger(RunsClaimLoop.name),
   ) {}
 
@@ -148,7 +159,53 @@ export class RunsClaimLoop implements OnModuleInit, OnModuleDestroy {
     const messages: Array<ModelMessage> = [
       { role: 'user', content: run.title ?? 'prototype run' },
     ];
-    const inputHash = sha256(canonicalJson({ model, messages }));
+    const definitionSetHash = run.definitionSetHash;
+    // definitionSetHash is `sha256:<base_commit>`; a run created without an
+    // explicit pin falls back to its own Forward-Only base — never the worktree
+    // HEAD, so the pin can only move forward by creating a new run.
+    const commitSha = definitionSetHash.startsWith('sha256:')
+      ? definitionSetHash.slice('sha256:'.length)
+      : run.baseCommit;
+
+    // Skills are resolved BEFORE the step opens: inputHash names the pinned
+    // definition set, so a journaled llm.call is replayable against the exact
+    // SKILL.md bodies the model saw.
+    let bundle: SkillBundle;
+    try {
+      bundle = await this.skills.loadForRun(run.worktree, commitSha);
+    } catch (err) {
+      if (err instanceof RunLeaseFencedError) throw err;
+      // Detail stays in debug; the journal gets a fixed code, no body.
+      this.logger.debug(serializeCause(err), '');
+      const inputHash = sha256(canonicalJson({ model, messages, definitionSetHash }));
+      await this.repo.startStep({
+        runId: run.id,
+        seq: step.seq,
+        type: step.type,
+        inputHash,
+        idempotencyKey: sha256(`${run.id}|${step.seq}|${step.type}|${inputHash}`),
+        holder: this.holder,
+        leaseTtlMs: LEASE_TTL_MS,
+        correlationId: '',
+      });
+      await this.repo.failStep({
+        runId: run.id,
+        seq: step.seq,
+        holder: this.holder,
+        leaseTtlMs: LEASE_TTL_MS,
+        correlationId: '',
+        error: { code: 'SKILL_LOAD_FAILED', message: 'skill load failed' },
+      });
+      await this.repo.finishRun(run.id, this.holder, 'failed', '');
+      return;
+    }
+
+    // Deny-by-default: an active skill narrows the model-facing surface to its
+    // `allowed-tools`; the model never sees effects or handlers (D3).
+    const tools = this.skills.filterToolViews(this.tools.listViews(), bundle);
+    const executor = this.executors.resolve(run.agentId);
+
+    const inputHash = sha256(canonicalJson({ model, messages, definitionSetHash }));
 
     await this.repo.startStep({
       runId: run.id,
@@ -164,10 +221,11 @@ export class RunsClaimLoop implements OnModuleInit, OnModuleDestroy {
     try {
       let text = '';
       let usage = { in: 0, out: 0 };
-      for await (const event of this.gateway.stream({
+      for await (const event of executor.stream({
         model,
+        system: bundle.system,
         messages,
-        tools: this.tools.listViews(),
+        tools,
         need: {},
       })) {
         if (event.type === 'delta') text += event.text;
@@ -179,7 +237,14 @@ export class RunsClaimLoop implements OnModuleInit, OnModuleDestroy {
         holder: this.holder,
         leaseTtlMs: LEASE_TTL_MS,
         correlationId: '',
-        resultRef: { model, text, usage },
+        resultRef: {
+          model,
+          text,
+          usage,
+          definitionSetHash,
+          skills: bundle.skills.map((skill) => skill.meta.name),
+          effects: bundle.effects,
+        },
       });
     } catch (err) {
       if (err instanceof RunLeaseFencedError) throw err;

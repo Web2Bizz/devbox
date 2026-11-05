@@ -60,9 +60,8 @@ function loadSdk(): Promise<SdkModule> {
  *   sdk's `GET /api/health` binding — which the 2.x server does not serve;
  *   it is NOT our health path, liveness goes through `GET /api/info`.
  *   Path params use `sessionID` with a capital D);
- *   `OpencodeController` mirrors those paths under `/api/opencode/*` so the
- *   frontend can use the SAME sdk against the backend base URL with no new
- *   contracts.
+ *   the unversioned mirror was removed; these classes remain internal
+ *   transport for legacy sessions until migration.
  */
 @Injectable()
 export class OpencodeSdkClient {

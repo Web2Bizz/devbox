@@ -13,8 +13,9 @@ import type { Request as ExpressRequest, Response as ExpressResponse } from 'exp
 // project's `location.directory` — the legacy POST /session answers 405). Writes without a v2 equivalent
 // (update/delete/fork/prompt/prompt_async/command/shell, status, abort,
 // global.event)
-// stay on the legacy `Session2`/`Config2`/`Event`/`Global` surface —
-// the same paths the controller mirrors under `/api/opencode/*`.
+// stay on the legacy `Session2`/`Config2`/`Event`/`Global` surface.
+// The unversioned mirror was removed; these paths remain internal transport
+// for legacy sessions until migration.
 import type { OpencodeClient, OutputFormat, Session, SessionV2Info } from '@opencode-ai/sdk/v2';
 import { AppLogger } from '../../../../../common/logger';
 import { ExternalClient } from '../../../../../common/external/external-client';

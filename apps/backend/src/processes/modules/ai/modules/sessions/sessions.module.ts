@@ -9,7 +9,7 @@ import { SessionsService } from './sessions.service';
 
 /**
  * Domain sessions module — /api/sessions* (the product contract replacing
- * the deprecated /api/opencode/* mirror; see SessionHarnessService for the
+ * the removed /api/opencode/* mirror; see SessionHarnessService for the
  * orchestration + translation and gate composition, SessionsService as the
  * thin domain facade over the SessionHarness interface).
  *

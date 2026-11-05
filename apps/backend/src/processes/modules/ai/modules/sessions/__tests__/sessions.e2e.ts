@@ -9,8 +9,8 @@
  * Strict Postgres (throwaway container, like auth/organizations/keys suites):
  * the durable session history reads/writes Postgres. Boots the real
  * AppModule through the shared configureApp()/setupSwagger(), patches the
- * C4 gate prototypes (organizations + workspace path, same trick as
- * opencode.e2e) and points OPENCODE_URL at a v2 stand stub that mirrors the
+ * C4 gate prototypes (organizations + workspace path, same trick as the
+ * other strict e2e suites) and points OPENCODE_URL at a v2 stand stub that mirrors the
  * 2.2.0 shapes (provenance: contracts/opencode-stand-2.2.0.json):
  * - GET /api/info → 200 JSON (the relay's liveness probe path);
  * - GET /api/session → {data:[A,B],cursor} (A carries title+model, B none);
@@ -498,7 +498,7 @@ async function main(): Promise<void> {
   });
 
   // C4 gate + jail patched on the PROTOTYPES (no Postgres in this suite) so
-  // requests really reach the stub (same convention as opencode.e2e).
+  // requests really reach the stub (same convention as the other e2e suites).
   const { ProjectAccessService } = await import('../../../../../../organizations/modules/projects/modules/project-access/project-access.service');
   const { WorkspacePathService } = await import('../../../../../../common/storage/workspace-path.service');
   const allowAccess = async (): Promise<{ ownerId: string; orgIds: Array<string> }> => ({
@@ -905,8 +905,8 @@ async function main(): Promise<void> {
     });
     process.env.OPENCODE_URL = stand.url;
 
-    // Swagger surface: domain paths present + mirror marked deprecated.
-    await check('swagger exposes /api/sessions and deprecates the mirror', '/swagger/v1.json', undefined, 200, (_res, body) => {
+    // Swagger surface: domain paths present, unversioned mirror gone.
+    await check('swagger exposes /api/sessions, no unversioned /api/opencode mirror', '/swagger/v1.json', undefined, 200, (_res, body) => {
       const doc = body as { paths?: Record<string, Record<string, { deprecated?: boolean; tags?: Array<string> }>> };
       const paths = doc.paths ?? {};
       assert.ok(paths['/api/sessions'], 'missing /api/sessions in swagger');
@@ -916,12 +916,11 @@ async function main(): Promise<void> {
       assert.ok(paths['/api/sessions/providers'], 'missing /api/sessions/providers in swagger');
       assert.ok(paths['/api/sessions/{id}/interrupt'], 'missing /api/sessions/{id}/interrupt in swagger');
       assert.ok(paths['/api/sessions']?.get?.tags?.includes('sessions'), 'sessions tag missing');
-      assert.equal(paths['/api/opencode/session']?.get?.deprecated, true, 'mirror GET not deprecated');
-      assert.equal(paths['/api/opencode/session']?.post?.deprecated, true, 'mirror POST not deprecated');
+      assert.ok(!paths['/api/opencode/session'], 'removed /api/opencode mirror is still documented');
     });
 
     // Anonymous (no Bearer) → 401 before any gate/DB work — check() always
-    // attaches the Bearer, so this one uses raw fetch (same pattern as opencode.e2e).
+    // attaches the Bearer, so this one uses raw fetch (same pattern as the other e2e suites).
     {
       const anon = await fetch(`${base}/api/sessions?projectId=${E2E_PROJECT_ID}`);
       const anonBody = (await anon.json().catch(() => null)) as { code?: string } | null;

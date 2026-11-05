@@ -230,6 +230,14 @@ async function main(): Promise<void> {
       assert.equal((body as { code?: string }).code, 'not_found');
     });
 
+    // Unversioned /api/opencode/* mirror removed — never registered again.
+    await check('GET /api/opencode/session → 404 not_found (unversioned mirror removed)', '/api/opencode/session', undefined, 404, (_res, body) => {
+      assert.equal((body as { code?: string }).code, 'not_found');
+    });
+    await check('GET /api/opencode/global/health → 404 not_found (unversioned mirror removed)', '/api/opencode/global/health', undefined, 404, (_res, body) => {
+      assert.equal((body as { code?: string }).code, 'not_found');
+    });
+
     // Swagger surface.
     await check('GET /swagger/v1 200 (UI)', '/swagger/v1', undefined, 200);
     await check('GET /swagger 200 (v1 back-compat)', '/swagger', undefined, 200);
@@ -242,9 +250,9 @@ async function main(): Promise<void> {
       assert.ok(!paths.includes('/api/v1/chat'), `deleted proxy /api/v1/chat came back: ${paths.join(',')}`);
       assert.ok(paths.includes('/api/v1/health'), `missing /api/v1/health in ${paths.join(',')}`);
       assert.ok(!paths.includes('/api/session'), `legacy /api/session must be gone, got ${paths.join(',')}`);
-      // Domain sessions routes (card 4) are intentional VERSION_NEUTRAL paths
-      // in this document — same contract presence as the /api/opencode/*
-      // mirror they deprecate (the removed proxy paths above must stay gone).
+      // Unversioned /api/opencode/* mirror is removed: no such path may be
+      // documented (the removed proxy paths above must stay gone too).
+      assert.ok(!paths.some((path) => path.startsWith('/api/opencode')), `unversioned /api/opencode survived: ${paths.join(',')}`);
       assert.ok(paths.includes('/api/sessions'), `missing /api/sessions in ${paths.join(',')}`);
       assert.ok(paths.includes('/api/sessions/status'), `missing /api/sessions/status in ${paths.join(',')}`);
       // Dropping the redundant per-handler `@Version('1')` must not drop the
@@ -278,6 +286,13 @@ async function main(): Promise<void> {
     // provided by several modules — one instance per module.
     const unauthorized = await startUnauthorizedUpstream();
     process.env.OPENCODE_URL = unauthorized.url;
+    const { SessionHistoryRepository } = await import(
+      '../../processes/modules/ai/modules/sessions/session-history.repository'
+    );
+    const historyProto = SessionHistoryRepository.prototype as unknown as {
+      listLocalSessions: (projectId: string) => Promise<Array<unknown>>;
+    };
+    const originalListLocalSessions = historyProto.listLocalSessions;
     try {
       const { ProjectAccessService } = await import('../../organizations/modules/projects/modules/project-access/project-access.service');
       const { WorkspacePathService } = await import('../../common/storage/workspace-path.service');
@@ -301,6 +316,10 @@ async function main(): Promise<void> {
       pathsProto.resolveUserStrict = async () => ({ absRepo: '/tmp/rush-code-e2e-project' });
       pathsProto.realStrictRoot = async () => '/tmp/rush-code-e2e-root';
       pathsProto.assertInsideJail = async (abs: string) => abs;
+      // No Postgres in this suite (DATABASE_URL=''): the local history lookup
+      // would fail with a DB-unavailable error before the runner is contacted.
+      // Stub it so the request really reaches the unauthorized runner.
+      historyProto.listLocalSessions = async () => [];
 
       await check(
         'GET /api/sessions runner 401 → 503 EXTERNAL_UNAUTHORIZED (no Retry-After)',
@@ -319,6 +338,7 @@ async function main(): Promise<void> {
         },
       );
     } finally {
+      historyProto.listLocalSessions = originalListLocalSessions;
       process.env.OPENCODE_URL = 'http://127.0.0.1:9';
       await unauthorized.close();
     }

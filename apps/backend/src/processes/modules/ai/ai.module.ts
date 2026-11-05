@@ -7,8 +7,8 @@ import { WorkersModule } from '../workers/workers.module';
 /**
  * AiModule — aggregate module without its own controller.
  * Submodules: AgentsModule (with controller), OpencodeModule (global opencode
- * upstream transport + mirror, re-exported so existing consumers keep
- * working), SessionsModule (/api/sessions* domain). WorkersModule is a
+ * upstream transport — unversioned mirror removed; re-exported so existing
+ * consumers keep working), SessionsModule (/api/sessions* domain). WorkersModule is a
  * sibling inside the processes scope (no controller) and is mounted here so
  * the AI runtime and its background workers boot together.
  */

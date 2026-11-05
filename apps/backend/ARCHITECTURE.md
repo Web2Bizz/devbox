@@ -58,8 +58,8 @@ src/
    ├─ processes.module.ts
    ├─ modules/ai/ — ai.module.ts
    │  ├─ modules/agents/ — AgentBase/AskAgent + /agents
-   │  ├─ modules/opencode/ — deprecated-зеркало /opencode/* + транспорт раннера
-   │  │  ├─ opencode.{controller,service}.ts, opencode-sdk-client.ts (lazy @opencode-ai/sdk/v2)
+   │  ├─ modules/opencode/ — unversioned mirror удалён; внутренний транспорт sessions до миграции
+   │  │  ├─ opencode.service.ts, opencode-sdk-client.ts (lazy @opencode-ai/sdk/v2; без HTTP-контроллера)
    │  │  ├─ keys.controller.ts — HTTP /api/v1/key (store — в common/keys)
    │  │  └─ modules/{auth,billing}/ — OpencodeAuthService (gate + Basic), BillingService + BillingController (HTTP /api/v1/usage)
    │  └─ modules/sessions/ — доменный /api/sessions* (VERSION_NEUTRAL, SSE через common/sse)

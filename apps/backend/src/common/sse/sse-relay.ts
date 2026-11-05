@@ -2,11 +2,11 @@ import type { Request as ExpressRequest, Response as ExpressResponse } from 'exp
 import type { AppLogger } from '../logger';
 
 /**
- * Shared SSE re-stream mechanics (was the private relaySse of
+ * Shared SSE re-stream mechanics (was the private relaySse of the removed
  * OpencodeController; extracted unchanged so the domain /api/sessions/events
  * route rides the same transport instead of duplicating it).
  *
- * Semantics (preserved 1:1 from the mirror, covered by opencode.e2e):
+ * Semantics (preserved 1:1 from the legacy transport, covered by sessions.e2e):
  * - probe first: an unreachable upstream answers 503 BEFORE any SSE header
  *   (the sdk SSE client reconnects forever, so without a probe a down
  *   upstream would stream 200 silence);

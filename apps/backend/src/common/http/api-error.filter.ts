@@ -103,7 +103,7 @@ export class ApiErrorFilter implements ExceptionFilter {
       // EXTERNAL_UNAUTHORIZED is the exception inside the 5xx family: the
       // upstream refused the credentials we sent, so a retry can only fail
       // the same way — no Retry-After, the fix is a config change.
-      // (proxy /api/v1/* and the /api/opencode/* surface throw
+      // (proxy /api/v1/* and the legacy sessions transport throw
       // EXTERNAL_UNAVAILABLE when the opencode server is unreachable —
       // no mock 200s).
       // Logging: normal-path one-liner with service/operation/status/code,

@@ -5,7 +5,6 @@ import { BillingModule } from './modules/billing/billing.module';
 import { OpencodeKeysController } from './keys.controller';
 import { OpencodeHostService } from './opencode-host.service';
 import { OpencodeSdkClient } from './opencode-sdk-client';
-import { OpencodeController } from './opencode.controller';
 import { OpencodeConfig } from './opencode.config';
 import { OpencodeService } from './opencode.service';
 import { OrganizationsModule } from '../../../../../organizations/organizations.module';
@@ -17,9 +16,10 @@ import { OrganizationsModule } from '../../../../../organizations/organizations.
  * shared HealthRegistry (HealthModule imports no domain).
  *
  * OpencodeSdkClient wraps the pinned @opencode-ai/sdk (transport via
- * ExternalClient timeout/retry); OpencodeController mirrors the upstream
- * opencode OpenAPI under VERSION_NEUTRAL /api/opencode/* so the frontend
- * uses the same sdk against the backend with no new contracts.
+ * ExternalClient timeout/retry). The unversioned /api/opencode/* mirror has
+ * been removed (it was VERSION_NEUTRAL and violated the versioned-API-paths
+ * requirement); OpencodeService/OpencodeSdkClient stay as the internal
+ * transport for legacy sessions until the next migration stage.
  *
  * Decomposed into modules/* submodules (each with its own Nest module):
  * billing (BillingService, live usage), auth (ServeAuthService
@@ -49,7 +49,7 @@ import { OrganizationsModule } from '../../../../../organizations/organizations.
 @Global()
 @Module({
   imports: [BillingModule, ServeAuthModule, OrganizationsModule],
-  controllers: [OpencodeController, OpencodeKeysController],
+  controllers: [OpencodeKeysController],
   providers: [OpencodeService, OpencodeConfig, OpencodeSdkClient, OpencodeHostService],
   exports: [
     BillingModule,

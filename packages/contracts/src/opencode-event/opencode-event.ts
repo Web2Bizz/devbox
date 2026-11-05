@@ -7,7 +7,7 @@
  * GET /api/opencode/event relays the v2 bus frames verbatim: the pinned
  * @opencode-ai/sdk v2 `event.subscribe()` parses the upstream SSE envelope
  * and yields the parsed event object — the mirror writes exactly that
- * object as the downstream `data:` frame (opencode.controller.ts relaySse).
+ * object as the downstream `data:` frame (common/sse/sse-relay.ts relaySse).
  * So the downstream frame is the FLAT event {id, type, data, …} — NOT the
  * raw upstream envelope {event, data:JSON-string} and NOT the legacy
  * GlobalEvent {…payload} wrapper. Shape provenance: live SSE probe of the

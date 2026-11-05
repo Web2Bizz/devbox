@@ -33,7 +33,7 @@ function isAbortLike(e: unknown): boolean {
 const PROCESS_CONTEXT = 'Process';
 const processLogger = new AppLogger(PROCESS_CONTEXT);
 
-// SSE downstream disconnect (GET /api/opencode/global/event) surfaces as
+// SSE downstream disconnect (GET /api/sessions/events) surfaces as
 // DOMException AbortError outside Nest context (EventEmitter close →
 // upstream.abort() → emitCloseNT) as unhandledRejection — log at debug so
 // real opencode timeouts (ExternalClient → EXTERNAL_TIMEOUT, handled via

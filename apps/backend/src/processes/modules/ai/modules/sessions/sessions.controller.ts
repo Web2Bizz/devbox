@@ -40,7 +40,7 @@ import { SessionsService } from './sessions.service';
 /**
  * Domain session routes — /api/sessions* (VERSION_NEUTRAL under the global
  * 'api' prefix). This is the product-facing contract that replaces the
- * deprecated /api/opencode/* mirror: our names, our shapes, no opencode
+ * removed /api/opencode/* mirror: our names, our shapes, no opencode
  * vocabulary on the wire (SessionHarnessService owns the translation,
  * SessionsService is the thin facade over it).
  *

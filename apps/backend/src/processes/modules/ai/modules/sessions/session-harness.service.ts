@@ -111,8 +111,8 @@ function isMissingKey(err: unknown): boolean {
  * Card 1 (harness-core): the orchestrator interface is domain-only
  * (SessionInfo / SessionMessage / SessionStreamFrame from
  * @rush-code/contracts); THIS implementation still rides the opencode serve
- * transport (:4096) through the exact building blocks the deprecated
- * /api/opencode/* mirror uses (no behavior change there):
+ * transport (:4096) through the exact building blocks the removed
+ * /api/opencode/* mirror used (no behavior change there):
  * - reads (session list, active set, providers, models, interrupt) ride
  *   the v2 sdk surface through OpencodeSdkClient (real-user gate +
  *   ExternalClient retry/timeout);
@@ -127,8 +127,8 @@ function isMissingKey(err: unknown): boolean {
  *   {interrupted} despite the stale 204-void typing);
  * - status is DERIVED from live data (GET /api/session/active — the 2.x
  *   spec's running-drain map): busy while a session has an active drain,
- *   idle otherwise. The legacy GET /session/status the mirror proxies is
- *   not served by 2.x (SPA catch-all → 503), so deriving from the active
+ *   idle otherwise. The legacy GET /session/status the removed mirror
+ *   proxied is not served by 2.x (SPA catch-all → 503), so deriving from the active
  *   map is the only REST-reachable source; the transient `retry` state
  *   lives in the event stream, not in snapshots. Interrupt and the model
  *   inventory ride the same sdk client (interrupt posts no body; the model
@@ -1122,8 +1122,8 @@ export class SessionHarnessService implements SessionHarness {
 
   /**
    * GET /api/sessions/providers — the project's runner provider inventory
-   * (v2 GET /api/provider in the gated jail, the same sdk call the mirror
-   * makes). The domain row is the REQUIRED artifact subset
+   * (v2 GET /api/provider in the gated jail, the same sdk call the removed
+   * mirror made). The domain row is the REQUIRED artifact subset
    * (Provider.Info: id/name/activation/package); settings/headers/body are
    * never projected (headers can carry auth material; the UI consumes
    * none of it). A row violating the required set fails loud — never a

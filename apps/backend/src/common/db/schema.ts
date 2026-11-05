@@ -20,6 +20,13 @@
  *   organization through projects.org_id (1:1). The former M2M table is gone.
  * - refresh_tokens: persistent refresh-token rotation registry (jti rows,
  *   soft revoke/soft prune — never physically deleted).
+ * - run_runs / run_steps / run_events: agent-harness run domain — the run
+ *   registry, the write-ahead step journal (one row per attempt) and the
+ *   append-only event journal that feeds replay/SSE (ADR-0001 §8.7.1/§9.1/
+ *   §9.7, ADR-0002 §6.1). project_id RESTRICTs a hard project delete.
+ * - run_leases: ephemeral claim/heartbeat row per run (simplified fencing —
+ *   no `epoch` yet); CASCADE on run delete because a lease is disposable
+ *   runtime state, not history.
  *
  * Strict Postgres runtime (ProjectsService / GithubInstallationsService /
  * UsersService hit these tables only — no memory fallback); the tables are
@@ -29,16 +36,17 @@
  *
  * Soft-delete rule (project rule): rows are NEVER physically deleted —
  * removal sets `deleted_at = now()` on organizations / projects /
- * project_chats / project_sessions / session_messages. Reads hide such rows with
- * `isNull(<table>.deletedAt)` (opt-in `includeDeleted` where the API needs
- * history). projects.org_id and the chats/sessions project_id FKs are
- * ON DELETE RESTRICT so hard deletes fail instead of wiping history.
+ * project_chats / project_sessions / session_messages / run_runs. Reads hide
+ * such rows with `isNull(<table>.deletedAt)` (opt-in `includeDeleted` where
+ * the API needs history). projects.org_id and the chats/sessions project_id
+ * FKs are ON DELETE RESTRICT so hard deletes fail instead of wiping history.
  */
 import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
   index,
+  integer,
   jsonb,
   pgTable,
   text,
@@ -377,3 +385,129 @@ export const refreshTokens = pgTable(
 );
 
 export type RefreshTokenRow = typeof refreshTokens.$inferSelect;
+
+/**
+ * Run registry (agent-harness prototype, ADR-0001 §8.7.1 / ADR-0002 §6.1).
+ *
+ * One row per run: the C4 scope (project_id), the Forward-Only base commit,
+ * the dedicated branch/worktree pair and the pinned definition set. Statuses
+ * come from the frozen `RunStatus` union in `@rush-code/contracts` — the
+ * column is plain text with a default, no CHECK (the contract owns the enum).
+ * `deleted_at` follows the soft-delete rule: aborted runs are hidden with
+ * `isNull(runRuns.deletedAt)`, never removed from disk.
+ */
+export const runRuns = pgTable(
+  "run_runs",
+  {
+    // run_id; the app mints Bun.randomUUIDv7() — defaultRandom is a DB-side
+    // safety net, not the source of truth (uuidv7 keeps creation order).
+    id: uuid("id").primaryKey().defaultRandom(),
+    // C4 scope; RESTRICT — rows are never physically deleted (soft-delete rule).
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "restrict" }),
+    title: text("title"),
+    status: text("status").notNull().default("open"),
+    // pin of the active definition set (skills/agents/tools) at run start
+    definitionSetHash: text("definition_set_hash").notNull(),
+    // Forward-Only lower bound: history is never rewound below this sha
+    baseCommit: text("base_commit").notNull(),
+    branch: text("branch").notNull(), // agent/<run_id>
+    worktree: text("worktree").notNull(), // REPOS_ROOT/.../wt/<run_id>
+    sandboxId: text("sandbox_id"), // opencode-runner slot; null while none
+    agentId: text("agent_id"), // registry id, nullable like session_agents.agent_id
+    model: jsonb("model").$type<Record<string, unknown> | null>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    // soft-delete: reads use isNull(deletedAt)
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("run_runs_project_idx").on(t.projectId),
+    index("run_runs_project_status_idx").on(t.projectId, t.status),
+  ],
+);
+
+/**
+ * Run steps — write-ahead step journal (ADR-0001 §9.1). One row per
+ * llm.call/tool.call/sandbox.exec/git.commit/await_human/router attempt.
+ *
+ * Written BEFORE the effect happens, then closed with its outcome, so a
+ * crash leaves a recoverable trail; `idempotency_key` makes a replay of the
+ * same effect a no-op. `seq` is monotonic per run (unique with run_id).
+ */
+export const runSteps = pgTable(
+  "run_steps",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => runRuns.id, { onDelete: "restrict" }),
+    seq: bigint("seq", { mode: "number" }).notNull(), // monotonic per run
+    // llm.call | tool.call | sandbox.exec | git.commit | await_human | router
+    type: text("type").notNull(),
+    status: text("status").notNull().default("pending"),
+    attempt: integer("attempt").notNull().default(0),
+    inputHash: text("input_hash").notNull(),
+    // hash(run_id, step_id, effect_class, input_hash) — one row per effect
+    idempotencyKey: text("idempotency_key").notNull().unique(),
+    // fencing slot: reserved for TODO(full-fencing); simplified claim ignores it
+    observedEpoch: integer("observed_epoch").notNull().default(0),
+    resultRef: jsonb("result_ref").$type<Record<string, unknown> | null>(),
+    error: jsonb("error").$type<Record<string, unknown> | null>(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("run_steps_run_seq_idx").on(t.runId, t.seq),
+    index("run_steps_run_status_idx").on(t.runId, t.status),
+  ],
+);
+
+/**
+ * Run events — append-only journal, the source of truth for replay/SSE
+ * (ADR-0001 §9.7). UPDATE/DELETE are forbidden by doctrine (no trigger in
+ * the prototype); `seq` is the SSE frame id and `prevHash` chains events
+ * tamper-evidently.
+ */
+export const runEvents = pgTable(
+  "run_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => runRuns.id, { onDelete: "restrict" }),
+    seq: bigint("seq", { mode: "number" }).notNull(),
+    type: text("type").notNull(),
+    data: jsonb("data").$type<Record<string, unknown>>().notNull(),
+    prevHash: text("prev_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [uniqueIndex("run_events_run_seq_idx").on(t.runId, t.seq)],
+);
+
+/**
+ * Run leases — ephemeral claim/heartbeat rows (simplified fencing).
+ * TODO(full-fencing): add `epoch` + `SELECT ... FOR UPDATE` on the lease row
+ * in the same transaction as the journal append; a stale/foreign epoch must
+ * fence the worker. The prototype only survives a graceful restart.
+ */
+export const runLeases = pgTable("run_leases", {
+  runId: uuid("run_id")
+    .primaryKey()
+    .references(() => runRuns.id, { onDelete: "cascade" }),
+  holder: text("holder").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+});
+
+export type RunRow = typeof runRuns.$inferSelect;
+export type RunStepRow = typeof runSteps.$inferSelect;
+export type RunEventRow = typeof runEvents.$inferSelect;
+export type RunLeaseRow = typeof runLeases.$inferSelect;
+

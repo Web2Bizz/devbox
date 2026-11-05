@@ -13,6 +13,10 @@ import {
   projects,
   projectSessions,
   refreshTokens,
+  runEvents,
+  runLeases,
+  runRuns,
+  runSteps,
   sessionAgents,
   sessionMessages,
   userOpencodeKeys,
@@ -97,6 +101,10 @@ const DRIZZLE_TABLES = [
   organizationMembers,
   organizationInvites,
   refreshTokens,
+  runRuns,
+  runSteps,
+  runEvents,
+  runLeases,
 ] as const;
 
 const pgDialect = new PgDialect();

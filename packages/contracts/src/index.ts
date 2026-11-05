@@ -22,3 +22,4 @@ export * from './opencode';
 export * from './opencode-session';
 export * from './opencode-event';
 export * from './sessions';
+export * from './runs';

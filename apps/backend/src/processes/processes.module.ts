@@ -6,7 +6,8 @@ import { WorkersModule } from './modules/workers/workers.module';
 /**
  * ProcessesModule — Processes scope aggregate (CoC v2 nested under modules/).
  * Owns the HTTP entries inside ai/* (sessions/opencode/agents), the runs
- * surface (/api/runs*, agent-harness) and the workers scaffold (no routes).
+ * surface (/api/runs*, agent-harness) and the in-process run engine
+ * (claim-loop: llm.call → tool.call → sandbox.exec → git.commit; no routes).
  * Processes depends on Common + Organization, never the other way round.
  */
 @Module({

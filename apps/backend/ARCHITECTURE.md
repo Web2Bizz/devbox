@@ -56,14 +56,15 @@ src/
 │  └─ __tests__/ — organizations.e2e, organizations.guard.spec, storage-unavailable.spec
 └─ processes/ — SCOPE: Processes
    ├─ processes.module.ts
-   └─ modules/ai/ — ai.module.ts
-      ├─ modules/agents/ — AgentBase/AskAgent + /agents
-      ├─ modules/opencode/ — deprecated-зеркало /opencode/* + транспорт раннера
-      │  ├─ opencode.{controller,service}.ts, opencode-sdk-client.ts (lazy @opencode-ai/sdk/v2)
-      │  ├─ keys.controller.ts — HTTP /api/v1/key (store — в common/keys)
-      │  └─ modules/{auth,billing}/ — OpencodeAuthService (gate + Basic), BillingService + BillingController (HTTP /api/v1/usage)
-      └─ modules/sessions/ — доменный /api/sessions* (VERSION_NEUTRAL, SSE через common/sse)
-   └─ modules/workers/ — workers.module.ts
+   ├─ modules/ai/ — ai.module.ts
+   │  ├─ modules/agents/ — AgentBase/AskAgent + /agents
+   │  ├─ modules/opencode/ — deprecated-зеркало /opencode/* + транспорт раннера
+   │  │  ├─ opencode.{controller,service}.ts, opencode-sdk-client.ts (lazy @opencode-ai/sdk/v2)
+   │  │  ├─ keys.controller.ts — HTTP /api/v1/key (store — в common/keys)
+   │  │  └─ modules/{auth,billing}/ — OpencodeAuthService (gate + Basic), BillingService + BillingController (HTTP /api/v1/usage)
+   │  └─ modules/sessions/ — доменный /api/sessions* (VERSION_NEUTRAL, SSE через common/sse)
+   ├─ modules/runs/ — доменный /api/runs* (RunInfo/CreateRunRequest, SSE-журнал run_events, VERSION_NEUTRAL)
+   └─ modules/workers/ — in-process run engine (claim-loop: llm.call → tool.call → sandbox.exec → git.commit; без HTTP-роутов)
 ```
 
 Примечание про `organizations/modules/projects/`: одна сущность — один

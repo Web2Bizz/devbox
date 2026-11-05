@@ -21,7 +21,6 @@
     "test:e2e:repos": "bun run build && bun scripts/e2e.ts repos.service repos-git submodules clone-jobs.repository repos.e2e"
   },
   "dependencies": {
-    "@rush-code/contracts": "workspace:*",
     "@nestjs/common": "^12.1.0",
     "@nestjs/config": "^12.0.1",
     "@nestjs/core": "^12.1.0",
@@ -29,6 +28,8 @@
     "@nestjs/swagger": "^12.0.2",
     "@octokit/auth-app": "^8.3.1",
     "@opencode-ai/sdk": "1.18.33",
+    "@opencode/sdk": "2.2.5",
+    "@rush-code/contracts": "workspace:*",
     "dotenv": "^16.4.5",
     "dotenv-expand": "^11.0.6",
     "drizzle-orm": "^0.45.3",

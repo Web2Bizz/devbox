@@ -3,6 +3,7 @@ import { HealthRegistry } from '../../../../../common/health/health-registry';
 import { ServeAuthModule } from './modules/auth/serve-auth.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { OpencodeKeysController } from './keys.controller';
+import { OpencodeHostService } from './opencode-host.service';
 import { OpencodeSdkClient } from './opencode-sdk-client';
 import { OpencodeController } from './opencode.controller';
 import { OpencodeConfig } from './opencode.config';
@@ -31,9 +32,10 @@ import { OrganizationsModule } from '../../../../../organizations/organizations.
  * CommonModule — no explicit imports. Root providers: OpencodeConfig (dial
  * url + REQUEST_TIMEOUT_MS budget, shared by the two below without an import
  * cycle), OpencodeService (upstream fetch) + OpencodeSdkClient (pinned
- * @opencode-ai/sdk instance). The per-user DB Bearer is gone from the serve
- * path: no stored key → no 404 anymore; without OPENCODE_PASSWORD the
- * upstream 401 is the honest signal.
+ * @opencode-ai/sdk instance) + OpencodeHostService (embedded V2 host, starts
+ * in-process; not consumed by domain code yet). The per-user DB Bearer is
+ * gone from the serve path: no stored key → no 404 anymore; without
+ * OPENCODE_PASSWORD the upstream 401 is the honest signal.
  *
  * JwtAuthGuard comes from the global auth module, ExternalClient/AppLogger
  * from the global CommonModule.
@@ -48,8 +50,15 @@ import { OrganizationsModule } from '../../../../../organizations/organizations.
 @Module({
   imports: [BillingModule, ServeAuthModule, OrganizationsModule],
   controllers: [OpencodeController, OpencodeKeysController],
-  providers: [OpencodeService, OpencodeConfig, OpencodeSdkClient],
-  exports: [BillingModule, ServeAuthModule, OpencodeService, OpencodeConfig, OpencodeSdkClient],
+  providers: [OpencodeService, OpencodeConfig, OpencodeSdkClient, OpencodeHostService],
+  exports: [
+    BillingModule,
+    ServeAuthModule,
+    OpencodeService,
+    OpencodeConfig,
+    OpencodeSdkClient,
+    OpencodeHostService,
+  ],
 })
 export class OpencodeModule implements OnModuleInit {
   constructor(

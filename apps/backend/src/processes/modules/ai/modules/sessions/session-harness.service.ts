@@ -188,6 +188,17 @@ export class SessionHarnessService implements SessionHarness {
   /** Sessions with an in-flight direct turn (status override until the answer lands). */
   private readonly busyDirect = new Set<string>();
 
+  /** Legacy runner circuit breaker: set when a list/messages call proves it is down. */
+  private runnerDownUntil = 0;
+
+  private markRunnerDown(): void {
+    this.runnerDownUntil = Date.now() + 30_000;
+  }
+
+  private isRunnerDown(): boolean {
+    return Date.now() < this.runnerDownUntil;
+  }
+
   /** Same non-negative-integer query guard the mirror uses for ?limit. */
   private parseLimit(limitRaw?: string): number | undefined {
     if (limitRaw === undefined) return undefined;
@@ -316,16 +327,24 @@ export class SessionHarnessService implements SessionHarness {
       const seen = new Set(rows.map((row) => row.id));
       return [...rows, ...memory.filter((s) => !seen.has(s.id))];
     } catch (err) {
-      // Serve stand unreachable but this project owns harness sessions: serve
-      // the durable store (already gate-scoped above) instead of failing. Nest
-      // HTTP throws (the C4 gate 404, the real-user 401) stay honest — they
-      // never read the store.
+      // The runner is legacy; the durable store is the source of truth — an
+      // empty list is honest. Serve it (already gate-scoped above) instead of
+      // failing whenever the runner is unavailable. Nest HTTP throws (the C4
+      // gate 404, the real-user 401) stay honest — they never read the store.
       if (err instanceof HttpException) throw err;
-      if (memory.length > 0) {
-        this.logger.warn('[sessions] list served from durable store', cid);
-        return memory;
+      // Request-level answers (401/404/400) stay honest; only a real runner
+      // outage/timeout falls back to the durable store.
+      if (
+        err instanceof ExternalServiceError &&
+        err.code !== 'EXTERNAL_UNAVAILABLE' &&
+        err.code !== 'EXTERNAL_TIMEOUT'
+      ) {
+        throw err;
       }
-      throw err;
+      this.logger.warn('[sessions] list served from durable store', cid);
+      this.logger.debug((err as Error).message, cid);
+      this.markRunnerDown();
+      return memory;
     }
   }
 
@@ -416,6 +435,7 @@ export class SessionHarnessService implements SessionHarness {
       const mapped = this.upstreamError('sessionsCreate', err);
       const code = (mapped as unknown as { code?: unknown }).code;
       if (code === 'EXTERNAL_BAD_REQUEST' || code === 'EXTERNAL_NOT_FOUND') throw mapped;
+      this.markRunnerDown();
       const local: SessionInfo = {
         id: Bun.randomUUIDv7(),
         title: body.title ?? null,
@@ -498,16 +518,22 @@ export class SessionHarnessService implements SessionHarness {
       // Our own validation + the gate keep their identity (400 bad_request /
       // gate HTTP — never mapped to EXTERNAL_* and never served from the store).
       if (err instanceof HttpException) throw err;
-      // Stand unreachable but this session has durable rows: serve them (same
-      // domain shape) instead of failing.
-      if (stored.length > 0) {
-        this.logger.warn('[sessions] messages served from durable store', cid);
-        this.logger.debug((err as Error).message, cid);
-        return stored;
+      // Request-level answers (401/404/400) stay honest; only a real runner
+      // outage/timeout falls back to the durable store.
+      if (
+        err instanceof ExternalServiceError &&
+        err.code !== 'EXTERNAL_UNAVAILABLE' &&
+        err.code !== 'EXTERNAL_TIMEOUT'
+      ) {
+        throw err;
       }
-      this.logger.warn('[sessions] messages list failed', cid);
+      // The runner is legacy; the durable store is the source of truth — an
+      // empty thread is honest. Serve the durable rows (same domain shape)
+      // instead of failing whenever the runner is unavailable.
+      this.logger.warn('[sessions] messages served from durable store', cid);
       this.logger.debug((err as Error).message, cid);
-      throw this.upstreamError('sessionMessages', err);
+      this.markRunnerDown();
+      return stored;
     }
   }
 
@@ -1155,6 +1181,14 @@ export class SessionHarnessService implements SessionHarness {
     } catch (err) {
       this.logger.warn('[sessions] providers list failed', cid);
       this.logger.debug((err as Error).message, cid);
+      if (
+        this.isRunnerDown() &&
+        err instanceof ExternalServiceError &&
+        (err.code === 'EXTERNAL_UNAVAILABLE' || err.code === 'EXTERNAL_TIMEOUT')
+      ) {
+        this.logger.warn('[sessions] providers served empty (runner unavailable)', cid);
+        return [];
+      }
       throw this.upstreamError('sessionProviders', err);
     }
   }
@@ -1190,6 +1224,14 @@ export class SessionHarnessService implements SessionHarness {
     } catch (err) {
       this.logger.warn('[sessions] models list failed', cid);
       this.logger.debug((err as Error).message, cid);
+      if (
+        this.isRunnerDown() &&
+        err instanceof ExternalServiceError &&
+        (err.code === 'EXTERNAL_UNAVAILABLE' || err.code === 'EXTERNAL_TIMEOUT')
+      ) {
+        this.logger.warn('[sessions] models served empty (runner unavailable)', cid);
+        return [];
+      }
       throw this.upstreamError('sessionModels', err);
     }
   }

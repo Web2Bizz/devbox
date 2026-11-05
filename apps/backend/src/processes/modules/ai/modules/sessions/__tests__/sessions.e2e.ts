@@ -895,13 +895,31 @@ async function main(): Promise<void> {
 
     // Real outage: network failure → 503 + Retry-After (only honest outage).
     process.env.OPENCODE_URL = 'http://127.0.0.1:9';
-    await check('runner unreachable → 503 EXTERNAL_UNAVAILABLE + Retry-After', '/api/sessions?projectId=' + E2E_PROJECT_ID, undefined, 503, (res, body) => {
-      assert.equal((body as { code?: string }).code, 'EXTERNAL_UNAVAILABLE');
-      assert.equal(res.headers.get('Retry-After'), '30');
+    await check('runner unreachable → 200 durable list (no 503)', '/api/sessions?projectId=' + E2E_PROJECT_ID, undefined, 200, (res, body) => {
+      assert.ok(Array.isArray(body), 'durable list must be an array');
+      assert.equal(res.headers.get('Retry-After'), null);
     });
     await check('events unreachable → 503 JSON before any SSE header', '/api/sessions/events?projectId=' + E2E_PROJECT_ID, { headers: { accept: 'text/event-stream' } }, 503, (res, body) => {
       assert.match(res.headers.get('content-type') ?? '', /application\/json/);
       assert.equal((body as { code?: string }).code, 'EXTERNAL_UNAVAILABLE');
+    });
+    await check('runner unreachable → providers empty 200 (circuit breaker)', `/api/sessions/providers?projectId=${E2E_PROJECT_ID}`, undefined, 200, (_res, body) => {
+      assert.deepEqual(body, []);
+    });
+    await check('runner unreachable → models empty 200 (circuit breaker)', `/api/sessions/models?projectId=${E2E_PROJECT_ID}`, undefined, 200, (_res, body) => {
+      assert.deepEqual(body, []);
+    });
+    let localSessionId = '';
+    await check('runner unreachable → POST /api/sessions creates a durable local session', '/api/sessions', jsonBody({ projectId: E2E_PROJECT_ID, title: 'local after outage' }), 200, (_res, body) => {
+      const row = body as Record<string, unknown>;
+      assert.equal(typeof row.id, 'string');
+      assert.ok(String(row.id).length > 0);
+      assert.equal(row.title, 'local after outage');
+      assert.equal(row.projectId, E2E_PROJECT_ID);
+      localSessionId = String(row.id);
+    });
+    await check('runner unreachable → GET messages of the local session is empty 200', `/api/sessions/${localSessionId}/messages?projectId=${E2E_PROJECT_ID}`, undefined, 200, (_res, body) => {
+      assert.deepEqual(body, []);
     });
     process.env.OPENCODE_URL = stand.url;
 

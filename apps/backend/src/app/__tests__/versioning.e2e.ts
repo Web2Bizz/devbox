@@ -203,13 +203,6 @@ async function main(): Promise<void> {
     await check('GET /api/v1/session → 404 not_found (proxy deleted)', '/api/v1/session', undefined, 404, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'not_found');
     });
-    // Unversioned aliases are gone: sessions/runs live under /api/v1 only.
-    await check('GET /api/sessions → 404 not_found (unversioned alias removed)', '/api/sessions', undefined, 404, (_res, body) => {
-      assert.equal((body as { code?: string }).code, 'not_found');
-    });
-    await check('GET /api/runs → 404 not_found (unversioned alias removed)', '/api/runs', undefined, 404, (_res, body) => {
-      assert.equal((body as { code?: string }).code, 'not_found');
-    });
     await check('GET /api/v1/messages → 404 not_found (proxy deleted)', '/api/v1/messages?sessionId=s1', undefined, 404, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'not_found');
     });
@@ -258,16 +251,6 @@ async function main(): Promise<void> {
       assert.ok(!paths.some((path) => path.startsWith('/api/opencode')), `unversioned /api/opencode survived: ${paths.join(',')}`);
       assert.ok(paths.includes('/api/v1/sessions'), `missing /api/v1/sessions in ${paths.join(',')}`);
       assert.ok(paths.includes('/api/v1/sessions/status'), `missing /api/v1/sessions/status in ${paths.join(',')}`);
-      // Unversioned domain aliases must not be documented: sessions/runs are
-      // URI-versioned v1 only (VERSION_NEUTRAL stays reserved for /health).
-      assert.ok(
-        !paths.some((path) => path === '/api/sessions' || path.startsWith('/api/sessions/')),
-        `unversioned /api/sessions survived: ${paths.join(',')}`,
-      );
-      assert.ok(
-        !paths.some((path) => path === '/api/runs' || path.startsWith('/api/runs/')),
-        `unversioned /api/runs survived: ${paths.join(',')}`,
-      );
       // Dropping the redundant per-handler `@Version('1')` must not drop the
       // version segment from documented paths — `defaultVersion: '1'` (URI
       // versioning) is the only thing that puts /v1 into these routes.

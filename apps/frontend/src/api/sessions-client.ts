@@ -23,17 +23,21 @@ import { sessionStreamFrameSchema } from '@rush-code/contracts';
  * two former mirror-alias exceptions (interrupt, provider inventory) are
  * domain routes too — no deprecated transport remains anywhere.
  *
- * Auth (unchanged semantics from the pre-domain client):
- * - `withAuth` resolves the access token through `getValidAccessToken`
- *   (lib/auth-store, single-flight POST /auth/refresh) and sends it as
- *   `authorization: Bearer`; one silent `refreshAccessToken()` retry on an
- *   honest 401, then `SessionExpiredError` (dead session — never a
- *   masked 400/404: those propagate as the raw ApiClientError envelope).
- *   The token is never logged.
- * - `ensureSessionAuth()` pre-warms that refresh for explicit-mutating
- *   callers (create/abort/send) — same call sites as the old proxy client.
+ * Auth (unchanged semantics from the pre-domain client): `withAuth` below
+ * resolves the access token through `getValidAccessToken` (lib/auth-store,
+ * single-flight POST /auth/refresh) and sends it as `authorization: Bearer`;
+ * one silent `refreshAccessToken()` retry on an honest 401, then
+ * `SessionExpiredError` (dead session — never a masked 400/404: those
+ * propagate as the raw ApiClientError envelope). The token is never logged.
  */
-async function withAuth<T>(call: (token: string) => Promise<T>): Promise<T> {
+
+/**
+ * Shared with runs-client (single-flight refresh + one silent retry).
+ *
+ * `ensureSessionAuth()` pre-warms that refresh for explicit-mutating
+ * callers (create/abort/send) — same call sites as the old proxy client.
+ */
+export async function withAuth<T>(call: (token: string) => Promise<T>): Promise<T> {
   const token = await getValidAccessToken();
   if (!token) throw new SessionExpiredError();
   try {

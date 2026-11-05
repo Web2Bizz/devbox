@@ -8,6 +8,7 @@ import type {
   CreateInviteInput as CreateInviteRequest,
   CreateOrganizationInput as CreateOrganizationRequest,
   CreateProjectInput as CreateProjectRequest,
+  CreateRunRequest,
   HealthResponse,
   Organization as OrganizationDto,
   OrganizationInvite as InviteDto,
@@ -19,6 +20,8 @@ import type {
   OrgRole,
   Project as ProjectApiDto,
   RegistryCatalogResponse,
+  RunInfo,
+  RunInfoList,
   UpdateMemberRoleInput as UpdateMemberRoleRequest,
   UpdateOrganizationInput as UpdateOrganizationRequest,
 } from '@rush-code/contracts';
@@ -32,6 +35,8 @@ import {
   sessionRunStatusMapSchema,
   sessionRunnerProviderListSchema,
   sessionModelListSchema,
+  runInfoListSchema,
+  runInfoSchema,
 } from '@rush-code/contracts';
 import type {
   AgentInfo,
@@ -403,6 +408,82 @@ export const api = {
         ...(opts?.signal ? { signal: opts.signal } : {}),
       }),
     ),
+  // ── Runs domain — VERSION_NEUTRAL /api/runs* (same stance as sessions:
+  // unversioned on purpose, JWT-guarded, project-scoped via ?projectId=,
+  // every answer parsed with a @rush-code/contracts boundary schema so a
+  // wire drift fails fast as ApiClientError('shape_mismatch')). ──
+  listRuns: async (
+    accessToken: string,
+    projectId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<RunInfoList> =>
+    parseBoundary(
+      'GET /api/runs',
+      runInfoListSchema,
+      await request<unknown>(`/api/runs?projectId=${encodeURIComponent(projectId)}`, {
+        headers: { authorization: `Bearer ${accessToken}` },
+        ...(opts?.signal ? { signal: opts.signal } : {}),
+      }),
+    ),
+  createRun: async (accessToken: string, body: CreateRunRequest): Promise<RunInfo> =>
+    parseBoundary(
+      'POST /api/runs',
+      runInfoSchema,
+      await request<unknown>('/api/runs', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify(body),
+      }),
+    ),
+  getRun: async (
+    accessToken: string,
+    runId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<RunInfo> =>
+    parseBoundary(
+      'GET /api/runs/:id',
+      runInfoSchema,
+      await request<unknown>(`/api/runs/${encodeURIComponent(runId)}`, {
+        headers: { authorization: `Bearer ${accessToken}` },
+        ...(opts?.signal ? { signal: opts.signal } : {}),
+      }),
+    ),
+  // SSE exception (same as streamSessionEvents): keep the Response open;
+  // the backend answers an honest JSON error (503/404/400) BEFORE the
+  // text/event-stream headers, surfaced as ApiClientError. No client timeout
+  // — cancellation is the caller's AbortSignal.
+  streamRunEvents: async (
+    accessToken: string,
+    runId: string,
+    cursor: number,
+    opts?: { signal?: AbortSignal },
+  ): Promise<Response> => {
+    const correlationId = crypto.randomUUID();
+    const res = await fetch(
+      `${BASE_URL}/api/runs/${encodeURIComponent(runId)}/events?cursor=${cursor}`,
+      {
+        method: 'GET',
+        headers: {
+          accept: 'text/event-stream',
+          authorization: `Bearer ${accessToken}`,
+          'x-correlation-id': correlationId,
+        },
+        ...(opts?.signal ? { signal: opts.signal } : {}),
+      },
+    );
+    if (!res.ok) {
+      const data = (await res.json().catch(() => null)) as (ApiError & { error?: string }) | null;
+      const err = (data ?? {}) as Partial<ApiError>;
+      const headerId = res.headers.get('x-correlation-id');
+      throw new ApiClientError({
+        code: err.code ?? `http_${res.status}`,
+        message: err.message ?? `HTTP ${res.status}`,
+        status: res.status,
+        correlationId: err.correlationId ?? headerId ?? correlationId,
+      });
+    }
+    return res;
+  },
   // Docker-registry surface: 200 always means live upstream /v2/_catalog
   // data. Unconfigured/unreachable answers 503 EXTERNAL_UNAVAILABLE
   // («сервис временно недоступен, повторите позже») with Retry-After —

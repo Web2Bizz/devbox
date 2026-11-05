@@ -72,3 +72,12 @@ export const agentsQueryKey = ['agents'] as const;
  */
 export const sessionMessagesQueryKey = (sessionId: string | null, projectId?: string) =>
   ['session-messages', sessionId ?? 'none', projectId ?? 'none'] as const;
+
+/**
+ * GET /api/runs — project-scoped run list. `projectId` nullish maps to the
+ * shared `'none'` scope (same convention as the session keys).
+ */
+export const runsQueryKey = (projectId?: string) => ['runs', projectId ?? 'none'] as const;
+
+/** GET /api/runs/{id} — one run row. */
+export const runQueryKey = (runId: string | null) => ['runs', 'run', runId ?? 'none'] as const;

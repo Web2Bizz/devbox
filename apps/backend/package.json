@@ -12,6 +12,7 @@
     "test": "for f in $(find dist -name '*.spec.js' | sort); do bun \"$f\" || exit 1; done",
     "test:e2e": "bun run build && bun scripts/e2e.ts",
     "test:e2e:opencode-keys": "bun run build && bun scripts/e2e.ts crypto.service keys.e2e",
+    "test:e2e:runs": "bun run build && bun scripts/e2e.ts runs.e2e",
     "keys:reencrypt": "bun run build && bun dist/common/keys/keys.reencrypt.js",
     "db:check-integrity": "bun src/common/db/schema-integrity.ts",
     "test:e2e:auth": "bun run build && bun scripts/e2e.ts auth.e2e",

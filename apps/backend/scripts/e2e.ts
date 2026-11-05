@@ -36,6 +36,7 @@ const SUITES = [
   "dist/processes/modules/ai/modules/opencode/__tests__/opencode.service.spec.js",
   "dist/processes/modules/ai/modules/opencode/__tests__/opencode.e2e.js",
   "dist/processes/modules/ai/modules/sessions/__tests__/sessions.e2e.js",
+  "dist/processes/modules/runs/__tests__/runs.e2e.js",
   "dist/organizations/modules/projects/modules/repository/modules/repos/__tests__/repos.service.spec.js",
   "dist/organizations/modules/projects/modules/repository/utils/repos-git/__tests__/repos-git.spec.js",
   "dist/organizations/modules/projects/modules/repository/utils/submodules/__tests__/submodules.spec.js",

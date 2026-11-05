@@ -68,3 +68,6 @@ apps/backend/repos/**
 apps/mobile/.supervisor/
 apps/mobile/.autopilot/
 apps/mobile/.playwright-mcp/
+
+# Tavily research captures (local cache, not repo content)
+.tavily/**

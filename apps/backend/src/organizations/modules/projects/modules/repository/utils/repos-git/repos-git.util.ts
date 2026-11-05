@@ -73,3 +73,22 @@ export async function isValidGitRepo(
   if (fsck) return fsck;
   return { ok: true };
 }
+
+/**
+ * Current HEAD sha of a repo, or null when it is not a repo / has no commits.
+ * Readonly probe (execFile, no shell, 5s timeout) — the same transport as
+ * isValidGitRepo. Callers map null to an honest 400 (a run needs a baseCommit
+ * for Forward-Only); never invent a sha.
+ */
+export async function resolveHeadOrNull(absRepoPath: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+      cwd: absRepoPath,
+      timeout: GIT_PROBE_TIMEOUT_MS,
+    });
+    const sha = stdout.trim();
+    return /^[0-9a-f]{40}$/i.test(sha) ? sha : null;
+  } catch {
+    return null;
+  }
+}

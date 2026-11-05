@@ -137,6 +137,56 @@ export class DbService {
   }
 
   /**
+   * Dedicated LISTEN connection from the shared pool (Postgres NOTIFY). The
+   * channel is a compile-time identifier validated below (no SQL injection);
+   * the payload is an opaque string the caller parses. Returns an idempotent
+   * close() that UNLISTENs and releases the connection. No pool → 503
+   * EXTERNAL_UNAVAILABLE (same strict-Postgres contract as `client`).
+   */
+  async listen(
+    channel: string,
+    onPayload: (payload: string) => void,
+  ): Promise<{ close: () => Promise<void> }> {
+    if (!/^[a-z_][a-z0-9_]*$/i.test(channel)) {
+      throw new Error("listen: channel must be an identifier");
+    }
+    const pool = this.pool;
+    if (!pool) {
+      throw new ExternalServiceError({
+        code: "EXTERNAL_UNAVAILABLE",
+        service: "db",
+        operation: "listen",
+        message: DB_UNAVAILABLE_MESSAGE,
+        isRetryable: true,
+      });
+    }
+    const client = await pool.connect();
+    try {
+      await client.query(`LISTEN "${channel}"`);
+    } catch (err) {
+      client.release();
+      throw err;
+    }
+    const handler = (msg: { channel: string; payload?: string }): void => {
+      if (msg.channel === channel) onPayload(msg.payload ?? "");
+    };
+    client.on("notification", handler);
+    let closed = false;
+    return {
+      close: async (): Promise<void> => {
+        if (closed) return;
+        closed = true;
+        client.removeListener("notification", handler);
+        try {
+          await client.query(`UNLISTEN "${channel}"`);
+        } finally {
+          client.release();
+        }
+      },
+    };
+  }
+
+  /**
    * Liveness probe for GET /health. 'up' on SELECT 1, 'down' otherwise —
    * never throws, never 'skipped' (an unconfigured/unreachable Postgres is
    * an outage, not a mode).

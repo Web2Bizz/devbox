@@ -2,6 +2,7 @@ import "reflect-metadata";
 import assert from "node:assert/strict";
 import { MODULE_METADATA } from "@nestjs/common/constants";
 import { AiModule } from "../modules/ai/ai.module";
+import { RunsModule } from "../modules/runs/runs.module";
 import { WorkersModule } from "../modules/workers/workers.module";
 import { ProcessesModule } from "../processes.module";
 
@@ -30,12 +31,16 @@ describe("ProcessesModule metadata", () => {
     assert.equal(ProcessesModule.name, "ProcessesModule");
   });
 
-  it("imports AiModule and WorkersModule", () => {
-    assert.deepEqual(meta<Array<unknown>>(MODULE_METADATA.IMPORTS), [AiModule, WorkersModule]);
+  it("imports AiModule, RunsModule and WorkersModule", () => {
+    assert.deepEqual(meta<Array<unknown>>(MODULE_METADATA.IMPORTS), [
+      AiModule,
+      RunsModule,
+      WorkersModule,
+    ]);
   });
 
-  it("exports only AiModule", () => {
-    assert.deepEqual(meta<Array<unknown>>(MODULE_METADATA.EXPORTS), [AiModule]);
+  it("exports AiModule and RunsModule", () => {
+    assert.deepEqual(meta<Array<unknown>>(MODULE_METADATA.EXPORTS), [AiModule, RunsModule]);
   });
 
   it("registers no controllers and no providers of its own", () => {

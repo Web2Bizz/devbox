@@ -22,7 +22,6 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 // Deterministic env — BEFORE AppModule import (ConfigModule.validate at create).
 process.env.APP_BACKEND_PORT ??= "3000";
 process.env.REQUEST_TIMEOUT_MS = "1500";
-process.env.OPENCODE_URL = "http://127.0.0.1:9";
 process.env.JWT_ACCESS_SECRET = "e2e-access-secret-not-real-0123456789";
 process.env.JWT_REFRESH_SECRET = "e2e-refresh-secret-not-real-0123456789";
 process.env.JWT_ACCESS_TTL = "15m";

@@ -16,12 +16,10 @@ import type {
  * Card 1 (harness-core): the interface speaks ONLY the domain vocabulary
  * (SessionInfo / SessionMessage / SessionStreamFrame-shaped rows from
  * @rush-code/contracts) — no opencode wire shapes cross this boundary.
- * The default implementation (SessionHarnessService) still rides the
- * opencode serve transport (:4096 via OpencodeService/OpencodeSdkClient);
- * card 2 plugs direct provider calls behind this same interface, card 3
- * owns the SSE token stream, card 4 the Postgres persistence, card 5 the
- * OPENCODE_URL cutover. Consumers (SessionsService) depend on the
- * interface, never on the transport.
+ * The default implementation (SessionHarnessService) rides the embedded
+ * OpenCode V2 host (OpencodeHostService, in-process) while Postgres stays
+ * the source of truth for lists/threads. Consumers (SessionsService) depend
+ * on the interface, never on the transport.
  */
 export interface SessionHarness {
   /** GET /api/v1/sessions?projectId — list scoped to the gated jail. */

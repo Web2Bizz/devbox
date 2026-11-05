@@ -7,58 +7,24 @@
  * sources). Usage: `bun run build && bun dist/processes/modules/ai/modules/sessions/__tests__/sessions.e2e.js`.
  *
  * Strict Postgres (throwaway container, like auth/organizations/keys suites):
- * the durable session history reads/writes Postgres. Boots the real
- * AppModule through the shared configureApp()/setupSwagger(), patches the
- * C4 gate prototypes (organizations + workspace path, same trick as the
- * other strict e2e suites) and points OPENCODE_URL at a v2 stand stub that mirrors the
- * 2.2.0 shapes (provenance: contracts/opencode-stand-2.2.0.json):
- * - GET /api/info → 200 JSON (the relay's liveness probe path);
- * - GET /api/session → {data:[A,B],cursor} (A carries title+model, B none);
- * - GET /api/session/active → {data:{A:{type:'running'}}};
- * - GET /api/session/ses_alpha/message → user(text)/assistant(content[])/
- *   shell(no text) rows; any other session → honest 404 SessionNotFound
- *   with a planted secret (never echoed);
- * - GET /api/provider → {location,data:[Provider.Info rows]} with a planted
- *   secret in settings/headers (the domain projection must drop them; the
- *   jail location is captured); 'bad-provider' mode answers a row off the
- *   artifact REQUIRED set;
- * - POST /api/session/{id}/interrupt → captures the request (body must be
- *   absent), answers the artifact {interrupted:true}; any other session →
- *   honest 404 SessionNotFoundError with a planted secret;
- * - POST /api/session/{id}/prompt → captures the body, answers the
- *   Session.Inbox.User receipt; 'conflict' mode answers 409 (retryable 503
- *   through the shared mapping);
- * - GET /api/event → four SSE frames (direct data.sessionID, upstream
- *   top-level extras to drop, out-of-spec part-nesting that must NOT be
- *   hoisted, no session) then heartbeats, tracking downstream close; only
- *   frames of the requested project's sessions reach the client;
- * - POST /api/session → 400 on a missing location (like the real 2.x
- *   server), echo-create otherwise; 'reject' mode answers 400 with a planted
- *   secret to prove honest EXTERNAL_BAD_REQUEST + never-echo;
- * - everything else → SPA text/html (the 2.x catch-all).
+ * list/status/messages read the durable store only. The embedded OpenCode host
+ * (OpencodeHostService) is in-process — there is no external runner stub and
+ * no external runner URL. Create is exercised against the real embedded host (the
+ * same smoke the host spec relies on); provider/model inventories are asserted
+ * for their current real answers (array, possibly empty).
  *
  * Asserts the DOMAIN contract: our field names and values (title/model
- * nullable, ISO createdAt, directory = the jailed path, projectId = OUR uuid
- * never the runtime project hash), status DERIVED busy/idle from the active
- * map, messages text projection (null for non-text variants), prompt
- * receipt mapping + body capture (text forwarded, jail not required), SSE
- * frames {id,type,data,session?} with upstream top-level extras dropped and
- * the upstream socket really aborted on client disconnect, honest 400/404
- * error mapping without Retry-After, stranger → 404 not_found (Q3), guest
- * 401, PROJECT_REQUIRED, and title/parentID actually forwarded to the create
- * body. A planted Basic password + upstream secret must never appear in any
- * log or response body; warn/error stay one-liners (AppLogger prototype
- * capture per keys.e2e).
+ * nullable, ISO createdAt, directory = the jailed path, projectId = OUR uuid),
+ * durable-only messages, honest 400/404 error mapping without Retry-After,
+ * stranger → 404 not_found (Q3), guest 401, PROJECT_REQUIRED, and
+ * metadata.opencodeSessionId binding. Never logs secrets.
  */
 import assert from 'node:assert/strict';
-import { createServer, type Server, type ServerResponse } from 'node:http';
-import type { AddressInfo } from 'node:net';
+import { mkdirSync } from 'node:fs';
 
 // --- deterministic env (overrides repo .env AFTER bun/node dotenv load) ---
 process.env.APP_BACKEND_PORT ??= '3000';
 process.env.REQUEST_TIMEOUT_MS = '2000';
-process.env.OPENCODE_URL = 'http://127.0.0.1:9'; // replaced with the stub once listening
-process.env.OPENCODE_PASSWORD = 'e2e-basic-secret-never-log-7c1d';
 // DATABASE_URL is resolved inside main() from a throwaway Postgres: the
 // durable session history reads/writes Postgres, so this suite is strict.
 for (const key of ['POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB', 'POSTGRES_HOST']) {
@@ -72,348 +38,22 @@ process.env.AUTH_LEGACY_MOCK_FALLBACK = 'false';
 
 const E2E_PROJECT_ID = '123e4567-e89b-12d3-a456-426614174090';
 const E2E_USER_ID = '123e4567-e89b-12d3-a456-426614174091';
-/** Jail dir the patched WorkspacePathService returns (what directory must reach the runner). */
+/** Jail dir the patched WorkspacePathService returns. */
 const JAIL_DIR = '/tmp/rush-code-e2e-project';
-/** Secret planted in a rejected upstream body — must never be echoed or logged. */
-const UPSTREAM_SECRET = 'e2e-upstream-secret-never-log-4b8e';
+/** Durable session ids are our own uuids (project_sessions.id uuid). */
+const SESSION_A = '123e4567-e89b-12d3-a456-426614174092';
+const SESSION_B = '123e4567-e89b-12d3-a456-426614174093';
+const UNKNOWN_SESSION = '123e4567-e89b-12d3-a456-426614174094';
+/** Host session id bound to SESSION_A (metadata.opencodeSessionId). */
+const HOST_SESSION_A = 'ses_e2e_alpha';
 
-/** Upstream projectID hash — deliberately NOT a uuid: the domain row must answer OUR projectId. */
-const RUNNER_PROJECT_HASH = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
-
-const BASE_TIME = 1793000000000;
-const SESSION_A = {
-  id: 'ses_alpha',
-  projectID: RUNNER_PROJECT_HASH,
-  title: 'Alpha',
-  cost: 0,
-  tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } },
-  time: { created: BASE_TIME, updated: BASE_TIME + 1000 },
-  location: { directory: JAIL_DIR },
-  model: { id: 'model-x', providerID: 'provider-y' },
-};
-const SESSION_B = {
-  id: 'ses_beta',
-  projectID: RUNNER_PROJECT_HASH,
-  cost: 0,
-  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-  time: { created: BASE_TIME + 2000, updated: BASE_TIME + 2000 },
-  location: { directory: JAIL_DIR },
-};
-
-/** Upstream message rows for GET …/message (variants per artifact
- * Session.Message.*: user carries `text`, assistant `content[]`, shell
- * neither — the shell row must project `text: null`). */
-const MESSAGE_USER = {
-  id: 'msg_u1',
-  type: 'user',
-  time: { created: BASE_TIME + 3000 },
-  text: 'Hello',
-  files: [],
-  agents: [],
-  skills: [],
-};
-const MESSAGE_ASSISTANT = {
-  id: 'msg_a1',
-  type: 'assistant',
-  time: { created: BASE_TIME + 3100 },
-  agent: 'build',
-  model: { id: 'model-x', providerID: 'provider-y' },
-  content: [
-    { type: 'text', text: 'Part one' },
-    { type: 'reasoning', text: 'hidden thinking' },
-    { type: 'text', text: 'Part two' },
-  ],
-};
-const MESSAGE_SHELL = {
-  id: 'msg_s1',
-  type: 'shell',
-  time: { created: BASE_TIME + 3200 },
-  shellID: 'sh1',
-  command: 'ls',
-  status: 'running',
-};
-
-/** v2 SSE frames the relay must translate. */
-const EVENT_FRAMES: Array<unknown> = [
-  {
-    id: 'evt_1',
-    type: 'message.part.delta',
-    data: { sessionID: 'ses_alpha', messageID: 'msg_1', partID: 'prt_1', field: 'text', delta: 'Hel' },
-  },
-  {
-    id: 'evt_2',
-    type: 'message.part.updated',
-    metadata: { a: 1 },
-    durable: { aggregateID: 'agg', seq: 1, version: 1 },
-    location: { directory: '/tmp/somewhere' },
-    data: { sessionID: 'ses_alpha', part: { id: 'prt_1', type: 'text', text: 'Hello' } },
-  },
-  { id: 'evt_3', type: 'x.test.nested-not-hoisted', data: { part: { sessionID: 'ses_beta' } } },
-  { id: 'evt_4', type: 'x.test.no-session', data: {} },
-];
-
-type EventConn = { res: ServerResponse; timer: ReturnType<typeof setInterval> | null; closed: boolean };
-type Captured = { contentType: string | null; body: unknown; basicAuth: boolean };
-
-function parseBody(raw: string): unknown {
-  try {
-    return raw.length > 0 ? (JSON.parse(raw) as unknown) : null;
-  } catch {
-    return null;
-  }
-}
-
-function startStandStub(): Promise<{
-  server: Server;
-  url: string;
-  listDirs: Array<string>;
-  creates: Array<Captured>;
-  prompts: Array<Captured & { url: string }>;
-  eventConns: Array<EventConn>;
-  interrupts: Array<Captured & { url: string }>;
-  providerDirs: Array<string>;
-  setMode: (m: 'normal' | 'reject' | 'conflict' | 'bad-provider') => void;
-  close: () => Promise<void>;
-}> {
-  const listDirs: Array<string> = [];
-  const creates: Array<Captured> = [];
-  const prompts: Array<Captured & { url: string }> = [];
-  const eventConns: Array<EventConn> = [];
-  const interrupts: Array<Captured & { url: string }> = [];
-  const providerDirs: Array<string> = [];
-  let mode: 'normal' | 'reject' | 'conflict' | 'bad-provider' = 'normal';
-  return new Promise((resolve) => {
-    const server = createServer((req, res) => {
-      const chunks: Array<Buffer> = [];
-      req.on('data', (c: Buffer) => chunks.push(c));
-      req.on('end', () => {
-        const raw = Buffer.concat(chunks).toString('utf8');
-        const [path] = (req.url ?? '').split('?');
-        const query = new URLSearchParams((req.url ?? '').split('?')[1] ?? '');
-        const json = (status: number, obj: unknown): void => {
-          res.writeHead(status, { 'content-type': 'application/json' });
-          res.end(JSON.stringify(obj));
-        };
-        if (req.method === 'GET' && path === '/api/info') {
-          // The relay's liveness probe (GET /api/info) must answer JSON.
-          json(200, { version: '2.2.0-e2e', pid: 1, hostname: 'stub' });
-          return;
-        }
-        if (req.method === 'GET' && path === '/api/session') {
-          listDirs.push(query.get('directory') ?? '');
-          json(200, { data: [SESSION_A, SESSION_B], cursor: { previous: null, next: null } });
-          return;
-        }
-        if (req.method === 'GET' && path === '/api/session/active') {
-          json(200, { data: { ses_alpha: { type: 'running' } } });
-          return;
-        }
-        if (req.method === 'GET' && path === '/api/session/ses_alpha/message') {
-          json(200, {
-            data: [MESSAGE_USER, MESSAGE_ASSISTANT, MESSAGE_SHELL],
-            cursor: { previous: null, next: null },
-          });
-          return;
-        }
-        if (req.method === 'GET' && /^\/api\/session\/[^/]+\/message$/.test(path)) {
-          // Honest upstream 404 (SessionNotFoundError), secret planted.
-          json(404, {
-            _tag: 'SessionNotFoundError',
-            sessionID: path.split('/')[3],
-            message: 'Session not found',
-            token: UPSTREAM_SECRET,
-          });
-          return;
-        }
-        if (req.method === 'POST' && /^\/api\/session\/[^/]+\/prompt$/.test(path)) {
-          const parsed = parseBody(raw);
-          prompts.push({
-            contentType: req.headers['content-type'] ?? null,
-            body: parsed,
-            basicAuth: (req.headers.authorization ?? '').startsWith('Basic '),
-            url: path,
-          });
-          if (mode === 'conflict') {
-            // Upstream 409 surfaces through the shared mapping (retryable
-            // 503 EXTERNAL_UNAVAILABLE), never echoing the planted secret.
-            json(409, { _tag: 'ConflictError', message: 'busy', resource: 'session', token: UPSTREAM_SECRET });
-            return;
-          }
-          const text = (parsed as { text?: unknown } | null)?.text;
-          json(200, {
-            data: {
-              id: 'msg_q1',
-              sessionID: 'ses_alpha',
-              time: { created: BASE_TIME + 4000 },
-              type: 'user',
-              payload: { text: typeof text === 'string' ? text : '' },
-              delivery: 'queue',
-            },
-          });
-          return;
-        }
-        if (req.method === 'POST' && /^\/api\/session\/[^/]+\/interrupt$/.test(path)) {
-          const parsed = parseBody(raw);
-          interrupts.push({
-            contentType: req.headers['content-type'] ?? null,
-            body: parsed,
-            basicAuth: (req.headers.authorization ?? '').startsWith('Basic '),
-            url: path,
-          });
-          if (path === '/api/session/ses_alpha/interrupt') {
-            // Artifact SessionInterruptResponse: {interrupted} (true here;
-            // the stub really received the POST, proven by the capture).
-            json(200, { interrupted: true });
-            return;
-          }
-          json(404, {
-            _tag: 'SessionNotFoundError',
-            sessionID: path.split('/')[3],
-            message: 'Session not found',
-            token: UPSTREAM_SECRET,
-          });
-          return;
-        }
-        if (req.method === 'GET' && path === '/api/provider') {
-          providerDirs.push(query.get('location[directory]') ?? '');
-          if (mode === 'bad-provider') {
-            // Row violating the artifact REQUIRED set — the domain must fail
-            // loud (never skip/default a drifted row), never echo the secret.
-            json(200, { location: {}, data: [{ id: 'p', name: 'P', activation: 'enabled', token: UPSTREAM_SECRET }] });
-            return;
-          }
-          // rows carry settings/headers/body with a planted secret: the
-          // domain projection must drop every non-required member.
-          json(200, {
-            location: {},
-            data: [
-              {
-                id: 'prov-openai',
-                name: 'OpenAI',
-                activation: 'enabled',
-                package: '@ai-sdk/openai',
-                settings: { token: UPSTREAM_SECRET },
-                headers: { authorization: UPSTREAM_SECRET },
-                body: {},
-              },
-              {
-                id: 'prov-anthropic',
-                name: '',
-                activation: 'auto',
-                package: '',
-              },
-            ],
-          });
-          return;
-        }
-        if (req.method === 'GET' && path === '/api/event') {
-          // SSE: emit the prepared frames spaced out, then heartbeats until
-          // the client (the relay's abort on downstream close) hangs up.
-          // Disconnect is tracked on the RESPONSE, not the request: under
-          // the bun runtime IncomingMessage 'close' fires as soon as the
-          // (empty) GET is consumed, which would stop the writes at frame 0.
-          const conn: EventConn = { res, timer: null, closed: false };
-          eventConns.push(conn);
-          res.on('close', () => {
-            conn.closed = true;
-            if (conn.timer) clearInterval(conn.timer);
-          });
-          res.writeHead(200, { 'content-type': 'text/event-stream' });
-          let i = 0;
-          const write = (): void => {
-            if (conn.closed || res.writableEnded) return;
-            try {
-              if (i < EVENT_FRAMES.length) {
-                res.write(`data: ${JSON.stringify(EVENT_FRAMES[i])}\n\n`);
-                i += 1;
-              } else {
-                res.write(': heartbeat\n\n');
-              }
-            } catch {
-              conn.closed = true;
-            }
-          };
-          write();
-          conn.timer = setInterval(write, 80);
-          return;
-        }
-        if (req.method === 'POST' && path === '/api/session') {
-          const parsed = parseBody(raw);
-          creates.push({
-            contentType: req.headers['content-type'] ?? null,
-            body: parsed,
-            basicAuth: (req.headers.authorization ?? '').startsWith('Basic '),
-          });
-          if (mode === 'reject') {
-            // Planted secret in the body: the domain layer must map the 400
-            // to the fixed EXTERNAL_BAD_REQUEST envelope — never echo this.
-            json(400, {
-              _tag: 'InvalidRequestError',
-              message: 'Expected object',
-              kind: 'Payload',
-              token: UPSTREAM_SECRET,
-            });
-            return;
-          }
-          const location = (parsed as { location?: { directory?: unknown } } | null)?.location;
-          if (!parsed || !location || typeof location.directory !== 'string') {
-            json(400, { _tag: 'InvalidRequestError', message: 'Expected object', kind: 'Payload' });
-            return;
-          }
-          const title = (parsed as { title?: unknown }).title;
-          json(200, {
-            data: {
-              id: 'ses_created',
-              projectID: RUNNER_PROJECT_HASH,
-              cost: 0,
-              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-              time: { created: BASE_TIME + 5000, updated: BASE_TIME + 5000 },
-              location: { directory: location.directory },
-              ...(typeof title === 'string' ? { title } : {}),
-            },
-          });
-          return;
-        }
-        // SPA catch-all, like the real 2.x server for unknown paths.
-        res.writeHead(200, { 'content-type': 'text/html' });
-        res.end('<!doctype html><html></html>');
-      });
-    });
-    server.listen(0, '127.0.0.1', () => {
-      const { port } = server.address() as AddressInfo;
-      resolve({
-        server,
-        url: `http://127.0.0.1:${port}`,
-        listDirs,
-        creates,
-        prompts,
-        eventConns,
-        interrupts,
-        providerDirs,
-        setMode: (m) => {
-          mode = m;
-        },
-        close: () =>
-          new Promise<void>((done) => {
-            // Kill live SSE sockets first — server.close() would otherwise
-            // wait forever on the keep-open event stream.
-            for (const conn of eventConns) {
-              if (conn.timer) clearInterval(conn.timer);
-              if (!conn.res.writableEnded) conn.res.destroy();
-            }
-            server.close(() => done());
-          }),
-      });
-    });
-  });
-}
+const BASE_TIME = Date.UTC(2026, 0, 2, 3, 4, 5);
 
 type CheckResult = { name: string; ok: boolean; detail?: string };
 
 async function main(): Promise<void> {
-  // Strict Postgres: GET /messages and GET /sessions read the durable
-  // history, so the suite needs a live DB (one-time container by default,
-  // TEST_DATABASE_URL override).
+  // The embedded host creates sessions in a real directory (jail).
+  mkdirSync(JAIL_DIR, { recursive: true });
   const { startTestDb } = await import('../../../../../../common/db/e2e-db.container');
   const testDb = await startTestDb();
   process.env.DATABASE_URL = testDb.url;
@@ -431,18 +71,71 @@ async function main(): Promise<void> {
   const base = await app.getUrl();
   const results: Array<CheckResult> = [];
 
-  // The C4 gate is patched on the prototype, so the project row the suite
-  // uses does not exist yet — but session_messages / session_agents carry a
-  // real FK to projects. Seed it once (strict Postgres).
-  {
-    const { DbService } = await import('../../../../../../common/db/db.service');
-    const { projects } = await import('../../../../../../common/db/schema');
-    const dbService = app.get(DbService, { strict: false }) as InstanceType<typeof DbService>;
-    await dbService.client
-      .insert(projects)
-      .values({ id: E2E_PROJECT_ID, name: 'sessions-e2e' })
-      .onConflictDoNothing({ target: projects.id });
-  }
+  const { DbService } = await import('../../../../../../common/db/db.service');
+  const { projects, projectSessions, sessionAgents, sessionMessages } = await import(
+    '../../../../../../common/db/schema'
+  );
+  const dbService = app.get(DbService, { strict: false }) as InstanceType<typeof DbService>;
+  const { eq } = await import('drizzle-orm');
+
+  await dbService.client
+    .insert(projects)
+    .values({ id: E2E_PROJECT_ID, name: 'sessions-e2e' })
+    .onConflictDoNothing({ target: projects.id });
+
+  // Durable fixtures: two sessions of the project (A bound to the embedded
+  // host, B without a binding) plus two history rows for A.
+  await dbService.client.insert(projectSessions).values([
+    {
+      id: SESSION_A,
+      projectId: E2E_PROJECT_ID,
+      chatId: null,
+      status: 'open',
+      origin: 'harness',
+      metadata: {
+        title: 'Alpha',
+        directory: JAIL_DIR,
+        model: { id: 'model-x', providerID: 'provider-y' },
+        status: { type: 'idle' },
+        opencodeSessionId: HOST_SESSION_A,
+      },
+      createdAt: new Date(BASE_TIME),
+    },
+    {
+      id: SESSION_B,
+      projectId: E2E_PROJECT_ID,
+      chatId: null,
+      status: 'open',
+      origin: 'harness',
+      metadata: { directory: JAIL_DIR, status: { type: 'idle' } },
+      createdAt: new Date(BASE_TIME + 2000),
+    },
+  ]);
+  await dbService.client.insert(sessionAgents).values({
+    sessionId: SESSION_A,
+    projectId: E2E_PROJECT_ID,
+    agentId: 'ask',
+  });
+  await dbService.client.insert(sessionMessages).values([
+    {
+      id: 'msg_u1',
+      sessionId: SESSION_A,
+      projectId: E2E_PROJECT_ID,
+      userId: E2E_USER_ID,
+      role: 'user',
+      text: 'Hello',
+      createdAt: new Date(BASE_TIME + 3000),
+    },
+    {
+      id: 'msg_a1',
+      sessionId: SESSION_A,
+      projectId: E2E_PROJECT_ID,
+      userId: E2E_USER_ID,
+      role: 'assistant',
+      text: 'Part one\n\nPart two',
+      createdAt: new Date(BASE_TIME + 3100),
+    },
+  ]);
 
   const { TokenService } = await import('../../../../../../auth/token.service');
   const tokens = app.get(TokenService, { strict: false }) as {
@@ -455,6 +148,18 @@ async function main(): Promise<void> {
   ).token;
   const authHeaders = { authorization: `Bearer ${bearer}` };
 
+  async function request(
+    path: string,
+    init?: RequestInit,
+  ): Promise<{ res: Response; body: unknown }> {
+    const withAuth = {
+      ...(init ?? {}),
+      headers: { ...authHeaders, ...((init?.headers as Record<string, string> | undefined) ?? {}) },
+    };
+    const res = await fetch(`${base}${path}`, withAuth);
+    return { res, body: (await res.json().catch(() => null)) as unknown };
+  }
+
   async function check(
     name: string,
     path: string,
@@ -462,15 +167,7 @@ async function main(): Promise<void> {
     expectedStatus: number,
     validate?: (res: Response, body: unknown) => void,
   ): Promise<void> {
-    const withAuth =
-      init === undefined
-        ? { headers: { ...authHeaders } }
-        : {
-            ...init,
-            headers: { ...authHeaders, ...((init.headers as Record<string, string> | undefined) ?? {}) },
-          };
-    const res = await fetch(`${base}${path}`, withAuth);
-    const body = (await res.json().catch(() => null)) as unknown;
+    const { res, body } = await request(path, init);
     try {
       assert.equal(res.status, expectedStatus, `status ${res.status} !== ${expectedStatus}`);
       validate?.(res, body);
@@ -482,6 +179,7 @@ async function main(): Promise<void> {
       console.log(`FAIL - ${name}: ${detail} [${init?.method ?? 'GET'} ${path}]`);
     }
   }
+
   function push(name: string, err: Error | null): void {
     if (err) {
       results.push({ name, ok: false, detail: err.message });
@@ -491,15 +189,18 @@ async function main(): Promise<void> {
       console.log(`ok   - ${name}`);
     }
   }
+
   const jsonBody = (obj: unknown): RequestInit => ({
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(obj),
   });
 
-  // C4 gate + jail patched on the PROTOTYPES (no Postgres in this suite) so
-  // requests really reach the stub (same convention as the other e2e suites).
-  const { ProjectAccessService } = await import('../../../../../../organizations/modules/projects/modules/project-access/project-access.service');
+  // C4 gate + jail patched on the PROTOTYPES (same convention as the other
+  // e2e suites) so requests reach the durable/host layers.
+  const { ProjectAccessService } = await import(
+    '../../../../../../organizations/modules/projects/modules/project-access/project-access.service'
+  );
   const { WorkspacePathService } = await import('../../../../../../common/storage/workspace-path.service');
   const allowAccess = async (): Promise<{ ownerId: string; orgIds: Array<string> }> => ({
     ownerId: E2E_USER_ID,
@@ -513,11 +214,7 @@ async function main(): Promise<void> {
   pathsProto.realStrictRoot = async () => '/tmp/rush-code-e2e-root';
   pathsProto.assertInsideJail = async (abs: string) => abs;
 
-  const stand = await startStandStub();
-  process.env.OPENCODE_URL = stand.url;
-
-  // AppLogger capture (keys.e2e reference): fixed events only —
-  // warn/error stay one-liners, planted secrets never appear anywhere.
+  // AppLogger capture: warn/error stay one-liners, secrets never appear.
   const logged: Array<{ method: string; text: string }> = [];
   const logMethods = ['debug', 'info', 'warn', 'error'] as const;
   const logProto = AppLogger.prototype as unknown as Record<string, (...a: Array<unknown>) => void>;
@@ -533,135 +230,47 @@ async function main(): Promise<void> {
   });
 
   try {
-    await check('GET /api/v1/sessions → 200 domain rows (translated, status derived)', '/api/v1/sessions?projectId=' + E2E_PROJECT_ID, undefined, 200, (_res, body) => {
-      const rows = body as Array<Record<string, unknown>>;
-      assert.ok(Array.isArray(rows) && rows.length === 2, `expected 2 rows, got ${JSON.stringify(body)?.slice(0, 120)}`);
-      const a = rows[0];
-      assert.equal(a.id, 'ses_alpha');
-      assert.equal(a.title, 'Alpha');
-      assert.equal(a.directory, JAIL_DIR);
-      // Our uuid — never the runner's project hash.
-      assert.equal(a.projectId, E2E_PROJECT_ID);
-      assert.notEqual(a.projectId, RUNNER_PROJECT_HASH);
-      assert.equal(a.createdAt, new Date(BASE_TIME).toISOString());
-      assert.deepEqual(a.model, { id: 'model-x', providerID: 'provider-y' });
-      assert.equal(a.agentId, null, 'agentId must be an explicit null, not absent');
-      assert.deepEqual(a.status, { type: 'busy' });
-      const b = rows[1];
-      assert.equal(b.title, null, 'title must be an explicit null, not absent');
-      assert.equal(b.model, null);
-      assert.equal(b.agentId, null, 'agentId must be an explicit null, not absent');
-      assert.deepEqual(b.status, { type: 'idle' });
-    });
-    assert.ok(stand.listDirs.at(-1) === JAIL_DIR, 'list must be scoped to the gated jail');
+    // --- durable list/status/messages ---------------------------------------
+    await check(
+      'GET /api/v1/sessions → durable rows (titles/model nullable, our uuids)',
+      `/api/v1/sessions?projectId=${E2E_PROJECT_ID}`,
+      undefined,
+      200,
+      (_res, body) => {
+        const rows = body as Array<Record<string, unknown>>;
+        assert.ok(Array.isArray(rows) && rows.length === 2, `expected 2 rows, got ${JSON.stringify(body)?.slice(0, 120)}`);
+        const a = rows[0];
+        assert.equal(a.id, SESSION_A);
+        assert.equal(a.title, 'Alpha');
+        assert.equal(a.directory, JAIL_DIR);
+        assert.equal(a.projectId, E2E_PROJECT_ID);
+        assert.equal(a.createdAt, new Date(BASE_TIME).toISOString());
+        assert.deepEqual(a.model, { id: 'model-x', providerID: 'provider-y' });
+        assert.equal(a.agentId, 'ask');
+        assert.deepEqual(a.status, { type: 'idle' });
+        const b = rows[1];
+        assert.equal(b.id, SESSION_B);
+        assert.equal(b.title, null, 'title must be an explicit null, not absent');
+        assert.equal(b.model, null);
+        assert.equal(b.agentId, null);
+        assert.deepEqual(b.status, { type: 'idle' });
+      },
+    );
 
     await check('GET /api/v1/sessions w/o projectId → 400 PROJECT_REQUIRED', '/api/v1/sessions', undefined, 400, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'PROJECT_REQUIRED');
     });
 
-    await check('GET /api/v1/sessions/status → derived busy/idle map (non-empty)', '/api/v1/sessions/status?projectId=' + E2E_PROJECT_ID, undefined, 200, (_res, body) => {
-      const map = body as Record<string, { type?: string }>;
-      assert.deepEqual(map.ses_alpha, { type: 'busy' });
-      assert.deepEqual(map.ses_beta, { type: 'idle' });
+    await check('GET /api/v1/sessions/status → all idle (no upstream round-trip)', `/api/v1/sessions/status?projectId=${E2E_PROJECT_ID}`, undefined, 200, (_res, body) => {
+      assert.deepEqual(body, {
+        [SESSION_A]: { type: 'idle' },
+        [SESSION_B]: { type: 'idle' },
+      });
     });
 
-    await check('POST /api/v1/sessions forwards title/parentID + jail location', '/api/v1/sessions', jsonBody({ projectId: E2E_PROJECT_ID, title: 'created via domain', parentID: 'ses_alpha' }), 200, (_res, body) => {
-      const row = body as Record<string, unknown>;
-      assert.equal(row.id, 'ses_created');
-      assert.equal(row.title, 'created via domain');
-      assert.equal(row.directory, JAIL_DIR);
-      assert.equal(row.projectId, E2E_PROJECT_ID);
-    });
-    {
-      const create = stand.creates.at(-1);
-      assert.ok(create, 'stub captured the create');
-      assert.ok((create.contentType ?? '').includes('application/json'), 'json content-type');
-      assert.ok(create.basicAuth, 'Basic auth header really sent');
-      const sent = create.body as { location?: { directory?: unknown }; title?: unknown; parentID?: unknown };
-      assert.equal(sent.location?.directory, JAIL_DIR);
-      assert.equal(sent.title, 'created via domain');
-      assert.equal(sent.parentID, 'ses_alpha');
-    }
-
-    await check('POST /api/v1/sessions forwards model (upstream Model.Ref verbatim)', '/api/v1/sessions', jsonBody({ projectId: E2E_PROJECT_ID, model: { id: 'model-m', providerID: 'prov-openai' } }), 200, (_res, body) => {
-      assert.equal((body as Record<string, unknown>).id, 'ses_created');
-    });
-    {
-      const create = stand.creates.at(-1);
-      assert.ok(create, 'stub captured the model create');
-      assert.deepEqual((create.body as { model?: unknown }).model, { id: 'model-m', providerID: 'prov-openai' });
-      assert.ok(create.basicAuth, 'Basic auth header really sent');
-    }
-
-    await check('POST /api/v1/sessions unknown agentId → honest 404 (no fallback, no side effects)', '/api/v1/sessions', jsonBody({ projectId: E2E_PROJECT_ID, agentId: 'ghost' }), 404, (_res, body) => {
-      const b = body as { code?: string; message?: string };
-      assert.equal(b.code, 'not_found');
-      assert.ok((b.message ?? '').includes("Agent 'ghost' not found"), `unexpected message: ${b.message}`);
-    });
-
-    await check('POST /api/v1/sessions {} → 400 bad_request (body zod)', '/api/v1/sessions', jsonBody({}), 400, (_res, body) => {
-      assert.equal((body as { code?: string }).code, 'bad_request');
-    });
-
-    stand.setMode('reject');
-    await check('runner 400 on create → honest 400 EXTERNAL_BAD_REQUEST (no Retry-After, no echo)', '/api/v1/sessions', jsonBody({ projectId: E2E_PROJECT_ID, title: 'x' }), 400, (res, body) => {
-      const b = body as { code?: string; message?: string };
-      assert.equal(b.code, 'EXTERNAL_BAD_REQUEST');
-      assert.notEqual(b.message, 'сервис временно недоступен, повторите позже');
-      assert.equal(res.headers.get('Retry-After'), null);
-      assert.ok(!JSON.stringify(body).includes(UPSTREAM_SECRET), 'upstream secret echoed outward');
-    });
-    stand.setMode('normal');
-
-    // --- providers & interrupt (card 6 domain routes) ----------------------
-    await check('GET /api/v1/sessions/providers → required artifact subset only, jail location forwarded', '/api/v1/sessions/providers?projectId=' + E2E_PROJECT_ID, undefined, 200, (_res, body) => {
-      const rows = body as Array<unknown>;
-      assert.deepEqual(rows, [
-        { id: 'prov-openai', name: 'OpenAI', activation: 'enabled', package: '@ai-sdk/openai' },
-        { id: 'prov-anthropic', name: '', activation: 'auto', package: '' },
-      ]);
-      // settings/headers/body (planted secret) never leave the projection.
-      assert.ok(!JSON.stringify(rows).includes(UPSTREAM_SECRET), 'provider secret echoed outward');
-      assert.equal(stand.providerDirs.at(-1), JAIL_DIR, 'providers ran in the gated jail');
-    });
-
-    await check('GET providers w/o projectId → 400 PROJECT_REQUIRED', '/api/v1/sessions/providers', undefined, 400, (_res, body) => {
-      assert.equal((body as { code?: string }).code, 'PROJECT_REQUIRED');
-    });
-
-    stand.setMode('bad-provider');
-    await check('provider row off the artifact REQUIRED set → fails loud (503), secret never echoed', '/api/v1/sessions/providers?projectId=' + E2E_PROJECT_ID, undefined, 503, (_res, body) => {
-      assert.equal((body as { code?: string }).code, 'EXTERNAL_UNAVAILABLE');
-      assert.ok(!JSON.stringify(body).includes(UPSTREAM_SECRET), 'upstream secret echoed outward');
-    });
-    stand.setMode('normal');
-
-    await check('POST /api/v1/sessions/{id}/interrupt → 200 {interrupted:true} (idle no-op is honest data, never an error)', '/api/v1/sessions/ses_alpha/interrupt', jsonBody({ projectId: E2E_PROJECT_ID }), 200, (_res, body) => {
-      assert.deepEqual(body, { interrupted: true });
-    });
-    {
-      const intr = stand.interrupts.at(-1);
-      assert.ok(intr, 'stub captured the interrupt');
-      assert.equal(intr.url, '/api/session/ses_alpha/interrupt');
-      assert.equal(intr.body, null, 'artifact declares no body — none is sent');
-      assert.ok(intr.basicAuth, 'Basic auth header really sent');
-    }
-
-    await check('POST interrupt w/o projectId → 400 bad_request (body zod)', '/api/v1/sessions/ses_alpha/interrupt', jsonBody({}), 400, (_res, body) => {
-      assert.equal((body as { code?: string }).code, 'bad_request');
-    });
-
-    await check('POST interrupt unknown session → honest 404 EXTERNAL_NOT_FOUND (no Retry-After, no echo)', '/api/v1/sessions/ses_ghost/interrupt', jsonBody({ projectId: E2E_PROJECT_ID }), 404, (res, body) => {
-      const b = body as { code?: string };
-      assert.equal(b.code, 'EXTERNAL_NOT_FOUND');
-      assert.equal(res.headers.get('Retry-After'), null);
-      assert.ok(!JSON.stringify(body).includes(UPSTREAM_SECRET), 'upstream secret echoed outward');
-    });
-
-    // --- messages ---------------------------------------------------------
-    await check('GET /api/v1/sessions/{id}/messages → text projection per variant', '/api/v1/sessions/ses_alpha/messages?projectId=' + E2E_PROJECT_ID, undefined, 200, (_res, body) => {
+    await check('GET messages → durable thread only', `/api/v1/sessions/${SESSION_A}/messages?projectId=${E2E_PROJECT_ID}`, undefined, 200, (_res, body) => {
       const rows = body as Array<Record<string, unknown>>;
-      assert.ok(Array.isArray(rows) && rows.length === 3, `expected 3 rows, got ${JSON.stringify(body)?.slice(0, 160)}`);
+      assert.ok(Array.isArray(rows) && rows.length === 2, `expected 2 rows, got ${JSON.stringify(body)?.slice(0, 160)}`);
       assert.deepEqual(rows[0], {
         id: 'msg_u1',
         type: 'user',
@@ -672,196 +281,131 @@ async function main(): Promise<void> {
         id: 'msg_a1',
         type: 'assistant',
         createdAt: new Date(BASE_TIME + 3100).toISOString(),
-        // only the TEXT content parts joined (reasoning is not chat text)
         text: 'Part one\n\nPart two',
-      });
-      assert.deepEqual(rows[2], {
-        id: 'msg_s1',
-        type: 'shell',
-        createdAt: new Date(BASE_TIME + 3200).toISOString(),
-        text: null,
       });
     });
 
-    await check('GET messages limit=abc → 400 bad_request', '/api/v1/sessions/ses_alpha/messages?projectId=' + E2E_PROJECT_ID + '&limit=abc', undefined, 400, (_res, body) => {
+    await check('GET messages limit=abc → 400 bad_request', `/api/v1/sessions/${SESSION_A}/messages?projectId=${E2E_PROJECT_ID}&limit=abc`, undefined, 400, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'bad_request');
     });
 
-    await check('GET messages unknown session → honest 404 EXTERNAL_NOT_FOUND (no echo)', '/api/v1/sessions/ses_ghost/messages?projectId=' + E2E_PROJECT_ID, undefined, 404, (res, body) => {
-      const b = body as { code?: string };
-      assert.equal(b.code, 'EXTERNAL_NOT_FOUND');
-      assert.equal(res.headers.get('Retry-After'), null);
-      assert.ok(!JSON.stringify(body).includes(UPSTREAM_SECRET), 'upstream secret echoed outward');
+    await check('GET messages unknown session → 200 [] (durable store is honest)', `/api/v1/sessions/${UNKNOWN_SESSION}/messages?projectId=${E2E_PROJECT_ID}`, undefined, 200, (_res, body) => {
+      assert.deepEqual(body, []);
     });
 
-    await check('POST messages captures text + maps Inbox.User receipt', '/api/v1/sessions/ses_alpha/messages', jsonBody({ projectId: E2E_PROJECT_ID, text: 'hi domain' }), 200, (_res, body) => {
-      assert.deepEqual(body, {
-        id: 'msg_q1',
-        type: 'user',
-        createdAt: new Date(BASE_TIME + 4000).toISOString(),
-        text: 'hi domain',
-      });
-    });
-    {
-      const prompt = stand.prompts.at(-1);
-      assert.ok(prompt, 'stub captured the prompt');
-      assert.equal(prompt.url, '/api/session/ses_alpha/prompt');
-      assert.deepEqual(prompt.body, { text: 'hi domain' });
-      assert.ok((prompt.contentType ?? '').includes('application/json'), 'json content-type');
-      assert.ok(prompt.basicAuth, 'Basic auth header really sent');
-    }
-
-    // The durable history read runs on every GET — after a serve prompt the
-    // same route must still answer 200 (no Postgres → no silent crash).
-    await check('GET messages after a serve prompt → 200 (durable history read)', '/api/v1/sessions/ses_alpha/messages?projectId=' + E2E_PROJECT_ID, undefined, 200, (_res, body) => {
-      const rows = body as Array<Record<string, unknown>>;
-      assert.ok(Array.isArray(rows), 'messages must stay an array');
-      assert.ok(rows.length >= 3, `expected the upstream rows to survive, got ${rows.length}`);
-    });
-
-    await check('POST messages forwards model in the prompt body (model pinned at create, not re-sent on prompt)', '/api/v1/sessions/ses_alpha/messages', jsonBody({ projectId: E2E_PROJECT_ID, text: 'hi model', model: { id: 'model-m', providerID: 'prov-openai', variant: 'v1' } }), 200, (_res, body) => {
-      assert.equal((body as Record<string, unknown>).text, 'hi model');
-    });
-    {
-      const prompt = stand.prompts.at(-1);
-      assert.ok(prompt, 'stub captured the model prompt');
-      // upstream /api/session/{id}/prompt does not accept `model` (additionalProperties:false)
-      // — the model is pinned at session creation time, so the prompt body is text-only.
-      assert.deepEqual(prompt.body, { text: 'hi model' });
-      assert.ok(prompt.basicAuth, 'Basic auth header really sent');
-    }
-
-    await check('POST messages unknown agentId → honest 404 (validated before any transport)', '/api/v1/sessions/ses_alpha/messages', jsonBody({ projectId: E2E_PROJECT_ID, text: 'hi ghost', agentId: 'ghost' }), 404, (_res, body) => {
+    // --- create validation --------------------------------------------------
+    await check('POST /api/v1/sessions unknown agentId → honest 404 (no side effects)', '/api/v1/sessions', jsonBody({ projectId: E2E_PROJECT_ID, agentId: 'ghost' }), 404, (_res, body) => {
       const b = body as { code?: string; message?: string };
       assert.equal(b.code, 'not_found');
       assert.ok((b.message ?? '').includes("Agent 'ghost' not found"), `unexpected message: ${b.message}`);
     });
 
-    await check('POST messages text:"" → 400 bad_request (body zod)', '/api/v1/sessions/ses_alpha/messages', jsonBody({ projectId: E2E_PROJECT_ID, text: '' }), 400, (_res, body) => {
+    await check('POST /api/v1/sessions {} → 400 bad_request (body zod)', '/api/v1/sessions', jsonBody({}), 400, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'bad_request');
     });
 
-    stand.setMode('conflict');
-    await check('runner 409 on prompt → 503 EXTERNAL_UNAVAILABLE + Retry-After (shared mapping, no echo)', '/api/v1/sessions/ses_alpha/messages', jsonBody({ projectId: E2E_PROJECT_ID, text: 'busy' }), 503, (res, body) => {
-      assert.equal((body as { code?: string }).code, 'EXTERNAL_UNAVAILABLE');
-      assert.equal(res.headers.get('Retry-After'), '30');
-      assert.ok(!JSON.stringify(body).includes(UPSTREAM_SECRET), 'upstream secret echoed outward');
+    // Create against the real embedded host: row first, host id in metadata.
+    let createdId = '';
+    await check('POST /api/v1/sessions → 200 + durable row bound to embedded host', '/api/v1/sessions', jsonBody({ projectId: E2E_PROJECT_ID, title: 'created via host' }), 200, (_res, body) => {
+      const row = body as Record<string, unknown>;
+      assert.equal(typeof row.id, 'string');
+      assert.equal(row.title, 'created via host');
+      assert.equal(row.directory, JAIL_DIR);
+      assert.equal(row.projectId, E2E_PROJECT_ID);
+      createdId = String(row.id);
     });
-    stand.setMode('normal');
-
-    // --- SSE events -------------------------------------------------------
-    {
-      const ctrl = new AbortController();
-      const frames: Array<Record<string, unknown>> = [];
-      try {
-        const res = await fetch(`${base}/api/v1/sessions/events?projectId=${E2E_PROJECT_ID}`, {
-          headers: { ...authHeaders, accept: 'text/event-stream' },
-          signal: ctrl.signal,
-        });
-        if (res.body) {
-          const reader = res.body.getReader();
-          const dec = new TextDecoder();
-          let buf = '';
-          const consume = (text: string): void => {
-            buf += text;
-            let idx: number;
-            while ((idx = buf.indexOf('\n\n')) >= 0) {
-              const chunk = buf.slice(0, idx);
-              buf = buf.slice(idx + 2);
-              const line = chunk.split('\n').find((l) => l.startsWith('data:'));
-              if (line) frames.push(JSON.parse(line.slice(5).trim()) as Record<string, unknown>);
-            }
-          };
-          const readUntil = async (
-            budgetMs: number,
-          ): Promise<{ value?: Uint8Array; done: boolean } | null> => {
-            // A quiet SSE stream resolves nothing: the relay awaits the next
-            // upstream frame (heartbeats are comments the sdk does not yield),
-            // so reader.read() alone would hang past the budget.
-            let timer: ReturnType<typeof setTimeout> | undefined;
-            try {
-              return await Promise.race([
-                reader.read() as Promise<{ value?: Uint8Array; done: boolean }>,
-                new Promise<null>((resolve) => {
-                  timer = setTimeout(() => resolve(null), Math.max(1, budgetMs));
-                }),
-              ]);
-            } finally {
-              if (timer) clearTimeout(timer);
-            }
-          };
-          const deadline = Date.now() + 8000;
-          while (frames.length < 2 && Date.now() < deadline) {
-            const chunk = await readUntil(deadline - Date.now());
-            if (chunk === null || chunk.done) break;
-            if (chunk.value) consume(dec.decode(chunk.value, { stream: true }));
-          }
-          // After the two expected frames keep reading for ~300ms: a leaked
-          // evt_3/evt_4 must be observed, not raced by the assertion.
-          const settleDeadline = Date.now() + 300;
-          while (Date.now() < settleDeadline) {
-            const chunk = await readUntil(settleDeadline - Date.now());
-            if (chunk === null || chunk.done) break;
-            if (chunk.value) consume(dec.decode(chunk.value, { stream: true }));
-          }
-        }
-        try {
-          assert.equal(res.status, 200);
-          assert.match(res.headers.get('content-type') ?? '', /text\/event-stream/);
-          assert.equal(frames.length, 2, `expected 2 frames, got ${frames.length}`);
-          const [f1, f2] = frames;
-          // domain envelope: id/type/data(+session) — upstream top-level
-          // extras (metadata/durable/location) dropped, no upstream names.
-          assert.deepEqual(Object.keys(f1).sort(), ['data', 'id', 'session', 'type']);
-          assert.equal(f1.id, 'evt_1');
-          assert.equal(f1.type, 'message.part.delta');
-          assert.equal(f1.session, 'ses_alpha');
-          assert.deepEqual(f1.data, {
-            sessionID: 'ses_alpha',
-            messageID: 'msg_1',
-            partID: 'prt_1',
-            field: 'text',
-            delta: 'Hel',
-          });
-          assert.deepEqual(Object.keys(f2).sort(), ['data', 'id', 'session', 'type'], 'metadata/durable/location must be dropped');
-          assert.equal(f2.id, 'evt_2');
-          assert.equal(f2.session, 'ses_alpha');
-          assert.ok(
-            !frames.some((frame) => frame.id === 'evt_3' || frame.id === 'evt_4'),
-            'frames outside the project scope leaked into the stream',
-          );
-          assert.ok(!Object.keys(f1).includes('sessionID'), 'upstream name at top level');
-          push(
-            'GET /api/v1/sessions/events → project-scoped domain frames (hoisted session, extras dropped, unscoped dropped)',
-            null,
-          );
-        } catch (err) {
-          push('GET /api/v1/sessions/events → project-scoped domain frames (hoisted session, extras dropped, unscoped dropped)', err as Error);
-        } finally {
-          ctrl.abort();
-        }
-        // The relay aborts the upstream fetch on downstream close: the stub
-        // must observe the connection closed.
-        let sawClose = false;
-        for (let i = 0; i < 40; i += 1) {
-          if (stand.eventConns.at(-1)?.closed) {
-            sawClose = true;
-            break;
-          }
-          await new Promise((r) => setTimeout(r, 50));
-        }
-        push(
-          'SSE downstream abort closes the upstream connection (relaySse reuse)',
-          sawClose ? null : new Error('upstream SSE connection never saw close'),
-        );
-      } catch (err) {
-        push('GET /api/v1/sessions/events → project-scoped domain frames (hoisted session, extras dropped, unscoped dropped)', err as Error);
-      }
+    if (createdId) {
+      const rows = await dbService.client
+        .select({ metadata: projectSessions.metadata })
+        .from(projectSessions)
+        .where(eq(projectSessions.id, createdId));
+      const meta = (rows[0]?.metadata ?? {}) as Record<string, unknown>;
+      const bound =
+        typeof meta.opencodeSessionId === 'string' && meta.opencodeSessionId.length > 0;
+      push(
+        'created row stores metadata.opencodeSessionId (host binding)',
+        bound ? null : new Error('metadata.opencodeSessionId missing'),
+      );
+      await check('GET list after create includes the durable row', `/api/v1/sessions?projectId=${E2E_PROJECT_ID}`, undefined, 200, (_res, body) => {
+        const ids = (body as Array<{ id?: string }>).map((r) => r.id);
+        assert.ok(ids.includes(createdId), 'created id missing from list');
+      });
     }
 
+    // --- message validation -------------------------------------------------
+    await check('POST messages unknown agentId → honest 404 (before transport)', `/api/v1/sessions/${SESSION_A}/messages`, jsonBody({ projectId: E2E_PROJECT_ID, text: 'hi ghost', agentId: 'ghost' }), 404, (_res, body) => {
+      assert.equal((body as { code?: string }).code, 'not_found');
+    });
+
+    await check('POST messages text:"" → 400 bad_request (body zod)', `/api/v1/sessions/${SESSION_A}/messages`, jsonBody({ projectId: E2E_PROJECT_ID, text: '' }), 400, (_res, body) => {
+      assert.equal((body as { code?: string }).code, 'bad_request');
+    });
+
+    await check('POST messages unbound session → 404 (no silent local turn)', `/api/v1/sessions/${SESSION_B}/messages`, jsonBody({ projectId: E2E_PROJECT_ID, text: 'no host binding' }), 404, (_res, body) => {
+      assert.equal((body as { code?: string }).code, 'opencode_session_unbound');
+    });
+
+    // --- providers/models (current host answers) ---------------------------
+    await check('GET providers w/o projectId → 400 PROJECT_REQUIRED', '/api/v1/sessions/providers', undefined, 400, (_res, body) => {
+      assert.equal((body as { code?: string }).code, 'PROJECT_REQUIRED');
+    });
+
+    {
+      const { res, body } = await request(`/api/v1/sessions/providers?projectId=${E2E_PROJECT_ID}`);
+      push(
+        'GET providers → 200 array (embedded host inventory)',
+        res.status === 200 && Array.isArray(body)
+          ? null
+          : new Error(`status=${res.status} body=${JSON.stringify(body)?.slice(0, 160)}`),
+      );
+    }
+
+    {
+      const { res, body } = await request(`/api/v1/sessions/models?projectId=${E2E_PROJECT_ID}`);
+      push(
+        'GET models → 200 array (embedded host inventory)',
+        res.status === 200 && Array.isArray(body)
+          ? null
+          : new Error(`status=${res.status} body=${JSON.stringify(body)?.slice(0, 160)}`),
+      );
+    }
+
+    // --- interrupt ----------------------------------------------------------
+    await check('POST interrupt w/o projectId → 400 bad_request (body zod)', `/api/v1/sessions/${SESSION_A}/interrupt`, jsonBody({}), 400, (_res, body) => {
+      assert.equal((body as { code?: string }).code, 'bad_request');
+    });
+
+    await check('POST interrupt unbound session → 404 (nothing to interrupt)', `/api/v1/sessions/${SESSION_B}/interrupt`, jsonBody({ projectId: E2E_PROJECT_ID }), 404, (_res, body) => {
+      assert.equal((body as { code?: string }).code, 'opencode_session_unbound');
+    });
+
+    // --- SSE events ---------------------------------------------------------
     await check('GET /api/v1/sessions/events w/o projectId → 400 PROJECT_REQUIRED', '/api/v1/sessions/events', undefined, 400, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'PROJECT_REQUIRED');
     });
+    {
+      const ctrl = new AbortController();
+      try {
+        const res = await fetch(
+          `${base}/api/v1/sessions/events?projectId=${E2E_PROJECT_ID}`,
+          { headers: { ...authHeaders, accept: 'text/event-stream' }, signal: ctrl.signal },
+        );
+        const contentType = res.headers.get('content-type') ?? '';
+        if (res.status === 200) {
+          assert.match(contentType, /text\/event-stream/);
+          push('GET events → 200 text/event-stream (embedded host bus)', null);
+        } else {
+          const body = (await res.json().catch(() => null)) as { code?: string } | null;
+          assert.equal(res.status, 503);
+          assert.equal(body?.code, 'EXTERNAL_UNAVAILABLE');
+          push('GET events → honest 503 when the embedded host is unavailable', null);
+        }
+      } catch (err) {
+        push('GET events → 200 text/event-stream (embedded host bus)', err as Error);
+      } finally {
+        ctrl.abort();
+      }
+    }
 
     // --- stranger project → 404 not_found (Q3) ----------------------------
     {
@@ -869,21 +413,20 @@ async function main(): Promise<void> {
       (
         ProjectAccessService.prototype as unknown as { assertProjectAccessById: unknown }
       ).assertProjectAccessById = async (): Promise<never> => {
-        // What the real service throws for strangers (no existence leak).
-        throw new NotFoundException('Project 123e4567-e89b-12d3-a456-426614174090 not found');
+        throw new NotFoundException(`Project ${E2E_PROJECT_ID} not found`);
       };
       try {
-        await check('GET /api/v1/sessions stranger project → 404 not_found (no Retry-After)', '/api/v1/sessions?projectId=' + E2E_PROJECT_ID, undefined, 404, (res, body) => {
+        await check('GET /api/v1/sessions stranger project → 404 not_found (no Retry-After)', `/api/v1/sessions?projectId=${E2E_PROJECT_ID}`, undefined, 404, (res, body) => {
           assert.equal((body as { code?: string }).code, 'not_found');
           assert.equal(res.headers.get('Retry-After'), null);
         });
-        await check('GET /api/v1/sessions/{id}/messages stranger project → 404 not_found', '/api/v1/sessions/ses_alpha/messages?projectId=' + E2E_PROJECT_ID, undefined, 404, (_res, body) => {
+        await check('GET messages stranger project → 404 not_found', `/api/v1/sessions/${SESSION_A}/messages?projectId=${E2E_PROJECT_ID}`, undefined, 404, (_res, body) => {
           assert.equal((body as { code?: string }).code, 'not_found');
         });
-        await check('GET providers stranger project → 404 not_found', '/api/v1/sessions/providers?projectId=' + E2E_PROJECT_ID, undefined, 404, (_res, body) => {
+        await check('GET providers stranger project → 404 not_found', `/api/v1/sessions/providers?projectId=${E2E_PROJECT_ID}`, undefined, 404, (_res, body) => {
           assert.equal((body as { code?: string }).code, 'not_found');
         });
-        await check('POST interrupt stranger project → 404 not_found', '/api/v1/sessions/ses_alpha/interrupt', jsonBody({ projectId: E2E_PROJECT_ID }), 404, (_res, body) => {
+        await check('POST interrupt stranger project → 404 not_found', `/api/v1/sessions/${SESSION_A}/interrupt`, jsonBody({ projectId: E2E_PROJECT_ID }), 404, (_res, body) => {
           assert.equal((body as { code?: string }).code, 'not_found');
         });
       } finally {
@@ -893,39 +436,9 @@ async function main(): Promise<void> {
       }
     }
 
-    // Real outage: network failure → 503 + Retry-After (only honest outage).
-    process.env.OPENCODE_URL = 'http://127.0.0.1:9';
-    await check('runner unreachable → 200 durable list (no 503)', '/api/v1/sessions?projectId=' + E2E_PROJECT_ID, undefined, 200, (res, body) => {
-      assert.ok(Array.isArray(body), 'durable list must be an array');
-      assert.equal(res.headers.get('Retry-After'), null);
-    });
-    await check('events unreachable → 503 JSON before any SSE header', '/api/v1/sessions/events?projectId=' + E2E_PROJECT_ID, { headers: { accept: 'text/event-stream' } }, 503, (res, body) => {
-      assert.match(res.headers.get('content-type') ?? '', /application\/json/);
-      assert.equal((body as { code?: string }).code, 'EXTERNAL_UNAVAILABLE');
-    });
-    await check('runner unreachable → providers empty 200 (circuit breaker)', `/api/v1/sessions/providers?projectId=${E2E_PROJECT_ID}`, undefined, 200, (_res, body) => {
-      assert.deepEqual(body, []);
-    });
-    await check('runner unreachable → models empty 200 (circuit breaker)', `/api/v1/sessions/models?projectId=${E2E_PROJECT_ID}`, undefined, 200, (_res, body) => {
-      assert.deepEqual(body, []);
-    });
-    let localSessionId = '';
-    await check('runner unreachable → POST /api/v1/sessions creates a durable local session', '/api/v1/sessions', jsonBody({ projectId: E2E_PROJECT_ID, title: 'local after outage' }), 200, (_res, body) => {
-      const row = body as Record<string, unknown>;
-      assert.equal(typeof row.id, 'string');
-      assert.ok(String(row.id).length > 0);
-      assert.equal(row.title, 'local after outage');
-      assert.equal(row.projectId, E2E_PROJECT_ID);
-      localSessionId = String(row.id);
-    });
-    await check('runner unreachable → GET messages of the local session is empty 200', `/api/v1/sessions/${localSessionId}/messages?projectId=${E2E_PROJECT_ID}`, undefined, 200, (_res, body) => {
-      assert.deepEqual(body, []);
-    });
-    process.env.OPENCODE_URL = stand.url;
-
     // Swagger surface: domain paths present, unversioned mirror gone.
     await check('swagger exposes /api/v1/sessions, no unversioned /api/opencode mirror', '/swagger/v1.json', undefined, 200, (_res, body) => {
-      const doc = body as { paths?: Record<string, Record<string, { deprecated?: boolean; tags?: Array<string> }>> };
+      const doc = body as { paths?: Record<string, Record<string, { tags?: Array<string> }>> };
       const paths = doc.paths ?? {};
       assert.ok(paths['/api/v1/sessions'], 'missing /api/v1/sessions in swagger');
       assert.ok(paths['/api/v1/sessions/status'], 'missing /api/v1/sessions/status in swagger');
@@ -937,8 +450,7 @@ async function main(): Promise<void> {
       assert.ok(!paths['/api/opencode/session'], 'removed /api/opencode mirror is still documented');
     });
 
-    // Anonymous (no Bearer) → 401 before any gate/DB work — check() always
-    // attaches the Bearer, so this one uses raw fetch (same pattern as the other e2e suites).
+    // Anonymous (no Bearer) → 401 before any gate/DB work.
     {
       const anon = await fetch(`${base}/api/v1/sessions?projectId=${E2E_PROJECT_ID}`);
       const anonBody = (await anon.json().catch(() => null)) as { code?: string } | null;
@@ -951,8 +463,6 @@ async function main(): Promise<void> {
       }
     }
   } finally {
-    process.env.OPENCODE_URL = 'http://127.0.0.1:9';
-    await stand.close();
     logMethods.forEach((m, i) => {
       (AppLogger.prototype as unknown as Record<string, unknown>)[m] = logOriginals[i];
     });
@@ -961,9 +471,6 @@ async function main(): Promise<void> {
       if (l.method === 'warn' || l.method === 'error') {
         assert.ok(!l.text.includes('\n'), `${l.method} line is not a one-liner: ${l.text.slice(0, 120)}`);
       }
-      assert.ok(!l.text.includes(UPSTREAM_SECRET), 'upstream secret leaked into a log line');
-      assert.ok(!l.text.includes(process.env.OPENCODE_PASSWORD ?? ''), 'Basic password leaked into a log line');
-      assert.ok(!l.text.includes(stand.url), 'upstream URL leaked into a log line');
       assert.ok(!l.text.includes('Bearer '), 'authorization material leaked into a log line');
       assert.ok(!l.text.includes('[object Object]'), 'unserialized object in a log line');
     }

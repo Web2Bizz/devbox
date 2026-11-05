@@ -29,7 +29,8 @@ import { McpToolSource, ToolRegistry } from './modules/tool-registry';
  * only (D3).
  *
  * sandbox.exec goes through the opencode runner (SandboxProvider →
- * OpencodeService; it is @Global, so no OpencodeModule import is added here);
+ * OpencodeHostService (the embedded in-process host); it is @Global, so no
+ * OpencodeModule import is added here);
  * MCP is consumption-only (McpToolSource registers the remote server's tools
  * at boot, MCP_SERVER_URL unset disables it) — the harness never serves MCP.
  */

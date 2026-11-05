@@ -19,10 +19,9 @@
 ## Поток одного запроса
 
 `JwtAuthGuard` → C4-гейт `assertProjectAccessById` (404 без утечки) →
-jail (`WorkspacePathService` поверх `REPOS_ROOT`) → upstream к runner:
-sdk (`OpencodeSdkClient`) для полей, которые генератор НЕ режет, иначе сырой
-`fetchWithRetry` + `serveBasicAuthHeader` → маппинг сбоя в `EXTERNAL_*`
-(`external-error.ts`) → `ApiErrorFilter` в `ApiError`-envelope
+jail (`WorkspacePathService` поверх `REPOS_ROOT`) → транспорт — встроенный
+`OpencodeHostService` (in-process, без внешнего раннера) → маппинг сбоя в
+`EXTERNAL_*` (`external-error.ts`) → `ApiErrorFilter` в `ApiError`-envelope
 (+`x-correlation-id`) — normal path однострочник `[http] handled`, без стеков/секретов.
 
 ## Фолбэки запрещены по умолчанию

@@ -1,19 +1,25 @@
-import { BadRequestException, HttpException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  Injectable,
+  NotFoundException,
+  Optional,
+  type OnModuleDestroy,
+  type OnModuleInit,
+} from '@nestjs/common';
 import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
-import type { OpencodeClient } from '@opencode-ai/sdk/v2';
 import { ProjectAccessService } from '../../../../../organizations/modules/projects/modules/project-access/project-access.service';
 import { SessionRunnerService } from '../../../../../common/zen/session-runner.service';
-import { OpencodeSdkClient } from '../opencode/opencode-sdk-client';
-import { OpencodeService } from '../opencode/opencode.service';
 import {
-  ServeAuthService,
-  serveBasicAuthHeader,
-} from '../opencode/modules/auth/serve-auth.service';
+  OpencodeHostService,
+  type HostProviderList,
+  type HostSessionInfo,
+} from '../opencode/opencode-host.service';
+import { ServeAuthService } from '../opencode/modules/auth/serve-auth.service';
 import { AppLogger } from '../../../../../common/logger';
 import { relaySse } from '../../../../../common/sse/sse-relay';
 import {
   ExternalServiceError,
-  fromStatus,
   fromUnknown,
 } from '../../../../../common/external/external-error';
 import { AgentsService } from '../agents/agents.service';
@@ -23,59 +29,17 @@ import type {
   InterruptSessionInput,
   SendMessageInput,
   SessionInfo,
-  SessionInfoModel,
   SessionInterruptResult,
   SessionMessage,
-  SessionRunStatus,
   SessionRunStatusMap,
   SessionRunnerProvider,
 } from './sessions.dto';
 import type { SessionHarness } from './session-harness.types';
 
 /**
- * Upstream session row as the live 2.2.0 stand answers it.
- * Provenance: contracts/opencode-stand-2.2.0.json Session.Info (required
- * id, projectID, cost, tokens, time, location; title optional). The sdk's
- * declared response type is narrowed here to the fields the translation
- * actually reads.
- */
-type UpstreamSession = {
-  id: string;
-  projectID: string;
-  title?: string;
-  time: { created: number; updated: number };
-  location: { directory: string };
-  model?: { id?: string; providerID?: string; variant?: string };
-};
-
-/** Envelope the v2 list/create endpoints answer ({data} unwrapped). */
-type UpstreamEnvelope<T> = { data?: T };
-
-/**
- * Upstream message row — a variant of the `Session.Message.Info` union
- * (provenance: artifact Session.Message.*). Only the fields the projection
- * reads are typed; `content` carries the assistant's text parts.
- */
-type UpstreamMessage = {
-  id: string;
-  type: string;
-  time: { created: number };
-  text?: string;
-  content?: Array<{ type?: string; text?: string }>;
-};
-
-/** v2 prompt receipt (`Session.Inbox.User`) — the queued user payload. */
-type UpstreamInboxUser = {
-  id: string;
-  type: string;
-  time: { created: number };
-  payload?: { text?: string };
-};
-
-/**
- * Upstream provider row — artifact Provider.Info. Only the fields the
- * domain projection reads are typed; settings/headers/body stay unread
- * (headers may carry auth material — never projected outward).
+ * Provider row — artifact Provider.Info. Only the fields the domain
+ * projection reads are typed; settings/headers/body stay unread (headers
+ * may carry auth material — never projected outward).
  */
 type UpstreamProviderInfo = {
   id?: unknown;
@@ -84,17 +48,13 @@ type UpstreamProviderInfo = {
   package?: unknown;
 };
 
-/** v2 provider answer envelope (artifact GET /api/provider). */
-type UpstreamProviderEnvelope = { data?: unknown; location?: unknown };
-
-/** Activation gate as a real type predicate — plain boolean variables do
- * not narrow union members under strictNullChecks. Provenance: artifact
- * Provider.Info.activation enum. */
+/** Activation gate as a real type predicate (plain boolean variables do
+ * not narrow union members under strictNullChecks). */
 function isProviderActivation(v: unknown): v is 'auto' | 'enabled' | 'disabled' {
   return v === 'auto' || v === 'enabled' || v === 'disabled';
 }
 
-/** True when the throw is the runner's honest missing-key signal (transport selection). */
+/** True when the throw is the direct runner's honest missing-key signal. */
 function isMissingKey(err: unknown): boolean {
   if (!(err instanceof NotFoundException)) return false;
   const res = err.getResponse() as unknown;
@@ -108,61 +68,43 @@ function isMissingKey(err: unknown): boolean {
 /**
  * SessionHarnessService — default SessionHarness behind /api/v1/sessions*.
  *
- * Card 1 (harness-core): the orchestrator interface is domain-only
- * (SessionInfo / SessionMessage / SessionStreamFrame from
- * @rush-code/contracts); THIS implementation still rides the opencode serve
- * transport (:4096) through the exact building blocks the removed
- * /api/opencode/* mirror used (no behavior change there):
- * - reads (session list, active set, providers, models, interrupt) ride
- *   the v2 sdk surface through OpencodeSdkClient (real-user gate +
- *   ExternalClient retry/timeout);
- * - create + prompt post through OpencodeService.fetchWithRetry directly
- *   with the server Basic header — the pinned sdk 1.18.33 generated create()
- *   sends only id/agent/model/location (title/parentID would be silently
- *   dropped), and the generated prompt() sends a `prompt` key while the live
- *   2.2.0 spec requires `text` with additionalProperties:false (provenance:
- *   contracts/opencode-stand-2.2.0.json). Both stay one transport layer
- *   below the generator; interrupt cleared the same gap earlier by moving
- *   onto `client.v2.session.interrupt` (the runtime parses the live 200
- *   {interrupted} despite the stale 204-void typing);
- * - status is DERIVED from live data (GET /api/session/active — the 2.x
- *   spec's running-drain map): busy while a session has an active drain,
- *   idle otherwise. The legacy GET /session/status the removed mirror
- *   proxied is not served by 2.x (SPA catch-all → 503), so deriving from the active
- *   map is the only REST-reachable source; the transient `retry` state
- *   lives in the event stream, not in snapshots. Interrupt and the model
- *   inventory ride the same sdk client (interrupt posts no body; the model
- *   list is scoped to the gated jail via the v2 location query).
+ * Transport is the embedded OpenCode V2 host (OpencodeHostService, in-process,
+ * no external runner URL / no Basic auth). Postgres (SessionHistoryRepository) stays
+ * the source of truth for the domain list/thread:
+ * - list/listMessages/status read ONLY the durable store — an empty project
+ *   is an honest empty answer, never an upstream 503;
+ * - create writes our `project_sessions` row first (id = our uuid) and then
+ *   binds the host session id into `metadata.opencodeSessionId`; a host that
+ *   cannot start rolls the row back and answers an honest 503
+ *   EXTERNAL_UNAVAILABLE;
+ * - sendMessage keeps the direct per-user Zen runner when a key exists and
+ *   otherwise prompts the bound host session; the user receipt is always
+ *   written to the durable thread;
+ * - interrupt/providers/models/events ride the host helpers and keep the
+ *   frozen domain shapes.
  *
- * Card 2 replaces the transport below this interface with direct provider
- * calls (no new wire shapes); the domain translation here (toSessionInfo /
- * toSessionMessage / toStreamFrame) and the SSE contract stay frozen.
- *
- * Config flows only through OpencodeService/OpencodeConfig (common/env/env.ts
- * strict source — this service reads no env itself); logs ride AppLogger
- * one-liners without secrets (no URLs/headers/bodies); failures map through
- * the shared external-error semantics (external-error fromStatus/fromUnknown):
- * request-level upstream 4xx answer honest 400/404 EXTERNAL_BAD_REQUEST /
- * EXTERNAL_NOT_FOUND (no Retry-After), real outages stay 503
- * EXTERNAL_UNAVAILABLE + Retry-After. No fallbacks: no projectId → 400
- * PROJECT_REQUIRED, no jailed dir → the gate error propagates (never a
- * cwd/default location), no upstream URL defaults.
- *
- * Own runner (cutover from `opencode serve` :4096): model answers ride
- * SessionRunnerService (common/zen — direct per-user Zen calls behind the
- * caller's decrypted key, same rotation as billing). Transport selection is
- * explicit, never silent: a stored key → direct answer (no stand needed);
- * 404 opencode_key_missing → the prompt queues on the serve stand while it
- * lives (legacy path). History/statuses/SSE additionally overlay the durable
- * Postgres history (SessionHistoryRepository) so a dead stand AND a backend
- * restart still serve what the harness itself created (gate-scoped first —
- * strangers never read it). No process-memory fallback remains.
+ * Domain translation (toSessionInfo-shaped rows, message rows, SSE frames)
+ * and the SSE contract stay unchanged. Logs ride AppLogger one-liners without
+ * URLs/secrets/stacks.
  */
+/** Host session id → durable domain binding (NEVER trusted across projects). */
+type HostBinding = { projectId: string; localSessionId: string; userId?: string };
+
+/** In-flight assistant text per host assistant message (recorder). */
+type AssistantBuffer = {
+  sessionID: string;
+  assistantMessageID: string;
+  text: string;
+  createdAt: number;
+};
+
+/** Owner/agent context of the last prompt, used for durable assistant rows. */
+type TurnMeta = { userId: string; projectId: string; agentId: string };
+
 @Injectable()
-export class SessionHarnessService implements SessionHarness {
+export class SessionHarnessService implements SessionHarness, OnModuleInit, OnModuleDestroy {
   constructor(
-    private readonly sdk: OpencodeSdkClient,
-    private readonly opencode: OpencodeService,
+    private readonly host: OpencodeHostService,
     private readonly access: ProjectAccessService,
     private readonly auth: ServeAuthService,
     private readonly history: SessionHistoryRepository,
@@ -188,15 +130,36 @@ export class SessionHarnessService implements SessionHarness {
   /** Sessions with an in-flight direct turn (status override until the answer lands). */
   private readonly busyDirect = new Set<string>();
 
-  /** Legacy runner circuit breaker: set when a list/messages call proves it is down. */
-  private runnerDownUntil = 0;
+  /**
+   * In-process host-id → durable binding written by create(), so SSE
+   * subscribers already connected see `session.created`/early frames before
+   * the Postgres metadata write lands. Every entry carries its projectId —
+   * the map is process-wide but reads are always project-scoped.
+   */
+  private readonly hostBindings = new Map<string, HostBinding>();
 
-  private markRunnerDown(): void {
-    this.runnerDownUntil = Date.now() + 30_000;
+  /** True when the single process-level assistant recorder is subscribed. */
+  private recorderStarted = false;
+  /** Single-flight guard for the recorder subscription. */
+  private recorderStarting: Promise<void> | null = null;
+  /** Cancels the recorder on module destroy. */
+  private readonly recorderAbort = new AbortController();
+  /** Assistant text buffers keyed by `${hostSessionID}\u0000${assistantMessageID}`. */
+  private readonly assistantBuffers = new Map<string, AssistantBuffer>();
+  /** Owner/agent of the in-flight turn keyed by OUR session uuid. */
+  private readonly turnMeta = new Map<string, TurnMeta>();
+
+  onModuleInit(): void {
+    // Best-effort: the host may still be booting; ensureAssistantRecorder()
+    // is retried from sendMessage/streamEvents.
+    void this.ensureAssistantRecorder();
   }
 
-  private isRunnerDown(): boolean {
-    return Date.now() < this.runnerDownUntil;
+  onModuleDestroy(): void {
+    this.recorderAbort.abort();
+    this.recorderStarted = false;
+    this.assistantBuffers.clear();
+    this.turnMeta.clear();
   }
 
   /** Same non-negative-integer query guard the mirror uses for ?limit. */
@@ -209,70 +172,18 @@ export class SessionHarnessService implements SessionHarness {
     return limit;
   }
 
-  private isUpstreamOk<T>(data: T | undefined, error: unknown): data is T {
-    return data !== undefined && error === undefined;
+  private badShape(operation: string): ExternalServiceError {
+    return new ExternalServiceError({
+      code: 'EXTERNAL_UNAVAILABLE',
+      service: 'opencode',
+      operation,
+      message: 'сервис временно недоступен, повторите позже',
+      isRetryable: false,
+      cause: new Error('bad_shape'),
+    });
   }
 
-  private sdkStatus(result: { response?: { status?: number } }): number | undefined {
-    const status = result.response?.status;
-    return typeof status === 'number' && Number.isInteger(status) ? status : undefined;
-  }
-
-  private upstreamError(operation: string, error: unknown, status?: number): Error {
-    if (status !== undefined && Number.isInteger(status) && status >= 400 && status <= 599) {
-      return fromStatus('opencode', operation, status, 1, error);
-    }
-    return fromUnknown('opencode', operation, error ?? new Error('upstream_error'));
-  }
-
-  /** Session ids with a live drain on the server (GET /api/session/active). */
-  private async activeSessionIds(client: OpencodeClient, cid: string): Promise<Set<string>> {
-    const res = await client.v2.session.active();
-    if (this.isUpstreamOk(res.data, res.error)) {
-      const map =
-        (res.data as unknown as UpstreamEnvelope<Record<string, unknown>>).data ?? {};
-      return new Set(Object.keys(map));
-    }
-    throw this.upstreamError('sessionsActive', res.error, this.sdkStatus(res));
-  }
-
-  /** Upstream row + our projectId (the gate-bound uuid, NOT the upstream
-   * project hash) + stored agent + derived status → domain SessionInfo. */
-  private toSessionInfo(
-    s: UpstreamSession,
-    projectId: string,
-    active: Set<string>,
-    agentId: string | null = null,
-  ): SessionInfo {
-    let model: SessionInfoModel | null = null;
-    const m = s.model;
-    if (m && typeof m.id === 'string' && typeof m.providerID === 'string') {
-      model = {
-        id: m.id,
-        providerID: m.providerID,
-        ...(m.variant !== undefined ? { variant: m.variant } : {}),
-      };
-    }
-    const status: SessionRunStatus = active.has(s.id) ? { type: 'busy' } : { type: 'idle' };
-    return {
-      id: s.id,
-      title: typeof s.title === 'string' && s.title.length > 0 ? s.title : null,
-      createdAt: new Date(s.time.created).toISOString(),
-      directory: s.location.directory,
-      projectId,
-      model,
-      agentId,
-      status,
-    };
-  }
-
-  /**
-   * Validate a client-supplied agentId against the registry (AgentsService —
-   * sessions→agents DI edge). Unknown ids fail loud as an honest 404 (never
-   * a fallback to another agent); undefined passes through (caller applies
-   * the session/default resolution). Without the registry wired (hand-rolled
-   * unit specs only) any explicit id is unknown — same honest 404.
-   */
+  /** Validate a client-supplied agentId against the registry (honest 404). */
   private resolveAgentId(agentId: string | undefined, cid: string): string | undefined {
     if (agentId === undefined) return undefined;
     const known = this.agents?.list().some((a) => a.id === agentId) ?? false;
@@ -283,72 +194,28 @@ export class SessionHarnessService implements SessionHarness {
     return agentId;
   }
 
-  /**
-   * List the gated project's sessions on an already-resolved project + client
-   * (callers that already hold both must not re-run the C4 gate / re-create
-   * the sdk client).
-   */
-  private async listWithClient(
-    client: OpencodeClient,
-    project: { projectId: string; directory: string },
+  /** Drop a staged row without masking the original failure (best effort). */
+  private async discardQuietly(sessionId: string, cid: string): Promise<void> {
+    try {
+      await this.history.discardSession(sessionId);
+    } catch (err) {
+      this.logger.warn('[sessions] rollback failed', cid);
+      this.logger.debug((err as Error).message, cid);
+    }
+  }
+
+  /** GET /api/v1/sessions?projectId — durable list scoped to the gated jail. */
+  async list(
+    userId: string,
+    projectId: string | undefined,
     cid: string,
   ): Promise<Array<SessionInfo>> {
-    let rows: Array<UpstreamSession>;
-    let active: Set<string>;
-    try {
-      const [res, activeIds] = await Promise.all([
-        client.v2.session.list({ directory: project.directory }),
-        this.activeSessionIds(client, cid),
-      ]);
-      if (!this.isUpstreamOk(res.data, res.error)) {
-        throw this.upstreamError('sessionsList', res.error, this.sdkStatus(res));
-      }
-      rows = (res.data as unknown as UpstreamEnvelope<Array<UpstreamSession>>).data ?? [];
-      active = activeIds;
-    } catch (err) {
-      this.logger.warn('[sessions] list failed', cid);
-      this.logger.debug((err as Error).message, cid);
-      throw this.upstreamError('sessionsList', err);
-    }
-    // Stored agent choice is durable (survives restart) — one project-scoped
-    // query instead of N lookups; DB errors propagate as 503 outside the
-    // upstream mapping above.
-    const agents = await this.history.listAgents(project.projectId);
-    return rows.map((s) => this.toSessionInfo(s, project.projectId, active, agents.get(s.id) ?? null));
-  }
-
-  /** GET /api/v1/sessions?projectId — list scoped to the gated jail. */
-  async list(userId: string, projectId: string | undefined, cid: string): Promise<Array<SessionInfo>> {
+    this.auth.assertServeUser(userId, cid);
     const project = await this.access.resolveProjectDirectory(projectId, userId, cid);
-    const memory = await this.history.listLocalSessions(project.projectId);
-    try {
-      const client = await this.sdk.create(userId, cid);
-      const rows = await this.listWithClient(client, project, cid);
-      const seen = new Set(rows.map((row) => row.id));
-      return [...rows, ...memory.filter((s) => !seen.has(s.id))];
-    } catch (err) {
-      // The runner is legacy; the durable store is the source of truth — an
-      // empty list is honest. Serve it (already gate-scoped above) instead of
-      // failing whenever the runner is unavailable. Nest HTTP throws (the C4
-      // gate 404, the real-user 401) stay honest — they never read the store.
-      if (err instanceof HttpException) throw err;
-      // Request-level answers (401/404/400) stay honest; only a real runner
-      // outage/timeout falls back to the durable store.
-      if (
-        err instanceof ExternalServiceError &&
-        err.code !== 'EXTERNAL_UNAVAILABLE' &&
-        err.code !== 'EXTERNAL_TIMEOUT'
-      ) {
-        throw err;
-      }
-      this.logger.warn('[sessions] list served from durable store', cid);
-      this.logger.debug((err as Error).message, cid);
-      this.markRunnerDown();
-      return memory;
-    }
+    return this.history.listLocalSessions(project.projectId);
   }
 
-  /** GET /api/v1/sessions/status?projectId — sessionId → derived runtime status. */
+  /** GET /api/v1/sessions/status?projectId — sessionId → runtime status. */
   async statusMap(
     userId: string,
     projectId: string | undefined,
@@ -357,214 +224,107 @@ export class SessionHarnessService implements SessionHarness {
     const rows = await this.list(userId, projectId, cid);
     const map: SessionRunStatusMap = {};
     for (const row of rows) {
-      map[row.id] = this.busyDirect.has(row.id) ? { type: 'busy' } : row.status;
+      map[row.id] = this.busyDirect.has(row.id) ? { type: 'busy' } : { type: 'idle' };
     }
     return map;
   }
 
   /**
-   * POST /api/v1/sessions — create in the gated jail, honestly forwarding
-   * title/parentID/model. The body is built non-empty ({location} always present)
-   * because the 2.x create endpoint rejects a missing JSON object; it rides
-   * fetchWithRetry (not the sdk) because the pinned generated create()
-   * silently drops every field except id/agent/model/location.
+   * POST /api/v1/sessions — durable row first (our uuid), then the embedded
+   * host session; the host id is stored in `metadata.opencodeSessionId`.
+   * A host failure soft-deletes the staged row and answers the typed 503.
    */
   async create(userId: string, body: CreateSessionInput, cid: string): Promise<SessionInfo> {
+    this.auth.assertServeUser(userId, cid);
     const project = await this.access.resolveProjectDirectory(body.projectId, userId, cid);
     // Fail fast on an unknown agent (honest 404, no side effects) before any
-    // upstream work; undefined keeps the pre-agent behavior (agentId null).
+    // durable/host work; undefined keeps the pre-agent behavior (agentId null).
     const agentId = this.resolveAgentId(body.agentId, cid);
-    const payload: Record<string, unknown> = { location: { directory: project.directory } };
-    if (body.title !== undefined) payload.title = body.title;
-    if (body.parentID !== undefined) payload.parentID = body.parentID;
-    if (body.model !== undefined) {
-      payload.model = {
-        id: body.model.id,
-        providerID: body.model.providerID,
-        ...(body.model.variant !== undefined ? { variant: body.model.variant } : {}),
-      };
-    }
-    try {
-      const client = await this.sdk.create(userId, cid);
-      const active = await this.activeSessionIds(client, cid);
-      const headers: Record<string, string> = {
-        ...serveBasicAuthHeader(),
-        'content-type': 'application/json',
-      };
-      if (cid) headers['x-correlation-id'] = cid;
-      const res = await this.opencode.fetchWithRetry(
-        `${this.opencode.dialUrl()}/api/session`,
-        { method: 'POST', headers, body: JSON.stringify(payload) },
-        { operation: 'sessionsCreate' },
-      );
-      if (!res.ok) {
-        // Drain before mapping (fixed messages only — the upstream body is
-        // never logged nor echoed).
-        await res.arrayBuffer().catch(() => null);
-        throw this.upstreamError('sessionsCreate', new Error(`status_${res.status}`), res.status);
-      }
-      const json = (await res.json()) as UpstreamEnvelope<UpstreamSession>;
-      if (!json || typeof json !== 'object' || !json.data || typeof json.data !== 'object') {
-        throw this.upstreamError('sessionsCreate', new Error('bad_create_shape'));
-      }
-      this.logger.info('[sessions] created', cid);
-      const created = this.toSessionInfo(
-        json.data,
-        project.projectId,
-        active,
-        agentId ?? null,
-      );
-      // The upstream row carries no agent — the durable store overlays it so
-      // the answered row (and every later list after a restart) is never
-      // missing the key (contract: nullable, never absent).
-      if (agentId !== undefined) {
-        await this.history.setAgent(created.id, project.projectId, agentId);
-      }
-      return created;
-    } catch (err) {
-      // Gate/validation stays honest (never a local session): Nest HTTP throws
-      // (C4 404, real-user 401) propagate unmapped. A Postgres outage from the
-      // agent upsert is already a 503 — never reinterpret it as an unreachable
-      // stand.
-      if (err instanceof HttpException) throw err;
-      if (err instanceof ExternalServiceError && err.service === 'db') throw err;
-      // Serve stand unreachable: the harness owns the session itself (same
-      // domain shape, gate-bound project, idle until the first direct turn).
-      // Upstream request-level 4xx keep their honest mapping — only transport
-      // failures land here.
-      const mapped = this.upstreamError('sessionsCreate', err);
-      const code = (mapped as unknown as { code?: unknown }).code;
-      if (code === 'EXTERNAL_BAD_REQUEST' || code === 'EXTERNAL_NOT_FOUND') throw mapped;
-      this.markRunnerDown();
-      const local: SessionInfo = {
-        id: Bun.randomUUIDv7(),
-        title: body.title ?? null,
-        createdAt: new Date().toISOString(),
-        directory: project.directory,
-        projectId: project.projectId,
-        model: body.model ?? null,
-        agentId: agentId ?? null,
-        status: { type: 'idle' },
-      };
-      // Durable registry row (origin='harness') so a backend restart keeps
-      // the session; the agent choice gets its own row.
-      await this.history.saveLocalSession(local);
-      if (agentId !== undefined) {
-        await this.history.setAgent(local.id, project.projectId, agentId);
-      }
-      this.logger.warn('[sessions] created in harness store', cid);
-      this.logger.debug((err as Error).message, cid);
-      return local;
-    }
-  }
+    const id = Bun.randomUUIDv7();
+    const info: SessionInfo = {
+      id,
+      title: body.title ?? null,
+      createdAt: new Date().toISOString(),
+      directory: project.directory,
+      projectId: project.projectId,
+      model: body.model ?? null,
+      agentId: agentId ?? null,
+      status: { type: 'idle' },
+    };
+    // Row first: the domain id exists before the host does, and list/status
+    // never need an upstream round-trip.
+    await this.history.saveLocalSession(info, userId);
 
-  /**
-   * Upstream message variant → domain SessionMessage. `text` is the
-   * chat-visible projection: the variant's own `text` (user/system/
-   * synthetic) or the assistant's `content[]` text parts joined — null for
-   * every other variant (their nesting is not consumed and never faked).
-   */
-  private toSessionMessage(m: UpstreamMessage): SessionMessage {
-    let text: string | null = null;
-    if (typeof m.text === 'string' && m.text.length > 0) {
-      text = m.text;
-    } else if (Array.isArray(m.content)) {
-      const parts = m.content
-        .filter((p) => p && p.type === 'text' && typeof p.text === 'string' && p.text.length > 0)
-        .map((p) => p.text as string);
-      if (parts.length > 0) text = parts.join('\n\n');
+    let created: HostSessionInfo;
+    try {
+      created = await this.host.sessionCreate({
+        directory: project.directory,
+        title: body.title,
+        parentID: body.parentID,
+        model: body.model,
+        agent: agentId,
+      });
+    } catch (err) {
+      // No half state: the row never becomes a visible session without a host
+      // binding. The error keeps its honest mapping (4xx stays 4xx, outage 503).
+      await this.discardQuietly(id, cid);
+      if (err instanceof ExternalServiceError || err instanceof HttpException) throw err;
+      throw fromUnknown('opencode', 'sessionsCreate', err);
     }
+
+    // Bind before persisting so live SSE subscribers can resolve the host id.
+    this.hostBindings.set(created.id, {
+      projectId: project.projectId,
+      localSessionId: id,
+      userId,
+    });
+    try {
+      await this.history.setHostSessionId(id, created.id);
+      if (agentId !== undefined) {
+        await this.history.setAgent(id, project.projectId, agentId);
+      }
+    } catch (err) {
+      // Postgres outage after the host session exists: drop both sides so a
+      // retry does not leave an orphan host session or a phantom row.
+      this.hostBindings.delete(created.id);
+      await this.host.sessionRemove(created.id).catch(() => undefined);
+      await this.discardQuietly(id, cid);
+      throw err;
+    }
+
+    this.logger.info('[sessions] created', cid);
     return {
-      id: m.id,
-      type: m.type,
-      createdAt: new Date(m.time.created).toISOString(),
-      text,
+      ...info,
+      title:
+        typeof created.title === 'string' && created.title.length > 0
+          ? created.title
+          : info.title,
     };
   }
 
   /**
-   * GET /api/v1/sessions/{id}/messages — v2 message list (GET
-   * /api/session/{sessionID}/message) scoped through the C4 gate, the
-   * {data,cursor} envelope unwrapped to a normalized array. `limit`/
-   * `cursor` are the upstream-optional pagination params (artifact params
-   * list), passed through unchanged.
+   * GET /api/v1/sessions/{id}/messages — durable Postgres thread only.
+   * `limit` keeps its validation contract (400 on garbage) but the durable
+   * read has no cursor semantics; an unknown session is an honest empty array.
    */
   async listMessages(
     userId: string,
     sessionId: string,
     projectId: string | undefined,
     limitRaw: string | undefined,
-    cursor: string | undefined,
+    _cursor: string | undefined,
     cid: string,
   ): Promise<Array<SessionMessage>> {
+    this.auth.assertServeUser(userId, cid);
     await this.access.resolveProjectDirectory(projectId, userId, cid);
-    // Durable history first: direct turns never reach the serve stand, and
-    // the rows must survive a backend restart (previously process memory).
-    const stored = await this.history.listMessages(sessionId);
-    const client = await this.sdk.create(userId, cid);
-    try {
-      const limit = this.parseLimit(limitRaw);
-      const res = await client.v2.session.messages({
-        sessionID: sessionId,
-        ...(limit !== undefined ? { limit } : {}),
-        ...(cursor ? { cursor } : {}),
-      });
-      if (!this.isUpstreamOk(res.data, res.error)) {
-        throw this.upstreamError('sessionMessages', res.error, this.sdkStatus(res));
-      }
-      const rows = (res.data as unknown as UpstreamEnvelope<Array<UpstreamMessage>>).data ?? [];
-      return this.mergeMessages(rows.map((m) => this.toSessionMessage(m)), stored);
-    } catch (err) {
-      // Our own validation + the gate keep their identity (400 bad_request /
-      // gate HTTP — never mapped to EXTERNAL_* and never served from the store).
-      if (err instanceof HttpException) throw err;
-      // Request-level answers (401/404/400) stay honest; only a real runner
-      // outage/timeout falls back to the durable store.
-      if (
-        err instanceof ExternalServiceError &&
-        err.code !== 'EXTERNAL_UNAVAILABLE' &&
-        err.code !== 'EXTERNAL_TIMEOUT'
-      ) {
-        throw err;
-      }
-      // The runner is legacy; the durable store is the source of truth — an
-      // empty thread is honest. Serve the durable rows (same domain shape)
-      // instead of failing whenever the runner is unavailable.
-      this.logger.warn('[sessions] messages served from durable store', cid);
-      this.logger.debug((err as Error).message, cid);
-      this.markRunnerDown();
-      return stored;
-    }
+    this.parseLimit(limitRaw);
+    return this.history.listMessages(sessionId);
   }
 
   /**
-   * Upstream rows + durable rows → one ascending thread, de-duplicated by
-   * message id (upstream wins on the unlikely overlap). Direct turns exist
-   * only in the durable store; serve turns only upstream.
-   */
-  private mergeMessages(
-    upstream: Array<SessionMessage>,
-    stored: Array<SessionMessage>,
-  ): Array<SessionMessage> {
-    const byId = new Map<string, SessionMessage>();
-    for (const row of upstream) byId.set(row.id, row);
-    for (const row of stored) if (!byId.has(row.id)) byId.set(row.id, row);
-    return [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  }
-
-  /**
-   * POST /api/v1/sessions/{id}/messages — prompt the session's agent (direct
-   * agent turn when a per-user key exists, otherwise queued on the serve
-   * stand while it lives — see sendMessageDirect / sendMessageViaServe).
-   * `text` is the prompt's only required payload field; files/skills/
-   * delivery stay unexposed until a consumer exists. `model` (same
-   * SessionInfoModel ref as on create) is accepted for backward compat but
-   * ignored on both paths (the agent owns its model; the upstream prompt
-   * rejects it). `agentId` selects the answering agent for this turn
-   * (validated up front — unknown ids fail loud before any transport work);
-   * without it the session keeps its stored agent (default 'ask'). The 200
-   * receipt is projected to the domain message form (queued user row); the
-   * answer itself streams over events.
+   * POST /api/v1/sessions/{id}/messages — direct agent turn when a per-user
+   * key exists, otherwise the bound embedded host session. The user receipt
+   * is persisted in the durable thread on both paths.
    */
   async sendMessage(
     userId: string,
@@ -573,17 +333,13 @@ export class SessionHarnessService implements SessionHarness {
     cid: string,
   ): Promise<SessionMessage> {
     await this.access.resolveProjectDirectory(body.projectId, userId, cid);
-    // Same real-user gate OpencodeSdkClient.create applies (the serve path
-    // posts below the generator, so assert it here explicitly).
     this.auth.assertServeUser(userId, cid);
     // Fail fast on an unknown agent (honest 404, no side effects) before any
-    // transport work — both the direct agent turn and the serve fallback
-    // share this gate; undefined keeps the session/default resolution.
+    // transport work — both paths share this gate.
     this.resolveAgentId(body.agentId, cid);
     // Transport selection (explicit, user-sanctioned): a stored per-user Zen
-    // key answers through the direct runner (no serve stand needed); without
-    // a key (404 opencode_key_missing) the prompt queues on the serve stand
-    // while it lives (legacy path — the e2e stub exercises exactly this).
+    // key answers through the direct runner (no host prompt needed); without
+    // a key (404 opencode_key_missing) the bound host session owns the turn.
     if (this.runner) {
       try {
         return await this.sendMessageDirect(userId, sessionId, body, cid);
@@ -592,26 +348,15 @@ export class SessionHarnessService implements SessionHarness {
         this.logger.warn('[sessions] direct runner skipped code=opencode_key_missing', cid);
       }
     }
-    return this.sendMessageViaServe(sessionId, body, cid);
+    return this.sendMessageViaHost(userId, sessionId, body, cid);
   }
 
   /**
    * Direct turn: the answer comes from the session's agent (AgentsService —
-   * sessions→agents DI edge; the Ask agent answers through the
-   * harness-owned runner behind the caller's key, so its model guard and
-   * timeouts are preserved, no mock). The receipt keeps the domain shape;
-   * both turns land in the durable Postgres history (survives restart) and
-   * the token frames stay in the live SSE buffer, so history/SSE serve them
-   * without the stand. A late answer after interrupt() is dropped (the
-   * partial commit already belongs to stop()).
-   *
-   * Agent resolution: explicit per-turn agentId wins (validated against the
-   * registry, honest 404 otherwise — never a fallback), then the session's
-   * stored agent, then the default 'ask'. The resolved agent is stored back
-   * on the session so SessionInfo.agentId always answers the truth. NOTE:
-   * `body.model` is accepted by the domain signature for backward compat
-   * but is intentionally ignored on the agent path (the agent owns its
-   * model) — same stance as the serve path below.
+   * sessions→agents DI edge; the Ask agent answers through the harness-owned
+   * runner behind the caller's key). Both turns land in the durable Postgres
+   * history and the token frames stay in the live SSE buffer. A late answer
+   * after interrupt() is dropped (the partial commit already belongs to stop()).
    */
   private async sendMessageDirect(
     userId: string,
@@ -627,14 +372,10 @@ export class SessionHarnessService implements SessionHarness {
       });
     }
     if (!this.agents) throw new Error('AgentsService is not wired');
-    // Explicit per-turn agentId wins, then the durable stored agent (survives
-    // restart), then the default. Reading the store is a DB call → 503 on
-    // outage, never a silent memory fallback.
     const agentId =
       this.resolveAgentId(body.agentId, cid) ??
       (await this.history.getAgent(sessionId)) ??
       'ask';
-    // An explicit per-turn agent becomes the session's stored agent.
     await this.history.setAgent(sessionId, body.projectId, agentId);
     void body.model;
     const receipt: SessionMessage = {
@@ -656,14 +397,8 @@ export class SessionHarnessService implements SessionHarness {
       createdAt: receipt.createdAt,
     });
     this.busyDirect.add(sessionId);
-    // Pre-allocated assistant identity for the token frames below.
     const assistantId = Bun.randomUUIDv7();
     try {
-      // Ask answers whole (no progressive deltas) — the turn therefore
-      // chunks into delta slices + the absolute snapshot (the same fallback
-      // path a non-streamed runner answer always took). Buffer helpers
-      // (bufferDirectDelta/Snapshot/Frames) and the session.idle terminator
-      // below stay untouched.
       const answer = await this.agents.askQuestion(agentId, body.text, userId, cid);
       if (!this.busyDirect.has(sessionId)) {
         this.logger.info('[sessions] direct answer dropped after interrupt', cid);
@@ -675,8 +410,6 @@ export class SessionHarnessService implements SessionHarness {
         createdAt: new Date().toISOString(),
         text: answer,
       };
-      // The answer joins the durable thread before it streams to the client,
-      // so a reload during the tail still reads the full history.
       await this.history.appendMessage({
         id: assistant.id,
         sessionId,
@@ -688,27 +421,19 @@ export class SessionHarnessService implements SessionHarness {
         createdAt: assistant.createdAt,
       });
       this.bufferDirectFrames(sessionId, assistant);
-      // Terminal session.idle so the client send() finalizes (useChat
-      // frameText:152 + send():444). Success path only — the direct-error
-      // path already clears client sending via the failed POST itself, so no
-      // idle there to avoid noise.
       this.bufferDirectIdle(sessionId);
       this.logger.info('[sessions] prompt answered directly', cid);
       return receipt;
     } catch (err) {
       // Missing per-user key: the direct transport never started, so the
-      // staged receipt is discarded — the serve fallback (sendMessage) owns
-      // the durable row, and keeping both would duplicate the message.
+      // staged receipt is discarded — the host fallback owns the durable row.
       if (isMissingKey(err)) {
         await this.history.discardMessage(receipt.id);
         throw err;
       }
-      // Postgres outage from the durable history write — keep its honest 503.
       if (err instanceof ExternalServiceError && err.service === 'db') throw err;
       this.logger.warn('[sessions] direct prompt failed', cid);
       this.logger.debug((err as Error).message, cid);
-      // Nest HTTP (missing/invalid key) keeps its billing-compatible code;
-      // only transport failures map to the EXTERNAL_* envelope.
       if (err instanceof HttpException) throw err;
       throw fromUnknown('zen', 'sessionPromptDirect', err);
     } finally {
@@ -717,50 +442,8 @@ export class SessionHarnessService implements SessionHarness {
   }
 
   /**
-   * One progressive delta frame under a pre-allocated assistant/part identity
-   * (Fix B sink for the runner's stream:true onDelta — the SSE tail no longer
-   * waits for the full answer). The absolute snapshot still lands once via
-   * bufferDirectSnapshot after the turn completes.
-   */
-  private bufferDirectDelta(
-    sessionId: string,
-    messageId: string,
-    partID: string,
-    delta: string,
-  ): void {
-    if (!delta) return;
-    this.localFrames.push({
-      id: Bun.randomUUIDv7(),
-      type: 'message.part.delta',
-      data: { sessionID: sessionId, messageID: messageId, partID, field: 'text', delta },
-    });
-    while (this.localFrames.length > 500) this.localFrames.shift();
-  }
-
-  /**
-   * Absolute snapshot frame for a turn whose deltas already tailed
-   * progressively (same message.part.updated envelope the frontend parses —
-   * no client change).
-   */
-  private bufferDirectSnapshot(sessionId: string, assistant: SessionMessage): void {
-    const text = assistant.text ?? '';
-    if (!text) return;
-    this.localFrames.push({
-      id: Bun.randomUUIDv7(),
-      type: 'message.part.updated',
-      data: { sessionID: sessionId, part: { id: `prt_${assistant.id}`, type: 'text', text } },
-    });
-    while (this.localFrames.length > 500) this.localFrames.shift();
-  }
-
-  /**
    * Terminal frame for a completed direct turn: the frontend useChat send()
-   * finalizes (clears sending) only on session.idle (frameText useChat.ts:152
-   * + send():444), and the direct harness otherwise emits only
-   * message.part.delta + message.part.updated — so without this the client
-   * sending flag hangs until a manual stop(). Same envelope shape as the
-   * delta/snapshot buffers (data.sessionID → toStreamFrame hoists top-level
-   * session, merged localSessionIds filter passes it).
+   * finalizes (clears sending) only on session.idle.
    */
   private bufferDirectIdle(sessionId: string): void {
     this.localFrames.push({
@@ -802,115 +485,276 @@ export class SessionHarnessService implements SessionHarness {
     while (this.localFrames.length > 500) this.localFrames.shift();
   }
 
-  private async sendMessageViaServe(
+  /**
+   * Host-backed turn: resolve the bound host session id from
+   * `metadata.opencodeSessionId`, prompt it, and persist the returned user
+   * receipt in the durable thread (so a reload keeps the question even though
+   * the answer streams over events).
+   */
+  private async sendMessageViaHost(
+    userId: string,
     sessionId: string,
     body: SendMessageInput,
     cid: string,
   ): Promise<SessionMessage> {
-    const headers: Record<string, string> = {
-      ...serveBasicAuthHeader(),
-      'content-type': 'application/json',
-    };
-    if (cid) headers['x-correlation-id'] = cid;
-    try {
-      const promptBody: Record<string, unknown> = { text: body.text };
-      // NOTE: upstream /api/session/{id}/prompt does NOT accept a `model`
-      // field (additionalProperties: false per contracts/opencode-stand-2.2.0.json).
-      // The model is pinned at session creation time (POST /api/session body
-      // accepts Model.Ref). Sending it here would be rejected (400) or
-      // silently ignored — never do it. `body.model` is accepted by the
-      // domain signature for backward compat but is intentionally dropped.
-      void body.model;
-      const res = await this.opencode.fetchWithRetry(
-        `${this.opencode.dialUrl()}/api/session/${encodeURIComponent(sessionId)}/prompt`,
-        { method: 'POST', headers, body: JSON.stringify(promptBody) },
-        { operation: 'sessionPrompt' },
-      );
-      if (!res.ok) {
-        await res.arrayBuffer().catch(() => null);
-        throw this.upstreamError('sessionPrompt', new Error(`status_${res.status}`), res.status);
-      }
-      const json = (await res.json()) as UpstreamEnvelope<UpstreamInboxUser>;
-      if (!json || typeof json.data !== 'object' || json.data === null) {
-        throw this.upstreamError('sessionPrompt', new Error('bad_prompt_shape'));
-      }
-      const receipt = json.data;
-      this.logger.info('[sessions] prompt accepted', cid);
-      return {
-        id: receipt.id,
-        type: receipt.type,
-        createdAt: new Date(receipt.time.created).toISOString(),
-        text:
-          typeof receipt.payload?.text === 'string' && receipt.payload.text.length > 0
-            ? receipt.payload.text
-            : null,
-      };
-    } catch (err) {
-      this.logger.warn('[sessions] prompt failed', cid);
-      this.logger.debug((err as Error).message, cid);
-      throw this.upstreamError('sessionPrompt', err);
+    const agentId =
+      this.resolveAgentId(body.agentId, cid) ??
+      (await this.history.getAgent(sessionId)) ??
+      'ask';
+    if (body.agentId !== undefined) {
+      await this.history.setAgent(sessionId, body.projectId, agentId);
     }
+    const hostSessionId = await this.history.getHostSessionId(sessionId, body.projectId);
+    if (!hostSessionId) {
+      throw new NotFoundException({
+        code: 'opencode_session_unbound',
+        message: 'Session is not bound to the embedded OpenCode host',
+      });
+    }
+    // The assistant recorder must be subscribed BEFORE the prompt so no early
+    // delta is lost; a failure there is logged but never blocks the prompt.
+    this.hostBindings.set(hostSessionId, {
+      projectId: body.projectId,
+      localSessionId: sessionId,
+      userId,
+    });
+    this.turnMeta.set(sessionId, {
+      userId,
+      projectId: body.projectId,
+      agentId,
+    });
+    await this.ensureAssistantRecorder();
+    void body.model; // model is pinned at create; prompt has no model field
+    const receipt = await this.host.sessionPrompt(hostSessionId, body.text);
+    const mapped: SessionMessage = {
+      id: receipt.id,
+      type: receipt.type,
+      createdAt: new Date(receipt.time.created).toISOString(),
+      text:
+        typeof receipt.payload.text === 'string' && receipt.payload.text.length > 0
+          ? receipt.payload.text
+          : null,
+    };
+    await this.history.appendMessage({
+      id: mapped.id,
+      sessionId,
+      projectId: body.projectId,
+      userId,
+      role: 'user',
+      agentId,
+      text: body.text,
+      createdAt: mapped.createdAt,
+    });
+    this.logger.info('[sessions] prompt accepted', cid);
+    return mapped;
   }
 
   /**
-   * Translate one upstream v2 event frame into our domain SSE frame:
-   * {id, type, data} passthrough + `session` hoisted from the variant's
-   * data.sessionID — provenance: artifact eventFrames.usedVariants carry
-   * sessionID at the data top level in EVERY session-scoped variant
-   * (message.part.*, session.*, permission.*); deeper part/info nesting is
-   * NOT spec'd (Session.Info carries `id`, not `sessionID`) and is never
-   * probed — no invented wire fields. Upstream top-level extras
-   * (metadata/durable/location) are NOT part of the domain frame and are
-   * dropped; `data` stays variant-owned (envelope-only decision from card
-   * 3 — the ~100-variant union is never invented here). Values pass through
-   * unstringified so a malformed upstream frame fails CLIENT-side parsing
-   * instead of being papered over with defaults.
+   * Starts the single process-level host-event recorder (once). It persists
+   * assistant text into `session_messages` so a reload keeps the answer even
+   * though the inbound endpoint only answers the queued user receipt.
    */
-  private toStreamFrame(value: unknown): Record<string, unknown> {
-    const frame = value as { id?: unknown; type?: unknown; data?: unknown } | null;
+  private async ensureAssistantRecorder(): Promise<void> {
+    if (this.recorderStarted) return;
+    this.recorderStarting ??= this.startAssistantRecorder();
+    await this.recorderStarting;
+  }
+
+  private async startAssistantRecorder(): Promise<void> {
+    try {
+      const stream = await this.host.subscribeEvents(this.recorderAbort.signal);
+      if (this.recorderAbort.signal.aborted) return;
+      this.recorderStarted = true;
+      void this.consumeHostEvents(stream);
+    } catch (err) {
+      if (!this.recorderAbort.signal.aborted) {
+        this.logger.warn('[sessions] assistant recorder unavailable', '');
+        this.logger.debug((err as Error).message, '');
+      }
+    } finally {
+      this.recorderStarting = null;
+    }
+  }
+
+  private async consumeHostEvents(stream: AsyncIterable<unknown>): Promise<void> {
+    try {
+      for await (const event of stream) {
+        if (this.recorderAbort.signal.aborted) break;
+        try {
+          await this.recordHostEvent(event);
+        } catch (err) {
+          // One bad frame/DB write never kills the process-level recorder.
+          this.logger.warn('[sessions] assistant persist failed', '');
+          this.logger.debug((err as Error).message, '');
+        }
+      }
+    } catch (err) {
+      if (!this.recorderAbort.signal.aborted) {
+        this.logger.warn('[sessions] assistant recorder stopped', '');
+        this.logger.debug((err as Error).message, '');
+      }
+    } finally {
+      this.recorderStarted = false;
+    }
+  }
+
+  /** Accumulate assistant text and persist it idempotently on turn end. */
+  private async recordHostEvent(event: unknown): Promise<void> {
+    const frame = event as { type?: unknown; created?: unknown; data?: unknown } | null;
+    const type = typeof frame?.type === 'string' ? frame.type : '';
     const data =
       frame && typeof frame.data === 'object' && frame.data !== null
         ? (frame.data as Record<string, unknown>)
         : {};
+    const sessionID = typeof data.sessionID === 'string' ? data.sessionID : undefined;
+    if (!sessionID) return;
+    const assistantMessageID =
+      typeof data.assistantMessageID === 'string' ? data.assistantMessageID : undefined;
+    const createdRaw = frame?.created;
+    const createdAt =
+      typeof createdRaw === 'number' && Number.isFinite(createdRaw) ? createdRaw : Date.now();
+
+    if (type === 'session.text.delta') {
+      const delta = typeof data.delta === 'string' ? data.delta : '';
+      if (!assistantMessageID || delta.length === 0) return;
+      const key = `${sessionID}\u0000${assistantMessageID}`;
+      const buffer = this.assistantBuffers.get(key) ?? {
+        sessionID,
+        assistantMessageID,
+        text: '',
+        createdAt,
+      };
+      buffer.text += delta;
+      this.assistantBuffers.set(key, buffer);
+      return;
+    }
+
+    if (type === 'session.text.ended') {
+      if (!assistantMessageID) return;
+      const key = `${sessionID}\u0000${assistantMessageID}`;
+      const full = typeof data.text === 'string' ? data.text : '';
+      const buffer = this.assistantBuffers.get(key) ?? {
+        sessionID,
+        assistantMessageID,
+        text: '',
+        createdAt,
+      };
+      if (full.length > 0) buffer.text = full;
+      this.assistantBuffers.set(key, buffer);
+      await this.flushAssistant(key);
+      return;
+    }
+
+    if (type === 'session.step.ended') {
+      if (!assistantMessageID) return;
+      await this.flushAssistant(`${sessionID}\u0000${assistantMessageID}`);
+      return;
+    }
+
+    if (
+      type === 'session.execution.succeeded' ||
+      type === 'session.execution.failed' ||
+      type === 'session.execution.interrupted'
+    ) {
+      const prefix = `${sessionID}\u0000`;
+      for (const key of [...this.assistantBuffers.keys()]) {
+        if (key.startsWith(prefix)) await this.flushAssistant(key);
+      }
+      const binding = await this.resolveHostBinding(sessionID);
+      if (binding) this.turnMeta.delete(binding.localSessionId);
+    }
+  }
+
+  /** Idempotent: message id = host assistantMessageID (PK conflict = no-op). */
+  private async flushAssistant(key: string): Promise<void> {
+    const buffer = this.assistantBuffers.get(key);
+    if (!buffer) return;
+    if (buffer.text.length === 0) {
+      this.assistantBuffers.delete(key);
+      return;
+    }
+    const binding = await this.resolveHostBinding(buffer.sessionID);
+    if (!binding) {
+      this.assistantBuffers.delete(key);
+      return;
+    }
+    const turn = this.turnMeta.get(binding.localSessionId);
+    const userId = binding.userId ?? turn?.userId;
+    if (!userId) {
+      // Never invent an owner: without one the durable row cannot be honest.
+      this.logger.warn('[sessions] assistant persist skipped code=no_owner', '');
+      this.assistantBuffers.delete(key);
+      return;
+    }
+    let agentId: string | null = turn?.agentId ?? null;
+    if (!agentId) {
+      try {
+        agentId = (await this.history.getAgent(binding.localSessionId)) ?? null;
+      } catch {
+        agentId = null;
+      }
+    }
+    await this.history.appendMessage({
+      id: buffer.assistantMessageID,
+      sessionId: binding.localSessionId,
+      projectId: binding.projectId,
+      userId,
+      role: 'assistant',
+      agentId,
+      text: buffer.text,
+      createdAt: new Date(buffer.createdAt).toISOString(),
+    });
+    this.assistantBuffers.delete(key);
+  }
+
+  /** Host id → durable binding, cached in-process (DB lookup on first sight). */
+  private async resolveHostBinding(hostSessionId: string): Promise<HostBinding | undefined> {
+    const cached = this.hostBindings.get(hostSessionId);
+    if (cached) return cached;
+    const found = await this.history.findSessionByHostSessionId(hostSessionId);
+    if (!found) return undefined;
+    const binding: HostBinding = {
+      projectId: found.projectId,
+      localSessionId: found.id,
+      ...(found.userId !== undefined ? { userId: found.userId } : {}),
+    };
+    this.hostBindings.set(hostSessionId, binding);
+    return binding;
+  }
+
+  /**
+   * Translate one host/domain event into our SSE frame:
+   * {id, type, data} passthrough with the host session id re-keyed to OUR
+   * session uuid via `resolve`; `session` is hoisted from data.sessionID.
+   * Upstream top-level extras are dropped; data stays variant-owned.
+   */
+  private toStreamFrame(
+    value: unknown,
+    resolve: (sessionId: string) => string | undefined,
+  ): Record<string, unknown> {
+    const frame = value as { id?: unknown; type?: unknown; data?: unknown } | null;
+    const data: Record<string, unknown> =
+      frame && typeof frame.data === 'object' && frame.data !== null
+        ? { ...(frame.data as Record<string, unknown>) }
+        : {};
+    const rawSession =
+      typeof data.sessionID === 'string' ? (data.sessionID as string) : undefined;
+    const localSession = rawSession ? resolve(rawSession) : undefined;
+    if (localSession) data.sessionID = localSession;
     const out: Record<string, unknown> = { id: frame?.id, type: frame?.type, data };
-    const session = typeof data.sessionID === 'string' ? data.sessionID : undefined;
-    if (session) out.session = session;
+    if (localSession) out.session = localSession;
     return out;
   }
 
   /**
-   * GET /api/v1/sessions/events — SSE re-stream of the v2 event bus (flat
-   * frames) translated via toStreamFrame, MERGED with the harness-owned
-   * direct-runner buffer. The C4 gate decides WHO may stream; the bus itself
-   * is server-global, so the frame filter narrows delivery to sessions of
-   * the gated project.
+   * GET /api/v1/sessions/events — SSE re-stream of the embedded host event
+   * bus, MERGED with the harness-owned direct-runner buffer. The C4 gate
+   * decides WHO may stream; the bus is process-global, so frames are filtered
+   * to sessions of the gated project (our uuids).
    *
-   * Why merged: direct-runner turns are unknown to the serve stand, so the
-   * live-only path filtered them out and the stream hung with zero frames
-   * (the answer still landed in harness memory — visible after reload). The
-   * harness-known sessions (localSessionIds) therefore stream from the local
-   * buffer INDEPENDENTLY of the stand: replay of the buffered frames first,
-   * then a live tail of newly appended frames while the turn is busy or
-   * inside the idle window. The live stand subscription stays for non-local
-   * sessions (its frames for harness-owned ids are dropped at the merge so
-   * they never double). Everything rides the shared relaySse (subscribe owns
-   * the merged async-iterable; mapFrame stays toStreamFrame).
-   *
-   * Merge/tail boundaries: the stream ends on downstream close (relaySse
-   * aborts the signal), on the local idle timeout (no busy direct turn AND
-   * no new local frame for LOCAL_IDLE_MS), or on the overall STREAM_CAP_MS.
-   * Compromise, stated honestly: the buffer is finite and shared, so a
-   * client redial replays whatever is still buffered (dupes possible) —
-   * full content always remains available via history.
-   *
-   * The id set is a snapshot taken ONCE per stream (never re-listed per
-   * frame) and then maintained incrementally: `session.created` adds a
-   * session whose `location.directory` equals the project's jailed directory,
-   * `session.deleted` removes it. A project that had zero sessions at
-   * subscribe time therefore starts receiving its first session's frames.
-   * Frames without a session are dropped. Shared relaySse mechanics:
-   * probe-down before headers → honest 503; downstream close → abort +
-   * quiet debug, no answer.
+   * The stream ends on downstream close (relaySse aborts the signal), on the
+   * idle timeout (no busy direct turn AND no new local/host frame), or on
+   * the overall STREAM_CAP_MS. Full content remains available via history.
    */
   async streamEvents(
     userId: string,
@@ -919,9 +763,8 @@ export class SessionHarnessService implements SessionHarness {
     req: ExpressRequest,
     res: ExpressResponse,
   ): Promise<void> {
+    this.auth.assertServeUser(userId, cid);
     const project = await this.access.resolveProjectDirectory(projectId, userId, cid);
-    // Harness-owned SSE scope: durable harness sessions + every session with
-    // durable messages, both already project-scoped by the store.
     const localSessionIds = new Set<string>();
     for (const s of await this.history.listLocalSessions(project.projectId)) {
       localSessionIds.add(s.id);
@@ -929,40 +772,31 @@ export class SessionHarnessService implements SessionHarness {
     for (const sid of await this.history.listSessionIdsWithMessages(project.projectId)) {
       localSessionIds.add(sid);
     }
-    const hasLocal = localSessionIds.size > 0;
-    // Live framing is best-effort when the harness owns turns: a transport
-    // failure degrades to local-only, but gate/auth errors stay honest (the
-    // old path never served memory to a caller who failed the gate). With no
-    // harness state the strict live path below keeps the honest 503 (never
-    // 200 silence).
-    let liveClient: OpencodeClient | null = null;
-    let rows: Array<SessionInfo> = [];
-    if (hasLocal) {
-      try {
-        liveClient = await this.sdk.create(userId, cid);
-      } catch (err) {
-        if (err instanceof HttpException) throw err;
-        liveClient = null;
-      }
-      if (liveClient) {
-        try {
-          rows = await this.listWithClient(liveClient, project, cid);
-        } catch {
-          // Stand unreachable mid-list — the local tail below still serves
-          // the harness-owned turns; the live subscribe retries the same way.
-          rows = [];
-        }
-      }
-    } else {
-      liveClient = await this.sdk.create(userId, cid);
-      rows = await this.listWithClient(liveClient, project, cid);
-    }
-    const allowedSessions = new Set(rows.map((row) => row.id));
+    const persisted = await this.history.listHostBindings(project.projectId);
+    // Project-scoped resolver: the process-wide hostBindings map carries the
+    // owner projectId, so a session of project B can never be re-keyed and
+    // admitted into project A's stream.
+    const resolve = (sessionId: string): string | undefined => {
+      const memory = this.hostBindings.get(sessionId);
+      const fromMemory =
+        memory !== undefined && memory.projectId === project.projectId
+          ? memory.localSessionId
+          : undefined;
+      const fromDb = persisted.get(sessionId);
+      const direct = localSessionIds.has(sessionId) ? sessionId : undefined;
+      const local = fromMemory ?? fromDb ?? direct;
+      // A session created while this stream is open becomes visible through
+      // the in-process binding before the DB metadata write is reloaded.
+      if (local !== undefined) localSessionIds.add(local);
+      return local;
+    };
+    // Keep the durable assistant recorder running even if boot raced the host.
+    await this.ensureAssistantRecorder();
+
     // Live refs for the merge closure (same array/set identity — appends and
     // the busyDirect override stay visible to the running generator).
     const frames = this.localFrames;
     const busy = this.busyDirect;
-    const stand = liveClient;
     await relaySse({
       operation: 'GET /api/v1/sessions/events',
       cid,
@@ -970,78 +804,68 @@ export class SessionHarnessService implements SessionHarness {
       res,
       logger: this.logger,
       prefix: '[sessions]',
-      probe: hasLocal ? async () => 'up' as const : () => this.opencode.checkConnectivity(),
-      unreachableError: () => this.upstreamError('sessionEvents', new Error('unreachable')),
-      subscribeFailedError: (err) => this.upstreamError('sessionEvents', err),
+      probe: async () => {
+        try {
+          await this.host.getHost();
+          return 'up' as const;
+        } catch {
+          return 'down' as const;
+        }
+      },
+      unreachableError: () =>
+        new ExternalServiceError({
+          code: 'EXTERNAL_UNAVAILABLE',
+          service: 'opencode',
+          operation: 'sessionEvents',
+          message: 'сервис временно недоступен, повторите позже',
+          isRetryable: true,
+          cause: new Error('unreachable'),
+        }),
+      subscribeFailedError: (err) => fromUnknown('opencode', 'sessionEvents', err),
       subscribe: async (signal) => {
         const replay = frames.filter((f) => {
           const sid = typeof f.data.sessionID === 'string' ? f.data.sessionID : undefined;
           return sid !== undefined && localSessionIds.has(sid);
         });
         let cursor = frames.length;
-        let liveIt: AsyncIterator<unknown> | null = null;
-        if (stand) {
-          try {
-            const sub = (await stand.v2.event.subscribe({
-              signal,
-              sseDefaultRetryDelay: 500,
-              sseMaxRetryDelay: 2000,
-            })) as unknown as {
-              stream: AsyncIterable<unknown> & { return?: (v?: unknown) => Promise<unknown> };
-            };
-            liveIt = sub.stream[Symbol.asyncIterator]();
-          } catch {
-            // Stand unreachable mid-handshake — local-only tail below.
-            liveIt = null;
-          }
-        }
+        const live = await this.host.subscribeEvents(signal);
+        let liveIt: AsyncIterator<unknown> | null = live[Symbol.asyncIterator]();
         const startedAt = Date.now();
-        let lastLocalAt = Date.now();
+        let lastActivityAt = Date.now();
         const LOCAL_IDLE_MS = 30_000;
         const STREAM_CAP_MS = 300_000;
         const POLL_MS = 250;
         const stream = (async function* (): AsyncGenerator<unknown> {
-          for (const frame of replay) {
-            if (signal.aborted) return;
-            yield frame;
-          }
-          while (!signal.aborted) {
+          try {
+            for (const frame of replay) {
+              if (signal.aborted) return;
+              yield frame;
+            }
+            while (!signal.aborted) {
             while (cursor < frames.length) {
               const f = frames[cursor];
               cursor += 1;
               const sid = typeof f.data.sessionID === 'string' ? f.data.sessionID : undefined;
               if (sid !== undefined && localSessionIds.has(sid)) {
-                lastLocalAt = Date.now();
+                lastActivityAt = Date.now();
                 yield f;
               }
             }
-            if (liveIt) {
-              const next = await Promise.race([
-                liveIt.next(),
-                new Promise<null>((resolve) => {
-                  setTimeout(() => resolve(null), POLL_MS);
-                }),
-              ]);
-              if (signal.aborted) return;
-              if (next === null) {
-                // No live frame this poll — fall through to idle/cap check.
-              } else if (next.done) {
-                liveIt = null; // upstream ended — tail the harness buffer only
-              } else {
-                // Live stand frames for harness-owned sessions are dropped
-                // here (the local tail above owns them) so they never double.
-                const raw = next.value as { data?: unknown } | null;
-                const data =
-                  raw && typeof raw.data === 'object' && raw.data !== null
-                    ? (raw.data as Record<string, unknown>)
-                    : {};
-                const sid = typeof data.sessionID === 'string' ? data.sessionID : undefined;
-                if (sid === undefined || !localSessionIds.has(sid)) yield next.value;
-                continue;
-              }
-            } else {
-              await new Promise((resolve) => setTimeout(resolve, POLL_MS));
-              if (signal.aborted) return;
+            const next =
+              liveIt === null
+                ? null
+                : await Promise.race([
+                    liveIt.next(),
+                    new Promise<null>((resolveIdle) => {
+                      setTimeout(() => resolveIdle(null), POLL_MS);
+                    }),
+                  ]);
+            if (signal.aborted) return;
+            if (next !== null && next.done) {
+              liveIt = null;
+            } else if (next !== null) {
+              lastActivityAt = Date.now();
+              yield next.value;
             }
             if (Date.now() - startedAt > STREAM_CAP_MS) return;
             let busyLocal = false;
@@ -1051,58 +875,49 @@ export class SessionHarnessService implements SessionHarness {
                 break;
               }
             }
-            if (!busyLocal && Date.now() - lastLocalAt > LOCAL_IDLE_MS) return;
+            if (liveIt === null && !busyLocal && cursor >= frames.length) return;
+            if (liveIt === null) {
+              await new Promise((resolveWait) => setTimeout(resolveWait, POLL_MS));
+              if (signal.aborted) return;
+            }
+            if (!busyLocal && Date.now() - lastActivityAt > LOCAL_IDLE_MS) return;
+            }
+          } finally {
+            // Downstream close / normal end / error: never leave the host bus
+            // iterator (and its reader) attached to this client forever.
+            const iterator = liveIt;
+            liveIt = null;
+            try {
+              await iterator?.return?.(undefined);
+            } catch {
+              /* abort during teardown is expected */
+            }
           }
         })();
         return { stream };
       },
       filterFrame: (frame) => {
-        const f = frame as { type?: unknown; data?: unknown; session?: unknown } | null;
-        const type = typeof f?.type === 'string' ? f.type : '';
+        const f = frame as { data?: unknown; session?: unknown } | null;
         const data =
           f && typeof f.data === 'object' && f.data !== null
             ? (f.data as Record<string, unknown>)
             : {};
-        const sessionId = typeof data.sessionID === 'string' ? data.sessionID : undefined;
-        const infoId = typeof data.id === 'string' ? data.id : undefined;
-        if (type === 'session.created') {
-          const location = data.location as { directory?: unknown } | undefined;
-          // Ownership = the jailed directory the project gate resolved.
-          if (location?.directory === project.directory) {
-            if (sessionId) allowedSessions.add(sessionId);
-            if (infoId) allowedSessions.add(infoId);
-          }
-        } else if (type === 'session.deleted') {
-          if (sessionId) allowedSessions.delete(sessionId);
-          if (infoId) allowedSessions.delete(infoId);
-        }
         const session =
           typeof f?.session === 'string'
             ? f.session
-            : type === 'session.created'
-              ? (sessionId ?? infoId)
+            : typeof data.sessionID === 'string'
+              ? data.sessionID
               : undefined;
-        if (typeof session !== 'string') return false;
-        // Harness-owned turns stream from the local tail (replay + live tail
-        // above) — always in scope for the gated project that owns them.
-        if (localSessionIds.has(session)) return true;
-        return allowedSessions.has(session);
+        return typeof session === 'string' && localSessionIds.has(session);
       },
-      mapFrame: (value) => this.toStreamFrame(value),
+      mapFrame: (value) => this.toStreamFrame(value, resolve),
     });
   }
 
   /**
-   * POST /api/v1/sessions/{id}/interrupt — v2 interrupt (POST
-   * /api/session/{sessionID}/interrupt) via the sdk client. No body: the
-   * artifact declares none (the stub asserts its absence). The pinned
-   * generator still types the answer as 204 void while the live 2.2.0 spec
-   * answers 200 {interrupted} (provenance: artifact interrupt path) — the
-   * runtime parses the JSON body either way, so the shape check below reads
-   * the cast data instead of the stale type. The `resume` query knob exists
-   * upstream but has no UI consumer — deliberately unexposed. The upstream
-   * {interrupted} is the honest domain answer (false = idle no-op, never
-   * an error).
+   * POST /api/v1/sessions/{id}/interrupt — interrupt the bound host session.
+   * A local direct turn is marked interrupted here (its late answer is
+   * dropped); an idle direct session keeps the honest no-op answer.
    */
   async interrupt(
     userId: string,
@@ -1110,35 +925,33 @@ export class SessionHarnessService implements SessionHarness {
     body: InterruptSessionInput,
     cid: string,
   ): Promise<SessionInterruptResult> {
+    this.auth.assertServeUser(userId, cid);
     await this.access.resolveProjectDirectory(body.projectId, userId, cid);
-    // A direct turn marks itself interrupted here; its late answer is dropped
-    // in sendMessageDirect (the partial commit already belongs to stop()).
     const localInterrupted = this.busyDirect.delete(sessionId);
     // Guarantee the hanging client sending flag clears even if the terminal
-    // session.idle was lost: a redundant idle while sendingRef=false is
-    // dropped client-side, so this is safe.
+    // session.idle was lost.
     if (localInterrupted) this.bufferDirectIdle(sessionId);
-    const client = await this.sdk.create(userId, cid);
+    const hostSessionId = await this.history.getHostSessionId(sessionId, body.projectId);
+    if (!hostSessionId) {
+      if (localInterrupted) return { interrupted: true };
+      throw new NotFoundException({
+        code: 'opencode_session_unbound',
+        message: 'Session is not bound to the embedded OpenCode host',
+      });
+    }
     try {
-      const res = await client.v2.session.interrupt({ sessionID: sessionId });
-      if (!this.isUpstreamOk(res.data, res.error)) {
-        throw this.upstreamError('sessionInterrupt', res.error, this.sdkStatus(res));
-      }
-      const json = res.data as unknown as { interrupted?: unknown };
-      if (!json || typeof json.interrupted !== 'boolean') {
-        throw this.upstreamError('sessionInterrupt', new Error('bad_interrupt_shape'));
-      }
+      const answer = await this.host.sessionInterrupt(hostSessionId);
       this.logger.info('[sessions] interrupted', cid);
-      return { interrupted: json.interrupted || localInterrupted };
+      return { interrupted: answer.interrupted || localInterrupted };
     } catch (err) {
       this.logger.warn('[sessions] interrupt failed', cid);
       this.logger.debug((err as Error).message, cid);
-      const mapped = this.upstreamError('sessionInterrupt', err);
-      // Stand does not know the session but we did interrupt a direct turn.
-      if (
-        localInterrupted &&
-        (mapped as unknown as { code?: unknown }).code === 'EXTERNAL_NOT_FOUND'
-      ) {
+      const mapped =
+        err instanceof ExternalServiceError
+          ? err
+          : fromUnknown('opencode', 'sessionInterrupt', err);
+      // Host does not know the session but we did interrupt a direct turn.
+      if (localInterrupted && mapped.code === 'EXTERNAL_NOT_FOUND') {
         this.logger.info('[sessions] interrupted locally', cid);
         return { interrupted: true };
       }
@@ -1147,92 +960,78 @@ export class SessionHarnessService implements SessionHarness {
   }
 
   /**
-   * GET /api/v1/sessions/providers — the project's runner provider inventory
-   * (v2 GET /api/provider in the gated jail, the same sdk call the removed
-   * mirror made). The domain row is the REQUIRED artifact subset
+   * GET /api/v1/sessions/providers — the project's host provider inventory.
+   * The domain row is the REQUIRED artifact subset
    * (Provider.Info: id/name/activation/package); settings/headers/body are
-   * never projected (headers can carry auth material; the UI consumes
-   * none of it). A row violating the required set fails loud — never a
-   * silently skipped or defaulted row.
+   * never projected. A row violating the required set fails loud.
    */
-  async providers(userId: string, projectId: string | undefined, cid: string): Promise<Array<SessionRunnerProvider>> {
+  async providers(
+    userId: string,
+    projectId: string | undefined,
+    cid: string,
+  ): Promise<Array<SessionRunnerProvider>> {
+    this.auth.assertServeUser(userId, cid);
     const project = await this.access.resolveProjectDirectory(projectId, userId, cid);
-    const client = await this.sdk.create(userId, cid);
+    let env: HostProviderList;
     try {
-      const res = await client.v2.provider.list({ location: { directory: project.directory } });
-      if (!this.isUpstreamOk(res.data, res.error)) {
-        throw this.upstreamError('sessionProviders', res.error, this.sdkStatus(res));
-      }
-      const env = res.data as unknown as UpstreamProviderEnvelope;
-      const rows = Array.isArray(env?.data) ? (env.data as Array<UpstreamProviderInfo>) : null;
-      if (!rows) throw this.upstreamError('sessionProviders', new Error('bad_providers_shape'));
-      return rows.map((p) => {
-        if (
-          typeof p.id !== 'string' ||
-          p.id.length === 0 ||
-          typeof p.name !== 'string' ||
-          typeof p.package !== 'string' ||
-          !isProviderActivation(p.activation)
-        ) {
-          throw this.upstreamError('sessionProviders', new Error('bad_provider_row'));
-        }
-        return { id: p.id, name: p.name, activation: p.activation, package: p.package };
-      });
+      env = await this.host.providerList(project.directory);
     } catch (err) {
       this.logger.warn('[sessions] providers list failed', cid);
       this.logger.debug((err as Error).message, cid);
-      if (
-        this.isRunnerDown() &&
-        err instanceof ExternalServiceError &&
-        (err.code === 'EXTERNAL_UNAVAILABLE' || err.code === 'EXTERNAL_TIMEOUT')
-      ) {
-        this.logger.warn('[sessions] providers served empty (runner unavailable)', cid);
-        return [];
-      }
-      throw this.upstreamError('sessionProviders', err);
+      throw err;
     }
+    const rows = (env as { data?: unknown }).data;
+    if (!Array.isArray(rows)) throw this.badShape('sessionProviders');
+    return (rows as unknown as Array<UpstreamProviderInfo>).map((p) => {
+      if (
+        typeof p.id !== 'string' ||
+        p.id.length === 0 ||
+        typeof p.name !== 'string' ||
+        typeof p.package !== 'string' ||
+        !isProviderActivation(p.activation)
+      ) {
+        throw this.badShape('sessionProviders');
+      }
+      return { id: p.id, name: p.name, activation: p.activation, package: p.package };
+    });
   }
 
   /**
-   * GET /api/v1/sessions/models — runner model inventory filtered to the
+   * GET /api/v1/sessions/models — host model inventory filtered to the
    * OpenCode Go/Zen family (provider id opencode / opencode-go / opencode-zen).
-   * Rides the sdk `client.v2.model.list` (same {location, data} envelope as
-   * the provider inventory above) scoped to the gated jail.
    */
-  async models(userId: string, projectId: string | undefined, cid: string): Promise<Array<{ id: string; name: string; providerID: string }>> {
+  async models(
+    userId: string,
+    projectId: string | undefined,
+    cid: string,
+  ): Promise<Array<{ id: string; name: string; providerID: string }>> {
+    this.auth.assertServeUser(userId, cid);
     const project = await this.access.resolveProjectDirectory(projectId, userId, cid);
-    const client = await this.sdk.create(userId, cid);
+    let env: { data?: unknown };
     try {
-      const res = await client.v2.model.list({ location: { directory: project.directory } });
-      if (!this.isUpstreamOk(res.data, res.error)) {
-        throw this.upstreamError('sessionModels', res.error, this.sdkStatus(res));
-      }
-      const env = res.data as unknown as { data?: unknown };
-      const rows = Array.isArray(env?.data) ? (env.data as Array<Record<string, unknown>>) : null;
-      if (!rows) throw this.upstreamError('sessionModels', new Error('bad_models_shape'));
-      const out: Array<{ id: string; name: string; providerID: string }> = [];
-      for (const r of rows) {
-        const providerID = typeof r.providerID === 'string' ? r.providerID : '';
-        if (!['opencode', 'opencode-go', 'opencode-zen'].includes(providerID)) continue;
-        const modelID = typeof r.modelID === 'string' ? r.modelID : (typeof r.id === 'string' ? r.id : '');
-        const name = typeof r.name === 'string' ? r.name : modelID;
-        if (!modelID) throw this.upstreamError('sessionModels', new Error('bad_model_row'));
-        out.push({ id: modelID, name, providerID });
-      }
-      this.logger.info('[sessions] models listed', cid);
-      return out;
+      env = await this.host.modelList(project.directory);
     } catch (err) {
       this.logger.warn('[sessions] models list failed', cid);
       this.logger.debug((err as Error).message, cid);
-      if (
-        this.isRunnerDown() &&
-        err instanceof ExternalServiceError &&
-        (err.code === 'EXTERNAL_UNAVAILABLE' || err.code === 'EXTERNAL_TIMEOUT')
-      ) {
-        this.logger.warn('[sessions] models served empty (runner unavailable)', cid);
-        return [];
-      }
-      throw this.upstreamError('sessionModels', err);
+      throw err;
     }
+    const rows = env.data;
+    if (!Array.isArray(rows)) throw this.badShape('sessionModels');
+    const out: Array<{ id: string; name: string; providerID: string }> = [];
+    for (const raw of rows as unknown as Array<Record<string, unknown>>) {
+      const providerID = typeof raw.providerID === 'string' ? raw.providerID : '';
+      if (!['opencode', 'opencode-go', 'opencode-zen'].includes(providerID)) continue;
+      const modelID =
+        typeof raw.modelID === 'string'
+          ? raw.modelID
+          : typeof raw.id === 'string'
+            ? raw.id
+            : '';
+      const name = typeof raw.name === 'string' ? raw.name : modelID;
+      if (!modelID) throw this.badShape('sessionModels');
+      out.push({ id: modelID, name, providerID });
+    }
+    this.logger.info('[sessions] models listed', cid);
+    return out;
   }
 }

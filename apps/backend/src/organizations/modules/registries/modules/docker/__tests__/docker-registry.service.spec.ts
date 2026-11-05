@@ -31,7 +31,6 @@ const SECRET_PASS = 'super-secret-pass-xyz-never-log';
 function baseEnv(): NodeJS.ProcessEnv {
   return {
     APP_BACKEND_PORT: '3000',
-    OPENCODE_URL: 'http://127.0.0.1:9',
     DATABASE_URL: '',
     EXTERNAL_RETRY_MAX_ATTEMPTS: '1',
     EXTERNAL_RETRY_BASE_DELAY_MS: '0',
@@ -47,7 +46,6 @@ function baseEnv(): NodeJS.ProcessEnv {
 function applyEnv(source: NodeJS.ProcessEnv): void {
   for (const key of [
     'APP_BACKEND_PORT',
-    'OPENCODE_URL',
     'DATABASE_URL',
     'EXTERNAL_RETRY_MAX_ATTEMPTS',
     'EXTERNAL_RETRY_BASE_DELAY_MS',

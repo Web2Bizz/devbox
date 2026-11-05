@@ -59,7 +59,6 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
         const base: Source = {
           APP_BACKEND_PORT: '3000',
           APP_BACKEND_HOST: '127.0.0.1',
-          OPENCODE_URL: 'http://127.0.0.1:4096',
           DATABASE_URL: 'postgres://u:p@localhost:5432/db',
           CORS_ORIGINS: 'http://localhost:3001',
           REQUEST_TIMEOUT_MS: '10000',

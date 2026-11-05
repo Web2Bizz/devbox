@@ -6,7 +6,6 @@
 - **apps/frontend** — Next.js веб-шелл — см. [`apps/frontend/AGENTS.md`](apps/frontend/AGENTS.md).
 - **apps/mobile** — Expo-мобильное приложение (standalone npm, вне bun workspaces) — см. [`apps/mobile/AGENTS.md`](apps/mobile/AGENTS.md).
 - **apps/cli** — CLI, интерактивный REPL в стиле opencode — см. [`apps/cli/AGENTS.md`](apps/cli/AGENTS.md).
-- **apps/opencode-server** — образ раннера opencode (отдельный compose-стек под Dokploy).
 
 ## Пакеты
 
@@ -32,7 +31,6 @@
 | `3100` | backend (NestJS API; compose публикует как `${BACKEND_PUBLISH:-3100}:3100`) |
 | `3001` | frontend dev (`next dev`; prod standalone — `:3000`, compose маппит `8080:3000`) |
 | `8080` | frontend via compose (host-порт к контейнерному `:3000`) |
-| `4096` | opencode runner (только внутри сети `back`, `expose`, наружу не публикуется) |
 | `5432` | Postgres внешний (сервиса в compose нет) |
 
 ## Дополнительные правила

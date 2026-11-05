@@ -28,8 +28,6 @@ function baseEnv(): Source {
     APP_BACKEND_PORT: '3000',
     APP_BACKEND_HOST: '127.0.0.1',
     APP_BACKEND_PROTOCOL: 'http',
-    OPENCODE_URL: 'http://127.0.0.1:4096',
-    OPENCODE_PASSWORD: 'test-opencode-password-not-real-never-logged',
     DATABASE_URL: 'postgres://u:p@localhost:5432/db',
     CORS_ORIGINS: 'http://localhost:3001',
     REQUEST_TIMEOUT_MS: '10000',
@@ -88,7 +86,6 @@ const checks: Array<{ name: string; run: () => void }> = [
       const { env, warnings } = validateEnvWithWarnings(baseEnv());
       assert.equal(env.backendPort, 3000);
       assert.equal(env.backendSocket, 'http://127.0.0.1:3000');
-      assert.equal(env.opencodeUrl, 'http://127.0.0.1:4096');
       assert.equal(env.databaseUrl, 'postgres://u:p@localhost:5432/db');
       assert.deepEqual(env.corsOrigins, ['http://localhost:3001']);
       assert.equal(env.logLevel, 'info');
@@ -775,58 +772,6 @@ const checks: Array<{ name: string; run: () => void }> = [
       // Empty id falls back to the default (never throws — ids are non-secret).
       const emptyId = validateEnv({ ...baseEnv(), OPENCODE_KEYS_PREVIOUS_KEY_ID: '' } as Source);
       assert.equal(emptyId.opencodeKeysPreviousKeyId, 'v0');
-    },
-  },
-  {
-    name: 'opencode password: OPENCODE_PASSWORD wins, OPENCODE_SERVER_PASSWORD is the fallback',
-    run: () => {
-      // (a) only OPENCODE_PASSWORD set → it is used.
-      const clientOnly = validateEnv({
-        ...baseEnv(),
-        OPENCODE_PASSWORD: 'client-password-not-real',
-      } as Source);
-      assert.equal(clientOnly.opencodePassword, 'client-password-not-real');
-      // (b) only OPENCODE_SERVER_PASSWORD set → the server-side fallback is used.
-      const serverOnly = validateEnv({
-        ...without(baseEnv(), 'OPENCODE_PASSWORD'),
-        OPENCODE_SERVER_PASSWORD: 'server-password-not-real',
-      } as Source);
-      assert.equal(serverOnly.opencodePassword, 'server-password-not-real');
-      // (c) both set (different values) → the client-side one wins.
-      const both = validateEnv({
-        ...baseEnv(),
-        OPENCODE_PASSWORD: 'client-password-not-real',
-        OPENCODE_SERVER_PASSWORD: 'server-password-not-real',
-      } as Source);
-      assert.equal(both.opencodePassword, 'client-password-not-real');
-      // (d) empty OPENCODE_PASSWORD + set OPENCODE_SERVER_PASSWORD → fallback wins.
-      const emptyClient = validateEnvWithWarnings({
-        ...baseEnv(),
-        OPENCODE_PASSWORD: '',
-        OPENCODE_SERVER_PASSWORD: 'server-password-not-real',
-      } as Source);
-      assert.equal(emptyClient.env.opencodePassword, 'server-password-not-real');
-      assert.ok(
-        !emptyClient.warnings.some((w) => w.includes('server-password-not-real')),
-        'secret leaked into warnings',
-      );
-      // Unset both → empty + one boot WARN (never a throw — the backend boots
-      // without the stand; the stand then answers 401).
-      const unset = validateEnvWithWarnings(
-        without(baseEnv(), 'OPENCODE_PASSWORD', 'OPENCODE_SERVER_PASSWORD'),
-      );
-      assert.equal(unset.env.opencodePassword, '');
-      assert.ok(
-        unset.warnings.some(
-          (w) => w.includes('OPENCODE_PASSWORD') && w.includes('WARN'),
-        ),
-        `expected password WARN, got: ${JSON.stringify(unset.warnings)}`,
-      );
-      // The WARN never carries the secret itself.
-      assert.ok(
-        !unset.warnings.some((w) => w.includes('server-password-not-real')),
-        'secret leaked into warnings',
-      );
     },
   },
 ];

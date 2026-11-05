@@ -10,7 +10,7 @@
  *   + Retry-After 30 when down/skipped, and 200 with live repositories when
  *   the stub registry is up (no mock 200s — 200 always means live data).
  * - the envelope never carries DOCKER_REGISTRY_* secret values.
- * Never logs secrets; reports db 'down' (strict Postgres) + opencode 'down' (no external net).
+ * Never logs secrets; reports db 'down' (strict Postgres) (no external net).
  */
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
@@ -19,7 +19,6 @@ import { createServer, type Server } from 'node:http';
 // ConfigModule.validate runs at import/factory time, dynamic imports below) --
 process.env.APP_BACKEND_PORT ??= '3000';
 process.env.REQUEST_TIMEOUT_MS = '2000';
-process.env.OPENCODE_URL = 'http://127.0.0.1:9';
 process.env.DATABASE_URL = '';
 for (const key of ['POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB', 'POSTGRES_HOST']) {
   delete process.env[key];

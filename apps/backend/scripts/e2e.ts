@@ -33,7 +33,6 @@ const SUITES = [
   "dist/auth/__tests__/auth.e2e.js",
   "dist/processes/modules/ai/modules/opencode/__tests__/keys.e2e.js",
   "dist/processes/modules/ai/modules/opencode/modules/billing/__tests__/billing-key-rotation.spec.js",
-  "dist/processes/modules/ai/modules/opencode/__tests__/opencode.service.spec.js",
   "dist/processes/modules/ai/modules/sessions/__tests__/sessions.e2e.js",
   "dist/processes/modules/runs/__tests__/runs.e2e.js",
   "dist/organizations/modules/projects/modules/repository/modules/repos/__tests__/repos.service.spec.js",

@@ -13,8 +13,8 @@ import { SessionsService } from './sessions.service';
  * orchestration + translation and gate composition, SessionsService as the
  * thin domain facade over the SessionHarness interface).
  *
- * OpencodeModule (OpencodeService + OpencodeSdkClient + ServeAuthService —
- * the real-user gate the raw prompt path asserts below the sdk) and
+ * OpencodeModule (OpencodeHostService — the in-process embedded host the
+ * harness prompts, plus ServeAuthService for the real-user gate) and
  * OrganizationsModule (C4 gate, reaching ProjectAccessService transitively
  * via OrganizationsModule → ProjectsModule → ProjectAccessModule) are
  * imported explicitly to document the dependencies (same convention as

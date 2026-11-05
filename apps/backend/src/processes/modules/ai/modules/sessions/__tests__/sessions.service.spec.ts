@@ -78,17 +78,10 @@ function fakeRes(): FakeRes {
   return res;
 }
 
-function streamOf(frames: Array<unknown>): {
-  stream: AsyncIterable<unknown> & { return?: (v?: unknown) => Promise<unknown> };
-} {
+function iterableOf(frames: Array<unknown>): AsyncIterable<unknown> {
   return {
-    stream: {
-      async *[Symbol.asyncIterator](): AsyncGenerator<unknown> {
-        for (const frame of frames) yield frame;
-      },
-      async return(): Promise<unknown> {
-        return { done: true, value: undefined };
-      },
+    async *[Symbol.asyncIterator](): AsyncGenerator<unknown> {
+      for (const frame of frames) yield frame;
     },
   };
 }
@@ -96,105 +89,59 @@ function streamOf(frames: Array<unknown>): {
 type Frame = { id: string; type: string; data: Record<string, unknown> };
 
 function sessionFrame(id: string, sessionID: string): Frame {
-  return { id, type: 'message.part.updated', data: { sessionID, part: { text: id } } };
+  return { id, type: 'session.text.delta', data: { sessionID, delta: id } };
 }
 
 function unscopedFrame(id: string): Frame {
-  return { id, type: 'server.connected', data: { version: '2.2.0' } };
+  return { id, type: 'server.connected', data: { version: '2.2.5' } };
 }
 
-function sessionCreatedFrame(id: string, sessionID: string, directory: string): Frame {
-  return {
-    id,
-    type: 'session.created',
-    data: { id: sessionID, sessionID, location: { directory } },
-  };
-}
+type Harness = { svc: SessionsService; calls: Array<string> };
 
-function sessionDeletedFrame(id: string, sessionID: string): Frame {
-  return { id, type: 'session.deleted', data: { id: sessionID, sessionID } };
-}
-
-function upstreamRow(id: string): Record<string, unknown> {
-  return {
-    id,
-    projectID: 'upstream-project-hash',
-    title: id,
-    time: { created: 1700000000000, updated: 1700000000000 },
-    location: { directory: DIR },
-  };
-}
-
-function clientMock(sessionIds: Array<string>, frames: Array<unknown>): {
-  client: Record<string, unknown>;
-  calls: Array<string>;
-} {
+function harness(options: {
+  localSessionIds: Array<string>;
+  hostBindings?: Map<string, string>;
+  frames: Array<unknown>;
+}): Harness {
   const calls: Array<string> = [];
-  const client = {
-    v2: {
-      session: {
-        list: async (): Promise<unknown> => {
-          calls.push('session.list');
-          return { data: { data: sessionIds.map(upstreamRow) } };
-        },
-        active: async (): Promise<unknown> => {
-          calls.push('session.active');
-          return { data: { data: {} } };
-        },
-      },
-      event: {
-        subscribe: async (): Promise<unknown> => {
-          calls.push('event.subscribe');
-          return streamOf(frames);
-        },
-      },
+  const host = {
+    getHost: async (): Promise<unknown> => {
+      calls.push('host.getHost');
+      return {};
     },
-  };
-  return { client, calls };
-}
-
-type Harness = {
-  svc: SessionsService;
-  calls: Array<string>;
-};
-
-function harness(sessionIds: Array<string>, frames: Array<unknown>): Harness {
-  const { client, calls } = clientMock(sessionIds, frames);
-  const sdk = {
-    create: async (userId: string): Promise<unknown> => {
-      calls.push(`sdk.create:${userId}`);
-      return client;
+    isUp: (): boolean => true,
+    subscribeEvents: async (): Promise<AsyncIterable<unknown>> => {
+      calls.push('host.subscribeEvents');
+      return iterableOf(options.frames);
     },
-  };
-  const opencode = {
-    checkConnectivity: async (): Promise<'up' | 'down'> => 'up',
   };
   const access = {
-    resolveProjectDirectory: async (
-      projectId: string,
-      userId: string,
-    ): Promise<unknown> => {
+    resolveProjectDirectory: async (projectId: string, userId: string): Promise<unknown> => {
       calls.push(`access:${projectId}:${userId}`);
       return { projectId, directory: DIR };
     },
   };
-  // History store is empty here: these checks exercise the live-stand path.
   const history = {
     async listLocalSessions(): Promise<Array<unknown>> {
-      return [];
+      return options.localSessionIds.map((id) => ({ id }));
     },
     async listSessionIdsWithMessages(): Promise<Array<string>> {
       return [];
     },
-    async listAgents(): Promise<Map<string, string>> {
-      return new Map();
+    async listHostBindings(): Promise<Map<string, string>> {
+      return options.hostBindings ?? new Map();
     },
-  } as unknown as ConstructorParameters<typeof SessionHarnessService>[4];
+    async findSessionByHostSessionId(): Promise<undefined> {
+      return undefined;
+    },
+    async getAgent(): Promise<undefined> {
+      return undefined;
+    },
+  };
   const args: Array<unknown> = [
-    sdk,
-    opencode,
+    host,
     access,
-    {},
+    { assertServeUser() {} },
     history,
     undefined,
     silentLogger(),
@@ -202,8 +149,7 @@ function harness(sessionIds: Array<string>, frames: Array<unknown>): Harness {
   const harnessSvc = new SessionHarnessService(
     ...(args as unknown as ConstructorParameters<typeof SessionHarnessService>),
   );
-  const svc = new SessionsService(harnessSvc);
-  return { svc, calls };
+  return { svc: new SessionsService(harnessSvc), calls };
 }
 
 function parseWrites(writes: Array<string>): Array<unknown> {
@@ -212,11 +158,12 @@ function parseWrites(writes: Array<string>): Array<unknown> {
     .map((chunk) => JSON.parse(chunk.slice('data: '.length).replace(/\n\n$/, '')));
 }
 
-async function runStream(
-  sessionIds: Array<string>,
-  frames: Array<unknown>,
-): Promise<{ delivered: Array<unknown>; res: FakeRes; calls: Array<string> }> {
-  const { svc, calls } = harness(sessionIds, frames);
+async function runStream(options: {
+  localSessionIds: Array<string>;
+  hostBindings?: Map<string, string>;
+  frames: Array<unknown>;
+}): Promise<{ delivered: Array<unknown>; res: FakeRes; calls: Array<string> }> {
+  const { svc, calls } = harness(options);
   const res = fakeRes();
   await svc.streamEvents(UID, PID, 'cid-test', fakeReq(), res as unknown as ExpressResponse);
   return { delivered: parseWrites(res.writes), res, calls };
@@ -230,10 +177,13 @@ function frameIds(frames: Array<unknown>): Array<unknown> {
   return frames.map((frame) => (frame as { id?: unknown } | null)?.id);
 }
 
-describe('SessionsService.streamEvents project scoping', () => {
+describe('SessionsService.streamEvents project scoping (embedded host)', () => {
   it('delivers frames whose session belongs to the requested project', async () => {
     const own = sessionFrame('e-own', 'ses_own');
-    const { delivered, res } = await runStream(['ses_own'], [own]);
+    const { delivered, res } = await runStream({
+      localSessionIds: ['ses_own'],
+      frames: [own],
+    });
     assert.deepEqual(frameIds(delivered), ['e-own']);
     assert.deepEqual(frameSessions(delivered), ['ses_own']);
     assert.equal(res.writableEnded, true, 'the relay must end the response');
@@ -242,7 +192,10 @@ describe('SessionsService.streamEvents project scoping', () => {
   it('drops frames from sessions of another project', async () => {
     const own = sessionFrame('e-own', 'ses_own');
     const foreign = sessionFrame('e-foreign', 'ses_foreign');
-    const { delivered } = await runStream(['ses_own'], [own, foreign]);
+    const { delivered } = await runStream({
+      localSessionIds: ['ses_own'],
+      frames: [own, foreign],
+    });
     assert.deepEqual(
       frameIds(delivered),
       ['e-own'],
@@ -252,7 +205,10 @@ describe('SessionsService.streamEvents project scoping', () => {
 
   it('drops frames without a session id (cannot be attributed to the project)', async () => {
     const unscoped = unscopedFrame('e-unscoped');
-    const { delivered } = await runStream(['ses_own'], [unscoped]);
+    const { delivered } = await runStream({
+      localSessionIds: ['ses_own'],
+      frames: [unscoped],
+    });
     assert.deepEqual(
       delivered,
       [],
@@ -262,7 +218,7 @@ describe('SessionsService.streamEvents project scoping', () => {
 
   it('delivers nothing when the project has no sessions', async () => {
     const frames = [sessionFrame('e-own', 'ses_own'), sessionFrame('e-foreign', 'ses_foreign')];
-    const { delivered } = await runStream([], frames);
+    const { delivered } = await runStream({ localSessionIds: [], frames });
     assert.deepEqual(
       delivered,
       [],
@@ -274,56 +230,52 @@ describe('SessionsService.streamEvents project scoping', () => {
     const first = sessionFrame('e-first', 'ses_a');
     const second = sessionFrame('e-second', 'ses_b');
     const foreign = sessionFrame('e-foreign', 'ses_c');
-    const { delivered } = await runStream(['ses_a', 'ses_b'], [first, second, foreign]);
+    const { delivered } = await runStream({
+      localSessionIds: ['ses_a', 'ses_b'],
+      frames: [first, second, foreign],
+    });
     assert.deepEqual(frameIds(delivered), ['e-first', 'e-second']);
     assert.deepEqual(frameSessions(delivered), ['ses_a', 'ses_b']);
   });
 
-  it('starts delivering a project session created after the stream opened', async () => {
-    const created = sessionCreatedFrame('e-created', 'ses_new', DIR);
-    const followUp = sessionFrame('e-new', 'ses_new');
-    const foreignCreated = sessionCreatedFrame('e-foreign-created', 'ses_foreign', '/tmp/other');
-    const foreign = sessionFrame('e-foreign', 'ses_foreign');
-    const { delivered, calls } = await runStream([], [
-      created,
-      followUp,
-      foreignCreated,
-      foreign,
-    ]);
-    assert.deepEqual(frameIds(delivered), ['e-created', 'e-new']);
-    assert.equal(
-      calls.filter((call) => call === 'session.list').length,
-      1,
-      'the session snapshot must not be re-listed per frame',
-    );
+  it('re-keys a host session id to OUR durable uuid', async () => {
+    const hostFrame = sessionFrame('e-host', 'ses_e2e_alpha');
+    const { delivered } = await runStream({
+      localSessionIds: ['123e4567-e89b-12d3-a456-426614174092'],
+      hostBindings: new Map([['ses_e2e_alpha', '123e4567-e89b-12d3-a456-426614174092']]),
+      frames: [hostFrame],
+    });
+    assert.deepEqual(frameIds(delivered), ['e-host']);
+    assert.deepEqual(frameSessions(delivered), ['123e4567-e89b-12d3-a456-426614174092']);
+    const data = (delivered[0] as { data?: Record<string, unknown> }).data ?? {};
+    assert.equal(data.sessionID, '123e4567-e89b-12d3-a456-426614174092');
+    assert.equal(data.delta, 'e-host', 'the variant payload must pass through intact');
+  });
+
+  it('drops an unbound host session (never leaks another project host id)', async () => {
+    const foreignHost = sessionFrame('e-foreign-host', 'ses_foreign_host');
+    const { delivered } = await runStream({
+      localSessionIds: ['ses_own'],
+      hostBindings: new Map([['ses_e2e_alpha', 'ses_own']]),
+      frames: [foreignHost],
+    });
+    assert.deepEqual(delivered, []);
+  });
+
+  it('resolves the gate once and keeps one recorder + one stream subscription', async () => {
+    const { calls } = await runStream({
+      localSessionIds: ['ses_own'],
+      frames: [sessionFrame('e-own', 'ses_own'), sessionFrame('e-own-2', 'ses_own')],
+    });
     assert.equal(
       calls.filter((call) => call.startsWith('access:')).length,
       1,
       'the project gate must be resolved once per stream',
     );
-  });
-
-  it('removes a deleted session from the live set', async () => {
-    const own = sessionFrame('e-own', 'ses_own');
-    const deleted = sessionDeletedFrame('e-deleted', 'ses_own');
-    const after = sessionFrame('e-after', 'ses_own');
-    const { delivered } = await runStream(['ses_own'], [own, deleted, after]);
-    assert.deepEqual(
-      frameIds(delivered),
-      ['e-own'],
-      `a deleted session kept leaking frames: ${JSON.stringify(frameSessions(delivered))}`,
-    );
-  });
-
-  it('does not grant access from a foreign session.created frame', async () => {
-    const foreignCreated = sessionCreatedFrame('e-fc', 'ses_foreign', '/tmp/other');
-    const foreign = sessionFrame('e-foreign', 'ses_foreign');
-    const { delivered } = await runStream([], [foreignCreated, foreign]);
-    assert.deepEqual(
-      delivered,
-      [],
-      `foreign session.created granted access: ${JSON.stringify(frameSessions(delivered))}`,
-    );
+    const hostSubs = calls.filter((call) => call === 'host.subscribeEvents').length;
+    // streamEvents lazily starts the single process-level assistant recorder
+    // (test harnesses are fresh per case), then subscribes the client stream.
+    assert.equal(hostSubs, 2, `expected recorder + stream subscription, got ${hostSubs}`);
   });
 });
 

@@ -31,7 +31,7 @@ import type { SessionInfo, SessionMessage } from './sessions.dto';
 export class SessionHistoryRepository {
   constructor(
     private readonly db: DbService,
-    private readonly logger: AppLogger = new AppLogger('SessionHistoryRepository'),
+    private readonly logger: AppLogger = new AppLogger(SessionHistoryRepository.name),
   ) {}
 
   /** Appends one chat row; idempotent on the domain message id (upstream replay-safe). */
@@ -144,8 +144,135 @@ export class SessionHistoryRepository {
     }
   }
 
+  /**
+   * Stores the embedded host session id on our durable row
+   * (`metadata.opencodeSessionId`). `project_sessions.id` stays OUR uuid —
+   * there is no separate column and no migration in this stage.
+   */
+  async setHostSessionId(sessionId: string, hostSessionId: string): Promise<void> {
+    try {
+      const rows = await this.db.client
+        .select({ metadata: projectSessions.metadata })
+        .from(projectSessions)
+        .where(eq(projectSessions.id, sessionId))
+        .limit(1);
+      const current = (rows[0]?.metadata ?? {}) as Record<string, unknown>;
+      await this.db.client
+        .update(projectSessions)
+        .set({
+          metadata: { ...current, opencodeSessionId: hostSessionId },
+          updatedAt: new Date(),
+        })
+        .where(eq(projectSessions.id, sessionId));
+    } catch (err) {
+      dbUnavailable('sessionsSetHostId', err, this.logger);
+    }
+  }
+
+  /** Host session id bound to our uuid (undefined → no embedded-host binding). */
+  async getHostSessionId(sessionId: string, projectId?: string): Promise<string | undefined> {
+    try {
+      const rows = await this.db.client
+        .select({ metadata: projectSessions.metadata })
+        .from(projectSessions)
+        .where(
+          projectId === undefined
+            ? and(eq(projectSessions.id, sessionId), isNull(projectSessions.deletedAt))
+            : and(
+                eq(projectSessions.id, sessionId),
+                eq(projectSessions.projectId, projectId),
+                isNull(projectSessions.deletedAt),
+              ),
+        )
+        .limit(1);
+      const meta = (rows[0]?.metadata ?? {}) as Record<string, unknown>;
+      return typeof meta.opencodeSessionId === 'string' && meta.opencodeSessionId.length > 0
+        ? meta.opencodeSessionId
+        : undefined;
+    } catch (err) {
+      dbUnavailable('sessionsGetHostId', err, this.logger);
+    }
+  }
+
+  /**
+   * Reverse lookup for the assistant recorder: host session id → our row.
+   * Single-row lookup; metadata carries project scope and owner id set by
+   * create (needed for durable assistant rows).
+   */
+  async findSessionByHostSessionId(
+    hostSessionId: string,
+  ): Promise<{ id: string; projectId: string; userId?: string } | undefined> {
+    try {
+      const rows = await this.db.client
+        .select({
+          id: projectSessions.id,
+          projectId: projectSessions.projectId,
+          metadata: projectSessions.metadata,
+        })
+        .from(projectSessions)
+        .where(
+          and(
+            eq(projectSessions.origin, 'harness'),
+            isNull(projectSessions.deletedAt),
+            sql`${projectSessions.metadata} ->> 'opencodeSessionId' = ${hostSessionId}`,
+          ),
+        )
+        .limit(1);
+      const row = rows[0];
+      if (!row) return undefined;
+      const meta = (row.metadata ?? {}) as Record<string, unknown>;
+      return {
+        id: row.id,
+        projectId: row.projectId,
+        ...(typeof meta.userId === 'string' && meta.userId.length > 0
+          ? { userId: meta.userId }
+          : {}),
+      };
+    } catch (err) {
+      dbUnavailable('sessionsFindByHostId', err, this.logger);
+    }
+  }
+
+  /** Project-scoped reverse map: host session id → our durable uuid (SSE scope). */
+  async listHostBindings(projectId: string): Promise<Map<string, string>> {
+    try {
+      const rows = await this.db.client
+        .select({ id: projectSessions.id, metadata: projectSessions.metadata })
+        .from(projectSessions)
+        .where(
+          and(
+            eq(projectSessions.projectId, projectId),
+            eq(projectSessions.origin, 'harness'),
+            isNull(projectSessions.deletedAt),
+          ),
+        );
+      const map = new Map<string, string>();
+      for (const row of rows) {
+        const meta = (row.metadata ?? {}) as Record<string, unknown>;
+        if (typeof meta.opencodeSessionId === 'string' && meta.opencodeSessionId.length > 0) {
+          map.set(meta.opencodeSessionId, row.id);
+        }
+      }
+      return map;
+    } catch (err) {
+      dbUnavailable('sessionsListHostBindings', err, this.logger);
+    }
+  }
+
+  /** Hides a row that never became usable (host create failed → honest 503). */
+  async discardSession(sessionId: string): Promise<void> {
+    try {
+      await this.db.client
+        .update(projectSessions)
+        .set({ deletedAt: new Date(), updatedAt: new Date() })
+        .where(eq(projectSessions.id, sessionId));
+    } catch (err) {
+      dbUnavailable('sessionsDiscard', err, this.logger);
+    }
+  }
+
   /** Registers a harness-created session (origin='harness') in the durable registry. */
-  async saveLocalSession(info: SessionInfo): Promise<void> {
+  async saveLocalSession(info: SessionInfo, userId?: string): Promise<void> {
     try {
       await this.db.client
         .insert(projectSessions)
@@ -159,6 +286,9 @@ export class SessionHistoryRepository {
             directory: info.directory,
             model: info.model,
             status: info.status,
+            // Owner identity for durable assistant rows (session_messages
+            // .user_id is NOT NULL; the recorder never invents it).
+            ...(userId !== undefined && userId.length > 0 ? { userId } : {}),
           },
           origin: 'harness',
         })
@@ -189,7 +319,8 @@ export class SessionHistoryRepository {
             eq(projectSessions.origin, 'harness'),
             isNull(projectSessions.deletedAt),
           ),
-        );
+        )
+        .orderBy(asc(projectSessions.createdAt));
       return rows.map((row) => this.toSessionInfo(row));
     } catch (err) {
       dbUnavailable('sessionsListLocal', err, this.logger);

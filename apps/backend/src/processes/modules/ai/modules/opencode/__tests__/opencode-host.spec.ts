@@ -14,6 +14,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { AppLogger } from '../../../../../../common/logger';
+import { ExternalServiceError } from '../../../../../../common/external/external-error';
 import { OpencodeHostService } from '../opencode-host.service';
 
 function silentLogger(): AppLogger {
@@ -29,12 +30,35 @@ function silentLogger(): AppLogger {
 
 async function main(): Promise<void> {
   const svc = new OpencodeHostService(silentLogger());
-  const host = await svc.getHost();
+  await svc.getHost();
   assert.equal(svc.isUp(), true);
   const dir = mkdtempSync(path.join(tmpdir(), 'opencode-host-spec-'));
   try {
-    const session = await host.sessions.create({ location: { directory: dir } });
+    const session = await svc.sessionCreate({ directory: dir });
     assert.ok(session.id, 'embedded host returned a session id');
+    // Declared-4xx errors must not be masked as a retryable 503 (P1-1).
+    let mapped: unknown;
+    let interrupted = false;
+    try {
+      const answer = await svc.sessionInterrupt('ses_missing_for_spec');
+      interrupted = true;
+      assert.equal(answer.interrupted, false, 'missing session is an honest no-op');
+    } catch (err) {
+      mapped = err;
+    }
+    if (!interrupted) {
+      assert.ok(mapped instanceof ExternalServiceError, 'interrupt error must be typed');
+      assert.notEqual(
+        (mapped as ExternalServiceError).code,
+        'EXTERNAL_UNAVAILABLE',
+        'a missing host session must not surface as a retryable outage',
+      );
+      assert.equal(
+        (mapped as ExternalServiceError).isRetryable,
+        false,
+        'declared 4xx must be non-retryable',
+      );
+    }
   } finally {
     await svc.onModuleDestroy();
     rmSync(dir, { recursive: true, force: true });

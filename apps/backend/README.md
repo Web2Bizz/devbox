@@ -1,6 +1,6 @@
-# Backend — opencode proxy layer (NestJS 12)
+# Backend — embedded OpenCode host API (NestJS 12)
 
-NestJS 12 API that fronts the live opencode server (migrated from `node:http`).
+NestJS 12 API with the OpenCode V2 host running in-process (migrated from `node:http`).
 
 Contract: [`contracts/openapi.yaml`](../../contracts/openapi.yaml) ·
 DTOs: [`@rush-code/contracts`](../../packages/contracts/src/index.ts) (single source of truth; [`src/contracts.ts`](./src/contracts.ts) is a deprecated re-export).
@@ -33,7 +33,6 @@ See [`.env.example`](./.env.example):
 | Var | Default | What |
 | --- | ------- | ---- |
 | `APP_BACKEND_PORT` (`PORT` legacy) | `3000` | listen port (required, empty → fail-fast) |
-| `OPENCODE_URL` (`OPENCODE_SERVER_URL` legacy) | `http://localhost:4096` | upstream opencode server (proxy target) |
 | `CORS_ORIGINS` | `http://localhost:${NEXT_PUBLIC_PORT},http://localhost:8080` | allowlist, comma-separated |
 | `REQUEST_TIMEOUT_MS` | `10000` | upstream fetch timeout (AbortController) |
 | `LOG_LEVEL` | `info` | debug/info/warn/error |
@@ -64,12 +63,8 @@ Nested `GithubModule` (imported by `ProjectsModule`, never in `AppModule`):
 | Route | Upstream | Fallback |
 | ----- | -------- | -------- |
 | `GET /health` | local only (drizzle `SELECT 1`) | `{ status:'ok', db }` |
-| `GET /api/v1/session` | `GET {OPENCODE_URL}/session` | mock-session-1 |
-| `GET /api/v1/messages?sessionId=` | `GET {OPENCODE_URL}/messages?...` | 1 mock message |
-| `POST /api/v1/chat` | `POST {OPENCODE_URL}/chat` | mock echo |
 
-`POST /api/v1/chat` body validated by `ZodValidationPipe(sendChatSchema)`
-(Standard Schema). Errors use `{ code, message, correlationId }` + `x-correlation-id` header.
+Errors use `{ code, message, correlationId }` + `x-correlation-id` header.
 Swagger UI: `GET /swagger` · JSON: `GET /swagger.json` · YAML: `GET /openapi.yaml`.
 
 ## Commands

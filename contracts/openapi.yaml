@@ -3,9 +3,10 @@ info:
   title: Rush Code opencode proxy API
   version: 0.1.0
   description: >-
-    Thin proxy layer between frontend clients and the live opencode server.
-    Backend (node:http) forwards /api/v1/* to OPENCODE_SERVER_URL with
-    REQUEST_TIMEOUT_MS timeout; unreachable upstream answers 503
+    Backend serves versioned domain routes (/api/v1/*) consumed by frontend
+    clients; the OpenCode transport is the embedded in-process host
+    (OpencodeHostService), not an external runner. Upstream dependencies are
+    called with REQUEST_TIMEOUT_MS timeout; unreachable upstream answers 503
     EXTERNAL_UNAVAILABLE («сервис временно недоступен, повторите позже»)
     with a Retry-After header — no mock fallbacks, a 200 always means live
     upstream data. An upstream that refuses the credentials we sent (401/403)

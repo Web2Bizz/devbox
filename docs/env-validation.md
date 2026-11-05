@@ -32,7 +32,6 @@ is the only place that validates them (zod@4), and `docs/env-validation.md`
 | --- | ---------- |
 | `APP_BACKEND_PORT` (`PORT` legacy) | Missing, or not a numeric port 1–65535 |
 | `APP_BACKEND_SOCKET` (+ composed) | Not a URL with a host |
-| `OPENCODE_URL` (+ composed) | Not a URL with a host |
 | `GITHUB_API_URL` | Not a URL with a host |
 | `NEXT_PUBLIC_API_URL` | Set but not a URL with a host (unset → backend socket) |
 | `CORS_ORIGINS` | Any entry not an `http(s)` URL — message carries the `entry #N` index |
@@ -42,8 +41,8 @@ is the only place that validates them (zod@4), and `docs/env-validation.md`
 | `GITHUB_APP_SLUG` | Set but not URL-safe |
 | `GITHUB_APP_*` pair | Partially configured (ID without key or vice versa) |
 | `GITHUB_APP_PRIVATE_KEY_PATH` | Set but unreadable (message carries the path, never the key) |
-| `POSTGRES_PORT` / `OPENCODE_PORT` / `NEXT_PUBLIC_PORT` | Set but not a numeric port |
-| `APP_BACKEND_PROTOCOL` / `OPENCODE_PROTOCOL` | Not `http`/`https` |
+| `POSTGRES_PORT` / `NEXT_PUBLIC_PORT` | Set but not a numeric port |
+| `APP_BACKEND_PROTOCOL` | Not `http`/`https` |
 | `REQUEST_TIMEOUT_MS` | Not a non-negative integer |
 | `DOCKER_REGISTRY_URL` | Set but not a URL with a host (unset → skipped, never an error) |
 | `DOCKER_REGISTRY_TIMEOUT_MS` | Set but not a non-negative integer |
@@ -69,8 +68,6 @@ are NOT errors: they recompose from the parts + WARN.
 | Notice | Meaning |
 | ------ | ------- |
 | `APP_BACKEND_HOST` empty → `localhost` | Dev default; set explicitly for production |
-| `OPENCODE_HOST` empty → `localhost`, `OPENCODE_PORT` unset → `4096` | Dev defaults (explicit `0.0.0.0` is preserved verbatim, no WARN) |
-| `OPENCODE_PASSWORD` unset (and `OPENCODE_SERVER_PASSWORD` unset) | No Basic header on the serve paths — the stand answers 401; set one of them (client-side name wins, server-side name is the fallback; never a boot fail-fast) |
 | `POSTGRES_HOST` empty → `localhost`, `POSTGRES_PORT` unset → `5432` | Only when composing from `POSTGRES_*` |
 | `LOG_LEVEL` unset/unknown → `info` | Expected `debug\|info\|warn\|error` |
 | `GITHUB_APP_*` empty pair | Normal: github endpoints answer 401/503 until configured |
@@ -104,8 +101,7 @@ are NOT errors: they recompose from the parts + WARN.
 `NPM_REGISTRY_TOKEN`, `NPM_TOKEN` (legacy fallback),
 `NPM_REGISTRY_USER/PASSWORD` (basic pair), `JWT_ACCESS_SECRET`,
 `JWT_REFRESH_SECRET`, `OPENCODE_KEYS_ENCRYPTION_KEY`,
-`OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS`, `OPENCODE_PASSWORD` /
-`OPENCODE_SERVER_PASSWORD` (stand password — one value, two names),
+`OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS`,
 per-user OpenCode API
 keys, password hashes, access/refresh tokens,
 private keys, tokens: never appear in

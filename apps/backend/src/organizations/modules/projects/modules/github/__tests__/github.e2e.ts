@@ -30,7 +30,6 @@ import { createHmac } from "node:crypto";
 // NOTE: DATABASE_URL is resolved inside main() (TEST_DATABASE_URL seam) —
 process.env.APP_BACKEND_PORT ??= "3000";
 process.env.REQUEST_TIMEOUT_MS = "2000";
-process.env.OPENCODE_URL = "http://127.0.0.1:9";
 // Identity-only auth (C2): callback/repos need a Bearer past JwtAuthGuard;
 // userIds below ride as JWT subs (hand-signed, TokenService.sign is pure).
 process.env.JWT_ACCESS_SECRET = "e2e-access-secret-not-real-0123456789";

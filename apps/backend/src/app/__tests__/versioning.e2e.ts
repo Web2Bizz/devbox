@@ -11,26 +11,20 @@
  * The former /api/v1/session|sessions|messages|chat proxy is gone (deleted
  * with ProxyService) — versioning coverage now rides the domain
  * /api/v1/sessions* surface (C4 project gate) plus the remaining v1 routes.
- * Unreachable runner (OPENCODE_URL down) answers 503 EXTERNAL_UNAVAILABLE
- * («сервис временно недоступен, повторите позже») with Retry-After —
- * no mock 200s. A runner that refuses the credentials we sent (401)
- * answers 503 EXTERNAL_UNAUTHORIZED instead — a distinct code and NO
- * Retry-After (the C4 project gate + the workspace jail are patched in
- * that phase so the request really reaches the runner).
+ * Without a database the gate denies with 503 EXTERNAL_UNAVAILABLE
+ * («сервис временно недоступен, повторите позже») + Retry-After; with the
+ * gate/history patched the durable list is an honest 200 [] (there is no
+ * external runner anymore — the embedded OpenCode host lives in-process).
  * Never logs secrets; reports db 'down' (strict Postgres) (no external
  * network).
  */
 import assert from 'node:assert/strict';
-import { createServer, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
 
 // --- deterministic env (overrides repo .env AFTER bun/node dotenv load) ---
 // NOTE: must run BEFORE AppModule is imported — ConfigModule.forRoot({validate})
 // executes at import time. Hence the dynamic imports inside main().
 process.env.APP_BACKEND_PORT ??= '3000';
 process.env.REQUEST_TIMEOUT_MS = '2000';
-// Fast ECONNREFUSED → 503 (no waiting on real runner).
-process.env.OPENCODE_URL = 'http://127.0.0.1:9';
 // No database in e2e → strict Postgres reports db:down (no secrets, no sockets).
 process.env.DATABASE_URL = '';
 for (const key of ['POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB', 'POSTGRES_HOST']) {
@@ -56,38 +50,6 @@ type CheckResult = {
   ok: boolean;
   detail?: string;
 };
-
-/**
- * Upstream that refuses the credentials we sent (401) — the honest auth
- * signal, never masked as "service unavailable".
- *
- * The body mirrors the opencode stand (`{"_tag":"UnauthorizedError"}`): it
- * carries NO status field, so the backend must take the real status from the
- * HTTP response (the sdk result tuple keeps it on `response.status`).
- */
-function startUnauthorizedUpstream(): Promise<{
-  server: Server;
-  url: string;
-  close: () => Promise<void>;
-}> {
-  return new Promise((resolve) => {
-    const server = createServer((req, res) => {
-      req.resume();
-      res.writeHead(401, { 'content-type': 'application/json' });
-      res.end(
-        JSON.stringify({ _tag: 'UnauthorizedError', message: 'Authentication required' }),
-      );
-    });
-    server.listen(0, '127.0.0.1', () => {
-      const { port } = server.address() as AddressInfo;
-      resolve({
-        server,
-        url: `http://127.0.0.1:${port}`,
-        close: () => new Promise<void>((done) => server.close(() => done())),
-      });
-    });
-  });
-}
 
 async function main(): Promise<void> {
   const { NestFactory } = await import('@nestjs/core');
@@ -174,7 +136,7 @@ async function main(): Promise<void> {
       assert.equal(res.headers.get('x-correlation-id'), b.correlationId);
       assert.equal(res.headers.get('Retry-After'), '30');
     };
-    await check('GET /api/v1/sessions down → 503 + Retry-After', `/api/v1/sessions?projectId=${E2E_PROJECT_ID}`, undefined, 503, (res, body) => {
+    await check('GET /api/v1/sessions without DB → 503 + Retry-After (C4 gate)', `/api/v1/sessions?projectId=${E2E_PROJECT_ID}`, undefined, 503, (res, body) => {
       assertUnavailable(body, res);
     });
     await check('POST /api/v1/sessions {} → 400 bad_request (zod, before the gate)', '/api/v1/sessions', json({}), 400, (_res, body) => {
@@ -246,8 +208,6 @@ async function main(): Promise<void> {
       assert.ok(!paths.includes('/api/v1/chat'), `deleted proxy /api/v1/chat came back: ${paths.join(',')}`);
       assert.ok(paths.includes('/api/v1/health'), `missing /api/v1/health in ${paths.join(',')}`);
       assert.ok(!paths.includes('/api/session'), `legacy /api/session must be gone, got ${paths.join(',')}`);
-      // Unversioned /api/opencode/* mirror is removed: no such path may be
-      // documented (the removed proxy paths above must stay gone too).
       assert.ok(!paths.some((path) => path.startsWith('/api/opencode')), `unversioned /api/opencode survived: ${paths.join(',')}`);
       assert.ok(paths.includes('/api/v1/sessions'), `missing /api/v1/sessions in ${paths.join(',')}`);
       assert.ok(paths.includes('/api/v1/sessions/status'), `missing /api/v1/sessions/status in ${paths.join(',')}`);
@@ -267,28 +227,19 @@ async function main(): Promise<void> {
       assert.equal(res.headers.get('access-control-allow-origin'), 'http://localhost:8080');
     });
 
-    // --- runner refuses our credentials (401) → EXTERNAL_UNAUTHORIZED ------
-    // The runner answered 401/403: that is NOT "the service is
-    // unavailable" — it is a distinct code (EXTERNAL_UNAUTHORIZED), answered
-    // with 503 (never 401: the frontend reads any 401 as "our session
-    // expired" → refresh → logout) and WITHOUT Retry-After (a retry with
-    // the same credentials cannot help).
-    //
-    // The C4 project gate and the workspace jail are patched on the service
-    // PROTOTYPES (no Postgres in this suite) so the request really reaches
-    // the runner; the real gate denial stays asserted above
-    // (assertUnavailable) and the "down" contract is untouched. The
-    // prototype (not the instance) is patched because WorkspacePathService is
-    // provided by several modules — one instance per module.
-    const unauthorized = await startUnauthorizedUpstream();
-    process.env.OPENCODE_URL = unauthorized.url;
+    // --- durable list with the gate/history patched (no external runner) ----
+    // The C4 project gate and workspace jail are patched on the service
+    // PROTOTYPES (no Postgres in this suite); history reads are stubbed empty
+    // so the durable list answers an honest 200 [] instead of a DB outage.
     const { SessionHistoryRepository } = await import(
       '../../processes/modules/ai/modules/sessions/session-history.repository'
     );
     const historyProto = SessionHistoryRepository.prototype as unknown as {
       listLocalSessions: (projectId: string) => Promise<Array<unknown>>;
+      listMessages: (sessionId: string) => Promise<Array<unknown>>;
     };
     const originalListLocalSessions = historyProto.listLocalSessions;
+    const originalListMessages = historyProto.listMessages;
     try {
       const { ProjectAccessService } = await import('../../organizations/modules/projects/modules/project-access/project-access.service');
       const { WorkspacePathService } = await import('../../common/storage/workspace-path.service');
@@ -312,31 +263,31 @@ async function main(): Promise<void> {
       pathsProto.resolveUserStrict = async () => ({ absRepo: '/tmp/rush-code-e2e-project' });
       pathsProto.realStrictRoot = async () => '/tmp/rush-code-e2e-root';
       pathsProto.assertInsideJail = async (abs: string) => abs;
-      // No Postgres in this suite (DATABASE_URL=''): the local history lookup
-      // would fail with a DB-unavailable error before the runner is contacted.
-      // Stub it so the request really reaches the unauthorized runner.
       historyProto.listLocalSessions = async () => [];
+      historyProto.listMessages = async () => [];
 
       await check(
-        'GET /api/v1/sessions runner 401 → 503 EXTERNAL_UNAUTHORIZED (no Retry-After)',
+        'GET /api/v1/sessions with durable store patched → 200 [] (no runner upstream)',
         `/api/v1/sessions?projectId=${E2E_PROJECT_ID}`,
         undefined,
-        503,
+        200,
         (res, body) => {
-          const b = body as { code?: string; message?: string; correlationId?: string };
-          assert.equal(b.code, 'EXTERNAL_UNAUTHORIZED');
-          // NOT the masked "service is unavailable" answer.
-          assert.notEqual(b.message, 'сервис временно недоступен, повторите позже');
-          assert.equal(typeof b.correlationId, 'string');
-          assert.equal(res.headers.get('x-correlation-id'), b.correlationId);
-          // No Retry-After: repeating the request cannot fix the credentials.
+          assert.deepEqual(body, []);
           assert.equal(res.headers.get('Retry-After'), null);
+        },
+      );
+      await check(
+        'GET /api/v1/sessions/{id}/messages with durable store patched → 200 []',
+        `/api/v1/sessions/123e4567-e89b-12d3-a456-426614174099/messages?projectId=${E2E_PROJECT_ID}`,
+        undefined,
+        200,
+        (_res, body) => {
+          assert.deepEqual(body, []);
         },
       );
     } finally {
       historyProto.listLocalSessions = originalListLocalSessions;
-      process.env.OPENCODE_URL = 'http://127.0.0.1:9';
-      await unauthorized.close();
+      historyProto.listMessages = originalListMessages;
     }
   } finally {
     await app.close();

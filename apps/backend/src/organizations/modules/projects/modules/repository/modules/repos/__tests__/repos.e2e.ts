@@ -36,7 +36,6 @@ process.env.REPOS_ROOT = REPOS_ROOT;
 
 process.env.APP_BACKEND_PORT ??= '3000';
 process.env.REQUEST_TIMEOUT_MS = '2000';
-process.env.OPENCODE_URL = 'http://127.0.0.1:9';
 process.env.DATABASE_URL = '';
 for (const key of ['POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB', 'POSTGRES_HOST']) {
   delete process.env[key];

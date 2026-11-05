@@ -20,9 +20,9 @@ import { SessionHarnessService } from './session-harness.service';
  * SessionHarnessService behind the SessionHarness interface; this service
  * keeps the stable domain method names the controller calls so the
  * sessions/* contract and the SSE events shape stay frozen (back-compat).
- * No transport imports here — OpencodeService/OpencodeSdkClient are owned
- * solely by the harness (card 2 swaps the transport below the interface,
- * cards 3-5 extend it; the facade signatures do not move).
+ * No transport imports here — the embedded OpenCode host
+ * (OpencodeHostService) is owned solely by the harness. The project directory
+ * jail rides ProjectAccessService.resolveProjectDirectory.
  */
 @Injectable()
 export class SessionsService {

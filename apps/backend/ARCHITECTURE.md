@@ -58,10 +58,10 @@ src/
    ├─ processes.module.ts
    ├─ modules/ai/ — ai.module.ts
    │  ├─ modules/agents/ — AgentBase/AskAgent + /agents
-   │  ├─ modules/opencode/ — unversioned mirror удалён; внутренний транспорт sessions до миграции
-   │  │  ├─ opencode.service.ts, opencode-sdk-client.ts (lazy @opencode-ai/sdk/v2; без HTTP-контроллера)
+   │  ├─ modules/opencode/ — встроенный OpenCode V2 host + keys/billing
+   │  │  ├─ opencode-host.service.ts (in-process @opencode/sdk, без листенера и HTTP-контроллера)
    │  │  ├─ keys.controller.ts — HTTP /api/v1/key (store — в common/keys)
-   │  │  └─ modules/{auth,billing}/ — OpencodeAuthService (gate + Basic), BillingService + BillingController (HTTP /api/v1/usage)
+   │  │  └─ modules/{auth,billing}/ — ServeAuthService (Basic для хоста), BillingService + BillingController (HTTP /api/v1/usage)
    │  └─ modules/sessions/ — доменный /api/v1/sessions* (URI-versioned v1, SSE через common/sse)
    ├─ modules/runs/ — доменный /api/v1/runs* (RunInfo/CreateRunRequest, SSE-журнал run_events, URI-versioned v1)
    └─ modules/workers/ — in-process run engine (claim-loop: llm.call → tool.call → sandbox.exec → git.commit; без HTTP-роутов)
@@ -116,8 +116,8 @@ src/
 `JwtAuthGuard` → гейт `ProjectAccessService` (`assertProjectAccess` /
 `assertProjectAccessById`: org-linked → member, user-space → owner,
 stranger → 404 без утечки существования) → jail (`WorkspacePathService` поверх
-`REPOS_ROOT`) → upstream к runner: sdk (`OpencodeSdkClient`) для полей, которые
-генератор НЕ режет, иначе сырой `fetchWithRetry` + `serveBasicAuthHeader` →
-маппинг сбоя в `EXTERNAL_*` (`external-error.ts`) → `ApiErrorFilter` в
+`REPOS_ROOT`) → транспорт — встроенный `OpencodeHostService` (OpenCode V2
+in-process, без внешнего раннера) → маппинг сбоя в `EXTERNAL_*`
+(`external-error.ts`) → `ApiErrorFilter` в
 `ApiError`-envelope (+`x-correlation-id`) — normal path однострочник
 `[http] handled`, без стеков/секретов.

@@ -18,10 +18,11 @@
  * - POST /api/runs answers 201 RunInfo (open, branch agent/<id>, worktree
  *   inside the jail, baseCommit = the repo HEAD);
  * - the claim loop advances llm.call → tool.call (native:git.recon) →
- *   git.commit, and GET /api/runs/:id/events?cursor=0 replays/tails the
- *   journal: run.started first, then the three run.step.committed frames
- *   (tool request/response hashes 64-hex, attempt 1; git sha 40-hex on
- *   agent/<id> from baseCommit);
+ *   sandbox.exec (opencode runner stub) → git.commit, and
+ *   GET /api/runs/:id/events?cursor=0 replays/tails the journal:
+ *   run.started first, then the four run.step.committed frames
+ *   (tool request/response hashes 64-hex, attempt 1; sandbox session id +
+ *   command; git sha 40-hex on agent/<id> from baseCommit);
  * - a second catch-up replays the same committed seqs (no loss) and a cursor
  *   at the last delivered id tails nothing (empty), so replay is
  *   append-only-correct;
@@ -35,19 +36,25 @@
  *   (POST and GET, never a fake 404).
  *
  * warn/error stay one-liners and no Bearer/[object Object] ever reaches a
- * log line (AppLogger prototype capture per keys.e2e).
+ * log line (AppLogger prototype capture per keys.e2e); the opencode Basic
+ * password never appears in a log line either.
  */
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, rmSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 
 // --- deterministic env (overrides repo .env AFTER bun/node dotenv load) ---
 process.env.APP_BACKEND_PORT ??= '3000';
 process.env.REQUEST_TIMEOUT_MS = '2000';
-// The sandbox provider is not part of this epic: the claim loop uses the
-// in-process stub model gateway + native tools, never opencode.
+// The sandbox step dials the opencode runner (SandboxProvider). The URL is
+// re-pointed at the in-process stub inside main(), before NestFactory.create;
+// this dead port is only the pre-stub placeholder.
 process.env.OPENCODE_URL = 'http://127.0.0.1:9';
+// Basic password the sandbox stub asserts on the wire; must never reach a log.
+process.env.OPENCODE_PASSWORD = 'e2e-basic-secret-never-log-runs';
 // DATABASE_URL is resolved inside main() from a throwaway Postgres: the run
 // journal/lease tables are durable, so this suite is strict.
 for (const key of ['POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB', 'POSTGRES_HOST']) {
@@ -169,6 +176,83 @@ function git(cwd: string, args: Array<string>): string {
   return String(execFileSync('git', args, { cwd, encoding: 'utf8' })).trim();
 }
 
+type SandboxStubRequest = {
+  method: string;
+  path: string;
+  authorization: string | null;
+  body: unknown;
+};
+
+type SandboxStub = {
+  url: string;
+  requests: Array<SandboxStubRequest>;
+  close: () => Promise<void>;
+};
+
+/**
+ * Minimal opencode-runner stand for the sandbox step (node:http, no deps).
+ *
+ * Serves exactly the three routes SandboxProvider uses — POST /api/session,
+ * POST /api/session/:id/shell, GET /api/info — and captures method/path/
+ * authorization/body so the suite can assert the Basic header and the shell
+ * command actually left the backend. Anything else is an honest 404.
+ */
+async function startSandboxStub(): Promise<SandboxStub> {
+  const requests: Array<SandboxStubRequest> = [];
+  const server = createServer((req, res) => {
+    const chunks: Array<Buffer> = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks).toString('utf8');
+      let body: unknown = null;
+      try {
+        body = raw.length > 0 ? (JSON.parse(raw) as unknown) : null;
+      } catch {
+        body = raw;
+      }
+      const path = req.url ?? '';
+      requests.push({
+        method: req.method ?? '',
+        path,
+        authorization: req.headers.authorization ?? null,
+        body,
+      });
+      const send = (status: number, payload: unknown): void => {
+        // `connection: close` keeps keep-alive sockets from delaying close().
+        res.writeHead(status, { 'content-type': 'application/json', connection: 'close' });
+        res.end(JSON.stringify(payload));
+      };
+      if (req.method === 'POST' && path === '/api/session') {
+        send(200, { data: { id: 'ses_runs_e2e' } });
+        return;
+      }
+      if (req.method === 'POST' && path === '/api/session/ses_runs_e2e/shell') {
+        send(200, { data: { output: 'run-ready' } });
+        return;
+      }
+      if (req.method === 'GET' && path === '/api/info') {
+        send(200, { version: '2.2.0-e2e' });
+        return;
+      }
+      send(404, { error: 'not_found' });
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => resolve());
+  });
+  const address = server.address() as AddressInfo | null;
+  const port = address ? address.port : 0;
+  return {
+    url: `http://127.0.0.1:${port}`,
+    requests,
+    close: () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+      }),
+  };
+}
+
 async function main(): Promise<void> {
   // Strict Postgres: the run registry/journal/leases and the claim loop are
   // durable, so the suite needs a live DB (one-time container by default,
@@ -194,6 +278,11 @@ async function main(): Promise<void> {
     'init',
   ]);
   const baseHead = git(JAIL_DIR, ['rev-parse', 'HEAD']);
+
+  // opencode-runner stub for sandbox.exec: OPENCODE_URL must point at it
+  // BEFORE NestFactory.create so every provider sees the live stub.
+  const sandbox = await startSandboxStub();
+  process.env.OPENCODE_URL = sandbox.url;
 
   const { NestFactory } = await import('@nestjs/core');
   const { AppModule } = await import('../../../../app/app.module');
@@ -387,11 +476,11 @@ async function main(): Promise<void> {
       );
 
       // --- live SSE journal ---------------------------------------------
-      // Stop exactly when git.commit (seq 3) commits: it is the last journal
+      // Stop exactly when git.commit (seq 4) commits: it is the last journal
       // event of the prototype plan, so the replay assertions below have a
       // closed, final journal to compare against.
-      const threeStepsCommitted = (frame: JsonRecord): boolean =>
-        frame.type === 'run.step.committed' && frameStepSeq(frame) === 3;
+      const fourStepsCommitted = (frame: JsonRecord): boolean =>
+        frame.type === 'run.step.committed' && frameStepSeq(frame) === 4;
 
       let liveFrames: Array<JsonRecord> = [];
       try {
@@ -399,13 +488,13 @@ async function main(): Promise<void> {
           base,
           `/api/runs/${runId}/events?cursor=0`,
           authHeaders,
-          threeStepsCommitted,
+          fourStepsCommitted,
           120_000,
         );
         liveFrames = collected.frames;
         assert.equal(collected.status, 200);
         assert.match(collected.contentType ?? '', /text\/event-stream/);
-        assert.ok(liveFrames.length >= 3, `expected frames, got ${liveFrames.length}`);
+        assert.ok(liveFrames.length >= 5, `expected frames, got ${liveFrames.length}`);
       } catch (err) {
         push('GET /api/runs/{id}/events → live run journal', err as Error);
       }
@@ -428,14 +517,20 @@ async function main(): Promise<void> {
       try {
         assert.deepEqual(
           committed.map((frame) => frameStepSeq(frame)),
-          [1, 2, 3],
-          `expected committed seq 1,2,3 — got ${JSON.stringify(
+          [1, 2, 3, 4],
+          `expected committed seq 1,2,3,4 — got ${JSON.stringify(
             committed.map((frame) => frameStepSeq(frame)),
           )}`,
         );
-        push('SSE journals llm.call → tool.call → git.commit as committed steps 1,2,3', null);
+        push(
+          'SSE journals llm.call → tool.call → sandbox.exec → git.commit as committed steps 1,2,3,4',
+          null,
+        );
       } catch (err) {
-        push('SSE journals llm.call → tool.call → git.commit as committed steps 1,2,3', err as Error);
+        push(
+          'SSE journals llm.call → tool.call → sandbox.exec → git.commit as committed steps 1,2,3,4',
+          err as Error,
+        );
       }
 
       try {
@@ -452,7 +547,19 @@ async function main(): Promise<void> {
         push('tool.call frame carries canonical request/response hashes (64-hex, attempt 1)', err as Error);
       }
 
-      const gitFrame = committed.find((frame) => frameStepSeq(frame) === 3);
+      const sandboxFrame = committed.find((frame) => frameStepSeq(frame) === 3);
+      try {
+        assert.ok(sandboxFrame, 'missing sandbox.exec committed frame');
+        const resultRef = (sandboxFrame.data as JsonRecord).resultRef as JsonRecord | undefined;
+        assert.ok(resultRef, 'sandbox frame has no resultRef');
+        assert.equal(resultRef.sessionId, 'ses_runs_e2e');
+        assert.equal(resultRef.command, 'echo run-ready');
+        push('sandbox.exec frame carries the runner session id and the shell command', null);
+      } catch (err) {
+        push('sandbox.exec frame carries the runner session id and the shell command', err as Error);
+      }
+
+      const gitFrame = committed.find((frame) => frameStepSeq(frame) === 4);
       let journalSha = '';
       try {
         assert.ok(gitFrame, 'missing git.commit committed frame');
@@ -467,20 +574,49 @@ async function main(): Promise<void> {
         push('git.commit frame carries the 40-hex sha on agent/<id> from baseCommit', err as Error);
       }
 
+      // --- sandbox wire (runner stub) -----------------------------------
+      try {
+        const createReq = sandbox.requests.find(
+          (req) => req.method === 'POST' && req.path === '/api/session',
+        );
+        assert.ok(createReq, 'sandbox stub saw no POST /api/session');
+        assert.match(String(createReq.authorization), /^Basic /, 'sandbox create is not Basic-authed');
+        const decoded = Buffer.from(
+          String(createReq.authorization).slice('Basic '.length),
+          'base64',
+        ).toString('utf8');
+        assert.equal(decoded, `opencode:${process.env.OPENCODE_PASSWORD}`);
+        const createBody = (createReq.body ?? {}) as JsonRecord;
+        const location = (createBody.location ?? {}) as JsonRecord;
+        assert.equal(location.directory, worktree, 'session location is not the run worktree');
+
+        const shellReq = sandbox.requests.find(
+          (req) => req.path === '/api/session/ses_runs_e2e/shell',
+        );
+        assert.ok(shellReq, 'sandbox stub saw no shell call');
+        assert.equal(shellReq.authorization, createReq.authorization);
+        const shellBody = (shellReq.body ?? {}) as JsonRecord;
+        assert.equal(shellBody.command, 'echo run-ready');
+        assert.equal(shellBody.directory, worktree);
+        push('sandbox.exec creates an opencode session and runs the shell with Basic auth', null);
+      } catch (err) {
+        push('sandbox.exec creates an opencode session and runs the shell with Basic auth', err as Error);
+      }
+
       // --- replay (append-only, no loss, no duplicate) -------------------
       try {
         const replay = await collectFrames(
           base,
           `/api/runs/${runId}/events?cursor=0`,
           authHeaders,
-          threeStepsCommitted,
+          fourStepsCommitted,
           30_000,
         );
         assert.equal(replay.status, 200);
         const replayCommitted = replay.frames.filter((frame) => frame.type === 'run.step.committed');
         assert.deepEqual(
           replayCommitted.map((frame) => frameStepSeq(frame)),
-          [1, 2, 3],
+          [1, 2, 3, 4],
           'catch-up replay lost or duplicated a committed step',
         );
         const lastId = Math.max(...replay.frames.map((frame) => Number(frame.id)));
@@ -645,19 +781,25 @@ async function main(): Promise<void> {
     pathsProto.realStrictRoot = originalRealStrictRoot;
     pathsProto.assertInsideJail = originalAssertInsideJail;
     await app.close();
+    await sandbox.close();
     await testDb.stop();
     rmSync(JAIL_DIR, { recursive: true, force: true });
     rmSync(E2E_ROOT, { recursive: true, force: true });
   }
 
   // Log discipline over the whole suite: warn/error one-liners, no
-  // authorization material, no unserialized objects.
+  // authorization material, no unserialized objects, no Basic password.
+  const sandboxSecret = String(process.env.OPENCODE_PASSWORD ?? '');
   for (const l of logged) {
     if (l.method === 'warn' || l.method === 'error') {
       assert.ok(!l.text.includes('\n'), `${l.method} line is not a one-liner: ${l.text.slice(0, 120)}`);
     }
     assert.ok(!l.text.includes('Bearer '), 'authorization material leaked into a log line');
     assert.ok(!l.text.includes('[object Object]'), 'unserialized object in a log line');
+    assert.ok(
+      sandboxSecret.length === 0 || !l.text.includes(sandboxSecret),
+      'opencode password leaked into a log line',
+    );
   }
 
   const failed = results.filter((r) => !r.ok);

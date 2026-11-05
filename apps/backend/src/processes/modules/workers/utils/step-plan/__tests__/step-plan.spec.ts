@@ -10,6 +10,7 @@
  * - a committed step advances to the next one;
  * - a running step is retried (write-ahead row without a committed effect);
  * - a failed step stops the pipeline (null), never silently skips it;
+ * - seq 3 is sandbox.exec and seq 4 is git.commit;
  * - all committed → null and isComplete() true;
  * - bigint seq values (Postgres bigint mode) match numbers.
  */
@@ -47,6 +48,21 @@ const checks: Array<{ name: string; run: () => void }> = [
     run: () => {
       assert.equal(nextStep([{ seq: 1, status: 'failed' }]), null);
       assert.equal(isComplete([{ seq: 1, status: 'failed' }]), false);
+    },
+  },
+  {
+    name: 'steps 1,2,3 committed → git.commit (step 4)',
+    run: () => {
+      assert.deepEqual(
+        nextStep([
+          { seq: 1, status: 'committed' },
+          { seq: 2, status: 'committed' },
+          { seq: 3, status: 'committed' },
+        ]),
+        PROTOTYPE_STEPS[3],
+      );
+      assert.equal(PROTOTYPE_STEPS[3]?.type, 'git.commit');
+      assert.equal(PROTOTYPE_STEPS[2]?.type, 'sandbox.exec');
     },
   },
   {

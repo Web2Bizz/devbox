@@ -4,7 +4,8 @@ import { RunsModule } from '../runs/runs.module';
 import { RunsClaimLoop } from './modules/claim-loop';
 import { RunWorktreeService } from './modules/git';
 import { ModelGateway, StubModelGateway } from './modules/model-gateway';
-import { ToolRegistry } from './modules/tool-registry';
+import { SandboxProvider } from './modules/sandbox';
+import { McpToolSource, ToolRegistry } from './modules/tool-registry';
 
 /**
  * WorkersModule — the in-process run engine (agent-harness prototype).
@@ -20,6 +21,11 @@ import { ToolRegistry } from './modules/tool-registry';
  * be replayed by the operator — TODO(full-fencing) adds epochs. The model port
  * is the stub (one provider, normalized response journaled as the step
  * result), and tools reach the model as ToolView projections only (D3).
+ *
+ * sandbox.exec goes through the opencode runner (SandboxProvider →
+ * OpencodeService; it is @Global, so no OpencodeModule import is added here);
+ * MCP is consumption-only (McpToolSource registers the remote server's tools
+ * at boot, MCP_SERVER_URL unset disables it) — the harness never serves MCP.
  */
 @Module({
   imports: [RunsModule],
@@ -27,6 +33,8 @@ import { ToolRegistry } from './modules/tool-registry';
     WorkspacePathService,
     RunWorktreeService,
     ToolRegistry,
+    McpToolSource,
+    SandboxProvider,
     { provide: ModelGateway, useClass: StubModelGateway },
     RunsClaimLoop,
   ],

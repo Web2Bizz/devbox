@@ -6,7 +6,8 @@ import { RunsModule } from "../../runs/runs.module";
 import { RunsClaimLoop } from "../modules/claim-loop";
 import { RunWorktreeService } from "../modules/git";
 import { ModelGateway, StubModelGateway } from "../modules/model-gateway";
-import { ToolRegistry } from "../modules/tool-registry";
+import { SandboxProvider } from "../modules/sandbox";
+import { McpToolSource, ToolRegistry } from "../modules/tool-registry";
 import { WorkersModule } from "../workers.module";
 
 type Case = { name: string; run: () => Promise<void> | void };
@@ -44,6 +45,8 @@ describe("WorkersModule metadata", () => {
       WorkspacePathService,
       RunWorktreeService,
       ToolRegistry,
+      McpToolSource,
+      SandboxProvider,
       { provide: ModelGateway, useClass: StubModelGateway },
       RunsClaimLoop,
     ]);

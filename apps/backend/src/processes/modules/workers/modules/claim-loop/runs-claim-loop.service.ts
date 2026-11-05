@@ -8,6 +8,7 @@ import { RunLeaseFencedError, RunsRepository } from '../../../runs/runs.reposito
 import { isComplete, nextStep, type PrototypeStep } from '../../utils/step-plan';
 import { RunWorktreeService } from '../git';
 import { ModelGateway, type ModelMessage } from '../model-gateway';
+import { SandboxProvider } from '../sandbox';
 import { ToolRegistry } from '../tool-registry';
 
 /** Lease is renewed by every step transaction; this is the ceiling between renewals. */
@@ -26,8 +27,8 @@ function sha256(value: string): string {
  *
  * One tick claims the oldest expired lease (SKIP LOCKED, so two workers never
  * take the same run), materializes the run worktree, and advances the fixed
- * `llm.call → tool.call → git.commit` plan one step at a time. Every step is
- * opened write-ahead and closed by RunsRepository, whose lease guard
+ * `llm.call → tool.call → sandbox.exec → git.commit` plan one step at a time.
+ * Every step is opened write-ahead and closed by RunsRepository, whose lease guard
  * (`assertLeaseTx`) renews our lease inside the SAME transaction as the
  * journal append — a lost lease surfaces as RunLeaseFencedError and the worker
  * stops instead of writing a second history. All steps committed → the run is
@@ -50,6 +51,7 @@ export class RunsClaimLoop implements OnModuleInit, OnModuleDestroy {
     private readonly worktree: RunWorktreeService,
     private readonly gateway: ModelGateway,
     private readonly tools: ToolRegistry,
+    private readonly sandbox: SandboxProvider,
     private readonly logger: AppLogger = new AppLogger(RunsClaimLoop.name),
   ) {}
 
@@ -137,6 +139,7 @@ export class RunsClaimLoop implements OnModuleInit, OnModuleDestroy {
 
     if (step.type === 'llm.call') await this.runLlm(run, step);
     else if (step.type === 'tool.call') await this.runTool(run, step);
+    else if (step.type === 'sandbox.exec') await this.runSandbox(run, step);
     else await this.runGitCommit(run, step);
   }
 
@@ -232,6 +235,52 @@ export class RunsClaimLoop implements OnModuleInit, OnModuleDestroy {
         leaseTtlMs: LEASE_TTL_MS,
         correlationId: '',
         error: { code: 'TOOL_CALL_FAILED', message: 'tool.call failed' },
+      });
+      // Terminal for the prototype: no auto-retry after a failed step
+      // (TODO(dual-write-reconcile)); the operator sees the failed run.
+      await this.repo.finishRun(run.id, this.holder, 'failed', '');
+    }
+  }
+
+  private async runSandbox(run: RunRow, step: PrototypeStep): Promise<void> {
+    const command = 'echo run-ready';
+    const inputHash = sha256(
+      canonicalJson({ baseCommit: run.baseCommit, worktree: run.worktree, command }),
+    );
+
+    await this.repo.startStep({
+      runId: run.id,
+      seq: step.seq,
+      type: step.type,
+      inputHash,
+      idempotencyKey: sha256(`${run.id}|${step.seq}|${step.type}|${inputHash}`),
+      holder: this.holder,
+      leaseTtlMs: LEASE_TTL_MS,
+      correlationId: '',
+    });
+
+    try {
+      const result = await this.sandbox.exec(run, command, '');
+      await this.repo.commitStep({
+        runId: run.id,
+        seq: step.seq,
+        holder: this.holder,
+        leaseTtlMs: LEASE_TTL_MS,
+        correlationId: '',
+        resultRef: { sessionId: result.sessionId, command, output: result.output },
+      });
+    } catch (err) {
+      if (err instanceof RunLeaseFencedError) throw err;
+      // Upstream detail (possibly body-shaped) stays in debug; the journal
+      // gets a fixed code, never a command output or a secret.
+      this.logger.debug(serializeCause(err), '');
+      await this.repo.failStep({
+        runId: run.id,
+        seq: step.seq,
+        holder: this.holder,
+        leaseTtlMs: LEASE_TTL_MS,
+        correlationId: '',
+        error: { code: 'SANDBOX_EXEC_FAILED', message: 'sandbox.exec failed' },
       });
       // Terminal for the prototype: no auto-retry after a failed step
       // (TODO(dual-write-reconcile)); the operator sees the failed run.

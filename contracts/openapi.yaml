@@ -2100,6 +2100,55 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+    get:
+      summary: List project runs (newest first)
+      operationId: listRunsDomain
+      tags: [runs]
+      parameters:
+        - name: projectId
+          in: query
+          required: true
+          description: Project uuid (the C4 gate; missing/blank answers 400 PROJECT_REQUIRED).
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: run rows for this project (always an array; empty when none)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunInfoList'
+        '400':
+          description: missing projectId (code PROJECT_REQUIRED) or invalid projectId (code bad_request — the C4 gate and our zod) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: missing/invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: database unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
   /api/runs/{id}:
     get:
       summary: Get one agent run by id (domain shape)

@@ -9,7 +9,7 @@ import { relaySse } from '../../../common/sse/sse-relay';
 import { WorkspacePathService } from '../../../common/storage/workspace-path.service';
 import { ProjectAccessService } from '../../../organizations/modules/projects/modules/project-access/project-access.service';
 import { resolveHeadOrNull } from '../../../organizations/modules/projects/modules/repository/utils/repos-git';
-import type { CreateRunInput, RunInfo, RunStreamFrame } from './runs.dto';
+import type { CreateRunInput, RunInfo, RunInfoList, RunStreamFrame } from './runs.dto';
 import { RunEventSource } from './run-event-source';
 import { RunsRepository } from './runs.repository';
 
@@ -84,6 +84,19 @@ export class RunsService {
     if (!row) throw notFound(runId);
     await this.access.assertProjectAccessById(row.projectId, userId, cid);
     return toRunInfo(row);
+  }
+
+  /** GET /api/runs?projectId= — C4-scoped live runs, newest first. */
+  async list(userId: string, projectId: string | undefined, cid: string): Promise<RunInfoList> {
+    if (!projectId || projectId.trim() === '') {
+      throw new BadRequestException({
+        code: 'PROJECT_REQUIRED',
+        message: 'projectId is required — run routes are project-scoped',
+      });
+    }
+    await this.access.assertProjectAccessById(projectId, userId, cid);
+    const rows = await this.repo.listRuns(projectId, cid);
+    return rows.map(toRunInfo);
   }
 
   /**

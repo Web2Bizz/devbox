@@ -501,6 +501,20 @@ async function main(): Promise<void> {
         },
       );
 
+      await check(
+        'GET /api/runs?projectId= → array containing the created run',
+        `/api/runs?projectId=${E2E_PROJECT_ID}`,
+        undefined,
+        200,
+        (_res, body) => {
+          assert.ok(Array.isArray(body), 'list answer must be an array');
+          const ids = (body as Array<JsonRecord>).map((row) => row.id);
+          assert.ok(ids.includes(runId), `created run ${runId} is missing from ${JSON.stringify(ids)}`);
+          const listed = (body as Array<JsonRecord>).find((row) => row.id === runId) as JsonRecord;
+          assert.equal(listed.projectId, E2E_PROJECT_ID);
+        },
+      );
+
       // --- live SSE journal ---------------------------------------------
       // Stop exactly when git.commit (seq 4) commits: it is the last journal
       // event of the prototype plan, so the replay assertions below have a
@@ -749,6 +763,16 @@ async function main(): Promise<void> {
               assert.equal((body as { code?: string }).code, 'not_found');
             },
           );
+          await check(
+            'GET /api/runs?projectId= stranger project → 404 not_found (no Retry-After)',
+            `/api/runs?projectId=${E2E_PROJECT_ID}`,
+            undefined,
+            404,
+            (res, body) => {
+              assert.equal((body as { code?: string }).code, 'not_found');
+              assert.equal(res.headers.get('Retry-After'), null);
+            },
+          );
         } finally {
           (
             ProjectAccessService.prototype as unknown as { assertProjectAccessById: unknown }
@@ -767,6 +791,15 @@ async function main(): Promise<void> {
         400,
         (_res, body) => {
           assert.equal((body as { code?: string }).code, 'bad_request');
+        },
+      );
+      await check(
+        'GET /api/runs (no projectId) → 400 PROJECT_REQUIRED',
+        '/api/runs',
+        undefined,
+        400,
+        (_res, body) => {
+          assert.equal((body as { code?: string }).code, 'PROJECT_REQUIRED');
         },
       );
       await check('GET /api/runs/not-a-uuid → 400 bad_request', '/api/runs/not-a-uuid', undefined, 400, (_res, body) => {

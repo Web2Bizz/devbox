@@ -168,6 +168,19 @@ export class RunsRepository {
     }
   }
 
+  /** Project-scoped live runs, newest first (GET /api/runs). */
+  async listRuns(projectId: string, cid: string): Promise<Array<RunRow>> {
+    try {
+      return await this.db.client
+        .select()
+        .from(runRuns)
+        .where(and(eq(runRuns.projectId, projectId), isNull(runRuns.deletedAt)))
+        .orderBy(desc(runRuns.createdAt));
+    } catch (err) {
+      dbUnavailable('runs.listRuns', err, this.logger, cid);
+    }
+  }
+
   /**
    * Journal rows after `afterSeq` in seq order — the SSE catch-up source
    * (append-only, so `seq > cursor` can never skip or duplicate a frame).

@@ -21,13 +21,13 @@ import type { RequestIdentity } from '../../../auth/identity.service';
 import { ReqUser } from '../../../auth/req-user.decorator';
 import { ApiErrorDto } from '../../../common/http/api/api.dto';
 import { ZodValidationPipe } from '../../../common/validation';
-import { createRunRequestSchema, type CreateRunInput, type RunInfo } from './runs.dto';
+import { createRunRequestSchema, type CreateRunInput, type RunInfo, type RunInfoList } from './runs.dto';
 import { RunsService } from './runs.service';
 
 /**
  * Domain run routes — /api/runs* (VERSION_NEUTRAL under the global 'api'
- * prefix). Prototype API minimum: create, read one, stream its journal.
- * The list route and interrupt/upgrade-definition are deliberately absent.
+ * prefix). Prototype API minimum: create, read one, stream its journal, list
+ * a project's runs. Interrupt/upgrade-definition are deliberately absent.
  *
  * Auth: every route is JwtAuthGuard + the C4 project gate (strangers → 404
  * with no existence leak; blank projectId → 400 PROJECT_REQUIRED). Guests →
@@ -79,6 +79,22 @@ export class RunsController {
   ): Promise<void> {
     const cid = correlationId ?? '';
     await this.runs.streamEvents(identity.id, id, cursor, cid, req, res);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get()
+  @Version(VERSION_NEUTRAL)
+  @ApiOperation({ summary: 'List project runs (domain rows, newest first)' })
+  @ApiResponse({ status: 200, description: 'run rows for this project (always an array; empty when none)' })
+  @ApiResponse({ status: 400, description: 'missing projectId (PROJECT_REQUIRED, the C4 gate)', type: ApiErrorDto })
+  @ApiResponse({ status: 404, description: 'unknown project for this caller (not_found, no existence leak — the C4 gate)', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'database unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
+  async list(
+    @ReqUser() identity: RequestIdentity,
+    @Query('projectId') projectId?: string,
+    @Headers('x-correlation-id') correlationId?: string,
+  ): Promise<RunInfoList> {
+    return this.runs.list(identity.id, projectId, correlationId ?? '');
   }
 
   @UseGuards(JwtAuthGuard)

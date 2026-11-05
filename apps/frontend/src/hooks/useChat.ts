@@ -172,7 +172,7 @@ function projectGateError(): ApiClientError {
 }
 
 /**
- * Chat over the domain contract (`/api/sessions*`, api/sessions-client) —
+ * Chat over the domain contract (`/api/v1/sessions*`, api/sessions-client) —
  * the frontend knows nothing about the underlying runner.
  *
  * Deliberately stays on `useEffect`, NOT React Query: streaming/SSE live
@@ -181,24 +181,24 @@ function projectGateError(): ApiClientError {
  *
  * Two modes (session = chat):
  * - Lazy: `useChat({ projectId })` — the session is created on the first
- *   `send()` via `POST /api/sessions` (one chat = one session).
+ *   `send()` via `POST /api/v1/sessions` (one chat = one session).
  * - Scoped: `useChat({ sessionId, projectId })` — bound to an existing
- *   session: history loads via `GET /api/sessions/{id}/messages`,
+ *   session: history loads via `GET /api/v1/sessions/{id}/messages`,
  *   `send()` queues that session directly (no create).
  *
  * - `send(text)` appends the user row, queues the prompt via
- *   `POST /api/sessions/{id}/messages` (the answer does NOT come from this
+ *   `POST /api/v1/sessions/{id}/messages` (the answer does NOT come from this
  *   response — it streams over events), and stays `sending` until the
  *   session's `session.idle` frame commits the streamed text as the
  *   assistant row.
- * - Live deltas: `GET /api/sessions/events` SSE subscription (self-healing
+ * - Live deltas: `GET /api/v1/sessions/events` SSE subscription (self-healing
  *   backoff 1s → 15s, same as useSessionEvents), scoped by the frame's
  *   top-level `session` field (never an upstream id name at the domain
  *   layer); `message.part.delta` appends, `message.part.updated` appends
  *   the growth of its absolute snapshot (part-keyed).
  * - Cancel: `stop()` commits the partial stream as the assistant answer so
  *   nothing is lost and fires a best-effort server interrupt
- *   (POST /api/sessions/{id}/interrupt — the domain route; an idle session
+ *   (POST /api/v1/sessions/{id}/interrupt — the domain route; an idle session
  *   answers interrupted=false, never an error). Unmount aborts the
  *   in-flight queue POST and closes the SSE stream via the AbortController
  *   signal.

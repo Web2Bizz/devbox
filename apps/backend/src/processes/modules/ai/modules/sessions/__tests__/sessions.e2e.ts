@@ -1,6 +1,6 @@
 /**
- * Domain sessions e2e (GET/POST /api/sessions, GET /api/sessions/status,
- * GET/POST /api/sessions/{id}/messages, GET /api/sessions/events).
+ * Domain sessions e2e (GET/POST /api/v1/sessions, GET /api/v1/sessions/status,
+ * GET/POST /api/v1/sessions/{id}/messages, GET /api/v1/sessions/events).
  *
  * Runs against COMPILED dist (tsc emits decorator metadata there; bun's own
  * TS transpiler does not, so this file must not run via `bun test` on TS
@@ -533,7 +533,7 @@ async function main(): Promise<void> {
   });
 
   try {
-    await check('GET /api/sessions → 200 domain rows (translated, status derived)', '/api/sessions?projectId=' + E2E_PROJECT_ID, undefined, 200, (_res, body) => {
+    await check('GET /api/v1/sessions → 200 domain rows (translated, status derived)', '/api/v1/sessions?projectId=' + E2E_PROJECT_ID, undefined, 200, (_res, body) => {
       const rows = body as Array<Record<string, unknown>>;
       assert.ok(Array.isArray(rows) && rows.length === 2, `expected 2 rows, got ${JSON.stringify(body)?.slice(0, 120)}`);
       const a = rows[0];
@@ -555,17 +555,17 @@ async function main(): Promise<void> {
     });
     assert.ok(stand.listDirs.at(-1) === JAIL_DIR, 'list must be scoped to the gated jail');
 
-    await check('GET /api/sessions w/o projectId → 400 PROJECT_REQUIRED', '/api/sessions', undefined, 400, (_res, body) => {
+    await check('GET /api/v1/sessions w/o projectId → 400 PROJECT_REQUIRED', '/api/v1/sessions', undefined, 400, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'PROJECT_REQUIRED');
     });
 
-    await check('GET /api/sessions/status → derived busy/idle map (non-empty)', '/api/sessions/status?projectId=' + E2E_PROJECT_ID, undefined, 200, (_res, body) => {
+    await check('GET /api/v1/sessions/status → derived busy/idle map (non-empty)', '/api/v1/sessions/status?projectId=' + E2E_PROJECT_ID, undefined, 200, (_res, body) => {
       const map = body as Record<string, { type?: string }>;
       assert.deepEqual(map.ses_alpha, { type: 'busy' });
       assert.deepEqual(map.ses_beta, { type: 'idle' });
     });
 
-    await check('POST /api/sessions forwards title/parentID + jail location', '/api/sessions', jsonBody({ projectId: E2E_PROJECT_ID, title: 'created via domain', parentID: 'ses_alpha' }), 200, (_res, body) => {
+    await check('POST /api/v1/sessions forwards title/parentID + jail location', '/api/v1/sessions', jsonBody({ projectId: E2E_PROJECT_ID, title: 'created via domain', parentID: 'ses_alpha' }), 200, (_res, body) => {
       const row = body as Record<string, unknown>;
       assert.equal(row.id, 'ses_created');
       assert.equal(row.title, 'created via domain');
@@ -583,7 +583,7 @@ async function main(): Promise<void> {
       assert.equal(sent.parentID, 'ses_alpha');
     }
 
-    await check('POST /api/sessions forwards model (upstream Model.Ref verbatim)', '/api/sessions', jsonBody({ projectId: E2E_PROJECT_ID, model: { id: 'model-m', providerID: 'prov-openai' } }), 200, (_res, body) => {
+    await check('POST /api/v1/sessions forwards model (upstream Model.Ref verbatim)', '/api/v1/sessions', jsonBody({ projectId: E2E_PROJECT_ID, model: { id: 'model-m', providerID: 'prov-openai' } }), 200, (_res, body) => {
       assert.equal((body as Record<string, unknown>).id, 'ses_created');
     });
     {
@@ -593,18 +593,18 @@ async function main(): Promise<void> {
       assert.ok(create.basicAuth, 'Basic auth header really sent');
     }
 
-    await check('POST /api/sessions unknown agentId → honest 404 (no fallback, no side effects)', '/api/sessions', jsonBody({ projectId: E2E_PROJECT_ID, agentId: 'ghost' }), 404, (_res, body) => {
+    await check('POST /api/v1/sessions unknown agentId → honest 404 (no fallback, no side effects)', '/api/v1/sessions', jsonBody({ projectId: E2E_PROJECT_ID, agentId: 'ghost' }), 404, (_res, body) => {
       const b = body as { code?: string; message?: string };
       assert.equal(b.code, 'not_found');
       assert.ok((b.message ?? '').includes("Agent 'ghost' not found"), `unexpected message: ${b.message}`);
     });
 
-    await check('POST /api/sessions {} → 400 bad_request (body zod)', '/api/sessions', jsonBody({}), 400, (_res, body) => {
+    await check('POST /api/v1/sessions {} → 400 bad_request (body zod)', '/api/v1/sessions', jsonBody({}), 400, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'bad_request');
     });
 
     stand.setMode('reject');
-    await check('runner 400 on create → honest 400 EXTERNAL_BAD_REQUEST (no Retry-After, no echo)', '/api/sessions', jsonBody({ projectId: E2E_PROJECT_ID, title: 'x' }), 400, (res, body) => {
+    await check('runner 400 on create → honest 400 EXTERNAL_BAD_REQUEST (no Retry-After, no echo)', '/api/v1/sessions', jsonBody({ projectId: E2E_PROJECT_ID, title: 'x' }), 400, (res, body) => {
       const b = body as { code?: string; message?: string };
       assert.equal(b.code, 'EXTERNAL_BAD_REQUEST');
       assert.notEqual(b.message, 'сервис временно недоступен, повторите позже');
@@ -614,7 +614,7 @@ async function main(): Promise<void> {
     stand.setMode('normal');
 
     // --- providers & interrupt (card 6 domain routes) ----------------------
-    await check('GET /api/sessions/providers → required artifact subset only, jail location forwarded', '/api/sessions/providers?projectId=' + E2E_PROJECT_ID, undefined, 200, (_res, body) => {
+    await check('GET /api/v1/sessions/providers → required artifact subset only, jail location forwarded', '/api/v1/sessions/providers?projectId=' + E2E_PROJECT_ID, undefined, 200, (_res, body) => {
       const rows = body as Array<unknown>;
       assert.deepEqual(rows, [
         { id: 'prov-openai', name: 'OpenAI', activation: 'enabled', package: '@ai-sdk/openai' },
@@ -625,18 +625,18 @@ async function main(): Promise<void> {
       assert.equal(stand.providerDirs.at(-1), JAIL_DIR, 'providers ran in the gated jail');
     });
 
-    await check('GET providers w/o projectId → 400 PROJECT_REQUIRED', '/api/sessions/providers', undefined, 400, (_res, body) => {
+    await check('GET providers w/o projectId → 400 PROJECT_REQUIRED', '/api/v1/sessions/providers', undefined, 400, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'PROJECT_REQUIRED');
     });
 
     stand.setMode('bad-provider');
-    await check('provider row off the artifact REQUIRED set → fails loud (503), secret never echoed', '/api/sessions/providers?projectId=' + E2E_PROJECT_ID, undefined, 503, (_res, body) => {
+    await check('provider row off the artifact REQUIRED set → fails loud (503), secret never echoed', '/api/v1/sessions/providers?projectId=' + E2E_PROJECT_ID, undefined, 503, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'EXTERNAL_UNAVAILABLE');
       assert.ok(!JSON.stringify(body).includes(UPSTREAM_SECRET), 'upstream secret echoed outward');
     });
     stand.setMode('normal');
 
-    await check('POST /api/sessions/{id}/interrupt → 200 {interrupted:true} (idle no-op is honest data, never an error)', '/api/sessions/ses_alpha/interrupt', jsonBody({ projectId: E2E_PROJECT_ID }), 200, (_res, body) => {
+    await check('POST /api/v1/sessions/{id}/interrupt → 200 {interrupted:true} (idle no-op is honest data, never an error)', '/api/v1/sessions/ses_alpha/interrupt', jsonBody({ projectId: E2E_PROJECT_ID }), 200, (_res, body) => {
       assert.deepEqual(body, { interrupted: true });
     });
     {
@@ -647,11 +647,11 @@ async function main(): Promise<void> {
       assert.ok(intr.basicAuth, 'Basic auth header really sent');
     }
 
-    await check('POST interrupt w/o projectId → 400 bad_request (body zod)', '/api/sessions/ses_alpha/interrupt', jsonBody({}), 400, (_res, body) => {
+    await check('POST interrupt w/o projectId → 400 bad_request (body zod)', '/api/v1/sessions/ses_alpha/interrupt', jsonBody({}), 400, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'bad_request');
     });
 
-    await check('POST interrupt unknown session → honest 404 EXTERNAL_NOT_FOUND (no Retry-After, no echo)', '/api/sessions/ses_ghost/interrupt', jsonBody({ projectId: E2E_PROJECT_ID }), 404, (res, body) => {
+    await check('POST interrupt unknown session → honest 404 EXTERNAL_NOT_FOUND (no Retry-After, no echo)', '/api/v1/sessions/ses_ghost/interrupt', jsonBody({ projectId: E2E_PROJECT_ID }), 404, (res, body) => {
       const b = body as { code?: string };
       assert.equal(b.code, 'EXTERNAL_NOT_FOUND');
       assert.equal(res.headers.get('Retry-After'), null);
@@ -659,7 +659,7 @@ async function main(): Promise<void> {
     });
 
     // --- messages ---------------------------------------------------------
-    await check('GET /api/sessions/{id}/messages → text projection per variant', '/api/sessions/ses_alpha/messages?projectId=' + E2E_PROJECT_ID, undefined, 200, (_res, body) => {
+    await check('GET /api/v1/sessions/{id}/messages → text projection per variant', '/api/v1/sessions/ses_alpha/messages?projectId=' + E2E_PROJECT_ID, undefined, 200, (_res, body) => {
       const rows = body as Array<Record<string, unknown>>;
       assert.ok(Array.isArray(rows) && rows.length === 3, `expected 3 rows, got ${JSON.stringify(body)?.slice(0, 160)}`);
       assert.deepEqual(rows[0], {
@@ -683,18 +683,18 @@ async function main(): Promise<void> {
       });
     });
 
-    await check('GET messages limit=abc → 400 bad_request', '/api/sessions/ses_alpha/messages?projectId=' + E2E_PROJECT_ID + '&limit=abc', undefined, 400, (_res, body) => {
+    await check('GET messages limit=abc → 400 bad_request', '/api/v1/sessions/ses_alpha/messages?projectId=' + E2E_PROJECT_ID + '&limit=abc', undefined, 400, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'bad_request');
     });
 
-    await check('GET messages unknown session → honest 404 EXTERNAL_NOT_FOUND (no echo)', '/api/sessions/ses_ghost/messages?projectId=' + E2E_PROJECT_ID, undefined, 404, (res, body) => {
+    await check('GET messages unknown session → honest 404 EXTERNAL_NOT_FOUND (no echo)', '/api/v1/sessions/ses_ghost/messages?projectId=' + E2E_PROJECT_ID, undefined, 404, (res, body) => {
       const b = body as { code?: string };
       assert.equal(b.code, 'EXTERNAL_NOT_FOUND');
       assert.equal(res.headers.get('Retry-After'), null);
       assert.ok(!JSON.stringify(body).includes(UPSTREAM_SECRET), 'upstream secret echoed outward');
     });
 
-    await check('POST messages captures text + maps Inbox.User receipt', '/api/sessions/ses_alpha/messages', jsonBody({ projectId: E2E_PROJECT_ID, text: 'hi domain' }), 200, (_res, body) => {
+    await check('POST messages captures text + maps Inbox.User receipt', '/api/v1/sessions/ses_alpha/messages', jsonBody({ projectId: E2E_PROJECT_ID, text: 'hi domain' }), 200, (_res, body) => {
       assert.deepEqual(body, {
         id: 'msg_q1',
         type: 'user',
@@ -713,13 +713,13 @@ async function main(): Promise<void> {
 
     // The durable history read runs on every GET — after a serve prompt the
     // same route must still answer 200 (no Postgres → no silent crash).
-    await check('GET messages after a serve prompt → 200 (durable history read)', '/api/sessions/ses_alpha/messages?projectId=' + E2E_PROJECT_ID, undefined, 200, (_res, body) => {
+    await check('GET messages after a serve prompt → 200 (durable history read)', '/api/v1/sessions/ses_alpha/messages?projectId=' + E2E_PROJECT_ID, undefined, 200, (_res, body) => {
       const rows = body as Array<Record<string, unknown>>;
       assert.ok(Array.isArray(rows), 'messages must stay an array');
       assert.ok(rows.length >= 3, `expected the upstream rows to survive, got ${rows.length}`);
     });
 
-    await check('POST messages forwards model in the prompt body (model pinned at create, not re-sent on prompt)', '/api/sessions/ses_alpha/messages', jsonBody({ projectId: E2E_PROJECT_ID, text: 'hi model', model: { id: 'model-m', providerID: 'prov-openai', variant: 'v1' } }), 200, (_res, body) => {
+    await check('POST messages forwards model in the prompt body (model pinned at create, not re-sent on prompt)', '/api/v1/sessions/ses_alpha/messages', jsonBody({ projectId: E2E_PROJECT_ID, text: 'hi model', model: { id: 'model-m', providerID: 'prov-openai', variant: 'v1' } }), 200, (_res, body) => {
       assert.equal((body as Record<string, unknown>).text, 'hi model');
     });
     {
@@ -731,18 +731,18 @@ async function main(): Promise<void> {
       assert.ok(prompt.basicAuth, 'Basic auth header really sent');
     }
 
-    await check('POST messages unknown agentId → honest 404 (validated before any transport)', '/api/sessions/ses_alpha/messages', jsonBody({ projectId: E2E_PROJECT_ID, text: 'hi ghost', agentId: 'ghost' }), 404, (_res, body) => {
+    await check('POST messages unknown agentId → honest 404 (validated before any transport)', '/api/v1/sessions/ses_alpha/messages', jsonBody({ projectId: E2E_PROJECT_ID, text: 'hi ghost', agentId: 'ghost' }), 404, (_res, body) => {
       const b = body as { code?: string; message?: string };
       assert.equal(b.code, 'not_found');
       assert.ok((b.message ?? '').includes("Agent 'ghost' not found"), `unexpected message: ${b.message}`);
     });
 
-    await check('POST messages text:"" → 400 bad_request (body zod)', '/api/sessions/ses_alpha/messages', jsonBody({ projectId: E2E_PROJECT_ID, text: '' }), 400, (_res, body) => {
+    await check('POST messages text:"" → 400 bad_request (body zod)', '/api/v1/sessions/ses_alpha/messages', jsonBody({ projectId: E2E_PROJECT_ID, text: '' }), 400, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'bad_request');
     });
 
     stand.setMode('conflict');
-    await check('runner 409 on prompt → 503 EXTERNAL_UNAVAILABLE + Retry-After (shared mapping, no echo)', '/api/sessions/ses_alpha/messages', jsonBody({ projectId: E2E_PROJECT_ID, text: 'busy' }), 503, (res, body) => {
+    await check('runner 409 on prompt → 503 EXTERNAL_UNAVAILABLE + Retry-After (shared mapping, no echo)', '/api/v1/sessions/ses_alpha/messages', jsonBody({ projectId: E2E_PROJECT_ID, text: 'busy' }), 503, (res, body) => {
       assert.equal((body as { code?: string }).code, 'EXTERNAL_UNAVAILABLE');
       assert.equal(res.headers.get('Retry-After'), '30');
       assert.ok(!JSON.stringify(body).includes(UPSTREAM_SECRET), 'upstream secret echoed outward');
@@ -754,7 +754,7 @@ async function main(): Promise<void> {
       const ctrl = new AbortController();
       const frames: Array<Record<string, unknown>> = [];
       try {
-        const res = await fetch(`${base}/api/sessions/events?projectId=${E2E_PROJECT_ID}`, {
+        const res = await fetch(`${base}/api/v1/sessions/events?projectId=${E2E_PROJECT_ID}`, {
           headers: { ...authHeaders, accept: 'text/event-stream' },
           signal: ctrl.signal,
         });
@@ -832,11 +832,11 @@ async function main(): Promise<void> {
           );
           assert.ok(!Object.keys(f1).includes('sessionID'), 'upstream name at top level');
           push(
-            'GET /api/sessions/events → project-scoped domain frames (hoisted session, extras dropped, unscoped dropped)',
+            'GET /api/v1/sessions/events → project-scoped domain frames (hoisted session, extras dropped, unscoped dropped)',
             null,
           );
         } catch (err) {
-          push('GET /api/sessions/events → project-scoped domain frames (hoisted session, extras dropped, unscoped dropped)', err as Error);
+          push('GET /api/v1/sessions/events → project-scoped domain frames (hoisted session, extras dropped, unscoped dropped)', err as Error);
         } finally {
           ctrl.abort();
         }
@@ -855,11 +855,11 @@ async function main(): Promise<void> {
           sawClose ? null : new Error('upstream SSE connection never saw close'),
         );
       } catch (err) {
-        push('GET /api/sessions/events → project-scoped domain frames (hoisted session, extras dropped, unscoped dropped)', err as Error);
+        push('GET /api/v1/sessions/events → project-scoped domain frames (hoisted session, extras dropped, unscoped dropped)', err as Error);
       }
     }
 
-    await check('GET /api/sessions/events w/o projectId → 400 PROJECT_REQUIRED', '/api/sessions/events', undefined, 400, (_res, body) => {
+    await check('GET /api/v1/sessions/events w/o projectId → 400 PROJECT_REQUIRED', '/api/v1/sessions/events', undefined, 400, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'PROJECT_REQUIRED');
     });
 
@@ -873,17 +873,17 @@ async function main(): Promise<void> {
         throw new NotFoundException('Project 123e4567-e89b-12d3-a456-426614174090 not found');
       };
       try {
-        await check('GET /api/sessions stranger project → 404 not_found (no Retry-After)', '/api/sessions?projectId=' + E2E_PROJECT_ID, undefined, 404, (res, body) => {
+        await check('GET /api/v1/sessions stranger project → 404 not_found (no Retry-After)', '/api/v1/sessions?projectId=' + E2E_PROJECT_ID, undefined, 404, (res, body) => {
           assert.equal((body as { code?: string }).code, 'not_found');
           assert.equal(res.headers.get('Retry-After'), null);
         });
-        await check('GET /api/sessions/{id}/messages stranger project → 404 not_found', '/api/sessions/ses_alpha/messages?projectId=' + E2E_PROJECT_ID, undefined, 404, (_res, body) => {
+        await check('GET /api/v1/sessions/{id}/messages stranger project → 404 not_found', '/api/v1/sessions/ses_alpha/messages?projectId=' + E2E_PROJECT_ID, undefined, 404, (_res, body) => {
           assert.equal((body as { code?: string }).code, 'not_found');
         });
-        await check('GET providers stranger project → 404 not_found', '/api/sessions/providers?projectId=' + E2E_PROJECT_ID, undefined, 404, (_res, body) => {
+        await check('GET providers stranger project → 404 not_found', '/api/v1/sessions/providers?projectId=' + E2E_PROJECT_ID, undefined, 404, (_res, body) => {
           assert.equal((body as { code?: string }).code, 'not_found');
         });
-        await check('POST interrupt stranger project → 404 not_found', '/api/sessions/ses_alpha/interrupt', jsonBody({ projectId: E2E_PROJECT_ID }), 404, (_res, body) => {
+        await check('POST interrupt stranger project → 404 not_found', '/api/v1/sessions/ses_alpha/interrupt', jsonBody({ projectId: E2E_PROJECT_ID }), 404, (_res, body) => {
           assert.equal((body as { code?: string }).code, 'not_found');
         });
       } finally {
@@ -895,22 +895,22 @@ async function main(): Promise<void> {
 
     // Real outage: network failure → 503 + Retry-After (only honest outage).
     process.env.OPENCODE_URL = 'http://127.0.0.1:9';
-    await check('runner unreachable → 200 durable list (no 503)', '/api/sessions?projectId=' + E2E_PROJECT_ID, undefined, 200, (res, body) => {
+    await check('runner unreachable → 200 durable list (no 503)', '/api/v1/sessions?projectId=' + E2E_PROJECT_ID, undefined, 200, (res, body) => {
       assert.ok(Array.isArray(body), 'durable list must be an array');
       assert.equal(res.headers.get('Retry-After'), null);
     });
-    await check('events unreachable → 503 JSON before any SSE header', '/api/sessions/events?projectId=' + E2E_PROJECT_ID, { headers: { accept: 'text/event-stream' } }, 503, (res, body) => {
+    await check('events unreachable → 503 JSON before any SSE header', '/api/v1/sessions/events?projectId=' + E2E_PROJECT_ID, { headers: { accept: 'text/event-stream' } }, 503, (res, body) => {
       assert.match(res.headers.get('content-type') ?? '', /application\/json/);
       assert.equal((body as { code?: string }).code, 'EXTERNAL_UNAVAILABLE');
     });
-    await check('runner unreachable → providers empty 200 (circuit breaker)', `/api/sessions/providers?projectId=${E2E_PROJECT_ID}`, undefined, 200, (_res, body) => {
+    await check('runner unreachable → providers empty 200 (circuit breaker)', `/api/v1/sessions/providers?projectId=${E2E_PROJECT_ID}`, undefined, 200, (_res, body) => {
       assert.deepEqual(body, []);
     });
-    await check('runner unreachable → models empty 200 (circuit breaker)', `/api/sessions/models?projectId=${E2E_PROJECT_ID}`, undefined, 200, (_res, body) => {
+    await check('runner unreachable → models empty 200 (circuit breaker)', `/api/v1/sessions/models?projectId=${E2E_PROJECT_ID}`, undefined, 200, (_res, body) => {
       assert.deepEqual(body, []);
     });
     let localSessionId = '';
-    await check('runner unreachable → POST /api/sessions creates a durable local session', '/api/sessions', jsonBody({ projectId: E2E_PROJECT_ID, title: 'local after outage' }), 200, (_res, body) => {
+    await check('runner unreachable → POST /api/v1/sessions creates a durable local session', '/api/v1/sessions', jsonBody({ projectId: E2E_PROJECT_ID, title: 'local after outage' }), 200, (_res, body) => {
       const row = body as Record<string, unknown>;
       assert.equal(typeof row.id, 'string');
       assert.ok(String(row.id).length > 0);
@@ -918,36 +918,36 @@ async function main(): Promise<void> {
       assert.equal(row.projectId, E2E_PROJECT_ID);
       localSessionId = String(row.id);
     });
-    await check('runner unreachable → GET messages of the local session is empty 200', `/api/sessions/${localSessionId}/messages?projectId=${E2E_PROJECT_ID}`, undefined, 200, (_res, body) => {
+    await check('runner unreachable → GET messages of the local session is empty 200', `/api/v1/sessions/${localSessionId}/messages?projectId=${E2E_PROJECT_ID}`, undefined, 200, (_res, body) => {
       assert.deepEqual(body, []);
     });
     process.env.OPENCODE_URL = stand.url;
 
     // Swagger surface: domain paths present, unversioned mirror gone.
-    await check('swagger exposes /api/sessions, no unversioned /api/opencode mirror', '/swagger/v1.json', undefined, 200, (_res, body) => {
+    await check('swagger exposes /api/v1/sessions, no unversioned /api/opencode mirror', '/swagger/v1.json', undefined, 200, (_res, body) => {
       const doc = body as { paths?: Record<string, Record<string, { deprecated?: boolean; tags?: Array<string> }>> };
       const paths = doc.paths ?? {};
-      assert.ok(paths['/api/sessions'], 'missing /api/sessions in swagger');
-      assert.ok(paths['/api/sessions/status'], 'missing /api/sessions/status in swagger');
-      assert.ok(paths['/api/sessions/{id}/messages'], 'missing /api/sessions/{id}/messages in swagger');
-      assert.ok(paths['/api/sessions/events'], 'missing /api/sessions/events in swagger');
-      assert.ok(paths['/api/sessions/providers'], 'missing /api/sessions/providers in swagger');
-      assert.ok(paths['/api/sessions/{id}/interrupt'], 'missing /api/sessions/{id}/interrupt in swagger');
-      assert.ok(paths['/api/sessions']?.get?.tags?.includes('sessions'), 'sessions tag missing');
+      assert.ok(paths['/api/v1/sessions'], 'missing /api/v1/sessions in swagger');
+      assert.ok(paths['/api/v1/sessions/status'], 'missing /api/v1/sessions/status in swagger');
+      assert.ok(paths['/api/v1/sessions/{id}/messages'], 'missing /api/v1/sessions/{id}/messages in swagger');
+      assert.ok(paths['/api/v1/sessions/events'], 'missing /api/v1/sessions/events in swagger');
+      assert.ok(paths['/api/v1/sessions/providers'], 'missing /api/v1/sessions/providers in swagger');
+      assert.ok(paths['/api/v1/sessions/{id}/interrupt'], 'missing /api/v1/sessions/{id}/interrupt in swagger');
+      assert.ok(paths['/api/v1/sessions']?.get?.tags?.includes('sessions'), 'sessions tag missing');
       assert.ok(!paths['/api/opencode/session'], 'removed /api/opencode mirror is still documented');
     });
 
     // Anonymous (no Bearer) → 401 before any gate/DB work — check() always
     // attaches the Bearer, so this one uses raw fetch (same pattern as the other e2e suites).
     {
-      const anon = await fetch(`${base}/api/sessions?projectId=${E2E_PROJECT_ID}`);
+      const anon = await fetch(`${base}/api/v1/sessions?projectId=${E2E_PROJECT_ID}`);
       const anonBody = (await anon.json().catch(() => null)) as { code?: string } | null;
       try {
         assert.equal(anon.status, 401);
         assert.equal(anonBody?.code, 'unauthorized');
-        push('GET /api/sessions anon → 401', null);
+        push('GET /api/v1/sessions anon → 401', null);
       } catch (err) {
-        push('GET /api/sessions anon → 401', err as Error);
+        push('GET /api/v1/sessions anon → 401', err as Error);
       }
     }
   } finally {

@@ -190,7 +190,7 @@ export const ru: Dictionary = {
   aiProviders: {
     titleA: 'AI-провайдеры',
     titleB: 'хаб',
-    subtitle: 'Живые провайдеры проекта через доменный API бэкенда (/api/sessions/providers). Переключатель — локальный.',
+    subtitle: 'Живые провайдеры проекта через доменный API бэкенда (/api/v1/sessions/providers). Переключатель — локальный.',
     doneTitle: 'Готово',
     emptyTitle: 'Нет провайдеров',
     emptyDesc: 'Подключите первый AI-провайдер, чтобы увидеть его здесь.',
@@ -239,7 +239,7 @@ export const ru: Dictionary = {
   },
   sessions: {
     streamTitle: 'Живой поток сессий',
-    streamSubtitle: 'SSE через доменный API бэкенда (/api/sessions/events).',
+    streamSubtitle: 'SSE через доменный API бэкенда (/api/v1/sessions/events).',
     connecting: 'Подключаемся…',
     live: 'В эфире',
     reconnecting: 'Переподключаемся…',

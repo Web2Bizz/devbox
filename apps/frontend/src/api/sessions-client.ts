@@ -15,7 +15,7 @@ import type {
 import { sessionStreamFrameSchema } from '@rush-code/contracts';
 
 /**
- * sessions-client — the browser domain client for `/api/sessions*`.
+ * sessions-client — the browser domain client for `/api/v1/sessions*`.
  *
  * The frontend knows NOTHING about the underlying session runner: every
  * call goes through the product contract (`@rush-code/contracts` types,
@@ -98,7 +98,7 @@ export function listSessionMessages(
 }
 
 /**
- * Long POST: POST /api/sessions/:id/messages returns its receipt only after
+ * Long POST: POST /api/v1/sessions/:id/messages returns its receipt only after
  * the whole backend turn (Jev + an Auto chain of up to 7 sequential model
  * calls) — the answer itself streams over SSE, `sending` clears on the
  * session.idle frame (or stop()). The long default timeout (SEND_TIMEOUT_MS)
@@ -126,7 +126,7 @@ export function sendSessionMessage(
 }
 
 /**
- * Interrupt a running session (POST /api/sessions/{id}/interrupt).
+ * Interrupt a running session (POST /api/v1/sessions/{id}/interrupt).
  * The domain answer {interrupted} is honest data: false means the session
  * was idle (no-op), never an error. Best-effort at the callers — stop()
  * keeps the partial answer locally regardless of the outcome.
@@ -139,7 +139,7 @@ export function interruptSession(
 }
 
 /**
- * Provider inventory for the project (GET /api/sessions/providers) —
+ * Provider inventory for the project (GET /api/v1/sessions/providers) —
  * domain rows are the REQUIRED subset of the artifact Provider.Info
  * (id/name/activation/package), boundary-parsed in ./client. Credential-
  * bearing upstream members (settings/headers/body) never reach the
@@ -178,7 +178,7 @@ export function listAgents(opts?: { signal?: AbortSignal }): Promise<AgentInfo[]
 export const DEFAULT_AGENT_ID = 'ask';
 
 /**
- * SSE live frames of GET /api/sessions/events as domain
+ * SSE live frames of GET /api/v1/sessions/events as domain
  * SessionStreamFrame rows. Every `data:` payload is parsed with
  * sessionStreamFrameSchema — a malformed frame FAILS LOUD (throws out of
  * the generator; the caller treats it as a stream break and redials with

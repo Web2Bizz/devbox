@@ -11,8 +11,6 @@ import {
   Req,
   Res,
   UseGuards,
-  Version,
-  VERSION_NEUTRAL,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
@@ -25,9 +23,10 @@ import { createRunRequestSchema, type CreateRunInput, type RunInfo, type RunInfo
 import { RunsService } from './runs.service';
 
 /**
- * Domain run routes — /api/runs* (VERSION_NEUTRAL under the global 'api'
- * prefix). Prototype API minimum: create, read one, stream its journal, list
- * a project's runs. Interrupt/upgrade-definition are deliberately absent.
+ * Domain run routes — /api/v1/runs* (URI-versioned v1 under the global 'api'
+ * prefix, NOT VERSION_NEUTRAL). Prototype API minimum: create, read one,
+ * stream its journal, list a project's runs. Interrupt/upgrade-definition are
+ * deliberately absent.
  *
  * Auth: every route is JwtAuthGuard + the C4 project gate (strangers → 404
  * with no existence leak; blank projectId → 400 PROJECT_REQUIRED). Guests →
@@ -43,7 +42,6 @@ export class RunsController {
 
   @UseGuards(JwtAuthGuard)
   @Post()
-  @Version(VERSION_NEUTRAL)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create a project run (open status, pinned to the repo HEAD as Forward-Only base)' })
   @ApiResponse({ status: 201, description: 'created domain run (RunInfo)' })
@@ -62,7 +60,6 @@ export class RunsController {
 
   @UseGuards(JwtAuthGuard)
   @Get(':id/events')
-  @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'Live run journal (SSE; prototype frames {id, type, data, run?}, catch-up from ?cursor=)' })
   @ApiResponse({ status: 200, description: 'text/event-stream of domain RunStreamFrame rows (replayed seq > cursor, then live)' })
   @ApiResponse({ status: 400, description: 'run id is not a uuid or cursor is not a non-negative integer (bad_request) — no Retry-After', type: ApiErrorDto })
@@ -83,7 +80,6 @@ export class RunsController {
 
   @UseGuards(JwtAuthGuard)
   @Get()
-  @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'List project runs (domain rows, newest first)' })
   @ApiResponse({ status: 200, description: 'run rows for this project (always an array; empty when none)' })
   @ApiResponse({ status: 400, description: 'missing projectId (PROJECT_REQUIRED, the C4 gate)', type: ApiErrorDto })
@@ -99,7 +95,6 @@ export class RunsController {
 
   @UseGuards(JwtAuthGuard)
   @Get(':id')
-  @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'Read one run by id (C4-gated by its project)' })
   @ApiResponse({ status: 200, description: 'domain run (RunInfo)' })
   @ApiResponse({ status: 400, description: 'run id is not a uuid (bad_request) — no Retry-After', type: ApiErrorDto })

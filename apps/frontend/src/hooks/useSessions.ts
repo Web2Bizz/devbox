@@ -19,7 +19,7 @@ import { sessionStatusQueryKey, sessionsQueryKey } from './query-keys';
 
 export type UseSessionsResult = {
   sessions: SessionInfo[];
-  /** sessionId → derived runtime status (GET /api/sessions/status). */
+  /** sessionId → derived runtime status (GET /api/v1/sessions/status). */
   statusMap: SessionRunStatusMap;
   loading: boolean;
   error: string | null;
@@ -33,9 +33,9 @@ export type UseSessionsResult = {
 
 /**
  * Domain session query retry policy — the single source for every
- * /api/sessions* React Query hook (useSessions/useSessionMessages).
+ * /api/v1/sessions* React Query hook (useSessions/useSessionMessages).
  * No retry on terminal auth states (dead session / honest 401 — a retry
- * would only hammer /api/sessions) and none on shape_mismatch (a contract
+ * would only hammer /api/v1/sessions) and none on shape_mismatch (a contract
  * bug — a refetch cannot fix it); one retry otherwise (shared-client
  * contract).
  */
@@ -68,8 +68,8 @@ function describeError(error: unknown, sessionExpired: string, unexpected: strin
 }
 
 /**
- * Project-scoped sessions through the domain contract (`GET /api/sessions`,
- * `GET /api/sessions/status`, `POST /api/sessions`, interrupt alias — see
+ * Project-scoped sessions through the domain contract (`GET /api/v1/sessions`,
+ * `GET /api/v1/sessions/status`, `POST /api/v1/sessions`, interrupt alias — see
  * api/sessions-client). Same loading/error/empty/reload contract as
  * useProjects:
  *
@@ -161,7 +161,7 @@ export function useSessions(options?: UseSessionsOptions): UseSessionsResult {
     },
   });
 
-  // Interrupt rides the domain route (POST /api/sessions/{id}/interrupt);
+  // Interrupt rides the domain route (POST /api/v1/sessions/{id}/interrupt);
   // {interrupted:false} (idle no-op) is an honest success, not an error.
   const abortMutation = useMutation<SessionInterruptResult, unknown, string>({
     mutationFn: async (id: string): Promise<SessionInterruptResult> => {

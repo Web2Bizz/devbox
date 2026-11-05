@@ -38,10 +38,10 @@ function describeError(error: unknown, sessionExpired: string, unexpected: strin
 
 /**
  * Session thread through the domain contract (GET/POST
- * `/api/sessions/{id}/messages`) — React Query data hook (rows are the
+ * `/api/v1/sessions/{id}/messages`) — React Query data hook (rows are the
  * normalized `SessionMessage` projection: id/type/createdAt/text|null,
  * boundary-parsed in api/client). The send() queues the prompt and the
- * assistant answer streams over /api/sessions/events (useSessionEvents),
+ * assistant answer streams over /api/v1/sessions/events (useSessionEvents),
  * so the mutation only invalidates the thread; live text does not come
  * from this hook.
  *

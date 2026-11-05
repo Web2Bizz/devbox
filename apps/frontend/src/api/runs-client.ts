@@ -4,7 +4,7 @@ import { runStreamFrameSchema } from '@rush-code/contracts';
 import type { CreateRunRequest, RunInfo, RunInfoList, RunStreamFrame } from '@rush-code/contracts';
 
 /**
- * runs-client — the browser domain client for `/api/runs*`.
+ * runs-client — the browser domain client for `/api/v1/runs*`.
  *
  * Same stance as sessions-client: every call goes through the product
  * contract (`@rush-code/contracts` types, boundaries enforced in ./client
@@ -84,7 +84,7 @@ export async function* runFrameStream(
   }
 }
 
-/** Live run journal frames (GET /api/runs/:id/events?cursor=). */
+/** Live run journal frames (GET /api/v1/runs/:id/events?cursor=). */
 export async function* runEventStream(
   runId: string,
   cursor: number,

@@ -103,7 +103,7 @@ export function setupSwagger(app: INestApplication): void {
     .setTitle('Rush Code domain API')
     .setDescription(
       'Product contract between frontend clients and the backend (NestJS 12). ' +
-        'The session-runner transport lives server-side only (see /api/sessions*); ' +
+        'The session-runner transport lives server-side only (see /api/v1/sessions*); ' +
         'unreachable upstream answers 503 ' +
         'EXTERNAL_UNAVAILABLE with Retry-After (no mock fallbacks). ' +
         'Error envelope is always { code, message, correlationId }. ' +

@@ -109,7 +109,7 @@ describe('sessions-client domain boundary', () => {
     const rows = await listSessions(PROJECT);
     expect(rows.length).toBe(1);
     expect(rows[0]).toEqual(ROW);
-    expect(calls[0]?.url).toContain(`/api/sessions?projectId=${PROJECT}`);
+    expect(calls[0]?.url).toContain(`/api/v1/sessions?projectId=${PROJECT}`);
     const headers = calls[0]?.init.headers as Record<string, string>;
     expect(headers.authorization).toBe('Bearer token-1');
     expect(headers['x-correlation-id']).toBeTruthy();
@@ -252,7 +252,7 @@ describe('sessions-client domain boundary', () => {
     expect(res).toEqual({ interrupted: false });
     const init = calls[0]?.init as RequestInit;
     expect(init.method).toBe('POST');
-    expect(calls[0]?.url).toContain('/api/sessions/ses_1/interrupt');
+    expect(calls[0]?.url).toContain('/api/v1/sessions/ses_1/interrupt');
     expect(JSON.parse(String(init.body))).toEqual({ projectId: PROJECT });
 
     // Drift: interrupted missing is a contract bug, never a default to false.
@@ -282,7 +282,7 @@ describe('sessions-client domain boundary', () => {
     const rows = await listSessionProviders(PROJECT);
     expect(rows).toEqual([{ id: 'p1', name: 'One', activation: 'enabled', package: '@p/one' }]);
     expect(JSON.stringify(rows)).not.toContain('should-never-travel');
-    expect(calls[0]?.url).toContain(`/api/sessions/providers?projectId=${PROJECT}`);
+    expect(calls[0]?.url).toContain(`/api/v1/sessions/providers?projectId=${PROJECT}`);
 
     stubs = [{ status: 200, body: [{ id: 'p1', name: 'One', activation: 'weird', package: '' }] }];
     const err = await listSessionProviders(PROJECT).catch((e: unknown) => e);

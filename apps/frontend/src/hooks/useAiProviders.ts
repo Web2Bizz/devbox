@@ -23,7 +23,7 @@ export type UseAiProvidersResult = {
 
 /**
  * Shared fetch — the project's provider inventory through the domain
- * route (GET /api/sessions/providers via api/sessions-client). Rows are
+ * route (GET /api/v1/sessions/providers via api/sessions-client). Rows are
  * the contract `SessionRunnerProvider` shape (boundary-parsed in
  * ./client): id/name/activation/package — the REQUIRED artifact
  * Provider.Info subset; credential-bearing upstream members never reach

@@ -78,7 +78,7 @@ const V1_PREFIX = `/api/${API_VERSION}`;
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
-// Long POST exception: POST /api/sessions/:id/messages returns its receipt
+// Long POST exception: POST /api/v1/sessions/:id/messages returns its receipt
 // only after the whole backend turn (Jev ~10s + an Auto chain of up to 7
 // sequential model calls ~90s each) — the 10s default would abort the wait
 // while the backend keeps computing and streaming frames over SSE. Abort
@@ -213,10 +213,9 @@ export const api = {
   baseUrl: BASE_URL,
   apiVersion: API_VERSION,
   getHealth: () => request<HealthResponse>('/health'),
-  // ── Domain sessions surface — GET/POST /api/sessions* (card 4 product
-  // contract). Unversioned ON PURPOSE: the backend serves these routes
-  // VERSION_NEUTRAL (the deleted /api/v1/session proxy is gone — never
-  // route domain rows through a versioned alias). JWT-guarded + C4 gate:
+  // ── Domain sessions surface — GET/POST /api/v1/sessions* (card 4 product
+  // contract). URI-versioned v1: the backend serves these routes under the
+  // canonical /api/v1 prefix (NOT VERSION_NEUTRAL). JWT-guarded + C4 gate:
   // projectId is REQUIRED here (missing → honest 400 PROJECT_REQUIRED
   // ApiClientError, strangers → 404 not_found, runner outage → 503
   // EXTERNAL_UNAVAILABLE — never masked, never defaulted). Every answer is
@@ -230,10 +229,10 @@ export const api = {
     opts?: { signal?: AbortSignal },
   ): Promise<SessionInfo[]> =>
     parseBoundary(
-      'GET /api/sessions',
+      'GET /api/v1/sessions',
       sessionInfoListSchema,
       await request<unknown>(
-        `/api/sessions?projectId=${encodeURIComponent(projectId)}`,
+        `/api/v1/sessions?projectId=${encodeURIComponent(projectId)}`,
         {
           headers: { authorization: `Bearer ${accessToken}` },
           ...(opts?.signal ? { signal: opts.signal } : {}),
@@ -242,9 +241,9 @@ export const api = {
     ),
   createSession: async (accessToken: string, body: CreateSessionRequest) =>
     parseBoundary(
-      'POST /api/sessions',
+      'POST /api/v1/sessions',
       sessionInfoSchema,
-      await request<unknown>('/api/sessions', {
+      await request<unknown>('/api/v1/sessions', {
         method: 'POST',
         headers: { authorization: `Bearer ${accessToken}` },
         body: JSON.stringify(body),
@@ -256,10 +255,10 @@ export const api = {
     opts?: { signal?: AbortSignal },
   ): Promise<SessionRunStatusMap> =>
     parseBoundary(
-      'GET /api/sessions/status',
+      'GET /api/v1/sessions/status',
       sessionRunStatusMapSchema,
       await request<unknown>(
-        `/api/sessions/status?projectId=${encodeURIComponent(projectId)}`,
+        `/api/v1/sessions/status?projectId=${encodeURIComponent(projectId)}`,
         {
           headers: { authorization: `Bearer ${accessToken}` },
           ...(opts?.signal ? { signal: opts.signal } : {}),
@@ -276,10 +275,10 @@ export const api = {
     if (opts?.limit !== undefined) q.set('limit', String(opts.limit));
     if (opts?.cursor) q.set('cursor', opts.cursor);
     return parseBoundary(
-      'GET /api/sessions/:id/messages',
+      'GET /api/v1/sessions/:id/messages',
       sessionMessageListSchema,
       await request<unknown>(
-        `/api/sessions/${encodeURIComponent(sessionId)}/messages?${q.toString()}`,
+        `/api/v1/sessions/${encodeURIComponent(sessionId)}/messages?${q.toString()}`,
         {
           headers: { authorization: `Bearer ${accessToken}` },
           ...(opts?.signal ? { signal: opts.signal } : {}),
@@ -294,10 +293,10 @@ export const api = {
     opts?: { signal?: AbortSignal; timeoutMs?: number },
   ) =>
     parseBoundary(
-      'POST /api/sessions/:id/messages',
+      'POST /api/v1/sessions/:id/messages',
       sessionMessageSchema,
       await request<unknown>(
-        `/api/sessions/${encodeURIComponent(sessionId)}/messages`,
+        `/api/v1/sessions/${encodeURIComponent(sessionId)}/messages`,
         {
           method: 'POST',
           headers: { authorization: `Bearer ${accessToken}` },
@@ -321,7 +320,7 @@ export const api = {
   ): Promise<Response> => {
     const correlationId = crypto.randomUUID();
     const res = await fetch(
-      `${BASE_URL}/api/sessions/events?projectId=${encodeURIComponent(projectId)}`,
+      `${BASE_URL}/api/v1/sessions/events?projectId=${encodeURIComponent(projectId)}`,
       {
         method: 'GET',
         headers: {
@@ -347,7 +346,7 @@ export const api = {
   },
   // ── Domain interrupt + provider inventory (card 6) — the last two
   // surfaces that used the deprecated mirror alias are now domain routes:
-  // POST /api/sessions/:id/interrupt and GET /api/sessions/providers.
+  // POST /api/v1/sessions/:id/interrupt and GET /api/v1/sessions/providers.
   // No mirror transport remains anywhere in the frontend. ──
   interruptSession: async (
     accessToken: string,
@@ -355,9 +354,9 @@ export const api = {
     body: InterruptSessionRequest,
   ): Promise<SessionInterruptResult> =>
     parseBoundary(
-      'POST /api/sessions/:id/interrupt',
+      'POST /api/v1/sessions/:id/interrupt',
       sessionInterruptResultSchema,
-      await request<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/interrupt`, {
+      await request<unknown>(`/api/v1/sessions/${encodeURIComponent(sessionId)}/interrupt`, {
         method: 'POST',
         headers: { authorization: `Bearer ${accessToken}` },
         body: JSON.stringify(body),
@@ -369,10 +368,10 @@ export const api = {
     opts?: { signal?: AbortSignal },
   ): Promise<SessionRunnerProvider[]> =>
     parseBoundary(
-      'GET /api/sessions/providers',
+      'GET /api/v1/sessions/providers',
       sessionRunnerProviderListSchema,
       await request<unknown>(
-        `/api/sessions/providers?projectId=${encodeURIComponent(projectId)}`,
+        `/api/v1/sessions/providers?projectId=${encodeURIComponent(projectId)}`,
         {
           headers: { authorization: `Bearer ${accessToken}` },
           ...(opts?.signal ? { signal: opts.signal } : {}),
@@ -385,10 +384,10 @@ export const api = {
     opts?: { signal?: AbortSignal },
   ): Promise<SessionModel[]> =>
     parseBoundary(
-      'GET /api/sessions/models',
+      'GET /api/v1/sessions/models',
       sessionModelListSchema,
       await request<unknown>(
-        `/api/sessions/models?projectId=${encodeURIComponent(projectId)}`,
+        `/api/v1/sessions/models?projectId=${encodeURIComponent(projectId)}`,
         {
           headers: { authorization: `Bearer ${accessToken}` },
           ...(opts?.signal ? { signal: opts.signal } : {}),
@@ -396,9 +395,9 @@ export const api = {
       ),
     ),
   // Agent registry (GET /api/v1/agents) — the chat AgentSelector inventory.
-  // Versioned (the agents controller is URI-versioned v1, unlike the
-  // VERSION_NEUTRAL domain session routes), same boundary-parse stance:
-  // a wire drift fails fast as shape_mismatch, never a silent cast.
+  // URI-versioned v1 (same canonical prefix as the domain session routes),
+  // same boundary-parse stance: a wire drift fails fast as shape_mismatch,
+  // never a silent cast.
   listAgents: async (accessToken: string, opts?: { signal?: AbortSignal }): Promise<AgentInfo[]> =>
     parseBoundary(
       'GET /api/v1/agents',
@@ -408,28 +407,28 @@ export const api = {
         ...(opts?.signal ? { signal: opts.signal } : {}),
       }),
     ),
-  // ── Runs domain — VERSION_NEUTRAL /api/runs* (same stance as sessions:
-  // unversioned on purpose, JWT-guarded, project-scoped via ?projectId=,
-  // every answer parsed with a @rush-code/contracts boundary schema so a
-  // wire drift fails fast as ApiClientError('shape_mismatch')). ──
+  // ── Runs domain — /api/v1/runs* (URI-versioned v1, same stance as
+  // sessions: JWT-guarded, project-scoped via ?projectId=, every answer
+  // parsed with a @rush-code/contracts boundary schema so a wire drift fails
+  // fast as ApiClientError('shape_mismatch')). ──
   listRuns: async (
     accessToken: string,
     projectId: string,
     opts?: { signal?: AbortSignal },
   ): Promise<RunInfoList> =>
     parseBoundary(
-      'GET /api/runs',
+      'GET /api/v1/runs',
       runInfoListSchema,
-      await request<unknown>(`/api/runs?projectId=${encodeURIComponent(projectId)}`, {
+      await request<unknown>(`/api/v1/runs?projectId=${encodeURIComponent(projectId)}`, {
         headers: { authorization: `Bearer ${accessToken}` },
         ...(opts?.signal ? { signal: opts.signal } : {}),
       }),
     ),
   createRun: async (accessToken: string, body: CreateRunRequest): Promise<RunInfo> =>
     parseBoundary(
-      'POST /api/runs',
+      'POST /api/v1/runs',
       runInfoSchema,
-      await request<unknown>('/api/runs', {
+      await request<unknown>('/api/v1/runs', {
         method: 'POST',
         headers: { authorization: `Bearer ${accessToken}` },
         body: JSON.stringify(body),
@@ -441,9 +440,9 @@ export const api = {
     opts?: { signal?: AbortSignal },
   ): Promise<RunInfo> =>
     parseBoundary(
-      'GET /api/runs/:id',
+      'GET /api/v1/runs/:id',
       runInfoSchema,
-      await request<unknown>(`/api/runs/${encodeURIComponent(runId)}`, {
+      await request<unknown>(`/api/v1/runs/${encodeURIComponent(runId)}`, {
         headers: { authorization: `Bearer ${accessToken}` },
         ...(opts?.signal ? { signal: opts.signal } : {}),
       }),
@@ -460,7 +459,7 @@ export const api = {
   ): Promise<Response> => {
     const correlationId = crypto.randomUUID();
     const res = await fetch(
-      `${BASE_URL}/api/runs/${encodeURIComponent(runId)}/events?cursor=${cursor}`,
+      `${BASE_URL}/api/v1/runs/${encodeURIComponent(runId)}/events?cursor=${cursor}`,
       {
         method: 'GET',
         headers: {

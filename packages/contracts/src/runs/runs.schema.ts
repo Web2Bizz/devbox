@@ -13,7 +13,7 @@ import type {
 import { agentIdSchema, sessionInfoModelSchema } from '../sessions/sessions.schema';
 
 /**
- * Boundary schemas for runs.ts (domain /api/runs* contract).
+ * Boundary schemas for runs.ts (domain /api/v1/runs* contract).
  *
  * Response schemas mirror contracts/openapi.yaml and are for CLIENT-side
  * parsing — nullable title/sandboxId/agentId/model are explicit keys (never
@@ -71,7 +71,7 @@ export const runInfoSchema = z.object({
 
 export const runInfoListSchema = z.array(runInfoSchema) satisfies z.ZodType<RunInfoList>;
 
-/** POST /api/runs body — projectId required (runs are project-scoped). */
+/** POST /api/v1/runs body — projectId required (runs are project-scoped). */
 export const createRunRequestSchema = z.object({
   projectId: z.uuid({ error: 'Field "projectId" is required' }),
   title: z.string().min(1).max(200).optional(),
@@ -83,7 +83,7 @@ export const createRunRequestSchema = z.object({
 
 export type CreateRunInput = z.infer<typeof createRunRequestSchema>;
 
-/** SSE frame envelope of GET /api/runs/{id}/events — `id` is the per-run
+/** SSE frame envelope of GET /api/v1/runs/{id}/events — `id` is the per-run
  * monotonic seq as a string; `data` is the variant payload passed through as
  * an unknown record (envelope-only, matching SessionStreamFrame). */
 export const runStreamFrameSchema = z.object({

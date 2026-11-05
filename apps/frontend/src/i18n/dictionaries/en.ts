@@ -190,7 +190,7 @@ export const en: Dictionary = {
   aiProviders: {
     titleA: 'AI providers',
     titleB: 'hub',
-    subtitle: 'Live provider inventory for this project via the backend domain API (/api/sessions/providers). Toggle is local-only.',
+    subtitle: 'Live provider inventory for this project via the backend domain API (/api/v1/sessions/providers). Toggle is local-only.',
     doneTitle: 'Done',
     emptyTitle: 'No providers',
     emptyDesc: 'Connect your first AI provider to see it here.',
@@ -239,7 +239,7 @@ export const en: Dictionary = {
   },
   sessions: {
     streamTitle: 'Live session stream',
-    streamSubtitle: 'SSE via the backend domain API (/api/sessions/events).',
+    streamSubtitle: 'SSE via the backend domain API (/api/v1/sessions/events).',
     connecting: 'Connecting…',
     live: 'Live',
     reconnecting: 'Reconnecting…',

@@ -14,7 +14,7 @@ import { AppLogger } from '../../../common/logger';
 import type { RunInfo } from './runs.dto';
 import { GENESIS_HASH, nextPrevHash } from './utils/event-chain';
 
-/** POST /api/runs row input (correlationId is log-only, never persisted). */
+/** POST /api/v1/runs row input (correlationId is log-only, never persisted). */
 export type CreateRunRowInput = {
   /** Pre-minted by the service — the SAME id the branch/worktree names derive from. */
   runId: string;
@@ -168,7 +168,7 @@ export class RunsRepository {
     }
   }
 
-  /** Project-scoped live runs, newest first (GET /api/runs). */
+  /** Project-scoped live runs, newest first (GET /api/v1/runs). */
   async listRuns(projectId: string, cid: string): Promise<Array<RunRow>> {
     try {
       return await this.db.client

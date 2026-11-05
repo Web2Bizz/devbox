@@ -11,7 +11,7 @@ import type {
 } from './sessions.dto';
 
 /**
- * SessionHarness — orchestrator of AI sessions behind /api/sessions*.
+ * SessionHarness — orchestrator of AI sessions behind /api/v1/sessions*.
  *
  * Card 1 (harness-core): the interface speaks ONLY the domain vocabulary
  * (SessionInfo / SessionMessage / SessionStreamFrame-shaped rows from
@@ -24,20 +24,20 @@ import type {
  * interface, never on the transport.
  */
 export interface SessionHarness {
-  /** GET /api/sessions?projectId — list scoped to the gated jail. */
+  /** GET /api/v1/sessions?projectId — list scoped to the gated jail. */
   list(userId: string, projectId: string | undefined, cid: string): Promise<Array<SessionInfo>>;
 
-  /** GET /api/sessions/status?projectId — sessionId → derived runtime status. */
+  /** GET /api/v1/sessions/status?projectId — sessionId → derived runtime status. */
   statusMap(
     userId: string,
     projectId: string | undefined,
     cid: string,
   ): Promise<SessionRunStatusMap>;
 
-  /** POST /api/sessions — create in the gated jail. */
+  /** POST /api/v1/sessions — create in the gated jail. */
   create(userId: string, body: CreateSessionInput, cid: string): Promise<SessionInfo>;
 
-  /** GET /api/sessions/{id}/messages — normalized domain rows. */
+  /** GET /api/v1/sessions/{id}/messages — normalized domain rows. */
   listMessages(
     userId: string,
     sessionId: string,
@@ -47,7 +47,7 @@ export interface SessionHarness {
     cid: string,
   ): Promise<Array<SessionMessage>>;
 
-  /** POST /api/sessions/{id}/messages — queue the prompt, answer the receipt. */
+  /** POST /api/v1/sessions/{id}/messages — queue the prompt, answer the receipt. */
   sendMessage(
     userId: string,
     sessionId: string,
@@ -55,7 +55,7 @@ export interface SessionHarness {
     cid: string,
   ): Promise<SessionMessage>;
 
-  /** POST /api/sessions/{id}/interrupt — honest {interrupted} answer. */
+  /** POST /api/v1/sessions/{id}/interrupt — honest {interrupted} answer. */
   interrupt(
     userId: string,
     sessionId: string,
@@ -63,21 +63,21 @@ export interface SessionHarness {
     cid: string,
   ): Promise<SessionInterruptResult>;
 
-  /** GET /api/sessions/providers — runner provider inventory (gated jail). */
+  /** GET /api/v1/sessions/providers — runner provider inventory (gated jail). */
   providers(
     userId: string,
     projectId: string | undefined,
     cid: string,
   ): Promise<Array<SessionRunnerProvider>>;
 
-  /** GET /api/sessions/models — runner model inventory (Go/Zen family). */
+  /** GET /api/v1/sessions/models — runner model inventory (Go/Zen family). */
   models(
     userId: string,
     projectId: string | undefined,
     cid: string,
   ): Promise<Array<{ id: string; name: string; providerID: string }>>;
 
-  /** GET /api/sessions/events — SSE re-stream of domain frames (contract frozen). */
+  /** GET /api/v1/sessions/events — SSE re-stream of domain frames (contract frozen). */
   streamEvents(
     userId: string,
     projectId: string | undefined,

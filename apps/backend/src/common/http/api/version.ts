@@ -9,9 +9,10 @@
  * - /health stays VERSION_NEUTRAL at the root (global-prefix excluded; probes
  *   must not depend on API versioning).
  *
- * `@Version(VERSION_NEUTRAL)` is the only explicit override controllers may
- * apply; there is no per-endpoint `Api-Version` request or response header —
- * the version is encoded in the URI alone.
+ * `@Version(VERSION_NEUTRAL)` is reserved for /health only (probes must not
+ * depend on API versioning); every other controller stays on the default v1
+ * URI version. There is no per-endpoint `Api-Version` request or response
+ * header — the version is encoded in the URI alone.
  */
 export const DEFAULT_API_VERSION = '1';
 

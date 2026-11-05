@@ -1,6 +1,6 @@
 /**
  * useAiProviders — provider inventory via the DOMAIN route
- * (api/sessions-client listSessionProviders → GET /api/sessions/providers;
+ * (api/sessions-client listSessionProviders → GET /api/v1/sessions/providers;
  * rows are the contract SessionRunnerProvider subset: id/name/activation/
  * package — boundary-parsed in api/client).
  *

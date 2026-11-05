@@ -13,7 +13,7 @@ import type {
 import { SessionHarnessService } from './session-harness.service';
 
 /**
- * SessionsService — thin domain facade behind /api/sessions*.
+ * SessionsService — thin domain facade behind /api/v1/sessions*.
  *
  * Card 1 (harness-core): all orchestration (create/send/interrupt/status,
  * transport + opencode → Rush Code translation) lives in
@@ -28,12 +28,12 @@ import { SessionHarnessService } from './session-harness.service';
 export class SessionsService {
   constructor(private readonly harness: SessionHarnessService) {}
 
-  /** GET /api/sessions?projectId — list scoped to the gated jail. */
+  /** GET /api/v1/sessions?projectId — list scoped to the gated jail. */
   async list(userId: string, projectId: string | undefined, cid: string): Promise<Array<SessionInfo>> {
     return this.harness.list(userId, projectId, cid);
   }
 
-  /** GET /api/sessions/status?projectId — sessionId → derived runtime status. */
+  /** GET /api/v1/sessions/status?projectId — sessionId → derived runtime status. */
   async statusMap(
     userId: string,
     projectId: string | undefined,
@@ -42,12 +42,12 @@ export class SessionsService {
     return this.harness.statusMap(userId, projectId, cid);
   }
 
-  /** POST /api/sessions — create in the gated jail. */
+  /** POST /api/v1/sessions — create in the gated jail. */
   async create(userId: string, body: CreateSessionInput, cid: string): Promise<SessionInfo> {
     return this.harness.create(userId, body, cid);
   }
 
-  /** GET /api/sessions/{id}/messages — normalized domain rows. */
+  /** GET /api/v1/sessions/{id}/messages — normalized domain rows. */
   async listMessages(
     userId: string,
     sessionId: string,
@@ -59,7 +59,7 @@ export class SessionsService {
     return this.harness.listMessages(userId, sessionId, projectId, limitRaw, cursor, cid);
   }
 
-  /** POST /api/sessions/{id}/messages — queue the prompt, answer the receipt. */
+  /** POST /api/v1/sessions/{id}/messages — queue the prompt, answer the receipt. */
   async sendMessage(
     userId: string,
     sessionId: string,
@@ -69,7 +69,7 @@ export class SessionsService {
     return this.harness.sendMessage(userId, sessionId, body, cid);
   }
 
-  /** GET /api/sessions/events — SSE re-stream of domain frames (contract frozen). */
+  /** GET /api/v1/sessions/events — SSE re-stream of domain frames (contract frozen). */
   async streamEvents(
     userId: string,
     projectId: string | undefined,
@@ -80,7 +80,7 @@ export class SessionsService {
     return this.harness.streamEvents(userId, projectId, cid, req, res);
   }
 
-  /** POST /api/sessions/{id}/interrupt — honest {interrupted} answer. */
+  /** POST /api/v1/sessions/{id}/interrupt — honest {interrupted} answer. */
   async interrupt(
     userId: string,
     sessionId: string,
@@ -90,12 +90,12 @@ export class SessionsService {
     return this.harness.interrupt(userId, sessionId, body, cid);
   }
 
-  /** GET /api/sessions/providers — runner provider inventory (gated jail). */
+  /** GET /api/v1/sessions/providers — runner provider inventory (gated jail). */
   async providers(userId: string, projectId: string | undefined, cid: string): Promise<Array<SessionRunnerProvider>> {
     return this.harness.providers(userId, projectId, cid);
   }
 
-  /** GET /api/sessions/models — runner model inventory (Go/Zen family). */
+  /** GET /api/v1/sessions/models — runner model inventory (Go/Zen family). */
   async models(userId: string, projectId: string | undefined, cid: string): Promise<Array<{ id: string; name: string; providerID: string }>> {
     return this.harness.models(userId, projectId, cid);
   }

@@ -43,7 +43,7 @@ No `lint`/`format` scripts despite `CONTRIBUTING.md` mentioning `npm run lint` �
 - `app/` — Expo Router screens. `_layout.tsx` is root (auth gate, SSE, notifications, telemetry consent). `(tabs)/` holds tab group, `session/[id].tsx`, `connection/`, `project/`.
 - `src/lib/sdk.ts` — custom lightweight opencode client over `expo/fetch` (not generated `@opencode-ai/sdk`). All API calls go through here; SSE via `src/lib/sse.ts`.
 
-> Note: mobile talks to the opencode server directly (not through the rush-code backend). The frontend web app uses the rush-code backend domain API (`/api/sessions*`) and must not import `@opencode-ai/sdk`.
+> Note: mobile talks to the opencode server directly (not through the rush-code backend). The frontend web app uses the rush-code backend domain API (`/api/v1/sessions*`) and must not import `@opencode-ai/sdk`.
 - `src/shared/utils/` — pure utils with colocated `*.test.ts`. Each module is independently testable.
 - `packages/uikit/` — `@web2bizz/ui-native`: the SINGLE home for reusable UI (components, theme, tablet hook, UI-support utils in `src/utils/`). Never duplicate a component in `src/components/` — app-bound components (stores, server clients, release checks: `AuthGate`, `CloneRepoSheet`, `ConnectionBadge`, `UpdateBanner`, `ErrorBoundary`) live in `src/components/` instead. Utils moved here keep their colocated tests; `npm test` covers `packages/uikit/src/**/*.test.ts` too.
 - `src/shared/stores/` — Zustand stores (`auth`, `connections`, `events`, `catalog`, `settings`).

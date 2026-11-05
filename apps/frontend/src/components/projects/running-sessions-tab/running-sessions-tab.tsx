@@ -23,14 +23,14 @@ function streamColor(status: string) {
  * Running tab for /projects/[id] — busy sessions only.
  *
  * Data is the domain surface (see useSessions): the list + the derived
- * busy/idle `statusMap` from GET /api/sessions/status (a working source —
+ * busy/idle `statusMap` from GET /api/v1/sessions/status (a working source —
  * the old runner status surface was never served by the current runtime,
  * which made the filter permanently empty). Liveness comes from
  * useSessionEvents (domain SSE, backoff 1s→15s, project-scoped), which
  * triggers a list+status reload on `session.*` frames; between frames the
  * rows' own derived status overlays the (possibly stale) map.
  * Abort is best-effort via useSessions → the domain interrupt route
- * (POST /api/sessions/{id}/interrupt; idle answers interrupted=false).
+ * (POST /api/v1/sessions/{id}/interrupt; idle answers interrupted=false).
  * Navigation/props: `projectId` required — no `?directory=`.
  *
  * List: linear ul/li + Separator (DESIGN §6, no Card), scroll owned by

@@ -4,7 +4,7 @@
  * The parser is deliberately pure: it takes an already-open Response, so no
  * auth/fetch is involved here (the domain auth path is covered by
  * sessions-client tests + `withAuth`). The point is the DOMAIN BOUNDARY of
- * GET /api/runs/{id}/events: `data:` payloads parse to
+ * GET /api/v1/runs/{id}/events: `data:` payloads parse to
  * @rush-code/contracts RunStreamFrame rows, heartbeat/comment lines are
  * transport framing (skipped, never a frame), multi-line `data:` chunks join
  * into one frame, and a malformed frame FAILS LOUD (throws out of the
@@ -42,7 +42,7 @@ async function collectFrames(res: Response): Promise<RunStreamFrame[]> {
   return frames;
 }
 
-describe('runFrameStream (GET /api/runs/{id}/events framing)', () => {
+describe('runFrameStream (GET /api/v1/runs/{id}/events framing)', () => {
   test('data: frames parse to domain rows; heartbeat skipped; multi-line JSON joins', async () => {
     const chunks = [
       ':\n\n',

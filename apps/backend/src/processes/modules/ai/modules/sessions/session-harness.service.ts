@@ -106,7 +106,7 @@ function isMissingKey(err: unknown): boolean {
 }
 
 /**
- * SessionHarnessService — default SessionHarness behind /api/sessions*.
+ * SessionHarnessService — default SessionHarness behind /api/v1/sessions*.
  *
  * Card 1 (harness-core): the orchestrator interface is domain-only
  * (SessionInfo / SessionMessage / SessionStreamFrame from
@@ -317,7 +317,7 @@ export class SessionHarnessService implements SessionHarness {
     return rows.map((s) => this.toSessionInfo(s, project.projectId, active, agents.get(s.id) ?? null));
   }
 
-  /** GET /api/sessions?projectId — list scoped to the gated jail. */
+  /** GET /api/v1/sessions?projectId — list scoped to the gated jail. */
   async list(userId: string, projectId: string | undefined, cid: string): Promise<Array<SessionInfo>> {
     const project = await this.access.resolveProjectDirectory(projectId, userId, cid);
     const memory = await this.history.listLocalSessions(project.projectId);
@@ -348,7 +348,7 @@ export class SessionHarnessService implements SessionHarness {
     }
   }
 
-  /** GET /api/sessions/status?projectId — sessionId → derived runtime status. */
+  /** GET /api/v1/sessions/status?projectId — sessionId → derived runtime status. */
   async statusMap(
     userId: string,
     projectId: string | undefined,
@@ -363,7 +363,7 @@ export class SessionHarnessService implements SessionHarness {
   }
 
   /**
-   * POST /api/sessions — create in the gated jail, honestly forwarding
+   * POST /api/v1/sessions — create in the gated jail, honestly forwarding
    * title/parentID/model. The body is built non-empty ({location} always present)
    * because the 2.x create endpoint rejects a missing JSON object; it rides
    * fetchWithRetry (not the sdk) because the pinned generated create()
@@ -483,7 +483,7 @@ export class SessionHarnessService implements SessionHarness {
   }
 
   /**
-   * GET /api/sessions/{id}/messages — v2 message list (GET
+   * GET /api/v1/sessions/{id}/messages — v2 message list (GET
    * /api/session/{sessionID}/message) scoped through the C4 gate, the
    * {data,cursor} envelope unwrapped to a normalized array. `limit`/
    * `cursor` are the upstream-optional pagination params (artifact params
@@ -553,7 +553,7 @@ export class SessionHarnessService implements SessionHarness {
   }
 
   /**
-   * POST /api/sessions/{id}/messages — prompt the session's agent (direct
+   * POST /api/v1/sessions/{id}/messages — prompt the session's agent (direct
    * agent turn when a per-user key exists, otherwise queued on the serve
    * stand while it lives — see sendMessageDirect / sendMessageViaServe).
    * `text` is the prompt's only required payload field; files/skills/
@@ -879,7 +879,7 @@ export class SessionHarnessService implements SessionHarness {
   }
 
   /**
-   * GET /api/sessions/events — SSE re-stream of the v2 event bus (flat
+   * GET /api/v1/sessions/events — SSE re-stream of the v2 event bus (flat
    * frames) translated via toStreamFrame, MERGED with the harness-owned
    * direct-runner buffer. The C4 gate decides WHO may stream; the bus itself
    * is server-global, so the frame filter narrows delivery to sessions of
@@ -964,7 +964,7 @@ export class SessionHarnessService implements SessionHarness {
     const busy = this.busyDirect;
     const stand = liveClient;
     await relaySse({
-      operation: 'GET /api/sessions/events',
+      operation: 'GET /api/v1/sessions/events',
       cid,
       req,
       res,
@@ -1093,7 +1093,7 @@ export class SessionHarnessService implements SessionHarness {
   }
 
   /**
-   * POST /api/sessions/{id}/interrupt — v2 interrupt (POST
+   * POST /api/v1/sessions/{id}/interrupt — v2 interrupt (POST
    * /api/session/{sessionID}/interrupt) via the sdk client. No body: the
    * artifact declares none (the stub asserts its absence). The pinned
    * generator still types the answer as 204 void while the live 2.2.0 spec
@@ -1147,7 +1147,7 @@ export class SessionHarnessService implements SessionHarness {
   }
 
   /**
-   * GET /api/sessions/providers — the project's runner provider inventory
+   * GET /api/v1/sessions/providers — the project's runner provider inventory
    * (v2 GET /api/provider in the gated jail, the same sdk call the removed
    * mirror made). The domain row is the REQUIRED artifact subset
    * (Provider.Info: id/name/activation/package); settings/headers/body are
@@ -1194,7 +1194,7 @@ export class SessionHarnessService implements SessionHarness {
   }
 
   /**
-   * GET /api/sessions/models — runner model inventory filtered to the
+   * GET /api/v1/sessions/models — runner model inventory filtered to the
    * OpenCode Go/Zen family (provider id opencode / opencode-go / opencode-zen).
    * Rides the sdk `client.v2.model.list` (same {location, data} envelope as
    * the provider inventory above) scoped to the gated jail.

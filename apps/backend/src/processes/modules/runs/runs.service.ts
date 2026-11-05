@@ -17,7 +17,7 @@ import { RunsRepository } from './runs.repository';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * RunsService — domain facade of /api/runs* (agent-harness prototype).
+ * RunsService — domain facade of /api/v1/runs* (agent-harness prototype).
  *
  * Every entry point is C4-gated: POST resolves the project directory through
  * ProjectAccessService (stranger → 404, blank projectId → 400, no leak of
@@ -44,7 +44,7 @@ export class RunsService {
     private readonly logger: AppLogger = new AppLogger(RunsService.name),
   ) {}
 
-  /** POST /api/runs — create an open run pinned to the project's HEAD. */
+  /** POST /api/v1/runs — create an open run pinned to the project's HEAD. */
   async create(userId: string, body: CreateRunInput, cid: string): Promise<RunInfo> {
     const project = await this.access.resolveProjectDirectory(body.projectId, userId, cid);
     const baseCommit = await resolveHeadOrNull(project.directory);
@@ -77,7 +77,7 @@ export class RunsService {
     return toRunInfo(row);
   }
 
-  /** GET /api/runs/:id — one run, gated by its project (stranger → 404). */
+  /** GET /api/v1/runs/:id — one run, gated by its project (stranger → 404). */
   async getOne(userId: string, id: string, cid: string): Promise<RunInfo> {
     const runId = parseRunId(id);
     const row = await this.repo.findRun(runId, cid);
@@ -86,7 +86,7 @@ export class RunsService {
     return toRunInfo(row);
   }
 
-  /** GET /api/runs?projectId= — C4-scoped live runs, newest first. */
+  /** GET /api/v1/runs?projectId= — C4-scoped live runs, newest first. */
   async list(userId: string, projectId: string | undefined, cid: string): Promise<RunInfoList> {
     if (!projectId || projectId.trim() === '') {
       throw new BadRequestException({
@@ -100,7 +100,7 @@ export class RunsService {
   }
 
   /**
-   * GET /api/runs/:id/events?cursor= — SSE over the run journal.
+   * GET /api/v1/runs/:id/events?cursor= — SSE over the run journal.
    *
    * The run is loaded (and gate-checked) BEFORE the stream opens so an
    * unknown/foreign run answers an honest 404 JSON instead of a 200 stream
@@ -121,7 +121,7 @@ export class RunsService {
     if (!row) throw notFound(runId);
     await this.access.assertProjectAccessById(row.projectId, userId, cid);
     await relaySse({
-      operation: 'GET /api/runs/:id/events',
+      operation: 'GET /api/v1/runs/:id/events',
       cid,
       req,
       res,

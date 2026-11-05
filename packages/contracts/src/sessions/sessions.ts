@@ -1,5 +1,5 @@
 /**
- * Domain session contracts (GET/POST /api/sessions — the product-facing
+ * Domain session contracts (GET/POST /api/v1/sessions — the product-facing
  * replacement for the deprecated /api/opencode/* mirror).
  *
  * Mirrors contracts/openapi.yaml components/schemas field-for-field:
@@ -27,7 +27,7 @@ export type SessionInfoModel = {
   variant?: string;
 };
 
-/** Model available to the runner, listed by GET /api/sessions/models. */
+/** Model available to the runner, listed by GET /api/v1/sessions/models. */
 export type SessionModel = {
   id: string;
   name: string;
@@ -49,7 +49,7 @@ export type AgentInfo = {
 /** GET /api/v1/agents — agent registry list. */
 export type AgentInfoList = Array<AgentInfo>;
 
-/** One domain session row (GET /api/sessions items, POST /api/sessions result). */
+/** One domain session row (GET /api/v1/sessions items, POST /api/v1/sessions result). */
 export type SessionInfo = {
   id: string;
   /** null until the server names the session */
@@ -71,10 +71,10 @@ export type SessionInfo = {
   status: SessionRunStatus;
 };
 
-/** GET /api/sessions — domain session list. */
+/** GET /api/v1/sessions — domain session list. */
 export type SessionInfoList = Array<SessionInfo>;
 
-/** POST /api/sessions body (projectId is required — sessions are project-scoped). */
+/** POST /api/v1/sessions body (projectId is required — sessions are project-scoped). */
 export type CreateSessionRequest = {
   projectId: string;
   title?: string;
@@ -101,13 +101,13 @@ export type CreateSessionRequest = {
  */
 export type SessionRunStatus = OpencodeSessionStatus;
 
-/** GET /api/sessions/status — sessionId → runtime status map. */
+/** GET /api/v1/sessions/status — sessionId → runtime status map. */
 export type SessionRunStatusMap = {
   [sessionId: string]: SessionRunStatus;
 };
 
 /**
- * Domain session message (GET/POST /api/sessions/{id}/messages) — the
+ * Domain session message (GET/POST /api/v1/sessions/{id}/messages) — the
  * NORMALIZED projection of the upstream `Session.Message.Info` union
  * (provenance: contracts/opencode-stand-2.2.0.json Session.Message.*
  * variants). Every field maps to an upstream source:
@@ -132,11 +132,11 @@ export type SessionMessage = {
   text: string | null;
 };
 
-/** GET /api/sessions/{id}/messages — normalized message list. */
+/** GET /api/v1/sessions/{id}/messages — normalized message list. */
 export type SessionMessageList = Array<SessionMessage>;
 
 /**
- * POST /api/sessions/{id}/messages body — the domain chat prompt. `text`
+ * POST /api/v1/sessions/{id}/messages body — the domain chat prompt. `text`
  * mirrors the v2 prompt's only required payload field (files/agents/skills/
  * metadata/delivery are upstream-optional and no UI consumes them yet —
  * deliberately not exposed until there is a consumer). `model` is the same
@@ -155,7 +155,7 @@ export type SendMessageRequest = {
 };
 
 /**
- * SSE frame emitted by GET /api/sessions/events (domain translation of the
+ * SSE frame emitted by GET /api/v1/sessions/events (domain translation of the
  * v2 event stream, provenance: artifact eventFrames — {id, type, data}
  * flat frame). The backend re-keys the upstream `data.sessionID` to the
  * top-level `session` so consumers never touch the upstream name; `data`
@@ -193,7 +193,7 @@ export type SessionMessagePartUpdatedFrame = SessionStreamFrame & {
 };
 
 /**
- * POST /api/sessions/{id}/interrupt body — projectId is the gate uuid.
+ * POST /api/v1/sessions/{id}/interrupt body — projectId is the gate uuid.
  * The runner's own resume knob (artifact interrupt parameters `resume`)
  * has no UI consumer and is deliberately not exposed — nothing invented.
  */
@@ -202,7 +202,7 @@ export type InterruptSessionRequest = {
 };
 
 /**
- * POST /api/sessions/{id}/interrupt answer — domain form of the artifact's
+ * POST /api/v1/sessions/{id}/interrupt answer — domain form of the artifact's
  * SessionInterruptResponse ({interrupted} verbatim, the only field the
  * live 2.2.0 spec carries). `interrupted: false` is the idle no-op (the
  * session was not running) — an honest answer, never an error.
@@ -214,7 +214,7 @@ export type SessionInterruptResult = {
 };
 
 /**
- * GET /api/sessions/providers row — the project's runner provider
+ * GET /api/v1/sessions/providers row — the project's runner provider
  * inventory. Fields are exactly the REQUIRED set of the artifact's
  * Provider.Info (id/name/activation/package); optional and sensitive
  * Provider.Info members (settings/headers/body — headers can carry auth
@@ -230,5 +230,5 @@ export type SessionRunnerProvider = {
   package: string;
 };
 
-/** GET /api/sessions/providers — provider inventory list. */
+/** GET /api/v1/sessions/providers — provider inventory list. */
 export type SessionRunnerProviderList = Array<SessionRunnerProvider>;

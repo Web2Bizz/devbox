@@ -18,7 +18,7 @@ export type UseRunsResult = {
 };
 
 /**
- * Project-scoped run list (`GET /api/runs?projectId=…`).
+ * Project-scoped run list (`GET /api/v1/runs?projectId=…`).
  *
  * Same contract as useSessions: the queryFn throws the raw ApiClientError
  * (a missing projectId answers the honest client-side PROJECT_REQUIRED gate,
@@ -71,7 +71,7 @@ export type UseRunResult = {
   reload: () => void;
 };
 
-/** One run row (`GET /api/runs/{id}`) — same loading/error/reload contract. */
+/** One run row (`GET /api/v1/runs/{id}`) — same loading/error/reload contract. */
 export function useRun(runId: string | null): UseRunResult {
   const queryClient = useQueryClient();
   const queryKey = useMemo(() => runQueryKey(runId), [runId]);
@@ -113,7 +113,7 @@ export type UseCreateRunResult = {
 };
 
 /**
- * `POST /api/runs` — creates a run and seeds the single-run cache entry.
+ * `POST /api/v1/runs` — creates a run and seeds the single-run cache entry.
  * `create` mirrors useSessions.create: it never throws into the UI and
  * resolves null on failure, while the error surfaces through `error`.
  */
@@ -167,7 +167,7 @@ function isAbortError(err: unknown): boolean {
 
 /**
  * Live run journal through the domain SSE route
- * (`GET /api/runs/{id}/events?cursor=…`, api/runs-client).
+ * (`GET /api/v1/runs/{id}/events?cursor=…`, api/runs-client).
  *
  * Deliberately `useEffect`, NOT React Query: a long-lived streaming
  * subscription with self-healing reconnects is the AGENTS.md streaming

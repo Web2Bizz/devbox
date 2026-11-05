@@ -7,7 +7,7 @@ import { RunsRepository } from './runs.repository';
 import { RunsService } from './runs.service';
 
 /**
- * Domain runs module — /api/runs* (agent-harness prototype API minimum:
+ * Domain runs module — /api/v1/runs* (agent-harness prototype API minimum:
  * create + read one + SSE journal stream).
  *
  * OrganizationsModule is imported explicitly to document the C4 dependency

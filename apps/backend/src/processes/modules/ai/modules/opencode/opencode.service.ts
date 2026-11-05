@@ -361,7 +361,7 @@ export class OpencodeService {
 
   /**
    * SSE re-stream — shared mechanics in common/sse/sse-relay.ts (extracted
-   * unchanged; the domain /api/sessions/events route rides the same
+   * unchanged; the domain /api/v1/sessions/events route rides the same
    * transport). Prefix/`[opencode]` log lines and error mapping are
    * preserved 1:1 (opencode.e2e covers the down-probe 503 + headers).
    */

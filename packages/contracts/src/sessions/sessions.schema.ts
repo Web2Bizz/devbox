@@ -24,7 +24,7 @@ import type {
 import { opencodeSessionStatusSchema } from '../opencode-session/opencode-session.schema';
 
 /**
- * Boundary schemas for sessions.ts (domain /api/sessions* contract).
+ * Boundary schemas for sessions.ts (domain /api/v1/sessions* contract).
  *
  * createSessionRequestSchema is the backend-verbatim POST validation (same
  * constraints + error strings the controller enforces); response schemas
@@ -98,7 +98,7 @@ export const sessionRunStatusMapSchema = z.record(
   sessionRunStatusSchema,
 ) satisfies z.ZodType<SessionRunStatusMap>;
 
-/** POST /api/sessions body — projectId required (sessions are project-scoped). */
+/** POST /api/v1/sessions body — projectId required (sessions are project-scoped). */
 export const createSessionRequestSchema = z.object({
   projectId: z.uuid({ error: 'Field "projectId" is required' }),
   title: z.string().min(1).max(200).optional(),
@@ -109,7 +109,7 @@ export const createSessionRequestSchema = z.object({
 
 export type CreateSessionInput = z.infer<typeof createSessionRequestSchema>;
 
-/** GET /api/sessions/{id}/messages item — normalized Session.Message.Info
+/** GET /api/v1/sessions/{id}/messages item — normalized Session.Message.Info
  * projection (text null for non-text variants; createdAt is backend-emitted
  * ISO like SessionInfo.createdAt, hence the same strict datetime). */
 export const sessionMessageSchema = z.object({
@@ -123,7 +123,7 @@ export const sessionMessageListSchema = z.array(sessionMessageSchema) satisfies 
   SessionMessageList
 >;
 
-/** POST /api/sessions/{id}/messages body — text mirrors the v2 prompt's
+/** POST /api/v1/sessions/{id}/messages body — text mirrors the v2 prompt's
  * only required payload field; projectId is the gate uuid (strict, Q2). */
 export const sendMessageRequestSchema = z.object({
   projectId: z.uuid({ error: 'Field "projectId" is required' }),
@@ -132,7 +132,7 @@ export const sendMessageRequestSchema = z.object({
   agentId: agentIdSchema.optional(),
 }) satisfies z.ZodType<SendMessageRequest>;
 
-/** SSE frame envelope of GET /api/sessions/events — the variant payload
+/** SSE frame envelope of GET /api/v1/sessions/events — the variant payload
  * (data) is upstream-owned and passes through as an unknown record;
  * `session` is the backend-hoisted data.sessionID (no upstream name at the
  * top level). Narrowed per-type frames (delta/updated) live in sessions.ts. */
@@ -177,7 +177,7 @@ export const sessionMessagePartUpdatedFrameSchema = z.object({
   session: z.string().optional(),
 }) satisfies z.ZodType<SessionMessagePartUpdatedFrame>;
 
-/** POST /api/sessions/{id}/interrupt body — projectId is the gate uuid
+/** POST /api/v1/sessions/{id}/interrupt body — projectId is the gate uuid
  * (strict like the YAML format: uuid; backend-generated, Q2 precedent). */
 export const interruptSessionRequestSchema = z.object({
   projectId: z.uuid({ error: 'Field "projectId" is required' }),

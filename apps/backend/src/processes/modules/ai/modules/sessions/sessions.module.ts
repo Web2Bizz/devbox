@@ -8,7 +8,7 @@ import { SessionsController } from './sessions.controller';
 import { SessionsService } from './sessions.service';
 
 /**
- * Domain sessions module — /api/sessions* (the product contract replacing
+ * Domain sessions module — /api/v1/sessions* (the product contract replacing
  * the removed /api/opencode/* mirror; see SessionHarnessService for the
  * orchestration + translation and gate composition, SessionsService as the
  * thin domain facade over the SessionHarness interface).

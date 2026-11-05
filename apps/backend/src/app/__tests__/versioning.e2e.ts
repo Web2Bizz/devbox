@@ -10,7 +10,7 @@
  * (now 404), the v2 404 contract and the versioned Swagger surface.
  * The former /api/v1/session|sessions|messages|chat proxy is gone (deleted
  * with ProxyService) — versioning coverage now rides the domain
- * /api/sessions* surface (C4 project gate) plus the remaining v1 routes.
+ * /api/v1/sessions* surface (C4 project gate) plus the remaining v1 routes.
  * Unreachable runner (OPENCODE_URL down) answers 503 EXTERNAL_UNAVAILABLE
  * («сервис временно недоступен, повторите позже») with Retry-After —
  * no mock 200s. A runner that refuses the credentials we sent (401)
@@ -174,28 +174,28 @@ async function main(): Promise<void> {
       assert.equal(res.headers.get('x-correlation-id'), b.correlationId);
       assert.equal(res.headers.get('Retry-After'), '30');
     };
-    await check('GET /api/sessions down → 503 + Retry-After', `/api/sessions?projectId=${E2E_PROJECT_ID}`, undefined, 503, (res, body) => {
+    await check('GET /api/v1/sessions down → 503 + Retry-After', `/api/v1/sessions?projectId=${E2E_PROJECT_ID}`, undefined, 503, (res, body) => {
       assertUnavailable(body, res);
     });
-    await check('POST /api/sessions {} → 400 bad_request (zod, before the gate)', '/api/sessions', json({}), 400, (_res, body) => {
+    await check('POST /api/v1/sessions {} → 400 bad_request (zod, before the gate)', '/api/v1/sessions', json({}), 400, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'bad_request');
     });
     // C4: no project context → 400 PROJECT_REQUIRED (fail-closed).
-    await check('GET /api/sessions w/o projectId → 400 PROJECT_REQUIRED', '/api/sessions', undefined, 400, (_res, body) => {
+    await check('GET /api/v1/sessions w/o projectId → 400 PROJECT_REQUIRED', '/api/v1/sessions', undefined, 400, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'PROJECT_REQUIRED');
     });
     // C1–C4: anonymous (no Bearer) → 401 before any gate/DB touch.
     {
-      const anon = await fetch(`${base}/api/sessions?projectId=${E2E_PROJECT_ID}`);
+      const anon = await fetch(`${base}/api/v1/sessions?projectId=${E2E_PROJECT_ID}`);
       try {
         assert.equal(anon.status, 401);
         assert.equal(((await anon.json().catch(() => null)) as { code?: string } | null)?.code, 'unauthorized');
-        results.push({ name: 'GET /api/sessions anon → 401', ok: true });
-        console.log('ok   - GET /api/sessions anon → 401');
+        results.push({ name: 'GET /api/v1/sessions anon → 401', ok: true });
+        console.log('ok   - GET /api/v1/sessions anon → 401');
       } catch (err) {
         const detail = (err as Error).message;
-        results.push({ name: 'GET /api/sessions anon → 401', ok: false, detail });
-        console.log(`FAIL - GET /api/sessions anon → 401: ${detail}`);
+        results.push({ name: 'GET /api/v1/sessions anon → 401', ok: false, detail });
+        console.log(`FAIL - GET /api/v1/sessions anon → 401: ${detail}`);
       }
     }
 
@@ -203,7 +203,11 @@ async function main(): Promise<void> {
     await check('GET /api/v1/session → 404 not_found (proxy deleted)', '/api/v1/session', undefined, 404, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'not_found');
     });
-    await check('GET /api/v1/sessions → 404 not_found (proxy deleted)', '/api/v1/sessions', undefined, 404, (_res, body) => {
+    // Unversioned aliases are gone: sessions/runs live under /api/v1 only.
+    await check('GET /api/sessions → 404 not_found (unversioned alias removed)', '/api/sessions', undefined, 404, (_res, body) => {
+      assert.equal((body as { code?: string }).code, 'not_found');
+    });
+    await check('GET /api/runs → 404 not_found (unversioned alias removed)', '/api/runs', undefined, 404, (_res, body) => {
       assert.equal((body as { code?: string }).code, 'not_found');
     });
     await check('GET /api/v1/messages → 404 not_found (proxy deleted)', '/api/v1/messages?sessionId=s1', undefined, 404, (_res, body) => {
@@ -245,7 +249,6 @@ async function main(): Promise<void> {
     await check('GET /swagger/v1.json exposes v1 + domain paths, no proxy', '/swagger/v1.json', undefined, 200, (_res, body) => {
       const paths = Object.keys((body as { paths?: Record<string, unknown> }).paths ?? {});
       assert.ok(!paths.includes('/api/v1/session'), `deleted proxy /api/v1/session came back: ${paths.join(',')}`);
-      assert.ok(!paths.includes('/api/v1/sessions'), `deleted proxy /api/v1/sessions came back: ${paths.join(',')}`);
       assert.ok(!paths.includes('/api/v1/messages'), `deleted proxy /api/v1/messages came back: ${paths.join(',')}`);
       assert.ok(!paths.includes('/api/v1/chat'), `deleted proxy /api/v1/chat came back: ${paths.join(',')}`);
       assert.ok(paths.includes('/api/v1/health'), `missing /api/v1/health in ${paths.join(',')}`);
@@ -253,8 +256,18 @@ async function main(): Promise<void> {
       // Unversioned /api/opencode/* mirror is removed: no such path may be
       // documented (the removed proxy paths above must stay gone too).
       assert.ok(!paths.some((path) => path.startsWith('/api/opencode')), `unversioned /api/opencode survived: ${paths.join(',')}`);
-      assert.ok(paths.includes('/api/sessions'), `missing /api/sessions in ${paths.join(',')}`);
-      assert.ok(paths.includes('/api/sessions/status'), `missing /api/sessions/status in ${paths.join(',')}`);
+      assert.ok(paths.includes('/api/v1/sessions'), `missing /api/v1/sessions in ${paths.join(',')}`);
+      assert.ok(paths.includes('/api/v1/sessions/status'), `missing /api/v1/sessions/status in ${paths.join(',')}`);
+      // Unversioned domain aliases must not be documented: sessions/runs are
+      // URI-versioned v1 only (VERSION_NEUTRAL stays reserved for /health).
+      assert.ok(
+        !paths.some((path) => path === '/api/sessions' || path.startsWith('/api/sessions/')),
+        `unversioned /api/sessions survived: ${paths.join(',')}`,
+      );
+      assert.ok(
+        !paths.some((path) => path === '/api/runs' || path.startsWith('/api/runs/')),
+        `unversioned /api/runs survived: ${paths.join(',')}`,
+      );
       // Dropping the redundant per-handler `@Version('1')` must not drop the
       // version segment from documented paths — `defaultVersion: '1'` (URI
       // versioning) is the only thing that puts /v1 into these routes.
@@ -267,7 +280,7 @@ async function main(): Promise<void> {
     });
 
     // CORS preserved on versioned routes (even on 503 domain errors).
-    await check('CORS echo on /api/sessions (503)', `/api/sessions?projectId=${E2E_PROJECT_ID}`, { headers: { origin: 'http://localhost:8080' } }, 503, (res) => {
+    await check('CORS echo on /api/v1/sessions (503)', `/api/v1/sessions?projectId=${E2E_PROJECT_ID}`, { headers: { origin: 'http://localhost:8080' } }, 503, (res) => {
       assert.equal(res.headers.get('access-control-allow-origin'), 'http://localhost:8080');
     });
 
@@ -322,8 +335,8 @@ async function main(): Promise<void> {
       historyProto.listLocalSessions = async () => [];
 
       await check(
-        'GET /api/sessions runner 401 → 503 EXTERNAL_UNAUTHORIZED (no Retry-After)',
-        `/api/sessions?projectId=${E2E_PROJECT_ID}`,
+        'GET /api/v1/sessions runner 401 → 503 EXTERNAL_UNAUTHORIZED (no Retry-After)',
+        `/api/v1/sessions?projectId=${E2E_PROJECT_ID}`,
         undefined,
         503,
         (res, body) => {

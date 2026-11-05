@@ -16,7 +16,7 @@ export type ChatSectionProps = {
  * Chat feature section — thin composition over `useChat` + kit rows.
  *
  * Layers (AGENTS.md): page owns `<ChatSection />`, business state lives in
- * `hooks/useChat` (prompt/SSE/abort/reload over the domain /api/sessions*
+ * `hooks/useChat` (prompt/SSE/abort/reload over the domain /api/v1/sessions*
  * contract — the frontend knows nothing about the underlying runner),
  * rows/composer are generic
  * `components/chat/*`. No `entities/`/`shared/` — no new deprecated

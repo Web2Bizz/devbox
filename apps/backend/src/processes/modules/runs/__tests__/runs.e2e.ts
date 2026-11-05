@@ -1,5 +1,5 @@
 /**
- * Runs e2e — /api/runs* (create → GET → live SSE journal → terminal state)
+ * Runs e2e — /api/v1/runs* (create → GET → live SSE journal → terminal state)
  * against COMPILED dist and a throwaway Postgres.
  *
  * Runs against COMPILED dist (tsc/swc emits decorator metadata there; bun's
@@ -15,11 +15,11 @@
  * worktree, run native:git.recon and write the trailered run commit.
  *
  * The live scenario is the prototype engine end to end:
- * - POST /api/runs answers 201 RunInfo (open, branch agent/<id>, worktree
+ * - POST /api/v1/runs answers 201 RunInfo (open, branch agent/<id>, worktree
  *   inside the jail, baseCommit = the repo HEAD);
  * - the claim loop advances llm.call → tool.call (native:git.recon) →
  *   sandbox.exec (embedded OpenCode host, in-process) → git.commit, and
- *   GET /api/runs/:id/events?cursor=0 replays/tails the journal:
+ *   GET /api/v1/runs/:id/events?cursor=0 replays/tails the journal:
  *   run.started first, then the four run.step.committed frames
  *   (tool request/response hashes 64-hex, attempt 1; sandbox session id +
  *   command; git sha 40-hex on agent/<id> from baseCommit);
@@ -344,8 +344,8 @@ async function main(): Promise<void> {
       // every route hit a dead port, so the honest answer is 503 — never a
       // fake 404 or a silent empty result.
       await check(
-        'POST /api/runs unreachable db → 503 EXTERNAL_UNAVAILABLE + Retry-After',
-        '/api/runs',
+        'POST /api/v1/runs unreachable db → 503 EXTERNAL_UNAVAILABLE + Retry-After',
+        '/api/v1/runs',
         jsonBody({ projectId: E2E_PROJECT_ID }),
         503,
         (res, body) => {
@@ -354,8 +354,8 @@ async function main(): Promise<void> {
         },
       );
       await check(
-        'GET /api/runs/{id} unreachable db → 503 (not 404)',
-        `/api/runs/${randomUUID()}`,
+        'GET /api/v1/runs/{id} unreachable db → 503 (not 404)',
+        `/api/v1/runs/${randomUUID()}`,
         undefined,
         503,
         (_res, body) => {
@@ -366,8 +366,8 @@ async function main(): Promise<void> {
       // --- create + read -------------------------------------------------
       let created: JsonRecord = {};
       await check(
-        'POST /api/runs → 201 open run pinned to the repo HEAD',
-        '/api/runs',
+        'POST /api/v1/runs → 201 open run pinned to the repo HEAD',
+        '/api/v1/runs',
         jsonBody({ projectId: E2E_PROJECT_ID }),
         201,
         (_res, body) => {
@@ -397,8 +397,8 @@ async function main(): Promise<void> {
       const worktree = String(created.worktree ?? '');
 
       await check(
-        'GET /api/runs/{id} → same id/branch/baseCommit',
-        `/api/runs/${runId}`,
+        'GET /api/v1/runs/{id} → same id/branch/baseCommit',
+        `/api/v1/runs/${runId}`,
         undefined,
         200,
         (_res, body) => {
@@ -411,8 +411,8 @@ async function main(): Promise<void> {
       );
 
       await check(
-        'GET /api/runs?projectId= → array containing the created run',
-        `/api/runs?projectId=${E2E_PROJECT_ID}`,
+        'GET /api/v1/runs?projectId= → array containing the created run',
+        `/api/v1/runs?projectId=${E2E_PROJECT_ID}`,
         undefined,
         200,
         (_res, body) => {
@@ -435,7 +435,7 @@ async function main(): Promise<void> {
       try {
         const collected = await collectFrames(
           base,
-          `/api/runs/${runId}/events?cursor=0`,
+          `/api/v1/runs/${runId}/events?cursor=0`,
           authHeaders,
           fourStepsCommitted,
           120_000,
@@ -445,7 +445,7 @@ async function main(): Promise<void> {
         assert.match(collected.contentType ?? '', /text\/event-stream/);
         assert.ok(liveFrames.length >= 5, `expected frames, got ${liveFrames.length}`);
       } catch (err) {
-        push('GET /api/runs/{id}/events → live run journal', err as Error);
+        push('GET /api/v1/runs/{id}/events → live run journal', err as Error);
       }
 
       try {
@@ -547,7 +547,7 @@ async function main(): Promise<void> {
       try {
         const replay = await collectFrames(
           base,
-          `/api/runs/${runId}/events?cursor=0`,
+          `/api/v1/runs/${runId}/events?cursor=0`,
           authHeaders,
           fourStepsCommitted,
           30_000,
@@ -564,7 +564,7 @@ async function main(): Promise<void> {
 
         const tail = await collectFrames(
           base,
-          `/api/runs/${runId}/events?cursor=${lastId}`,
+          `/api/v1/runs/${runId}/events?cursor=${lastId}`,
           authHeaders,
           () => false,
           1500,
@@ -581,7 +581,7 @@ async function main(): Promise<void> {
         const deadline = Date.now() + 30_000;
         let status = '';
         while (Date.now() < deadline) {
-          const res = await fetch(`${base}/api/runs/${runId}`, { headers: authHeaders });
+          const res = await fetch(`${base}/api/v1/runs/${runId}`, { headers: authHeaders });
           const body = (await res.json().catch(() => null)) as JsonRecord | null;
           status = String(body?.status ?? '');
           if (status === 'awaiting_human') break;
@@ -624,8 +624,8 @@ async function main(): Promise<void> {
         };
         try {
           await check(
-            'GET /api/runs/{id} stranger project → 404 not_found (no Retry-After)',
-            `/api/runs/${runId}`,
+            'GET /api/v1/runs/{id} stranger project → 404 not_found (no Retry-After)',
+            `/api/v1/runs/${runId}`,
             undefined,
             404,
             (res, body) => {
@@ -634,8 +634,8 @@ async function main(): Promise<void> {
             },
           );
           await check(
-            'GET /api/runs/{id}/events stranger project → 404 JSON before SSE headers',
-            `/api/runs/${runId}/events?cursor=0`,
+            'GET /api/v1/runs/{id}/events stranger project → 404 JSON before SSE headers',
+            `/api/v1/runs/${runId}/events?cursor=0`,
             { headers: { accept: 'text/event-stream' } },
             404,
             (res, body) => {
@@ -644,8 +644,8 @@ async function main(): Promise<void> {
             },
           );
           await check(
-            'GET /api/runs?projectId= stranger project → 404 not_found (no Retry-After)',
-            `/api/runs?projectId=${E2E_PROJECT_ID}`,
+            'GET /api/v1/runs?projectId= stranger project → 404 not_found (no Retry-After)',
+            `/api/v1/runs?projectId=${E2E_PROJECT_ID}`,
             undefined,
             404,
             (res, body) => {
@@ -661,12 +661,12 @@ async function main(): Promise<void> {
       }
 
       // --- caller mistakes / unknown run --------------------------------
-      await check('POST /api/runs {} → 400 bad_request', '/api/runs', jsonBody({}), 400, (_res, body) => {
+      await check('POST /api/v1/runs {} → 400 bad_request', '/api/v1/runs', jsonBody({}), 400, (_res, body) => {
         assert.equal((body as { code?: string }).code, 'bad_request');
       });
       await check(
-        'POST /api/runs non-uuid projectId → 400 bad_request',
-        '/api/runs',
+        'POST /api/v1/runs non-uuid projectId → 400 bad_request',
+        '/api/v1/runs',
         jsonBody({ projectId: 'not-a-uuid' }),
         400,
         (_res, body) => {
@@ -674,20 +674,20 @@ async function main(): Promise<void> {
         },
       );
       await check(
-        'GET /api/runs (no projectId) → 400 PROJECT_REQUIRED',
-        '/api/runs',
+        'GET /api/v1/runs (no projectId) → 400 PROJECT_REQUIRED',
+        '/api/v1/runs',
         undefined,
         400,
         (_res, body) => {
           assert.equal((body as { code?: string }).code, 'PROJECT_REQUIRED');
         },
       );
-      await check('GET /api/runs/not-a-uuid → 400 bad_request', '/api/runs/not-a-uuid', undefined, 400, (_res, body) => {
+      await check('GET /api/v1/runs/not-a-uuid → 400 bad_request', '/api/v1/runs/not-a-uuid', undefined, 400, (_res, body) => {
         assert.equal((body as { code?: string }).code, 'bad_request');
       });
       await check(
-        'GET /api/runs/{random uuid} → 404 not_found',
-        `/api/runs/${randomUUID()}`,
+        'GET /api/v1/runs/{random uuid} → 404 not_found',
+        `/api/v1/runs/${randomUUID()}`,
         undefined,
         404,
         (_res, body) => {
@@ -695,8 +695,8 @@ async function main(): Promise<void> {
         },
       );
       await check(
-        'GET /api/runs/{id}/events?cursor=abc → 400 JSON before SSE headers',
-        `/api/runs/${runId}/events?cursor=abc`,
+        'GET /api/v1/runs/{id}/events?cursor=abc → 400 JSON before SSE headers',
+        `/api/v1/runs/${runId}/events?cursor=abc`,
         { headers: { accept: 'text/event-stream' } },
         400,
         (res, body) => {
@@ -706,24 +706,24 @@ async function main(): Promise<void> {
       );
 
       // --- swagger -------------------------------------------------------
-      await check('swagger exposes the /api/runs surface', '/swagger/v1.json', undefined, 200, (_res, body) => {
+      await check('swagger exposes the /api/v1/runs surface', '/swagger/v1.json', undefined, 200, (_res, body) => {
         const doc = body as { paths?: Record<string, unknown> };
         const paths = doc.paths ?? {};
-        assert.ok(paths['/api/runs'], 'missing /api/runs in swagger');
-        assert.ok(paths['/api/runs/{id}'], 'missing /api/runs/{id} in swagger');
-        assert.ok(paths['/api/runs/{id}/events'], 'missing /api/runs/{id}/events in swagger');
+        assert.ok(paths['/api/v1/runs'], 'missing /api/v1/runs in swagger');
+        assert.ok(paths['/api/v1/runs/{id}'], 'missing /api/v1/runs/{id} in swagger');
+        assert.ok(paths['/api/v1/runs/{id}/events'], 'missing /api/v1/runs/{id}/events in swagger');
       });
 
       // --- guest ---------------------------------------------------------
       {
-        const anon = await fetch(`${base}/api/runs/${runId}`);
+        const anon = await fetch(`${base}/api/v1/runs/${runId}`);
         const anonBody = (await anon.json().catch(() => null)) as { code?: string } | null;
         try {
           assert.equal(anon.status, 401);
           assert.equal(anonBody?.code, 'unauthorized');
-          push('GET /api/runs/{id} without Bearer → 401', null);
+          push('GET /api/v1/runs/{id} without Bearer → 401', null);
         } catch (err) {
-          push('GET /api/runs/{id} without Bearer → 401', err as Error);
+          push('GET /api/v1/runs/{id} without Bearer → 401', err as Error);
         }
       }
     }

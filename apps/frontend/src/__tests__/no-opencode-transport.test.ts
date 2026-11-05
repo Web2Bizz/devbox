@@ -3,7 +3,7 @@
  *
  * Invariant (the user's own words, cards 5-6): "во фронтенде не должно быть
  * opencode sdk никакого; фронт обращается к бэкенду" — every browser call
- * goes through the backend domain contract (/api/sessions*, /api/v1 auth/
+ * goes through the backend domain contract (/api/v1/sessions*, /api/v1 auth/
  * org/project surfaces), never a runner SDK, never the deprecated mirror
  * transport paths.
  *

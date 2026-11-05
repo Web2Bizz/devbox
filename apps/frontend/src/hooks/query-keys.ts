@@ -36,7 +36,7 @@ export const REGISTRIES_QUERY_KEY = ['registries'] as const;
 export const NPM_QUERY_KEY = ['npm', 'status'] as const;
 
 /**
- * GET /api/sessions/providers — project-scoped provider inventory.
+ * GET /api/v1/sessions/providers — project-scoped provider inventory.
  * `projectId` nullish maps to the shared `'none'` scope so hooks without
  * a project share one stable cache entry (`??`, empty string stays as-is)
  * — same convention as the other session keys.
@@ -45,14 +45,14 @@ export const aiProvidersQueryKey = (projectId?: string) =>
   ['ai-providers', projectId ?? 'none'] as const;
 
 /**
- * GET /api/sessions — project-scoped domain session list.
+ * GET /api/v1/sessions — project-scoped domain session list.
  * `projectId` nullish maps to the shared `'none'` scope so hooks without
  * a project share one stable empty entry (`??`, empty string stays as-is).
  */
 export const sessionsQueryKey = (projectId?: string) =>
   ['sessions', projectId ?? 'none'] as const;
 
-/** GET /api/sessions/status — derived busy/idle map, same scope rule. */
+/** GET /api/v1/sessions/status — derived busy/idle map, same scope rule. */
 export const sessionStatusQueryKey = (projectId?: string) =>
   ['sessions', 'status', projectId ?? 'none'] as const;
 
@@ -66,7 +66,7 @@ export const sessionModelsQueryKey = (projectId?: string) =>
 export const agentsQueryKey = ['agents'] as const;
 
 /**
- * GET /api/sessions/{id}/messages — project-scoped session thread.
+ * GET /api/v1/sessions/{id}/messages — project-scoped session thread.
  * `sessionId`/`projectId` nulls map to stable `'none'` scopes (same
  * convention as above — one entry per real scope, never one per render).
  */
@@ -74,10 +74,10 @@ export const sessionMessagesQueryKey = (sessionId: string | null, projectId?: st
   ['session-messages', sessionId ?? 'none', projectId ?? 'none'] as const;
 
 /**
- * GET /api/runs — project-scoped run list. `projectId` nullish maps to the
+ * GET /api/v1/runs — project-scoped run list. `projectId` nullish maps to the
  * shared `'none'` scope (same convention as the session keys).
  */
 export const runsQueryKey = (projectId?: string) => ['runs', projectId ?? 'none'] as const;
 
-/** GET /api/runs/{id} — one run row. */
+/** GET /api/v1/runs/{id} — one run row. */
 export const runQueryKey = (runId: string | null) => ['runs', 'run', runId ?? 'none'] as const;

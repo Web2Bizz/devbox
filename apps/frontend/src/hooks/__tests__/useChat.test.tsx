@@ -1,5 +1,5 @@
 /**
- * useChat — streamed single-session chat over the DOMAIN /api/sessions*
+ * useChat — streamed single-session chat over the DOMAIN /api/v1/sessions*
  * contract (api/sessions-client is the only transport; the frontend knows
  * nothing about the underlying runner).
  *

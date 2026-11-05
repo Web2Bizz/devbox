@@ -11,8 +11,6 @@ import {
   Req,
   Res,
   UseGuards,
-  Version,
-  VERSION_NEUTRAL,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
@@ -38,11 +36,11 @@ import {
 import { SessionsService } from './sessions.service';
 
 /**
- * Domain session routes — /api/sessions* (VERSION_NEUTRAL under the global
- * 'api' prefix). This is the product-facing contract that replaces the
- * removed /api/opencode/* mirror: our names, our shapes, no opencode
- * vocabulary on the wire (SessionHarnessService owns the translation,
- * SessionsService is the thin facade over it).
+ * Domain session routes — /api/v1/sessions* (URI-versioned v1 under the
+ * global 'api' prefix, NOT VERSION_NEUTRAL). This is the product-facing
+ * contract that replaces the removed /api/opencode/* mirror: our names, our
+ * shapes, no opencode vocabulary on the wire (SessionHarnessService owns the
+ * translation, SessionsService is the thin facade over it).
  *
  * Auth: every route is JwtAuthGuard + the C4 project gate (projectId
  * required; strangers → 404 not_found with no existence leak). Guests →
@@ -63,7 +61,6 @@ export class SessionsController {
 
   @UseGuards(JwtAuthGuard)
   @Get()
-  @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'List project sessions (domain shape; runtime status derived from the live session runner)' })
   @ApiResponse({ status: 200, description: 'domain sessions (always an array; empty when the project has none)' })
   @ApiResponse({ status: 400, description: 'missing projectId (PROJECT_REQUIRED, the C4 gate) or the session runner rejected the request (EXTERNAL_BAD_REQUEST) — no Retry-After', type: ApiErrorDto })
@@ -82,7 +79,6 @@ export class SessionsController {
 
   @UseGuards(JwtAuthGuard)
   @Post()
-  @Version(VERSION_NEUTRAL)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Create a project session (domain shape; title/parentID forwarded honestly)' })
   @ApiResponse({ status: 200, description: 'created domain session' })
@@ -99,7 +95,6 @@ export class SessionsController {
 
   @UseGuards(JwtAuthGuard)
   @Get('status')
-  @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'Runtime status map for project sessions (sessionId → busy/idle snapshot; retry lives on the event stream)' })
   @ApiResponse({ status: 200, description: 'sessionId → status map (derived from the live runner state; not a cached/empty source)' })
   @ApiResponse({ status: 400, description: 'missing projectId (PROJECT_REQUIRED, the C4 gate) or the session runner rejected the request (EXTERNAL_BAD_REQUEST) — no Retry-After', type: ApiErrorDto })
@@ -117,7 +112,6 @@ export class SessionsController {
   // ':id/...' two-segment routes; keep that ordering when adding more.
   @UseGuards(JwtAuthGuard)
   @Get('providers')
-  @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'List the project session-runner providers (required artifact subset; credential-bearing members are never projected)' })
   @ApiResponse({ status: 200, description: 'domain provider rows (always an array; empty when the runner reports none)' })
   @ApiResponse({ status: 400, description: 'missing projectId (PROJECT_REQUIRED, the C4 gate) or the session runner rejected the request (EXTERNAL_BAD_REQUEST) — no Retry-After', type: ApiErrorDto })
@@ -133,7 +127,6 @@ export class SessionsController {
 
   @UseGuards(JwtAuthGuard)
   @Get('models')
-  @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'List runner models filtered to the OpenCode Go/Zen family' })
   @ApiResponse({ status: 200, description: 'domain model rows' })
   async models(
@@ -146,7 +139,6 @@ export class SessionsController {
 
   @UseGuards(JwtAuthGuard)
   @Get(':id/messages')
-  @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'List session messages (normalized domain rows; text projection of the runtime message union)' })
   @ApiResponse({ status: 200, description: 'normalized messages (always an array; empty when the session has none)' })
   @ApiResponse({ status: 400, description: 'missing projectId (PROJECT_REQUIRED, the C4 gate), invalid query (bad_request — our limit validation) or the session runner rejected the request shape (EXTERNAL_BAD_REQUEST) — no Retry-After', type: ApiErrorDto })
@@ -165,7 +157,6 @@ export class SessionsController {
 
   @UseGuards(JwtAuthGuard)
   @Post(':id/messages')
-  @Version(VERSION_NEUTRAL)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Send a session message (queues the prompt on the session runner; the reply streams over events)' })
   @ApiResponse({ status: 200, description: 'queued user message receipt (domain row)' })
@@ -183,7 +174,6 @@ export class SessionsController {
 
   @UseGuards(JwtAuthGuard)
   @Post(':id/interrupt')
-  @Version(VERSION_NEUTRAL)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Interrupt the active session execution (idle interruption is an honest no-op: interrupted=false)' })
   @ApiResponse({ status: 200, description: 'interrupted: whether an active execution was really interrupted (false = idle no-op, never an error)' })
@@ -201,7 +191,6 @@ export class SessionsController {
 
   @UseGuards(JwtAuthGuard)
   @Get('events')
-  @Version(VERSION_NEUTRAL)
   @ApiOperation({ summary: 'Live session events (SSE; domain frames {id, type, data, session?})' })
   @ApiResponse({ status: 200, description: 'text/event-stream of domain SessionStreamFrame rows' })
   @ApiResponse({ status: 400, description: 'missing projectId (PROJECT_REQUIRED, the C4 gate) — no Retry-After', type: ApiErrorDto })

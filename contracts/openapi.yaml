@@ -1624,7 +1624,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/sessions:
+  /api/v1/sessions:
     get:
       summary: List project sessions (domain shape; runtime status derived from the live session runner)
       operationId: listSessionsDomain
@@ -1711,7 +1711,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/sessions/status:
+  /api/v1/sessions/status:
     get:
       summary: Runtime status map for project sessions (sessionId → busy/idle snapshot; retry lives on the event stream)
       operationId: sessionStatusDomain
@@ -1755,7 +1755,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/sessions/providers:
+  /api/v1/sessions/providers:
     get:
       summary: List the project session-runner providers (required artifact subset; credential-bearing members are never projected)
       operationId: listSessionProvidersDomain
@@ -1810,7 +1810,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/sessions/{id}/messages:
+  /api/v1/sessions/{id}/messages:
     get:
       summary: List session messages (normalized domain rows; text projection of the runtime message union)
       operationId: listSessionMessagesDomain
@@ -1881,7 +1881,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
     post:
-      summary: Send a session message (queues the prompt on the session runner; the reply streams over /api/sessions/events)
+      summary: Send a session message (queues the prompt on the session runner; the reply streams over /api/v1/sessions/events)
       operationId: sendSessionMessageDomain
       tags: [sessions]
       parameters:
@@ -1930,7 +1930,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/sessions/{id}/interrupt:
+  /api/v1/sessions/{id}/interrupt:
     post:
       summary: 'Interrupt the active session execution (idle interruption is an honest no-op: interrupted=false)'
       operationId: interruptSessionDomain
@@ -1987,7 +1987,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/sessions/events:
+  /api/v1/sessions/events:
     get:
       summary: Live session events (SSE; domain frames {id, type, data, session?})
       operationId: streamSessionEventsDomain
@@ -2034,7 +2034,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/runs:
+  /api/v1/runs:
     post:
       summary: Create an agent run (domain shape; project-scoped, server-owned branch/worktree)
       operationId: createRunDomain
@@ -2131,7 +2131,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/runs/{id}:
+  /api/v1/runs/{id}:
     get:
       summary: Get one agent run by id (domain shape)
       operationId: getRunDomain
@@ -2181,7 +2181,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/runs/{id}/events:
+  /api/v1/runs/{id}/events:
     get:
       summary: Live run events (SSE; per-run seq-ordered RunStreamFrame rows)
       operationId: streamRunEventsDomain
@@ -2495,7 +2495,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/sessions/models:
+  /api/v1/sessions/models:
     get:
       summary: List session-runner models filtered to the OpenCode Go/Zen family
       operationId: listSessionModelsDomain
@@ -2781,7 +2781,7 @@ components:
       type: object
       required: [id, title, createdAt, directory, projectId, model, agentId, status]
       description: >-
-        Domain session row (GET/POST /api/sessions) — OUR shape, stable while
+        Domain session row (GET/POST /api/v1/sessions) — OUR shape, stable while
         the runtime behind it changes: title/model are explicitly nullable
         (a fresh session carries neither), createdAt is ISO-8601 (the runtime
         keeps epoch millis; the backend converts), directory is the jailed
@@ -2834,7 +2834,7 @@ components:
       type: object
       required: [projectId]
       description: >-
-        POST /api/sessions body — projectId is required (sessions are
+        POST /api/v1/sessions body — projectId is required (sessions are
         project-scoped); title/parentID are honestly forwarded to the runtime
         create (the deprecated mirror could not forward them). model is the
         SessionInfoModel ref (upstream Model.Ref shape); without it the
@@ -2870,14 +2870,14 @@ components:
         - $ref: '#/components/schemas/OpencodeSessionStatus'
     SessionRunStatusMap:
       type: object
-      description: GET /api/sessions/status payload — sessionId → derived runtime status.
+      description: GET /api/v1/sessions/status payload — sessionId → derived runtime status.
       additionalProperties:
         $ref: '#/components/schemas/SessionRunStatus'
     SessionMessage:
       type: object
       required: [id, type, createdAt, text]
       description: >-
-        Normalized domain message row (GET/POST /api/sessions/{id}/messages) — the chat-visible
+        Normalized domain message row (GET/POST /api/v1/sessions/{id}/messages) — the chat-visible
         projection of the runtime message union (provenance
         contracts/opencode-stand-2.2.0.json Session.Message.*): id/type/time.created are required on
         every variant; text is the variant's own text or the assistant content[] text parts joined,
@@ -2899,7 +2899,7 @@ components:
       type: object
       required: [projectId, text]
       description: >-
-        POST /api/sessions/{id}/messages body — text mirrors the session
+        POST /api/v1/sessions/{id}/messages body — text mirrors the session
         runner prompt's only required payload field; files/agents/skills/delivery stay unexposed
         until a consumer exists (nothing invented). model is the
         SessionInfoModel ref (same as on create); without it the runner
@@ -2924,7 +2924,7 @@ components:
       type: object
       required: [id, type, data]
       description: >-
-        SSE frame of GET /api/sessions/events — envelope of the flat runtime event frame
+        SSE frame of GET /api/v1/sessions/events — envelope of the flat runtime event frame
         (provenance contracts/opencode-stand-2.2.0.json eventFrames). `session` is the
         backend-hoisted variant sessionID (data.sessionID, the only nesting the provenance
         artifact carries on session-scoped variants) so
@@ -2946,7 +2946,7 @@ components:
       type: object
       required: [projectId]
       description: >-
-        POST /api/sessions/{id}/interrupt body — projectId is the gate uuid. The runner's own
+        POST /api/v1/sessions/{id}/interrupt body — projectId is the gate uuid. The runner's own
         resume knob (provenance contracts/opencode-stand-2.2.0.json interrupt parameters) has
         no UI consumer and is deliberately not exposed — nothing invented.
       properties:
@@ -2957,7 +2957,7 @@ components:
       type: object
       required: [interrupted]
       description: >-
-        POST /api/sessions/{id}/interrupt answer — domain form of the artifact
+        POST /api/v1/sessions/{id}/interrupt answer — domain form of the artifact
         SessionInterruptResponse ({interrupted} verbatim, contracts/opencode-stand-2.2.0.json
         paths['/api/session/{sessionID}/interrupt']). false is the idle no-op: an honest
         answer, never an error.
@@ -2968,7 +2968,7 @@ components:
       type: object
       required: [id, name, activation, package]
       description: >-
-        GET /api/sessions/providers row — the REQUIRED subset of the artifact Provider.Info
+        GET /api/v1/sessions/providers row — the REQUIRED subset of the artifact Provider.Info
         (contracts/opencode-stand-2.2.0.json components.schemas['Provider.Info']:
         id/name/activation/package, activation enum verbatim). Optional and sensitive
         Provider.Info members (settings/headers/body — headers can carry auth material) are
@@ -2992,7 +2992,7 @@ components:
       required:
         [id, projectId, title, status, definitionSetHash, baseCommit, branch, worktree, sandboxId, agentId, model, createdAt, updatedAt]
       description: >-
-        Domain run row (GET/POST /api/runs) — the harness-owned run: id is a
+        Domain run row (GET/POST /api/v1/runs) — the harness-owned run: id is a
         uuidv7 (creation order is monotonic), branch/worktree are server-owned
         (agent/<run_id> inside the REPOS_ROOT jail), baseCommit is the
         Forward-Only lower bound and definitionSetHash pins the active
@@ -3050,14 +3050,14 @@ components:
           format: date-time
     RunInfoList:
       type: array
-      description: GET /api/runs payload — always an array, empty when the project has none.
+      description: GET /api/v1/runs payload — always an array, empty when the project has none.
       items:
         $ref: '#/components/schemas/RunInfo'
     CreateRunRequest:
       type: object
       required: [projectId]
       description: >-
-        POST /api/runs body — projectId is required (runs are project-scoped);
+        POST /api/v1/runs body — projectId is required (runs are project-scoped);
         title is optional (the run may stay unnamed until the server names it).
         agentId/model reuse the sessions registry id and SessionInfoModel ref
         (never duplicates). definitionSetHash pins an explicit definition set;
@@ -3085,7 +3085,7 @@ components:
       type: object
       required: [id, type, data]
       description: >-
-        SSE frame of GET /api/runs/{id}/events — `id` is the per-run monotonic
+        SSE frame of GET /api/v1/runs/{id}/events — `id` is the per-run monotonic
         seq rendered as a string (the cursor is the last delivered value, the
         stream replays seq > cursor then goes live). `type` lists the prototype
         frame set only; the full run union grows and consumers ignore unknown
@@ -3775,7 +3775,7 @@ components:
       type: object
       required: [id, name, providerID]
       description: >-
-        GET /api/sessions/models row — runner model inventory entry filtered to the
+        GET /api/v1/sessions/models row — runner model inventory entry filtered to the
         OpenCode Go/Zen family (providerID opencode / opencode-go / opencode-zen).
       properties:
         id:

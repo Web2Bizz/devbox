@@ -20,7 +20,7 @@ const MAX_DELAY_MS = 15000;
 
 /**
  * Live session events through the domain SSE route
- * (`GET /api/sessions/events?projectId=…`, api/sessions-client).
+ * (`GET /api/v1/sessions/events?projectId=…`, api/sessions-client).
  *
  * Deliberately `useEffect`, NOT React Query: a long-lived streaming
  * subscription with self-healing reconnects is the AGENTS.md streaming

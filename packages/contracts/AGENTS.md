@@ -23,9 +23,9 @@ src/
 │   ├─ index.ts — баррель домена (реэкспорт `<domain>.ts` + `<domain>.schema.ts`)
 │   ├─ <domain>.ts — entity-типы (только `export type`, `interface` запрещён)
 │   └─ <domain>.schema.ts — zod v4 boundary-схемы (Standard Schema)
-├─ sessions/ — доменный контракт `/api/sessions*` (SessionInfo, SessionMessage,
+├─ sessions/ — доменный контракт `/api/v1/sessions*` (SessionInfo, SessionMessage,
 │   SessionStreamFrame, SessionRunnerProvider, SessionInterruptResult, SessionModel)
-└─ runs/ — доменный контракт `/api/runs*` (RunInfo, CreateRunRequest, RunStreamFrame, ToolView; журнал/SSE-типы прототипа)
+└─ runs/ — доменный контракт `/api/v1/runs*` (RunInfo, CreateRunRequest, RunStreamFrame, ToolView; журнал/SSE-типы прототипа)
 ```
 
 ## Правила

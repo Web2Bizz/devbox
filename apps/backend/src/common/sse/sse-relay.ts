@@ -3,7 +3,7 @@ import type { AppLogger } from '../logger';
 
 /**
  * Shared SSE re-stream mechanics (was the private relaySse of the removed
- * OpencodeController; extracted unchanged so the domain /api/sessions/events
+ * OpencodeController; extracted unchanged so the domain /api/v1/sessions/events
  * route rides the same transport instead of duplicating it).
  *
  * Semantics (preserved 1:1 from the legacy transport, covered by sessions.e2e):

@@ -1,5 +1,5 @@
 /**
- * Domain run contracts (/api/runs* — the agent-harness run domain).
+ * Domain run contracts (/api/v1/runs* — the agent-harness run domain).
  *
  * Mirrors contracts/openapi.yaml components/schemas field-for-field:
  * RunStatus, RunInfo, RunInfoList, CreateRunRequest, RunStreamFrame, ToolView.
@@ -29,7 +29,7 @@ export type RunStepType =
   | 'await_human'
   | 'router';
 
-/** One domain run row (GET /api/runs/{id}, POST /api/runs result). */
+/** One domain run row (GET /api/v1/runs/{id}, POST /api/v1/runs result). */
 export type RunInfo = {
   id: string; // uuidv7 (Bun.randomUUIDv7())
   projectId: string; // uuid, C4-scope
@@ -46,10 +46,10 @@ export type RunInfo = {
   updatedAt: string; // ISO-8601 Z
 };
 
-/** GET /api/runs — domain run list. */
+/** GET /api/v1/runs — domain run list. */
 export type RunInfoList = Array<RunInfo>;
 
-/** POST /api/runs body (projectId is required — runs are project-scoped). */
+/** POST /api/v1/runs body (projectId is required — runs are project-scoped). */
 export type CreateRunRequest = {
   projectId: string;
   title?: string;
@@ -70,7 +70,7 @@ export type RunStreamFrameTypeProto =
   | 'run.step.failed';
 
 /**
- * SSE frame of GET /api/runs/{id}/events — `id` is the per-run monotonic seq
+ * SSE frame of GET /api/v1/runs/{id}/events — `id` is the per-run monotonic seq
  * rendered as a string (the cursor is the last delivered value); `data` is the
  * variant-owned payload passed through untouched.
  */

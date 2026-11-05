@@ -62,8 +62,8 @@ src/
    │  │  ├─ opencode.service.ts, opencode-sdk-client.ts (lazy @opencode-ai/sdk/v2; без HTTP-контроллера)
    │  │  ├─ keys.controller.ts — HTTP /api/v1/key (store — в common/keys)
    │  │  └─ modules/{auth,billing}/ — OpencodeAuthService (gate + Basic), BillingService + BillingController (HTTP /api/v1/usage)
-   │  └─ modules/sessions/ — доменный /api/sessions* (VERSION_NEUTRAL, SSE через common/sse)
-   ├─ modules/runs/ — доменный /api/runs* (RunInfo/CreateRunRequest, SSE-журнал run_events, VERSION_NEUTRAL)
+   │  └─ modules/sessions/ — доменный /api/v1/sessions* (URI-versioned v1, SSE через common/sse)
+   ├─ modules/runs/ — доменный /api/v1/runs* (RunInfo/CreateRunRequest, SSE-журнал run_events, URI-versioned v1)
    └─ modules/workers/ — in-process run engine (claim-loop: llm.call → tool.call → sandbox.exec → git.commit; без HTTP-роутов)
 ```
 

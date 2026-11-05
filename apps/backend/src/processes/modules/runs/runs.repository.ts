@@ -1,15 +1,18 @@
 import { Injectable } from '@nestjs/common';
-import { and, asc, eq, gt, isNull } from 'drizzle-orm';
-import { DbService, dbUnavailable } from '../../../common/db/db.service';
+import { and, asc, desc, eq, gt, isNull, sql } from 'drizzle-orm';
+import { type DbClient, DbService, dbUnavailable } from '../../../common/db/db.service';
 import {
   type RunEventRow,
   type RunRow,
+  type RunStepRow,
   runEvents,
   runLeases,
   runRuns,
+  runSteps,
 } from '../../../common/db/schema';
 import { AppLogger } from '../../../common/logger';
 import type { RunInfo } from './runs.dto';
+import { GENESIS_HASH, nextPrevHash } from './utils/event-chain';
 
 /** POST /api/runs row input (correlationId is log-only, never persisted). */
 export type CreateRunRowInput = {
@@ -26,6 +29,46 @@ export type CreateRunRowInput = {
   correlationId: string;
 };
 
+/** Thrown when the lease is no longer ours (another worker claimed it). */
+export class RunLeaseFencedError extends Error {
+  constructor(readonly runId: string) {
+    super(`run ${runId} lease is not held by this worker`);
+    this.name = 'RunLeaseFencedError';
+  }
+}
+
+/** Write-ahead step opening: recorded BEFORE the effect runs (ADR-0001 §9.1). */
+export type RunStepStartInput = {
+  runId: string;
+  seq: number;
+  /** llm.call | tool.call | sandbox.exec | git.commit | router */
+  type: string;
+  inputHash: string;
+  /** hash(run_id, step_id, effect_class, input_hash) — one row per effect. */
+  idempotencyKey: string;
+  holder: string;
+  leaseTtlMs: number;
+  correlationId: string;
+};
+
+/** Step closing: outcome of an effect that already happened. */
+export type RunStepFinishInput = {
+  runId: string;
+  seq: number;
+  holder: string;
+  leaseTtlMs: number;
+  correlationId: string;
+  resultRef?: Record<string, unknown>;
+  error?: Record<string, unknown>;
+};
+
+/**
+ * Drizzle transaction handle. Journal appends and the rows they describe must
+ * commit together, so every mutating method threads this through instead of
+ * reaching for the pool client.
+ */
+type RunTx = Parameters<Parameters<DbClient['transaction']>[0]>[0];
+
 /**
  * RunsRepository — the ONLY place the runs domain touches drizzle.
  *
@@ -35,6 +78,13 @@ export type CreateRunRowInput = {
  * unit. Every method funnels Postgres failures through `dbUnavailable` (503
  * EXTERNAL_UNAVAILABLE, logged once with the caller cid) — no silent
  * in-memory fallback.
+ *
+ * The claim loop story is the mirror image: claimNextRun takes an expired
+ * lease (SKIP LOCKED, so two workers never take the same run), heartbeat
+ * renews it, and the step methods (start/commit/fail) re-assert ownership
+ * inside the SAME transaction as the journal append. A lost lease surfaces
+ * as RunLeaseFencedError — the one error that is NOT a Postgres outage and
+ * therefore never maps to 503: the worker simply stops.
  */
 @Injectable()
 export class RunsRepository {
@@ -136,5 +186,311 @@ export class RunsRepository {
     } catch (err) {
       dbUnavailable('runs.listEventsAfter', err, this.logger, cid);
     }
+  }
+
+  /**
+   * Takes the oldest expired lease among live 'open'/'running' runs and hands
+   * the run to `holder` for `leaseTtlMs`.
+   *
+   * One transaction: the SELECT locks the lease row with SKIP LOCKED, so two
+   * workers racing the same tick pick different runs instead of serializing
+   * (or double-claiming) one. null means "nothing to do", not an error.
+   */
+  async claimNextRun(holder: string, leaseTtlMs: number, cid: string): Promise<RunRow | null> {
+    try {
+      return await this.db.client.transaction(async (tx) => {
+        // TODO(full-fencing): claim with an epoch bump and a holder check in
+        // this same transaction (a stale epoch must fence the old worker).
+        const claimed = (await tx.execute(sql`
+          SELECT rl.run_id
+          FROM run_leases rl
+          JOIN run_runs r ON r.id = rl.run_id
+          WHERE rl.expires_at < now()
+            AND r.deleted_at IS NULL
+            AND r.status IN ('open', 'running')
+          ORDER BY rl.expires_at ASC
+          LIMIT 1
+          FOR UPDATE OF rl SKIP LOCKED
+        `)) as unknown as { rows: Array<{ run_id?: string }> };
+        const runId = claimed.rows[0]?.run_id;
+        if (!runId) return null;
+        await tx.execute(sql`
+          UPDATE run_leases
+          SET holder = ${holder},
+              expires_at = now() + make_interval(secs => ${leaseTtlMs / 1000})
+          WHERE run_id = ${runId}
+        `);
+        const rows = await tx.select().from(runRuns).where(eq(runRuns.id, runId)).limit(1);
+        return rows.length > 0 ? rows[0] : null;
+      });
+    } catch (err) {
+      dbUnavailable('runs.claimNextRun', err, this.logger, cid);
+    }
+  }
+
+  /**
+   * Renews our lease. false means the lease is gone (claimed by another
+   * worker or reaped) — the caller must stop working on this run, it is NOT
+   * a Postgres outage.
+   */
+  async heartbeat(
+    runId: string,
+    holder: string,
+    leaseTtlMs: number,
+    cid: string,
+  ): Promise<boolean> {
+    try {
+      const renewed = (await this.db.client.execute(sql`
+        UPDATE run_leases
+        SET expires_at = now() + make_interval(secs => ${leaseTtlMs / 1000})
+        WHERE run_id = ${runId} AND holder = ${holder}
+        RETURNING run_id
+      `)) as unknown as { rows: Array<{ run_id?: string }> };
+      return renewed.rows.length > 0;
+    } catch (err) {
+      dbUnavailable('runs.heartbeat', err, this.logger, cid);
+    }
+  }
+
+  /** Steps of one run in seq order (crash recovery reads what was journaled). */
+  async listSteps(runId: string, cid: string): Promise<Array<RunStepRow>> {
+    try {
+      return await this.db.client
+        .select()
+        .from(runSteps)
+        .where(eq(runSteps.runId, runId))
+        .orderBy(asc(runSteps.seq));
+    } catch (err) {
+      dbUnavailable('runs.listSteps', err, this.logger, cid);
+    }
+  }
+
+  /**
+   * Opens (or re-opens, after a crash) a step BEFORE its effect runs, and
+   * journals `run.step.started` in the same transaction.
+   *
+   * The run row is locked first: journal seq is read-then-inserted, so the
+   * lock is what keeps concurrent appends of one run from colliding on
+   * (run_id, seq). A replayed step bumps `attempt` instead of duplicating the
+   * row — `idempotency_key` still identifies the effect itself.
+   */
+  async startStep(input: RunStepStartInput): Promise<{ step: RunStepRow; event: RunEventRow }> {
+    try {
+      return await this.db.client.transaction(async (tx) => {
+        await this.lockRunTx(tx, input.runId);
+        await this.assertLeaseTx(tx, input.runId, input.holder, input.leaseTtlMs);
+        const existing = await tx
+          .select()
+          .from(runSteps)
+          .where(and(eq(runSteps.runId, input.runId), eq(runSteps.seq, input.seq)))
+          .limit(1);
+        const step =
+          existing.length > 0
+            ? (
+                await tx
+                  .update(runSteps)
+                  .set({
+                    status: 'running',
+                    attempt: existing[0].attempt + 1,
+                    startedAt: new Date(),
+                  })
+                  .where(eq(runSteps.id, existing[0].id))
+                  .returning()
+              )[0]
+            : (
+                await tx
+                  .insert(runSteps)
+                  .values({
+                    id: Bun.randomUUIDv7(),
+                    runId: input.runId,
+                    seq: input.seq,
+                    type: input.type,
+                    status: 'running',
+                    attempt: 1,
+                    inputHash: input.inputHash,
+                    idempotencyKey: input.idempotencyKey,
+                    observedEpoch: 0,
+                    startedAt: new Date(),
+                  })
+                  .returning()
+              )[0];
+        const event = await this.appendEventTx(tx, input.runId, 'run.step.started', {
+          step: { id: step.id, seq: input.seq, type: input.type },
+        });
+        return { step, event };
+      });
+    } catch (err) {
+      if (err instanceof RunLeaseFencedError) throw err;
+      dbUnavailable('runs.startStep', err, this.logger, input.correlationId);
+    }
+  }
+
+  /**
+   * Closes a step as committed and journals its result reference.
+   *
+   * TODO(dual-write-reconcile): git effects (git.commit) are replayed onto the
+   * branch/worktree in E4.1b; this method only closes the step row, the journal
+   * stays the source of truth.
+   */
+  async commitStep(input: RunStepFinishInput): Promise<RunEventRow> {
+    try {
+      return await this.db.client.transaction(async (tx) => {
+        await this.lockRunTx(tx, input.runId);
+        await this.assertLeaseTx(tx, input.runId, input.holder, input.leaseTtlMs);
+        const resultRef = input.resultRef ?? {};
+        await tx
+          .update(runSteps)
+          .set({ status: 'committed', resultRef, endedAt: sql`now()` })
+          .where(and(eq(runSteps.runId, input.runId), eq(runSteps.seq, input.seq)));
+        const event = await this.appendEventTx(tx, input.runId, 'run.step.committed', {
+          step: { seq: input.seq },
+          resultRef,
+        });
+        // A committed step proves the run is in flight (it may have been
+        // 'open' right after the claim).
+        await tx
+          .update(runRuns)
+          .set({ status: 'running', updatedAt: sql`now()` })
+          .where(eq(runRuns.id, input.runId));
+        // Release the lease so the next prototype step is claimable
+        // immediately; the next tick re-claims and re-asserts ownership in the
+        // step transaction (TODO(full-fencing): epoch fencing later).
+        await tx.execute(sql`
+          UPDATE run_leases
+          SET expires_at = now()
+          WHERE run_id = ${input.runId} AND holder = ${input.holder}
+        `);
+        return event;
+      });
+    } catch (err) {
+      if (err instanceof RunLeaseFencedError) throw err;
+      dbUnavailable('runs.commitStep', err, this.logger, input.correlationId);
+    }
+  }
+
+  /**
+   * Closes a step as failed and journals the error.
+   *
+   * Run status is NOT touched: whether the failure is retryable (retry the
+   * step) or terminal (fail/abort the run) is the claim loop's decision.
+   *
+   * TODO(dual-write-reconcile): partial git effects are reconciled in E4.1b.
+   */
+  async failStep(input: RunStepFinishInput): Promise<RunEventRow> {
+    try {
+      return await this.db.client.transaction(async (tx) => {
+        await this.lockRunTx(tx, input.runId);
+        await this.assertLeaseTx(tx, input.runId, input.holder, input.leaseTtlMs);
+        const error = input.error ?? {};
+        await tx
+          .update(runSteps)
+          .set({ status: 'failed', error, endedAt: sql`now()` })
+          .where(and(eq(runSteps.runId, input.runId), eq(runSteps.seq, input.seq)));
+        const event = await this.appendEventTx(tx, input.runId, 'run.step.failed', {
+          step: { seq: input.seq },
+          error,
+        });
+        await tx
+          .update(runRuns)
+          .set({ updatedAt: sql`now()` })
+          .where(eq(runRuns.id, input.runId));
+        return event;
+      });
+    } catch (err) {
+      if (err instanceof RunLeaseFencedError) throw err;
+      dbUnavailable('runs.failStep', err, this.logger, input.correlationId);
+    }
+  }
+
+  /**
+   * Parks the run for a human (`awaiting_human`) or marks it terminally
+   * `failed` when nothing can be advanced anymore. Either way the lease is
+   * held for a day, so no worker re-claims it while the decision is pending.
+   * Resuming is a later epic (the lease simply expires and the claim loop
+   * picks it up).
+   */
+  async finishRun(
+    runId: string,
+    holder: string,
+    status: 'awaiting_human' | 'failed',
+    cid: string,
+  ): Promise<void> {
+    try {
+      await this.db.client.transaction(async (tx) => {
+        await this.lockRunTx(tx, runId);
+        await tx.execute(sql`
+          UPDATE run_leases
+          SET expires_at = now() + interval '24 hours'
+          WHERE run_id = ${runId} AND holder = ${holder}
+        `);
+        await tx
+          .update(runRuns)
+          .set({ status, updatedAt: sql`now()` })
+          .where(eq(runRuns.id, runId));
+      });
+    } catch (err) {
+      dbUnavailable('runs.finishRun', err, this.logger, cid);
+    }
+  }
+
+  /**
+   * Serializes journal appends of one run. The run row lock is taken before
+   * the seq read, so two transactions can never compute the same `seq`.
+   */
+  private async lockRunTx(tx: RunTx, runId: string): Promise<void> {
+    await tx.execute(sql`SELECT id FROM run_runs WHERE id = ${runId} FOR UPDATE`);
+  }
+
+  /**
+   * Lease guard: extends our still-held lease or fences the worker. An empty
+   * RETURNING means the lease now belongs to someone else — a fenced worker
+   * must stop instead of writing a second history for the run.
+   */
+  private async assertLeaseTx(
+    tx: RunTx,
+    runId: string,
+    holder: string,
+    leaseTtlMs: number,
+  ): Promise<void> {
+    const renewed = (await tx.execute(sql`
+      UPDATE run_leases
+      SET expires_at = now() + make_interval(secs => ${leaseTtlMs / 1000})
+      WHERE run_id = ${runId} AND holder = ${holder}
+      RETURNING run_id
+    `)) as unknown as { rows: Array<{ run_id?: string }> };
+    if (renewed.rows.length === 0) throw new RunLeaseFencedError(runId);
+  }
+
+  /**
+   * Appends one journal row onto the hash chain and wakes SSE subscribers.
+   *
+   * `pg_notify` rides the caller's transaction: it is delivered only if the
+   * append commits, so no subscriber can tail a row that rolled back. The
+   * seq read + insert are safe because every caller already holds the run row
+   * lock (lockRunTx) in this transaction.
+   */
+  private async appendEventTx(
+    tx: RunTx,
+    runId: string,
+    type: string,
+    data: Record<string, unknown>,
+  ): Promise<RunEventRow> {
+    const last = await tx
+      .select()
+      .from(runEvents)
+      .where(eq(runEvents.runId, runId))
+      .orderBy(desc(runEvents.seq))
+      .limit(1);
+    const previous = last[0] ?? null;
+    const seq = previous ? Number(previous.seq) + 1 : 1;
+    // An empty journal still starts from genesis (createRun normally owns
+    // that row; a run without one must not chain onto a fake predecessor).
+    const prevHash = previous ? nextPrevHash(previous) : GENESIS_HASH;
+    const inserted = await tx
+      .insert(runEvents)
+      .values({ runId, seq, type, data, prevHash })
+      .returning();
+    await tx.execute(sql`SELECT pg_notify('run_events', ${runId})`);
+    return inserted[0];
   }
 }

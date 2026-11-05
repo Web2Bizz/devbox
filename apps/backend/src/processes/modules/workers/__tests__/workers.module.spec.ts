@@ -1,6 +1,12 @@
 import "reflect-metadata";
 import assert from "node:assert/strict";
 import { MODULE_METADATA } from "@nestjs/common/constants";
+import { WorkspacePathService } from "../../../../common/storage/workspace-path.service";
+import { RunsModule } from "../../runs/runs.module";
+import { RunsClaimLoop } from "../modules/claim-loop";
+import { RunWorktreeService } from "../modules/git";
+import { ModelGateway, StubModelGateway } from "../modules/model-gateway";
+import { ToolRegistry } from "../modules/tool-registry";
 import { WorkersModule } from "../workers.module";
 
 type Case = { name: string; run: () => Promise<void> | void };
@@ -28,13 +34,23 @@ describe("WorkersModule metadata", () => {
     assert.equal(WorkersModule.name, "WorkersModule");
   });
 
-  it("is a scaffold with no imports", () => {
-    assert.equal(meta<Array<unknown>>(MODULE_METADATA.IMPORTS), undefined);
+  it("imports the runs domain (journal/step repository)", () => {
+    assert.deepEqual(meta<Array<unknown>>(MODULE_METADATA.IMPORTS), [RunsModule]);
   });
 
-  it("registers no controllers, providers or exports", () => {
+  it("registers the run engine providers", () => {
+    const providers = meta<Array<unknown>>(MODULE_METADATA.PROVIDERS);
+    assert.deepEqual(providers, [
+      WorkspacePathService,
+      RunWorktreeService,
+      ToolRegistry,
+      { provide: ModelGateway, useClass: StubModelGateway },
+      RunsClaimLoop,
+    ]);
+  });
+
+  it("exposes no controllers and no exports", () => {
     assert.equal(meta<Array<unknown>>(MODULE_METADATA.CONTROLLERS), undefined);
-    assert.equal(meta<Array<unknown>>(MODULE_METADATA.PROVIDERS), undefined);
     assert.equal(meta<Array<unknown>>(MODULE_METADATA.EXPORTS), undefined);
   });
 });

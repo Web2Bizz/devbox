@@ -1,7 +1,34 @@
 import { Module } from '@nestjs/common';
+import { WorkspacePathService } from '../../../common/storage/workspace-path.service';
+import { RunsModule } from '../runs/runs.module';
+import { RunsClaimLoop } from './modules/claim-loop';
+import { RunWorktreeService } from './modules/git';
+import { ModelGateway, StubModelGateway } from './modules/model-gateway';
+import { ToolRegistry } from './modules/tool-registry';
 
 /**
- * WorkersModule — scaffold only, no controller and no functionality yet.
+ * WorkersModule — the in-process run engine (agent-harness prototype).
+ *
+ * RunsModule is imported for the claim/step repository (the workers append to
+ * the same journal the HTTP surface reads); WorkspacePathService is provided
+ * directly, the same stateless "safe second instance" pattern as RunsModule.
+ *
+ * The claim loop is deliberately in-process and single-role: one holder per
+ * backend instance, lease renewed by step transactions, and shutdown only
+ * drains the current tick. That survives a GRACEFUL restart (the lease expires
+ * and another instance claims the run); a hard crash may leave one attempt to
+ * be replayed by the operator — TODO(full-fencing) adds epochs. The model port
+ * is the stub (one provider, normalized response journaled as the step
+ * result), and tools reach the model as ToolView projections only (D3).
  */
-@Module({})
+@Module({
+  imports: [RunsModule],
+  providers: [
+    WorkspacePathService,
+    RunWorktreeService,
+    ToolRegistry,
+    { provide: ModelGateway, useClass: StubModelGateway },
+    RunsClaimLoop,
+  ],
+})
 export class WorkersModule {}

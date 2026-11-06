@@ -6,7 +6,7 @@
 // apps/backend dotenv and `next dev` would never see the repo-root `.env`.
 // This launcher parses the root `.env` and injects it before spawn.
 //
-// Parser semantics (ported from the removed ecosystem.config.cjs, no new
+// Parser semantics (kept from the legacy dotenv bridge, no new
 // syntax invented): KEY=VALUE lines, `#` comments, optional quotes,
 // ${VAR} / ${VAR:-default} expansion resolved whole-file (order-independent,
 // cycle-guarded), lookup order process.env > file > nothing. In particular

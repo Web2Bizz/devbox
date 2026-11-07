@@ -1,7 +1,7 @@
 'use client';
 
 import { useParams } from 'next/navigation';
-import { ChatSection } from '@/features/chat/chat-section';
+import { ChatSection } from '@/features/chat-section';
 
 export default function NestedSessionPage() {
   const params = useParams();

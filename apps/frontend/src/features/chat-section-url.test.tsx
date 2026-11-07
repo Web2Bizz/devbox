@@ -38,7 +38,7 @@ mock.module('next/navigation', () => ({
 }));
 
 // ---- domain client mock (registry only; the hook is mocked below) ----------
-mock.module('../../api/sessions-client', () => ({
+mock.module('../api/sessions-client', () => ({
   DEFAULT_AGENT_ID: 'ask',
   listAgents: async () => [],
 }));
@@ -50,7 +50,7 @@ const chatHolder: { agentId: string; sessionId: string | null } = {
 };
 const setAgentCalls: Array<string> = [];
 
-mock.module('../../hooks/useChat', () => ({
+mock.module('../hooks/useChat', () => ({
   useChat: () => ({
     messages: [],
     streamingText: '',
@@ -72,17 +72,17 @@ mock.module('../../hooks/useChat', () => ({
 }));
 
 // ---- fork/revert dialogs (heavy, irrelevant when closed) --------------------
-mock.module('../chat-fork-dialog', () => ({
+mock.module('./chat-fork-dialog', () => ({
   ChatForkDialog: () => null,
 }));
-mock.module('../chat-revert-dialog', () => ({
+mock.module('./chat-revert-dialog', () => ({
   ChatRevertDialog: () => null,
 }));
 
 const { cleanup, render } = await import('@testing-library/react');
 const { QueryClient, QueryClientProvider } = await import('@tanstack/react-query');
-const { I18nProvider } = await import('../../i18n');
-const { ChatSection } = await import('../chat-section');
+const { I18nProvider } = await import('../i18n');
+const { ChatSection } = await import('./chat-section');
 
 function setQuery(qs: string): void {
   window.history.replaceState({}, '', qs ? `${PATHNAME}${qs}` : PATHNAME);

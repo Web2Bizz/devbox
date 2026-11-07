@@ -8,25 +8,12 @@ import {
   CollapsibleTrigger,
 } from '@web2bizz/ui/components';
 import { ShimmerText } from '@web2bizz/ui/widgets';
-import type { ChatToolEvent } from '../../../hooks/useChat';
-import { useI18n } from '../../../i18n';
-
-export type ChatToolsTimelineProps = {
-  /** Chronological tool calls of the session (append-only, see useChat). */
-  events: ChatToolEvent[];
-  /** Tool name currently reported by the live part frames (null while idle). */
-  liveToolName?: string | null;
-};
+import { useI18n } from '../../i18n';
+import type { ChatToolsTimelineProps } from './types';
 
 /**
- * Chronological tool timeline of the current chat request, rendered INSIDE
- * the kit `MessageScroller` as an ordinary `MessageScrollerItem` (never with
- * `scrollAnchor`) so the streaming auto-follow anchor stays on thinking/streaming.
- * Hidden while empty, and the error/empty branches of `ChatWindow` return before it, so it never shows on those
- * states either.
- *
- * Kit-only chrome: `Collapsible` for the fold, `Badge` for the call count,
- * token classes (`text-muted-foreground`, `bg-muted`) for the rows — no hex.
+ * Chronological tool timeline inside the thread (ordinary scroller item,
+ * never scrollAnchor). Kit-only chrome: Collapsible + Badge + tokens.
  */
 export function ChatToolsTimeline({ events, liveToolName }: ChatToolsTimelineProps) {
   const { t } = useI18n();

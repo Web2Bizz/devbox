@@ -2,24 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { ShimmerText } from '@web2bizz/ui/widgets';
-import { useI18n } from '../../../i18n';
-
-export type AgentThinkingProps = {
-  /** Display name of the agent owning the in-flight turn. */
-  activeAgentName?: string;
-  /** Tool name reported by the live part frames. */
-  activeToolName?: string;
-};
+import { useI18n } from '../../i18n';
+import type { AgentThinkingProps } from './types';
 
 /**
- * Rotating "agent is working" status for the sending gap
- * (`sending && !streamingText`).
- *
- * Live status first: when the turn reports an agent/tool, the line is the
- * flat `agent [· tool]` pair (no extra chrome, ShimmerText only). Without
- * that data it falls back to cycling `t.chat.thinking` every ~1.6s — the
- * rotation is a fallback, not the primary status. Language switch (`t`
- * identity) resets the index to the first phrase.
+ * Rotating "agent is working" status for the sending gap.
+ * Live status first (agent [· tool]); fallback cycles t.chat.thinking.
  */
 export function AgentThinking({ activeAgentName, activeToolName }: AgentThinkingProps) {
   const { t } = useI18n();

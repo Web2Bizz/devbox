@@ -1,13 +1,9 @@
 'use client';
 
 import { Badge } from '@web2bizz/ui/components';
-import { useI18n } from '../../../i18n';
-import { AgentThinking } from './agent-thinking';
-
-export type ChatThinkingRowProps = {
-  activeAgentName?: string;
-  activeToolName?: string;
-};
+import { useI18n } from '../../i18n';
+import { AgentThinking } from '../agent-thinking';
+import type { ChatThinkingRowProps } from './types';
 
 /** Live "thinking" row: bare ShimmerText line + agent/tool badges. */
 export function ChatThinkingRow({ activeAgentName, activeToolName }: ChatThinkingRowProps) {

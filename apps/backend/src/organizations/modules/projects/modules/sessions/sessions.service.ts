@@ -49,10 +49,8 @@ function toSession(row: ProjectSessionRow): ProjectSession {
  * (Retry-After 30 via ApiErrorFilter), logged once with the correlationId.
  *
  * Scope (Card 5 access layer): every user-facing op gates on
- * ProjectAccessService.assertProjectAccess — org-linked projects admit any
- * member of a linked org, user-space projects admit only the owner
- * (project.ownerId vs the requester). Strangers get 404 (existence is not
- * leaked). Cascade helpers (removeByProject/detachChat/hasChatReference)
+ * ProjectAccessService.assertProjectAccess — org members pass.
+ * Strangers get 404 (existence is not leaked). Cascade helpers (removeByProject/detachChat/hasChatReference)
  * stay access-free — the project-delete path calls them after its own gate.
  */
 @Injectable()
@@ -73,9 +71,9 @@ export class SessionsService {
   }
 
   /**
-   * Card 5 gate: org-linked → any linked-org member; user-space → owner
-   * only; strangers → 404 (no existence leak). A missing requester is a
-   * fail-closed 401 — there is no anonymous/service bypass.
+   * Card 5 gate: org members pass; strangers → 404 (no existence leak).
+   * A missing requester is a fail-closed 401 — there is no
+   * anonymous/service bypass.
    */
   private async checkAccess(
     projectId: string,

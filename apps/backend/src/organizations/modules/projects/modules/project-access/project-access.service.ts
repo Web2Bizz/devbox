@@ -12,7 +12,6 @@ import {
 import { WorkspacePathService } from "../../../../../common/storage/workspace-path.service";
 import { OrganizationsGuard } from "../../../../organizations.guard";
 import type { OrgRole } from "../../../../organizations.types";
-import { ownerKeyOrThrow } from "../../projects.service";
 
 /** uuid shape check (mirrors UsersService.isUserId — non-uuid keys never match a row). */
 function isUuidKey(value: string): boolean {
@@ -32,9 +31,7 @@ function isUuidKey(value: string): boolean {
  * Reads the 1:1 `projects` table directly (dynamic imports, no
  * ProjectsService injection, no module cycle) and delegates membership to
  * OrganizationsGuard.getRole (the guard is stateless, provided directly by
- * ProjectAccessModule — same pattern as WorkspacePathService). The only
- * import from the parent projects module is the pure ownerKeyOrThrow layout
- * mapping (no service instance, no cycle).
+ * ProjectAccessModule — same pattern as WorkspacePathService).
  *
  * Postgres outages funnel through `dbUnavailable` → 503
  * EXTERNAL_UNAVAILABLE (Retry-After 30 via ApiErrorFilter), logged once with
@@ -129,11 +126,11 @@ export class ProjectAccessService {
   /**
    * Project-id gate for project-scoped surfaces without an org path
    * (opencode serve/session proxy, C4): loads the row, then runs the
-   * shared assertProjectAccess (org-linked → member, user-space → owner;
-   * strangers → 404, no existence leak). Missing projectId at the call
-   * site is the caller's 400 (PROJECT_REQUIRED) — this method only gates
-   * a present id. Returns the row's owner/orgs so callers can resolve the
-   * project directory jail without a second lookup.
+   * shared assertProjectAccess (org membership only; strangers → 404, no
+   * existence leak). Missing projectId at the call site is the caller's
+   * 400 (PROJECT_REQUIRED) — this method only gates a present id.
+   * Returns the row's owner/orgs so callers can resolve the project
+   * directory jail without a second lookup.
    */
   async assertProjectAccessById(
     projectId: string,
@@ -156,11 +153,11 @@ export class ProjectAccessService {
    * - Missing/blank projectId → 400 PROJECT_REQUIRED (session routes are
    *   project-scoped; there is no cross-project listing).
    * - assertProjectAccessById → 404 for strangers (no existence leak).
-   * - The owner home maps through ownerKeyOrThrow (same user layout the
-   *   projects domain writes) and resolves via resolveUserStrict, then the
-   *   content dir is re-asserted against the strict storage root — a path
-   *   that escapes the jail answers 403.
+   * - The org home resolves via resolveOrgStrict, then the content dir is
+   *   re-asserted against the strict storage root — a path that escapes
+   *   the jail answers 403.
    * - Unconfigured storage fails closed (500) before any upstream call.
+   * - Rows without orgId are invalid (org-only model) → 404.
    *
    * Returns the accepted projectId alongside the jailed content directory so
    * callers pass it as the upstream location instead of a client-supplied
@@ -177,13 +174,17 @@ export class ProjectAccessService {
         message: "projectId is required — session routes are project-scoped",
       });
     }
-    const { ownerId } = await this.assertProjectAccessById(
+    const { orgIds } = await this.assertProjectAccessById(
       projectId,
       userId,
       correlationId,
     );
-    const resolved = await this.paths.resolveUserStrict(
-      ownerKeyOrThrow(ownerId),
+    const orgId = orgIds[0];
+    if (!orgId) {
+      throw new NotFoundException(`Project ${projectId} not found`);
+    }
+    const resolved = await this.paths.resolveOrgStrict(
+      orgId,
       projectId,
     );
     await this.paths.assertInsideJail(
@@ -198,72 +199,48 @@ export class ProjectAccessService {
    * the top-level projects :id routes (C1) and the opencode/proxy project
    * gate via assertProjectAccessById (C4).
    *
-   * 1:1 model (M2M removed — docs live under this code): the ONLY
-   * association is the `projects.org_id` column — orgIdsForProject selects
-   * it directly from the projects row. The old `projects_and_organizations`
-   * link table is gone (link/unlink answer 410 Gone, here and in the
-   * controllers); a project belongs to exactly one org or to no org
-   * (user-space). There is no multi-org membership walk anymore.
+   * Org-only model: the ONLY association is the `projects.org_id` column (NOT NULL)
+   * selected directly from the projects row. The old link table is gone
+   * (link/unlink answer 410 Gone); a project always belongs to exactly one
+   * org. There is no user-space and no ownerless fallback.
    *
-   * - Org-linked project (org_id set): access to any member of that org
-   *   (`getRole` non-null). The owner-equality fallback also passes — the
-   *   creator is a maintainer in practice, so this never widens the member
-   *   rule. A soft-deleted org (guard `orgRowOrThrow` → 404) admits nobody,
-   *   including its owner.
-   * - User-space project (org_id NULL, owner set): owner-only
-   *   (ownerId === userId).
-   * - Ownerless rows (ownerId NULL, pre-auth legacy): DENY by default → 404
-   *   for everyone (C5). Rationale: an ownerless row binds to no identity,
-   *   so the old "shared dev data" pass was an open door. New rows always
-   *   carry a real owner (C1 forces ownerId = identity.id at both create
-   *   paths); legacy rows need a hand migration (set ownerId) to become
-   *   visible again.
+   * - Access to any member of the project org (`getRole` non-null).
+   *   A soft-deleted org admits nobody.
+   * - Rows without org_id are invalid: 404 for everyone (a project without
+   *   an organization is not addressable). No owner-equality fallback:
+   *   membership is the only rule.
    * - Strangers get 404 (the project's very existence is not leaked — the
    *   same no-enumeration rule as org reads). Non-uuid requesters (legacy
    *   mock `default`) skip the membership lookup (a non-uuid key can never
-   *   match a uuid column — querying would 503 on 22P02) and only pass via
-   *   the owner-equality fallback above.
+   *   match a uuid column) and get 404.
    * - DB outages propagate untouched as 503 EXTERNAL_UNAVAILABLE via
    *   orgIdsForProject/getRole's dbUnavailable (never downgraded to 404).
    * Logs carry only ids/reasons — never tokens, emails, or secrets.
    */
   async assertProjectAccess(
     projectId: string,
-    ownerId: string | null,
+    _ownerId: string | null,
     userId: string,
     correlationId?: string,
   ): Promise<void> {
+    void _ownerId;
     const orgIds = await this.orgIdsForProject(projectId, correlationId);
-    if (orgIds.length > 0) {
-      for (const orgId of orgIds) {
-        if (isUuidKey(userId)) {
-          const role = await this.getRole(orgId, userId, correlationId);
-          if (role) return;
-        }
-        // A soft-deleted org authorizes nobody — not even its owner (the
-        // owner-equality fallback below must not resurrect a removed org).
-        try {
-          await this.guard.orgRowOrThrow(orgId, correlationId);
-        } catch (err) {
-          if (err instanceof NotFoundException)
-            throw new NotFoundException(`Project ${projectId} not found`);
-          throw err;
-        }
-      }
-      if (
-        typeof ownerId === "string" &&
-        ownerId.toLowerCase() === userId.toLowerCase()
-      ) {
-        return;
-      }
+    if (orgIds.length === 0) {
       throw new NotFoundException(`Project ${projectId} not found`);
     }
-    // C5 deny-by-default: ownerless rows (NULL owner, pre-auth legacy) admit
-    // nobody — the old shared-dev-data pass is removed (open door). New rows
-    // always carry a real owner (C1); legacy rows need a hand migration.
-    if (ownerId === null || ownerId === undefined)
-      throw new NotFoundException(`Project ${projectId} not found`);
-    if (ownerId.toLowerCase() === userId.toLowerCase()) return;
+    for (const orgId of orgIds) {
+      try {
+        await this.guard.orgRowOrThrow(orgId, correlationId);
+      } catch (err) {
+        if (err instanceof NotFoundException)
+          throw new NotFoundException(`Project ${projectId} not found`);
+        throw err;
+      }
+      if (isUuidKey(userId)) {
+        const role = await this.getRole(orgId, userId, correlationId);
+        if (role) return;
+      }
+    }
     throw new NotFoundException(`Project ${projectId} not found`);
   }
 }

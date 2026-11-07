@@ -10,15 +10,14 @@ import { ReposService } from './repos.service';
 
 /**
  * Readonly git-repo registry — GET only (no POST/PUT/DELETE by design).
- * Layout on disk (organizations epic, no `workspace` segment):
- *   users/<user-uuid>/projects/<project-uuid>/content
+ * Layout on disk (org-only, no `workspace` segment, no user homes):
  *   orgs/<org-uuid>/projects/<project-uuid>/content
  *
  * Security (Card C3, reuse of the Card 5 access layer):
  * - Bearer-guarded (JwtAuthGuard); anonymous → 401.
- * - Callers see only their own space: GET /repos scopes to the Bearer
- *   identity's user-space; GET /repos/:userSpace admits the owner's own
- *   space or a member org (ProjectAccessService.getRole) — strangers get
+ * - Callers see only spaces they belong to: GET /repos scopes to the
+ *   Bearer identity's id; GET /repos/:userSpace admits the identity's own
+ *   id or a member org (ProjectAccessService.getRole) — strangers get
  *   404 (existence is not leaked, same no-enumeration rule as
  *   organizations member reads).
  *
@@ -75,8 +74,9 @@ export class ReposController {
         parsed.error.issues[0]?.message ?? 'Invalid userSpace',
       );
     }
-    // Own user-space passes directly; any other space must be a member org
-    // (reuse of the ProjectAccessService.getRole member rule — strangers 404).
+    // The identity's own id passes directly; any other space must be a
+    // member org (reuse of the ProjectAccessService.getRole member rule —
+    // strangers 404).
     if (parsed.data !== identity.id) {
       const role = await this.access.getRole(parsed.data, identity.id, correlationId);
       if (!role) throw new NotFoundException(`Repo space ${parsed.data} not found`);

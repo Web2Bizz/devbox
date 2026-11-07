@@ -28,9 +28,8 @@ import {
 /**
  * Project chats — Bearer-guarded (JwtAuthGuard, legacy mock fallback in
  * dev). User-facing ops scope through
- * ProjectAccessService.assertProjectAccess (Card 5): org-linked projects
- * admit any member of a linked org, user-space projects admit only the
- * owner; strangers get 404 (existence is not leaked).
+ * ProjectAccessService.assertProjectAccess (Card 5): org members pass;
+ * strangers get 404 (existence is not leaked).
  */
 @ApiTags("project-chats")
 @Controller("projects/:projectId/chats")

@@ -62,6 +62,9 @@ export class OrganizationDto {
   @ApiProperty({ default: true })
   isPrivate!: boolean;
 
+  @ApiProperty({ default: false, description: 'Personal org of a single user — created at register, never deleted' })
+  isPersonal!: boolean;
+
   @ApiProperty({ format: 'date-time' })
   createdAt!: string;
 

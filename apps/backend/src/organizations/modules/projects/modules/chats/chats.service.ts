@@ -41,8 +41,7 @@ function toChat(row: ProjectChatRow): ProjectChat {
  * (Retry-After 30 via ApiErrorFilter), logged once with the correlationId.
  *
  * Scope (Card 5 access layer): user-facing ops (list/create/remove) gate on
- * ProjectAccessService.assertProjectAccess — org-linked projects admit any
- * member of a linked org, user-space projects admit only the owner.
+ * ProjectAccessService.assertProjectAccess — org members pass.
  * Strangers get 404 (existence is not leaked). getInProject/removeByProject
  * stay access-free (called by SessionsService.create / project-delete after
  * their own gates).

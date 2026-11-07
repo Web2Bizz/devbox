@@ -12,6 +12,8 @@ export type Organization = {
   description: string | null;
   ownerId: string | null;
   isPrivate: boolean;
+  /** Personal org of a single user — created at register, never deleted. */
+  isPersonal: boolean;
   createdAt: string;
   updatedAt: string;
 };

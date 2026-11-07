@@ -6,8 +6,7 @@ import { ProjectsService } from "../../projects.service";
  * GithubModule. Never stores tokens/credentials (only owner/repo/branch
  * text on the project row). Format-only checks; no outbound network.
  * No path resolver use: disk homes resolve inside ProjectsService
- * (users/<ownerUuid>/projects/<id>/content), so the organizations layout
- * migration (Card 3) needs no change here.
+ * (orgs/<orgUuid>/projects/<id>/content).
  *
  * Write paths (link/unlink) were removed with their routes: PATCH
  * githubOwner/githubRepo/githubBranch is the only way to change the link.

@@ -49,11 +49,11 @@ import { ProjectsService } from "./projects.service";
  *   user-id header/query/body to tamper with (same rule as
  *   OpencodeKeysController.ownUserId: userId comes from the Bearer only).
  * - POST create forces ownerId = identity.id (a body ownerId is ignored,
- *   never trusted) — new rows always carry a real owner (no ownerless
- *   rows; see C5 deny-by-default).
+ *   never trusted) — new rows always carry a real audit owner alongside
+ *   the required orgId (no ownerless rows; see C5 deny-by-default).
  * - GET/PATCH/DELETE :id (+ github status) gate through
- *   ProjectAccessService.assertProjectAccess (org-linked → member,
- *   user-space → owner; strangers → 404, no existence leak — the same
+ *   ProjectAccessService.assertProjectAccess (org members only;
+ *   strangers → 404, no existence leak — the same
  *   no-enumeration rule as memberOrThrow).
  * - Anonymous → 401 from the guard (before any DB touch).
  *
@@ -72,8 +72,7 @@ export class ProjectsController {
 
   /**
    * Top-level :id gate (reuse, not a new rule): load the row, then run the
-   * shared Card 5 gate — org-linked projects admit any member of a linked
-   * org, user-space projects admit only the owner; strangers get 404.
+   * shared Card 5 gate — org members pass; strangers get 404.
    */
   private async assertAccess(
     projectId: string,

@@ -14,7 +14,7 @@ process.env.CLONE_ALLOWED_HOSTS = 'gitea.internal';
 const UID = '123e4567-e89b-12d3-a456-426614174001';
 const PID = '123e4567-e89b-12d3-a456-426614174003';
 const JAIL = '/tmp/repos';
-const INSIDE_DEST = `${JAIL}/users/${UID}/projects/${PID}/content`;
+const INSIDE_DEST = `${JAIL}/orgs/${UID}/projects/${PID}/content`;
 
 type Case = { name: string; run: () => Promise<void> | void };
 
@@ -43,7 +43,7 @@ function silentLogger(): AppLogger {
 }
 
 type Resolved = {
-  scope: 'user';
+  scope: 'org';
   scopeId: string;
   projectId: string;
   absBase: string;
@@ -57,13 +57,13 @@ type Resolved = {
 function resolvedAt(absRepo: string): Resolved {
   const absBase = absRepo.replace(/\/content$/, '');
   return {
-    scope: 'user',
+    scope: 'org',
     scopeId: UID,
     projectId: PID,
     absBase,
     absRepo,
     absSecrets: `${absBase}/.secrets`,
-    scopeSecrets: `${JAIL}/users/${UID}/.secrets`,
+    scopeSecrets: `${JAIL}/orgs/${UID}/.secrets`,
     abs: absRepo,
     rel: '.',
   };
@@ -117,7 +117,7 @@ function readyJobs(
 }
 
 type PathsMock = {
-  resolveUser: (userId: string, projectId: string) => Promise<Resolved>;
+  resolveOrg: (userId: string, projectId: string) => Promise<Resolved>;
   assertInsideJail: (abs: string, jailReal: string) => Promise<string>;
   realStrictRoot: () => Promise<string>;
 };
@@ -247,7 +247,7 @@ const DENIED: Array<string> = [
 
 function permissivePaths(): PathsMock {
   return {
-    resolveUser: async () => resolvedAt(INSIDE_DEST),
+    resolveOrg: async () => resolvedAt(INSIDE_DEST),
     realStrictRoot: async () => JAIL,
     assertInsideJail: async (abs) => abs,
   };
@@ -308,8 +308,8 @@ describe('WorkspaceCloneService.clone destination jail', () => {
     const seq: Array<string> = [];
     const { jobs } = readyJobs(() => seq.push('withLock'));
     const paths: PathsMock = {
-      resolveUser: async () => {
-        seq.push('resolveUser');
+      resolveOrg: async () => {
+        seq.push('resolveOrg');
         return resolvedAt(INSIDE_DEST);
       },
       realStrictRoot: async () => {
@@ -342,8 +342,8 @@ describe('WorkspaceCloneService.clone destination jail', () => {
     const seq: Array<string> = [];
     const { jobs, store } = readyJobs(() => seq.push('withLock'));
     const paths: PathsMock = {
-      resolveUser: async () => {
-        seq.push('resolveUser');
+      resolveOrg: async () => {
+        seq.push('resolveOrg');
         return resolvedAt('/etc');
       },
       realStrictRoot: async () => {

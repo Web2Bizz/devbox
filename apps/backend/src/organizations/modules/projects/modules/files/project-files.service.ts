@@ -12,7 +12,7 @@ import { ExternalServiceError } from '../../../../../common/external/external-er
 import { storageUnavailable, throwStorageNotConfigured } from '../../../../../common/storage/storage-unavailable';
 import { ProjectAccessService } from '../project-access/project-access.service';
 import { WorkspacePathService } from '../../../../../common/storage/workspace-path.service';
-import { ProjectsService, ownerKeyOrThrow } from '../../projects.service';
+import { ProjectsService } from '../../projects.service';
 
 export type FileNode = {
   path: string;
@@ -23,8 +23,8 @@ export type FileNode = {
 const MAX_DEPTH = 5;
 
 /**
- * Project file browser over the organizations layout
- * (users/<ownerUuid>/projects/<id>/content, jailed per project).
+ * Project file browser over the org layout
+ * (orgs/<orgUuid>/projects/<id>/content, jailed per project).
  * Every path is normalized + jailed inside the project content dir;
  * traversal attempts yield 403, unconfigured storage denies with 503
  * EXTERNAL_UNAVAILABLE (Retry-After 30, logged once with the
@@ -68,13 +68,23 @@ export class ProjectFilesService {
         message: 'Authentication required',
       });
     }
+    // Storage gate first (before any DB branching): empty REPOS_ROOT →
+    // 503 EXTERNAL_UNAVAILABLE via storageUnavailable (single deny log
+    // line), never a silent 404 over an unconfigured root — consistent
+    // with the repos/workspaces/clone deny cases.
+    try {
+      this.resolveRoot();
+    } catch (err) {
+      if (err instanceof ExternalServiceError && err.code === 'EXTERNAL_UNAVAILABLE') {
+        storageUnavailable('project-files.tree', this.logger, correlationId, err);
+      }
+      throw err;
+    }
     const project = await this.projects.getOrThrow(projectId, correlationId);
-    // Card 5 access layer, always enforced: org-linked → any linked-org
-    // member, user-space → owner only, strangers → 404 (existence is not
-    // leaked). A missing requester is a fail-closed 401 (checked above);
-    // there is no internal/test bypass and no optional access dependency.
-    // Disk homes are NOT moved by linking (metadata-only join rows) — the
-    // user home below stays canonical.
+    // Card 5 access layer, always enforced: org members only (membership
+    // via ProjectAccessService.assertProjectAccess); strangers → 404
+    // (existence is not leaked). A missing requester is a fail-closed 401
+    // (checked above).
     await this.access.assertProjectAccess(
       project.id,
       project.ownerId,
@@ -82,15 +92,15 @@ export class ProjectFilesService {
       correlationId,
     );
     const clamped = Math.min(Math.max(depth, 0), MAX_DEPTH);
-    // Owner home determines the content jail (access already gated above
-    // via ProjectAccessService.assertProjectAccess — Card 5; legacy non-uuid
-    // owners have no home here → 404, never an unscoped read).
+    // The org home determines the content jail (access already gated above).
     let abs: string;
     let rel: string;
     try {
-      const ownerKey = ownerKeyOrThrow(project.ownerId);
-      const resolved = await this.paths.resolveUser(
-        ownerKey,
+      if (!project.orgId) {
+        throw new NotFoundException(`Path ${requestedPath} not found`);
+      }
+      const resolved = await this.paths.resolveOrg(
+        project.orgId,
         project.id,
         requestedPath || '.',
       );
@@ -103,7 +113,7 @@ export class ProjectFilesService {
         storageUnavailable('project-files.tree', this.logger, correlationId, err);
       }
       if (err instanceof ForbiddenException) throw err;
-      // BadRequest here means the stored row predates the uuid layout
+      // BadRequest here means the stored row carries a non-uuid id
       // (hand-migration pending) — surface 404, never 400 for a stored row.
       throw new NotFoundException(`Path ${requestedPath} not found`);
     }

@@ -5,16 +5,18 @@
  *   `bun run build && bun dist/organizations/modules/projects/__tests__/project-strict-root.spec.js`
  * Also executes under `bun test dist` (top-level run, throws on failure).
  *
- * Covers the strict storage-root canon for project writes (organizations
- * layout — users/<ownerUuid>/projects/<id>/content, no `workspace` segment):
- * - empty REPOS_ROOT → requireExplicitRoot/resolveUserStrict throw 500
+ * Covers the strict storage-root canon for project writes (org-only
+ * layout — orgs/<orgUuid>/projects/<id>/content, no `workspace` segment,
+ * no user homes):
+ * - empty REPOS_ROOT → requireExplicitRoot/resolveOrgStrict throw 500
  *   before any mkdir/INSERT; ProjectsService.create() throws and
  *   DbService.insert is NEVER called (no rows written);
- * - non-uuid ownerId → create() throws 400 before any mkdir/INSERT;
+ * - non-uuid orgId → create() throws 400 before any mkdir/INSERT;
  * - enrich() with unconfigured storage → corrupted=true,
  *   reason `storage-unconfigured` (never throws);
  * - explicit REPOS_ROOT keeps working (strict resolve inside jail);
- * - update() rejects ownerId change with 400 (no orphaned dirs).
+ * - update() rejects ownerId change with 400 (immutable, no orphan).
+ * - org-less rows enrich to corrupted=true reason `missing-org`.
  */
 import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
@@ -54,11 +56,11 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
     },
   },
   {
-    name: 'resolveUserStrict throws before any disk/DB touch on empty root',
+    name: 'resolveOrgStrict throws before any disk/DB touch on empty root',
     run: async () => {
       const paths = new WorkspacePathService();
       await assert.rejects(() =>
-        paths.resolveUserStrict(
+        paths.resolveOrgStrict(
           '123e4567-e89b-12d3-a456-426614174001',
           '123e4567-e89b-12d3-a456-426614174002',
         ),
@@ -66,13 +68,13 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
     },
   },
   {
-    name: 'create() with non-uuid ownerId throws 400, insert NEVER called',
+    name: 'create() with non-uuid orgId throws 400, insert NEVER called',
     run: async () => {
       let insertCalled = 0;
       const fakeClient = {
         insert() {
           insertCalled += 1;
-          throw new Error('insert must not be called for a bad ownerId');
+          throw new Error('insert must not be called for a bad orgId');
         },
       };
       const svc = makeService(fakeClient);
@@ -80,13 +82,13 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
         () =>
           svc.create(
             {
-              name: 'bad-owner',
-              ownerId: 'alice',
-              orgId: '123e4567-e89b-12d3-a456-426614174001',
+              name: 'bad-org',
+              ownerId: '123e4567-e89b-12d3-a456-426614174001',
+              orgId: 'not-an-org',
             },
             'cid-strict-owner',
           ),
-        /ownerId must be a uuid/,
+        /orgId.*required/i,
       );
       assert.equal(insertCalled, 0);
     },
@@ -190,7 +192,7 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
     },
   },
   {
-    name: 'explicit REPOS_ROOT keeps strict resolve inside jail (users canon)',
+    name: 'explicit REPOS_ROOT keeps strict resolve inside jail (orgs canon)',
     run: async () => {
       const prev = process.env.REPOS_ROOT;
       const root = mkdtempSync(path.join(tmpdir(), 'proj-strict-'));
@@ -199,21 +201,16 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
         const paths = new WorkspacePathService();
         assert.equal(paths.isExplicitRootConfigured(), true);
         assert.equal(paths.requireExplicitRoot(), path.resolve(root));
-        const owner = '123e4567-e89b-12d3-a456-426614174001';
+        const org = '123e4567-e89b-12d3-a456-426614174001';
         const id = '123e4567-e89b-12d3-a456-426614174000';
-        const resolved = await paths.resolveUserStrict(owner, id);
+        const resolved = await paths.resolveOrgStrict(org, id);
         assert.equal(
           resolved.absRepo,
-          path.resolve(root, 'users', owner, 'projects', id, 'content'),
+          path.resolve(root, 'orgs', org, 'projects', id, 'content'),
         );
         const jailReal = await paths.realStrictRoot();
         await paths.assertInsideJail(resolved.absRepo, jailReal);
         await paths.ensureProjectDirs(resolved);
-        const org = await paths.resolveOrgStrict(owner, id);
-        assert.equal(
-          org.absRepo,
-          path.resolve(root, 'orgs', owner, 'projects', id, 'content'),
-        );
       } finally {
         if (prev === undefined) delete process.env.REPOS_ROOT;
         else process.env.REPOS_ROOT = prev;
@@ -231,7 +228,7 @@ async function main(): Promise<void> {
   for (const c of checks) {
     const prevRepos = process.env.REPOS_ROOT;
     const prevProjects = process.env.PROJECTS_ROOT;
-    const needsClean = c.name !== 'explicit REPOS_ROOT keeps strict resolve inside jail';
+    const needsClean = c.name !== 'explicit REPOS_ROOT keeps strict resolve inside jail (orgs canon)';
     if (needsClean) {
       delete process.env.REPOS_ROOT;
       delete process.env.PROJECTS_ROOT;

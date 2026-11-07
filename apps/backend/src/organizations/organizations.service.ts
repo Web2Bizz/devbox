@@ -1,4 +1,4 @@
-import { Injectable, InternalServerErrorException, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException } from "@nestjs/common";
 import { and, eq, isNull } from "drizzle-orm";
 import { AppLogger } from "../common/logger";
 import { DbService, dbUnavailable, type DbClient } from "../common/db/db.service";
@@ -38,6 +38,7 @@ function toOrganization(row: OrganizationRow): Organization {
     description: row.description,
     ownerId: row.ownerId,
     isPrivate: row.isPrivate,
+    isPersonal: row.isPersonal ?? false,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -115,9 +116,10 @@ export class OrganizationsService {
    * INSERT org + owner-as-maintainer → `mkdir -p` the org home
    * (orgs/<orgId> + empty `.secrets`). Owner must be a uuid account (400
    * otherwise — the members FK carries real user ids, never mock keys).
+   * `input.isPersonal` marks the per-user personal org (default false).
    */
   async create(
-    input: CreateOrganizationInput,
+    input: CreateOrganizationInput & { isPersonal?: boolean },
     ownerId: string,
     correlationId?: string,
   ): Promise<Organization> {
@@ -157,6 +159,7 @@ export class OrganizationsService {
             description: input.description ?? null,
             ownerId: owner,
             isPrivate: input.isPrivate ?? true,
+            isPersonal: input.isPersonal ?? false,
           })
           .returning();
         const id = orgRows[0].id;
@@ -277,7 +280,13 @@ export class OrganizationsService {
     requesterId: string,
     correlationId?: string,
   ): Promise<void> {
-    await this.guard.maintainerOrThrow(orgId, requesterId, correlationId);
+    const gate = await this.guard.maintainerOrThrow(orgId, requesterId, correlationId);
+    if (gate.org.isPersonal) {
+      throw new BadRequestException({
+        code: "personal_org_immutable",
+        message: "Personal organization cannot be deleted",
+      });
+    }
     let cascadedProjects = 0;
     try {
       // Soft org delete (project rule: DB rows are NEVER physically

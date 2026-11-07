@@ -10,17 +10,17 @@ import { userSpaceSchema, type ReposQuery } from './repos.dto';
 import { isValidGitRepo } from '../../utils/repos-git';
 
 export type RepoEntry = {
-  /** Scope owner id (user uuid under users/, org uuid under orgs/). */
+  /** Scope owner id (org uuid under orgs/). */
   userSpace: string;
   /** Project id (uuid). */
   name: string;
-  /** Path relative to REPOS_ROOT, e.g. "users/<uuid>/projects/<uuid>/content". */
+  /** Path relative to REPOS_ROOT, e.g. "orgs/<uuid>/projects/<uuid>/content". */
   path: string;
   updatedAt: string;
 };
 
 type Candidate = {
-  scope: 'users' | 'orgs';
+  scope: 'orgs';
   userSpace: string;
   name: string;
   absPath: string;
@@ -30,10 +30,10 @@ type Candidate = {
 const SCOPE_DIR_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
 /**
- * Unified storage catalog over the organizations layout:
- *   users/<user-uuid>/projects/<project-uuid>/content
+ * Unified storage catalog over the org layout:
  *   orgs/<org-uuid>/projects/<project-uuid>/content
- * (no `workspace` segment; pre-epic data is hand-migrated per
+ * (no `workspace` segment; user homes users/<uuid>/… are not scanned —
+ * org-only model; pre-epic data is hand-migrated per
  * docs/manual-migration-orgs-layout.md).
  *
  * READ ONLY: only `readdir`/`stat`/`realpath` (never recurses into a repo),
@@ -89,7 +89,7 @@ export class ReposService {
   }
 
   /**
-   * Scoped scan: root → (users|orgs) → <scope-uuid> → projects →
+   * Org-scoped scan: root → orgs → <org-uuid> → projects →
    * <project-uuid> → content. `.secrets` reserves are never candidates.
    */
   private async scan(userSpace?: string, correlationId?: string): Promise<Array<Candidate>> {
@@ -115,7 +115,7 @@ export class ReposService {
     const wanted = userSpace?.trim();
     for (const s of scopes.sort((a, b) => a.name.localeCompare(b.name))) {
       if (!s.isDirectory()) continue;
-      if (s.name !== 'users' && s.name !== 'orgs') continue;
+      if (s.name !== 'orgs') continue;
       let owners;
       try {
         owners = await readdir(path.join(root, s.name), { withFileTypes: true });
@@ -147,7 +147,7 @@ export class ReposService {
             continue;
           }
           out.push({
-            scope: s.name as 'users' | 'orgs',
+            scope: 'orgs',
             userSpace: o.name,
             name: p.name,
             absPath: abs,

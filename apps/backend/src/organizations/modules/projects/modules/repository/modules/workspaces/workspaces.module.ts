@@ -7,11 +7,11 @@ import { WorkspacesController } from "./workspaces.controller";
 import { WorkspacesService } from "./workspaces.service";
 
 /**
- * WorkspacesModule — per-user project-content surface (nested in the projects
+ * WorkspacesModule — org-scoped project-content surface (nested in the projects
  * domain via RepositoryModule, CoC §2).
  *
  * - WorkspacePathService: the single jail
- *   (REPOS_ROOT/(users|orgs)/<scopeId>/projects/<projectId>/content) — a
+ *   (REPOS_ROOT/orgs/<orgId>/projects/<projectId>/content) — a
  *   stateless common/storage service; exported so repos/projects/opencode
  *   reuse one jail instead of forking it.
  * - WorkspaceCloneService + CloneJobsRepository: idempotent

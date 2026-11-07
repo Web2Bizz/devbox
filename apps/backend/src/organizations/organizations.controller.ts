@@ -116,6 +116,7 @@ export class OrganizationsController {
   @UseGuards(OrganizationsGuard)
   @ApiOperation({ summary: "Delete organization (maintainer only, projects survive)" })
   @ApiResponse({ status: 204 })
+  @ApiResponse({ status: 400, description: "personal organization cannot be deleted" })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
   @ApiResponse({ status: 403, description: "member without the maintainer role" })
   @ApiResponse({ status: 404, description: "not found (or not a member)" })

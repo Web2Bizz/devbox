@@ -17,17 +17,20 @@ const MAX_DEPTH = 5;
 const MAX_ENTRIES = 200;
 
 /**
- * WorkspacesService — per-user project content browser over the unified
- * REPOS_ROOT (organizations layout, no `workspace` segment).
+ * WorkspacesService — org-scoped project content browser over the unified
+ * REPOS_ROOT (orgs layout, no `workspace` segment).
  *
- * Every listing is jailed through WorkspacePathService.resolveUser
- * (REPOS_ROOT/users/<userUuid>/projects/<projectUuid>/content[/subPath],
+ * Every listing is jailed through WorkspacePathService.resolveOrg
+ * (REPOS_ROOT/orgs/<orgUuid>/projects/<projectUuid>/content[/subPath],
  * both ids uuid-validated — 400 on garbage): unconfigured storage denies
  * with 503 EXTERNAL_UNAVAILABLE (Retry-After 30, logged once with the
  * correlationId — never a silent []/404 over <cwd>/repos), traversal yields
  * 403, missing paths 404. Readonly — readdir/stat only, never writes.
  * Submodule reads delegate to utils/submodules (unsafe gitlinks
  * skipped).
+ *
+ * User homes (users/<userUuid>/…) are removed (org-only model): the
+ * (userId, repo) args are the org id + project id of the project home.
  */
 @Injectable()
 export class WorkspacesService {
@@ -44,9 +47,9 @@ export class WorkspacesService {
     correlationId?: string,
   ): Promise<WorkspaceTreeNode> {
     const clamped = Math.min(Math.max(Number(depth) || 0, 0), MAX_DEPTH);
-    let resolved: Awaited<ReturnType<typeof this.paths.resolveUser>>;
+    let resolved: Awaited<ReturnType<typeof this.paths.resolveOrg>>;
     try {
-      resolved = await this.paths.resolveUser(userId, repo, requestedPath);
+      resolved = await this.paths.resolveOrg(userId, repo, requestedPath);
     } catch (err) {
       if (err instanceof ExternalServiceError && err.code === 'EXTERNAL_UNAVAILABLE') {
         // Unconfigured REPOS_ROOT → single deny log line, 503 propagates.
@@ -67,9 +70,9 @@ export class WorkspacesService {
     repo: string,
     correlationId?: string,
   ): Promise<Array<SubmoduleEntry>> {
-    let resolved: Awaited<ReturnType<typeof this.paths.resolveUser>>;
+    let resolved: Awaited<ReturnType<typeof this.paths.resolveOrg>>;
     try {
-      resolved = await this.paths.resolveUser(userId, repo);
+      resolved = await this.paths.resolveOrg(userId, repo);
     } catch (err) {
       if (err instanceof ExternalServiceError && err.code === 'EXTERNAL_UNAVAILABLE') {
         storageUnavailable('workspaces.submodules', this.logger, correlationId, err);
@@ -86,7 +89,7 @@ export class WorkspacesService {
     const entries = await readSubmodules(resolved.absRepo, this.logger);
     // Per-request listing on a hot path → debug (not info); ids only, no secrets.
     this.logger.debug(
-      `[workspaces] submodules listed users/${resolved.scopeId}/projects/${resolved.projectId} (${entries.length})`,
+      `[workspaces] submodules listed orgs/${resolved.scopeId}/projects/${resolved.projectId} (${entries.length})`,
     );
     return entries;
   }

@@ -111,8 +111,8 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
       delete process.env.PROJECTS_ROOT;
       try {
         const svc = new WorkspacesService(new WorkspacePathService(), silentLogger() as never);
-        await assert.rejects(() => svc.tree('alice', 'demo', '.', 1, 'cid-1'), expectStorageDeny);
-        await assert.rejects(() => svc.submodules('alice', 'demo', 'cid-1'), expectStorageDeny);
+        await assert.rejects(() => svc.tree('123e4567-e89b-12d3-a456-426614174001', '123e4567-e89b-12d3-a456-426614174002', '.', 1, 'cid-1'), expectStorageDeny);
+        await assert.rejects(() => svc.submodules('123e4567-e89b-12d3-a456-426614174001', '123e4567-e89b-12d3-a456-426614174002', 'cid-1'), expectStorageDeny);
       } finally {
         if (prevRepos === undefined) delete process.env.REPOS_ROOT;
         else process.env.REPOS_ROOT = prevRepos;
@@ -163,7 +163,7 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
           silentLogger() as never,
         );
         await assert.rejects(
-          () => svc.clone('alice', 'https://github.com/a.git', 'demo', 'cid-1'),
+          () => svc.clone('123e4567-e89b-12d3-a456-426614174001', 'https://github.com/a.git', '123e4567-e89b-12d3-a456-426614174002', 'cid-1'),
           expectStorageDeny,
         );
       } finally {
@@ -184,7 +184,7 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
         const paths = new WorkspacePathService();
         const uid = '123e4567-e89b-12d3-a456-426614174001';
         const pid = '123e4567-e89b-12d3-a456-426614174002';
-        const contentAbs = path.join(root, 'users', uid, 'projects', pid, 'content');
+        const contentAbs = path.join(root, 'orgs', uid, 'projects', pid, 'content');
         mkdirSync(contentAbs, { recursive: true });
         writeFileSync(path.join(contentAbs, 'hello.txt'), 'hi');
         const svc = new WorkspacesService(paths, silentLogger() as never);
@@ -193,8 +193,8 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
         assert.ok((node.children ?? []).some((c) => c.path === 'hello.txt'));
         // Jail preserved: escape still 403 on the configured root.
         await assert.rejects(() => svc.tree(uid, pid, '../../etc', 1, 'cid-pos'), /forbidden/i);
-        // project-files positive over the same unified root.
-        const fakeProjects = { getOrThrow: async () => ({ id: pid, ownerId: uid }) } as never;
+        // project-files positive over the same unified root (org-scoped).
+        const fakeProjects = { getOrThrow: async () => ({ id: pid, orgId: uid, ownerId: uid }) } as never;
         const access = { assertProjectAccess: async () => {} } as never;
         const files = new ProjectFilesService(
           fakeProjects,

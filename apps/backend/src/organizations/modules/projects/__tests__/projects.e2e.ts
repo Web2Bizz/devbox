@@ -229,6 +229,37 @@ async function main(): Promise<void> {
         assert.ok(orgId);
       });
 
+      await check("register minted a personal org (undeletable)", async () => {
+        const res = await fetch(
+          `${base}/api/v1/organizations`,
+          auth(owner.token),
+        );
+        assert.equal(res.status, 200);
+        const orgs = (await readJson(res)) as Array<{
+          id?: string;
+          isPersonal?: boolean;
+        }>;
+        const personal = orgs.find((o) => o.isPersonal === true);
+        assert.ok(personal?.id, "register must create a personal org");
+        const del = await fetch(
+          `${base}/api/v1/organizations/${personal?.id}`,
+          { method: "DELETE", ...auth(owner.token) },
+        );
+        assert.equal(del.status, 400);
+        assert.equal(
+          ((await readJson(del)) as { code?: string }).code,
+          "personal_org_immutable",
+        );
+      });
+
+      await check("POST /api/v1/projects without orgId → 400", async () => {
+        const res = await fetch(
+          `${base}/api/v1/projects`,
+          json({ name: "no-org" }, "POST", owner.token),
+        );
+        assert.equal(res.status, 400);
+      });
+
       let projectId = "";
       let chatId = "";
       let sessionId = "";
@@ -295,8 +326,8 @@ async function main(): Promise<void> {
           await import("../../../../common/storage/workspace-path.service");
         const { isValidGitRepo } = await import("../modules/repository/utils/repos-git");
         const paths = new WorkspacePathService();
-        // Owner-forced row → owner user home (C1, no ownerless rows).
-        const resolved = await paths.resolveUser(owner.id, projectId);
+        // Org-scoped row → org home (org-only model, no user homes).
+        const resolved = await paths.resolveOrg(orgId, projectId);
         const gitDir = await stat(path.join(resolved.absRepo, ".git"));
         assert.equal(gitDir.isDirectory(), true);
         const checkGit = await isValidGitRepo(resolved.absRepo);
@@ -337,7 +368,7 @@ async function main(): Promise<void> {
         const { WorkspacePathService } =
           await import("../../../../common/storage/workspace-path.service");
         const paths = new WorkspacePathService();
-        const resolved = await paths.resolveUser(owner.id, projectId);
+        const resolved = await paths.resolveOrg(orgId, projectId);
         await rm(resolved.absRepo, { recursive: true, force: true });
 
         const single = await fetch(
@@ -532,7 +563,7 @@ async function main(): Promise<void> {
         const { WorkspacePathService } =
           await import("../../../../common/storage/workspace-path.service");
         const paths = new WorkspacePathService();
-        const resolved = await paths.resolveUser(owner.id, probeId);
+        const resolved = await paths.resolveOrg(orgId, probeId);
         assert.equal((await stat(resolved.absRepo)).isDirectory(), true);
         const del = await fetch(`${base}/api/v1/projects/${probeId}`, {
           method: "DELETE",

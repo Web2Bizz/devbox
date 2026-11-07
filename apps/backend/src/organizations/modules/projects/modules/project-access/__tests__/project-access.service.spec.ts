@@ -6,23 +6,19 @@
  *   `bun run build && bun dist/organizations/modules/projects/modules/project-access/__tests__/project-access.service.spec.js`
  * Also executes under `bun test dist` (top-level run, throws on failure).
  *
- * The gate moved here verbatim from the organizations service (Phase 4): the
- * projects domain owns the C4 rule and reads `projects.org_id` directly.
- * Covers the frozen access contract with a fake DbService (the
+ * Covers the org-only access contract with a fake DbService (the
  * select().from().where() shape only) and a fake OrganizationsGuard:
  * - (a) org-linked + member → resolves;
- * - (b) org-linked + non-member non-owner → 404;
- * - (c) org-linked + owner (not a member) → resolves via owner fallback;
- * - (d) user-space owner → resolves;
- * - (e) user-space stranger → 404;
- * - (f) ownerless row → 404 for everyone (C5 deny-by-default);
- * - (g) non-uuid requester on an org-linked project → 404, guard untouched
+ * - (b) org-linked + non-member → 404 (no owner fallback);
+ * - (c) org-linked + owner (not a member) → 404 (membership is the only rule);
+ * - (d) org-less row (NULL org_id) → 404 for everyone (invalid row);
+ * - (e) non-uuid requester on an org-linked project → 404, guard untouched
  *       (a non-uuid key can never match a uuid column — querying would 503);
- * - (h) assertProjectAccessById returns {ownerId, orgIds} and gates;
- * - (i) org-linked + owner but org soft-deleted → 404 (no owner resurrection);
- * - (j) resolveProjectDirectory: blank projectId → 400 PROJECT_REQUIRED,
- *       stranger → 404, owner → {projectId, directory} inside the jail,
- *       escaping path → 403.
+ * - (f) assertProjectAccessById returns {ownerId, orgIds} and gates;
+ * - (g) org-linked but org soft-deleted → 404;
+ * - (h) resolveProjectDirectory: blank → 400 PROJECT_REQUIRED,
+ *       stranger → 404, org-less → 404, member → {projectId, directory}
+ *       inside the org jail, escaping path → 403.
  *
  * Logs are silent; no secrets or PII appear anywhere in this file.
  */
@@ -150,137 +146,113 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
     },
   },
   {
-    name: "(c) org-linked + owner (not a member) → resolves",
+    name: "(c) org-linked + owner (not a member) → 404 (no owner fallback)",
     run: async () => {
       const { svc, calls } = service([{ orgId: ORG_ID, ownerId: OWNER_ID }]);
-      await svc.assertProjectAccess(PROJECT_ID, OWNER_ID, OWNER_ID, "cid-c");
-      // Member lookup answered null, owner-equality fallback admitted.
+      await assert.rejects(
+        () => svc.assertProjectAccess(PROJECT_ID, OWNER_ID, OWNER_ID, "cid-c"),
+        isNotFound,
+      );
+      // Member lookup answered null; the removed owner-equality fallback
+      // no longer admits.
       assert.deepEqual(calls, [{ orgId: ORG_ID, userId: OWNER_ID }]);
     },
   },
   {
-    name: "(d) user-space owner → resolves (guard untouched)",
-    run: async () => {
-      const { svc, calls } = service([{ orgId: null, ownerId: OWNER_ID }]);
-      await svc.assertProjectAccess(PROJECT_ID, OWNER_ID, OWNER_ID, "cid-d");
-      assert.deepEqual(calls, [], "no org → no membership lookup");
-    },
-  },
-  {
-    name: "(e) user-space stranger → 404",
+    name: "(d) org-less row → 404 for everyone (invalid row)",
     run: async () => {
       const { svc, calls } = service([{ orgId: null, ownerId: OWNER_ID }]);
       await assert.rejects(
-        () => svc.assertProjectAccess(PROJECT_ID, OWNER_ID, STRANGER_ID, "cid-e"),
+        () => svc.assertProjectAccess(PROJECT_ID, OWNER_ID, OWNER_ID, "cid-d1"),
         isNotFound,
       );
-      assert.deepEqual(calls, []);
+      await assert.rejects(
+        () => svc.assertProjectAccess(PROJECT_ID, OWNER_ID, STRANGER_ID, "cid-d2"),
+        isNotFound,
+      );
+      assert.deepEqual(calls, [], "no org → no membership lookup, still denied");
     },
   },
   {
-    name: "(f) ownerless row → 404 for everyone (C5 deny-by-default)",
-    run: async () => {
-      const { svc } = service([{ orgId: null, ownerId: null }]);
-      await assert.rejects(
-        () => svc.assertProjectAccess(PROJECT_ID, null, OWNER_ID, "cid-f1"),
-        isNotFound,
-      );
-      await assert.rejects(
-        () => svc.assertProjectAccess(PROJECT_ID, null, NON_UUID_ID, "cid-f2"),
-        isNotFound,
-      );
-      // undefined owner behaves like null (legacy rows / absent column).
-      await assert.rejects(
-        () =>
-          svc.assertProjectAccess(
-            PROJECT_ID,
-            undefined as unknown as null,
-            OWNER_ID,
-            "cid-f3",
-          ),
-        isNotFound,
-      );
-    },
-  },
-  {
-    name: "(g) non-uuid requester on an org-linked project → 404, guard not called",
+    name: "(e) non-uuid requester on an org-linked project → 404, guard not called",
     run: async () => {
       const { svc, calls } = service([{ orgId: ORG_ID, ownerId: OWNER_ID }], {
         [`${ORG_ID}:${NON_UUID_ID}`]: "maintainer",
       });
       await assert.rejects(
-        () => svc.assertProjectAccess(PROJECT_ID, OWNER_ID, NON_UUID_ID, "cid-g"),
+        () => svc.assertProjectAccess(PROJECT_ID, OWNER_ID, NON_UUID_ID, "cid-e"),
         isNotFound,
       );
       assert.deepEqual(calls, [], "non-uuid keys never reach the membership query");
     },
   },
   {
-    name: "(h) assertProjectAccessById returns {ownerId, orgIds} and gates",
+    name: "(f) assertProjectAccessById returns {ownerId, orgIds} and gates",
     run: async () => {
       const { svc } = service([{ orgId: ORG_ID, ownerId: OWNER_ID }], {
         [`${ORG_ID}:${MEMBER_ID}`]: "user",
       });
       assert.deepEqual(
-        await svc.assertProjectAccessById(PROJECT_ID, MEMBER_ID, "cid-h1"),
+        await svc.assertProjectAccessById(PROJECT_ID, MEMBER_ID, "cid-f1"),
         { ownerId: OWNER_ID, orgIds: [ORG_ID] },
       );
-      // Same row, user-space shape → empty orgIds, owner returned.
-      const userSpace = service([{ orgId: null, ownerId: OWNER_ID }]);
-      assert.deepEqual(
-        await userSpace.svc.assertProjectAccessById(PROJECT_ID, OWNER_ID, "cid-h2"),
-        { ownerId: OWNER_ID, orgIds: [] },
+      // Org-less row → 404 even for the audit owner.
+      const orgLess = service([{ orgId: null, ownerId: OWNER_ID }]);
+      await assert.rejects(
+        () => orgLess.svc.assertProjectAccessById(PROJECT_ID, OWNER_ID, "cid-f2"),
+        isNotFound,
       );
       // Stranger → 404 before any owner/org leak.
       const { svc: gated } = service([{ orgId: ORG_ID, ownerId: OWNER_ID }]);
       await assert.rejects(
-        () => gated.assertProjectAccessById(PROJECT_ID, STRANGER_ID, "cid-h3"),
+        () => gated.assertProjectAccessById(PROJECT_ID, STRANGER_ID, "cid-f3"),
         isNotFound,
       );
       // Missing project row → 404 from projectAccessRow.
       const { svc: empty } = service([]);
       await assert.rejects(
-        () => empty.assertProjectAccessById(PROJECT_ID, MEMBER_ID, "cid-h4"),
+        () => empty.assertProjectAccessById(PROJECT_ID, MEMBER_ID, "cid-f4"),
         (err: unknown) => {
           assert.ok(isNotFound(err));
           assert.equal((err as Error).message, `Project ${PROJECT_ID} not found`);
           return true;
         },
       );
-      // orgIdsForProject reads the same 1:1 row / answers [] for user-space.
-      assert.deepEqual(await svc.orgIdsForProject(PROJECT_ID, "cid-h5"), [ORG_ID]);
-      assert.deepEqual(await userSpace.svc.orgIdsForProject(PROJECT_ID, "cid-h6"), []);
+      // orgIdsForProject reads the same 1:1 row / answers [] for org-less.
+      assert.deepEqual(await svc.orgIdsForProject(PROJECT_ID, "cid-f5"), [ORG_ID]);
+      assert.deepEqual(await orgLess.svc.orgIdsForProject(PROJECT_ID, "cid-f6"), []);
     },
   },
   {
-    name: "(i) org-linked + owner but org soft-deleted → 404",
+    name: "(g) org-linked but org soft-deleted → 404",
     run: async () => {
       const { svc, calls } = service(
         [{ orgId: ORG_ID, ownerId: OWNER_ID }],
-        {},
+        { [`${ORG_ID}:${MEMBER_ID}`]: "user" },
         [ORG_ID],
       );
       await assert.rejects(
-        () => svc.assertProjectAccess(PROJECT_ID, OWNER_ID, OWNER_ID, "cid-i"),
+        () => svc.assertProjectAccess(PROJECT_ID, OWNER_ID, MEMBER_ID, "cid-g"),
         isNotFound,
       );
-      // The member lookup still ran, but the owner fallback never rescued it.
-      assert.deepEqual(calls, [{ orgId: ORG_ID, userId: OWNER_ID }]);
+      void calls;
     },
   },
   {
-    name: "(j) resolveProjectDirectory: blank → 400, stranger → 404, owner → jail dir, escape → 403",
+    name: "(h) resolveProjectDirectory: blank → 400, stranger/org-less → 404, member → org jail dir, escape → 403",
     run: async () => {
       const previousRoot = process.env.REPOS_ROOT;
       process.env.REPOS_ROOT = "/tmp/opencode/c4-project-access-jail";
       try {
         const root = path.resolve(process.env.REPOS_ROOT);
-        const { svc } = service([{ orgId: null, ownerId: OWNER_ID }]);
+        const { svc } = service([{ orgId: ORG_ID, ownerId: OWNER_ID }], {
+          [`${ORG_ID}:${MEMBER_ID}`]: "user",
+        });
 
         // Blank (or absent) projectId → 400 PROJECT_REQUIRED before any gate.
         for (const blank of ["", "   ", undefined]) {
           await assert.rejects(
-            () => svc.resolveProjectDirectory(blank, OWNER_ID, "cid-j1"),
+            () => svc.resolveProjectDirectory(blank, MEMBER_ID, "cid-h1"),
             (err: unknown) => {
               assert.ok(err instanceof BadRequestException);
               assert.deepEqual((err as BadRequestException).getResponse(), {
@@ -295,19 +267,19 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
 
         // Stranger → 404 (no existence leak).
         await assert.rejects(
-          () => svc.resolveProjectDirectory(PROJECT_ID, STRANGER_ID, "cid-j2"),
+          () => svc.resolveProjectDirectory(PROJECT_ID, STRANGER_ID, "cid-h2"),
           isNotFound,
         );
 
-        // Owner → the jailed content dir for this project.
+        // Member → the jailed org content dir for this project.
         assert.deepEqual(
-          await svc.resolveProjectDirectory(PROJECT_ID, OWNER_ID, "cid-j3"),
+          await svc.resolveProjectDirectory(PROJECT_ID, MEMBER_ID, "cid-h3"),
           {
             projectId: PROJECT_ID,
             directory: path.join(
               root,
-              "users",
-              OWNER_ID,
+              "orgs",
+              ORG_ID,
               "projects",
               PROJECT_ID,
               "content",
@@ -315,25 +287,33 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
           },
         );
 
+        // Org-less row → 404 (project without an organization is invalid).
+        const orgLess = service([{ orgId: null, ownerId: OWNER_ID }]);
+        await assert.rejects(
+          () => orgLess.svc.resolveProjectDirectory(PROJECT_ID, OWNER_ID, "cid-h4"),
+          isNotFound,
+        );
+
         // A resolved path outside the strict root → 403 from the real jail.
         const realPaths = new WorkspacePathService();
         const escaping = {
-          async resolveUserStrict() {
+          async resolveOrgStrict() {
             return { absRepo: path.resolve(root, "..", "escaped", "content") };
           },
           realStrictRoot: async () => root,
           assertInsideJail: (abs: string, jail: string) =>
             realPaths.assertInsideJail(abs, jail),
         } as unknown as WorkspacePathService;
+        const memberRoles = { [`${ORG_ID}:${MEMBER_ID}`]: "user" };
         const { svc: escapingSvc } = service(
-          [{ orgId: null, ownerId: OWNER_ID }],
-          {},
+          [{ orgId: ORG_ID, ownerId: OWNER_ID }],
+          memberRoles,
           [],
           escaping,
         );
         await assert.rejects(
           () =>
-            escapingSvc.resolveProjectDirectory(PROJECT_ID, OWNER_ID, "cid-j4"),
+            escapingSvc.resolveProjectDirectory(PROJECT_ID, MEMBER_ID, "cid-h5"),
           (err: unknown) => err instanceof ForbiddenException,
         );
       } finally {

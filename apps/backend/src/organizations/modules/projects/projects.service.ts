@@ -41,32 +41,9 @@ export type EffectiveConfigEntry = {
 /** Per-command budget for `git init/config/commit` during disk-first create. */
 const PROJECT_GIT_TIMEOUT_MS = 15000;
 
-/**
- * Owner-less / legacy rows (ownerId NULL) map to this deterministic user
- * home: users/00000000-…/projects/<id>/content. A fixed nil-uuid keeps the
- * uuid-validated layout total (no `system` string segment anywhere).
- */
-export const SYSTEM_OWNER_UUID = "00000000-0000-0000-0000-000000000000";
-
-/**
- * Maps a stored ownerId to its user-home uuid. NULL → SYSTEM_OWNER_UUID.
- * Non-uuid legacy values throw 400 (write paths) — read paths catch this
- * and surface `corrupted: resolve-failed` instead (see enrich()).
- */
-export function ownerKeyOrThrow(ownerId: string | null): string {
-  if (ownerId === null || ownerId === undefined) return SYSTEM_OWNER_UUID;
-  const raw = String(ownerId).trim().toLowerCase();
-  if (
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(raw)
-  ) {
-    throw new BadRequestException("ownerId must be a uuid");
-  }
-  return raw;
-}
-
 export type Project = {
   id: string;
-  orgId: string | null;
+  orgId: string;
   name: string;
   description: string | null;
   githubOwner: string | null;
@@ -95,7 +72,7 @@ export type Project = {
 function toProject(row: ProjectRow): Project {
   return {
     id: row.id,
-    orgId: (row as { orgId?: string | null }).orgId ?? null,
+    orgId: row.orgId,
     name: row.name,
     description: row.description,
     githubOwner: row.githubOwner,
@@ -117,21 +94,16 @@ function toProject(row: ProjectRow): Project {
 /**
  * Disk-first layout spec (frozen for create/list/getOrThrow/remove):
  *
- *   users/<ownerUuid>/projects/<project.id>/{content,.secrets}
- *     + users/<ownerUuid>/.secrets
- *   (org-scoped homes orgs/<orgUuid>/projects/<id>/… resolve via
- *   resolveOrg — see the organizations service; user homes always win for
- *   owner-bound rows here.)
- *   ownerKey = ownerKeyOrThrow(ownerId ?? SYSTEM_OWNER_UUID-nCoalesce):
- *     NULL owners deterministically map to SYSTEM_OWNER_UUID
- *     (users/00000000-…/…), never to a random space; non-uuid legacy
- *     ownerIds surface as `corrupted: resolve-failed` on reads (moved by
- *     hand per docs/manual-migration-orgs-layout.md).
+ *   orgs/<orgUuid>/projects/<project.id>/{content,.secrets}
+ *     + orgs/<orgUuid>/.secrets
+ *
+ * ownerId is an audit-only creator field — it NEVER participates in path
+ * resolution (no users/<owner>/ homes; only the orgs/ layout remains).
  *   contentDir = project.id (uuid-validated, 400 on garbage).
  *
  * Storage-root canon: REPOS_ROOT is the SINGLE source of truth for project
  * storage — reads AND writes. create()/remove() go through
- * WorkspacePathService.requireExplicitRoot()/resolveUserStrict() — empty
+ * WorkspacePathService.requireExplicitRoot()/resolveOrgStrict() — empty
  * REPOS_ROOT throws 500 before any mkdir/INSERT (no silent <cwd>/repos
  * fallback for writes; no row is written unconfigured). Storage READS outside
  * the projects registry (repos list, workspaces tree/submodules,
@@ -143,9 +115,9 @@ function toProject(row: ProjectRow): Project {
  * recursive (disk-first init: content + empty `.secrets` reserves).
  *
  * ownerId policy: IMMUTABLE after create (update() rejects any change with
- * 400). Rationale: the user home derives from ownerId, so a change would
- * orphan the on-disk repo (old dir stranded, new dir missing → corrupted).
- * A move variant (rename inside jail + git re-verify) was considered and
+ * 400). Rationale: the audit creator must stay stable for history; disk
+ * location derives from orgId (also immutable), so neither field may move
+ * the repo. A move variant (rename inside jail + git re-verify) was considered and
  * REJECTED for now — no silent data moves; a future explicit move endpoint
  * can add it with jail + git checks.
  *
@@ -172,7 +144,7 @@ function toProject(row: ProjectRow): Project {
  *
  * Disk-first: create() mints the uuid, requires the explicit REPOS_ROOT
  * canon (empty → 500 before any mkdir/INSERT, no <cwd>/repos fallback for
- * writes), initializes users/<ownerUuid>/projects/<id>/content as a
+ * writes), initializes orgs/<orgUuid>/projects/<id>/content as a
  * non-bare git repo (`git init -b main` + empty `init` commit, execFile
  * argv only, no shell, plus empty `.secrets` reserves) and only then
  * INSERTs the row. Reads surface the computed
@@ -201,10 +173,7 @@ export class ProjectsService {
    *
    * Unconfigured storage (empty REPOS_ROOT) → corrupted with reason
    * `storage-unconfigured` (reads never 404/500 for this).
-   * ownerKey fallback: `ownerId ?? SYSTEM_OWNER_UUID` — NULL owners
-   * deterministically map to the nil-uuid user home (see layout spec);
-   * non-uuid legacy owners → `resolve-failed` (hand-migrated per the
-   * manual-migration doc).
+   * Rows without orgId are invalid (org-only model) → corrupted `missing-org`.
    */
   private async enrich(project: Project, correlationId?: string): Promise<Project> {
     try {
@@ -218,8 +187,10 @@ export class ProjectsService {
       }
       let absRepo: string;
       try {
-        const ownerKey = ownerKeyOrThrow(project.ownerId);
-        absRepo = (await this.paths.resolveUser(ownerKey, project.id)).absRepo;
+        if (!project.orgId) {
+          return { ...project, corrupted: true, corruptedReason: "missing-org" };
+        }
+        absRepo = (await this.paths.resolveOrg(project.orgId, project.id)).absRepo;
       } catch {
         this.logger.warn({
           projectId: project.id,
@@ -264,14 +235,11 @@ export class ProjectsService {
    */
   private async removeRepoDirBestEffort(
     projectId: string,
-    ownerId: string | null,
+    orgId: string,
     correlationId?: string,
   ): Promise<void> {
     try {
-      // Legacy non-uuid owners have no user home in the new layout — warn
-      // `resolve-failed` and skip (never touch an unscoped path).
-      const ownerKey = ownerKeyOrThrow(ownerId);
-      const resolved = await this.paths.resolveUserStrict(ownerKey, projectId);
+      const resolved = await this.paths.resolveOrgStrict(orgId, projectId);
       const jailReal = await this.paths.realStrictRoot();
       await this.paths.assertInsideJail(resolved.absBase, jailReal);
       await this.paths.removeDir(resolved.absBase);
@@ -309,12 +277,13 @@ export class ProjectsService {
   }
 
   /**
-   * Disk-first create: strict-root check → resolve jailed user home →
+   * Disk-first create: strict-root check → resolve jailed org home →
    * `mkdir -p` (content + empty `.secrets` reserves) → `git init` + empty
    * `init` commit inside `content` (execFile, argv arrays, no shell) →
    * only then INSERT with the pre-generated id.
    *
-   * Non-uuid ownerId → 400 before any disk/DB touch. Unconfigured storage
+   * ownerId is audit-only (no uuid gate, never trusted for paths).
+   * Unconfigured storage
    * (empty REPOS_ROOT) → 500 (correlationId-bound, no secrets) with NO
    * mkdir and NO row written. Disk failure → 500 likewise. DB failure after
    * a successful disk init → best-effort rm of the fresh home inside the
@@ -338,14 +307,12 @@ export class ProjectsService {
     // Variant A: id is minted before any disk write so the repo dir is
     // derived deterministically (see layout spec above).
     const id = randomUUID();
-    // 400 on non-uuid ownerId before the strict-root gate touches disk.
-    const ownerKey = ownerKeyOrThrow(input.ownerId ?? null);
     // Strict root first: empty REPOS_ROOT → 500 before any mkdir/INSERT.
     // 400/403 on bad shape/traversal — propagate before touching disk or DB.
     let absRepo: string;
     let absBase: string;
     try {
-      const resolved = await this.paths.resolveUserStrict(ownerKey, id);
+      const resolved = await this.paths.resolveOrgStrict(orgId, id);
       absRepo = resolved.absRepo;
       absBase = resolved.absBase;
       // Belt-and-braces jail assertion before the first write.
@@ -401,7 +368,7 @@ export class ProjectsService {
       this.logger.info(`[projects] created ${project.id}`, correlationId);
       return project;
     } catch (err) {
-      await this.removeRepoDirBestEffort(id, input.ownerId ?? null, correlationId);
+      await this.removeRepoDirBestEffort(id, orgId, correlationId);
       dbUnavailable("projects.create", err, this.logger, correlationId);
     }
   }
@@ -461,26 +428,25 @@ export class ProjectsService {
       : await this.getOrThrow(id, correlationId, { includeDeleted: true });
     if (current.status === "deleted" || current.deletedAt !== null)
       throw new NotFoundException(`Project ${id} not found`);
-    // orgId + ownerId are IMMUTABLE after create.
-    // ownerId: userSpace derives from it, so a change would
-    // orphan the on-disk repo (stranded old dir, missing new dir). Reject
-    // with 400; a future explicit move endpoint can add jailed rename + git
-    // re-verify. No silent directory moves here.
+    // orgId + ownerId are IMMUTABLE after create (disk location derives
+    // from orgId; ownerId is the audit creator — neither may move the repo).
+    // Reject with 400; a future explicit move endpoint can add jailed
+    // rename + git re-verify. No silent directory moves here.
     if (
       (input as { orgId?: string }).orgId !== undefined &&
       (input as { orgId?: string }).orgId !== current.orgId
     ) {
       throw new BadRequestException("orgId is immutable after create");
     }
-    // orphan the on-disk repo (stranded old dir, missing new dir). Reject
-    // with 400; a future explicit move endpoint can add jailed rename + git
-    // re-verify. No silent directory moves here.
+    // ownerId is audit-only (no path derivation) but still immutable.
+    // Reject with 400; a future explicit move endpoint can add jailed
+    // rename + git re-verify. No silent directory moves here.
     if (
       input.ownerId !== undefined &&
       (input.ownerId ?? null) !== current.ownerId
     ) {
       throw new BadRequestException(
-        "ownerId is immutable after create (would orphan the project directory)",
+        "ownerId is immutable after create",
       );
     }
     const next: Project = {
@@ -571,7 +537,7 @@ export class ProjectsService {
    */
   async restore(id: string, correlationId?: string): Promise<Project> {
     const current = await this.getOrThrow(id, correlationId, { includeDeleted: true });
-    if (current.orgId !== null) {
+    if (current.orgId) {
       try {
         const orgRows = await this.client()
           .select({ id: organizations.id })

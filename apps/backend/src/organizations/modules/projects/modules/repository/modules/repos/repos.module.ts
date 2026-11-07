@@ -11,7 +11,7 @@ import { ReposService } from "./repos.service";
  *
  * Imports ProjectAccessModule for the C3 space gate: repos lives inside
  * projects, so it must not point back at the organizations root — the gate
- * (ProjectAccessService.getRole; own user-space or member org — strangers
+ * (ProjectAccessService.getRole; own id or member org — strangers
  * get 404, no enumeration) is the projects-domain access layer itself.
  */
 @Module({

@@ -63,12 +63,12 @@ function toJobDto(job: {
 }
 
 /**
- * WorkspacesController — per-user project-content surface (organizations
+ * WorkspacesController — org-scoped project-content surface (orgs
  * layout, no `workspace` segment).
  *
  * - POST /api/v1/workspaces/clone — enqueue (idempotent) a
  *   `git clone --recurse-submodules` into
- *   REPOS_ROOT/users/<userUuid>/projects/<projectUuid>/content (both ids
+ *   REPOS_ROOT/orgs/<orgUuid>/projects/<projectUuid>/content (both ids
  *   uuid-validated, 400 on garbage)
  * - GET /api/v1/workspaces/:repo/clone-status — queued/cloning/ready/failed
  * - GET /api/v1/workspaces/:repo/tree — jailed readonly listing (path+depth)
@@ -107,7 +107,7 @@ export class WorkspacesController {
   @Post('clone')
   @UseGuards(JwtAuthGuard)
   @HttpCode(202)
-  @ApiOperation({ summary: 'Clone a repo into the per-user workspace (idempotent, per-user lock)' })
+  @ApiOperation({ summary: 'Clone a repo into the org project home (idempotent, per-scope lock)' })
   @ApiBearerAuth()
   @ApiResponse({ status: 202, type: WorkspaceCloneJobDto })
   @ApiResponse({ status: 400, description: 'bad repoUrl/repoName' })
@@ -126,7 +126,7 @@ export class WorkspacesController {
 
   @Get(':repo/clone-status')
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Clone job status for a repo in the per-user workspace' })
+  @ApiOperation({ summary: 'Clone job status for a repo in the org workspace' })
   @ApiBearerAuth()
   @ApiParam({ name: 'repo', example: 'demo' })
   @ApiResponse({ status: 200, type: WorkspaceCloneJobDto })
@@ -146,7 +146,7 @@ export class WorkspacesController {
 
   @Get(':repo/tree')
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Readonly workspace file tree (jailed per-user, depth 0-5)' })
+  @ApiOperation({ summary: 'Readonly workspace file tree (jailed per-org, depth 0-5)' })
   @ApiBearerAuth()
   @ApiParam({ name: 'repo', example: 'demo' })
   @ApiQuery({ name: 'path', required: false, example: '.' })

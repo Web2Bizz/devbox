@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { UnauthorizedException } from "@nestjs/common";
 import type { WorkspacePathService } from "../../../../../../common/storage/workspace-path.service";
 import type { ProjectAccessService } from "../../project-access/project-access.service";
@@ -21,6 +24,7 @@ function it(name: string, run: () => Promise<void> | void): void {
 }
 
 const PROJECT_ID = "123e4567-e89b-12d3-a456-426614174090";
+const ORG_ID = "123e4567-e89b-12d3-a456-426614174005";
 const OWNER_ID = "123e4567-e89b-12d3-a456-426614174001";
 const REQUESTER_ID = "123e4567-e89b-12d3-a456-426614174002";
 
@@ -33,23 +37,31 @@ const silentLogger = {
   fatal() {},
 } as unknown as ConstructorParameters<typeof ProjectFilesService>[2];
 
-const project = { id: PROJECT_ID, ownerId: OWNER_ID } as unknown as Awaited<
-  ReturnType<ProjectsService["getOrThrow"]>
->;
+const project = {
+  id: PROJECT_ID,
+  orgId: ORG_ID,
+  ownerId: OWNER_ID,
+} as unknown as Awaited<ReturnType<ProjectsService["getOrThrow"]>>;
 
-function makeService(opts: { wired: boolean }) {
+const orgLessProject = {
+  id: PROJECT_ID,
+  orgId: null,
+  ownerId: OWNER_ID,
+} as unknown as Awaited<ReturnType<ProjectsService["getOrThrow"]>>;
+
+function makeService(opts: { wired: boolean; orgLess?: boolean }) {
   const accessCalls: Array<{ projectId: string; ownerId: string | null; requesterId: string }> = [];
   const fsCalls: Array<string> = [];
   const projectsCalls: Array<string> = [];
   const projects = {
     async getOrThrow(projectId: string) {
       projectsCalls.push(projectId);
-      return project;
+      return opts.orgLess ? orgLessProject : project;
     },
   } as unknown as ProjectsService;
   const paths = {
-    async resolveUser(userId: string, projectId: string, subPath: string) {
-      fsCalls.push(`resolveUser:${userId}:${projectId}:${subPath}`);
+    async resolveOrg(orgId: string, projectId: string, subPath: string) {
+      fsCalls.push(`resolveOrg:${orgId}:${projectId}:${subPath}`);
       return { abs: "/tmp/project-content", rel: "." };
     },
     async readDir(abs: string) {
@@ -118,20 +130,45 @@ describe("ProjectFilesService access is fail-closed", () => {
     assert.deepEqual(fsCalls, []);
   });
 
-  it("tree() with a requester checks project access before reading disk (regression)", async () => {
-    const { svc, accessCalls, fsCalls } = makeService({ wired: true });
-    const node = await svc.tree(
-      PROJECT_ID,
-      ".",
-      1,
-      "cid-files-allowed",
-      REQUESTER_ID,
-    );
-    assert.equal(node.type, "dir");
-    assert.deepEqual(accessCalls, [
-      { projectId: PROJECT_ID, ownerId: OWNER_ID, requesterId: REQUESTER_ID },
-    ]);
-    assert.ok(fsCalls.length > 0);
+  it("tree() resolves the jail through the project org (resolveOrg)", async () => {
+    const prevRepos = process.env.REPOS_ROOT;
+    process.env.REPOS_ROOT = mkdtempSync(path.join(tmpdir(), "project-files-"));
+    try {
+      const { svc, fsCalls } = makeService({ wired: true });
+      const node = await svc.tree(
+        PROJECT_ID,
+        ".",
+        1,
+        "cid-files-allowed",
+        REQUESTER_ID,
+      );
+      assert.equal(node.type, "dir");
+      assert.deepEqual(
+        fsCalls.filter((c) => c.startsWith("resolveOrg:")),
+        [`resolveOrg:${ORG_ID}:${PROJECT_ID}:.`],
+      );
+    } finally {
+      if (prevRepos === undefined) delete process.env.REPOS_ROOT;
+      else process.env.REPOS_ROOT = prevRepos;
+    }
+  });
+
+  it("tree() on an org-less project → 404 (no user-space fallback)", async () => {
+    const prevRepos = process.env.REPOS_ROOT;
+    process.env.REPOS_ROOT = mkdtempSync(path.join(tmpdir(), "project-files-"));
+    try {
+      const { svc, fsCalls } = makeService({ wired: true, orgLess: true });
+      await assert.rejects(() =>
+        svc.tree(PROJECT_ID, ".", 1, "cid-files-org-less", REQUESTER_ID),
+      );
+      assert.deepEqual(
+        fsCalls.filter((c) => c.startsWith("resolveOrg:")),
+        [],
+      );
+    } finally {
+      if (prevRepos === undefined) delete process.env.REPOS_ROOT;
+      else process.env.REPOS_ROOT = prevRepos;
+    }
   });
 });
 

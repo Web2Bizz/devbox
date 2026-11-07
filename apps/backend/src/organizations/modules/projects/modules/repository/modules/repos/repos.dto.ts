@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { z } from 'zod';
 
-/** Scope owner id segment: users/<uuid> or orgs/<uuid> (no slashes, no traversal). */
+/** Scope owner id segment: orgs/<uuid> (no slashes, no traversal). */
 export const userSpaceSchema = z
   .string()
   .min(1, { error: 'userSpace must be a non-empty [a-zA-Z0-9_-] segment' })
@@ -36,8 +36,8 @@ export class RepoDto {
   @ApiProperty({ example: '123e4567-e89b-12d3-a456-426614174001' })
   name!: string;
 
-  /** Repo path relative to REPOS_ROOT, e.g. "users/<uuid>/projects/<uuid>/content". */
-  @ApiProperty({ example: 'users/123e4567-e89b-12d3-a456-426614174000/projects/123e4567-e89b-12d3-a456-426614174001/content' })
+  /** Repo path relative to REPOS_ROOT, e.g. "orgs/<uuid>/projects/<uuid>/content". */
+  @ApiProperty({ example: 'orgs/123e4567-e89b-12d3-a456-426614174000/projects/123e4567-e89b-12d3-a456-426614174001/content' })
   path!: string;
 
   @ApiProperty({ format: 'date-time' })

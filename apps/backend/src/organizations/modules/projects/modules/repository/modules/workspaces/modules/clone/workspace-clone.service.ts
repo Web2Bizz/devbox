@@ -49,14 +49,14 @@ async function dirIsEmpty(abs: string): Promise<boolean> {
 }
 
 /**
- * WorkspaceCloneService — idempotent per-user `git clone` lifecycle.
+ * WorkspaceCloneService — idempotent org-scoped `git clone` lifecycle.
  *
  * Dest is the project content dir
- * (users/<userUuid>/projects/<projectUuid>/content): both ids are
+ * (orgs/<orgUuid>/projects/<projectUuid>/content): both ids are
  * uuid-validated (400 on garbage), the jail rules match
- * WorkspacePathService.resolveUser (403 on traversal), and empty
+ * WorkspacePathService.resolveOrg (403 on traversal), and empty
  * REPOS_ROOT denies with 503 before any mkdir/clone.
- * - Lock + job key is (userId, repoName): two users cloning into different
+ * - Lock + job key is (orgId, projectId): two scopes cloning into different
  *   project homes never touch each other's directory; repeat calls while
  *   queued/cloning/ready return the existing job (never re-clone over it).
  * - Clone runs `git clone --recurse-submodules -- <url> <dest>` + `git submodule
@@ -64,6 +64,9 @@ async function dirIsEmpty(abs: string): Promise<boolean> {
  *   queued → cloning → ready/failed with progress hints and AppLogger
  *   entries (URLs sanitized, no tokens/keys; logs carry ids only).
  * - A failed job may be re-queued by calling `clone()` again.
+ *
+ * User homes (users/<userUuid>/…) are removed (org-only model): the
+ * (userId, repoName) args are the org id + project id of the project home.
  */
 @Injectable()
 export class WorkspaceCloneService {
@@ -91,11 +94,11 @@ export class WorkspaceCloneService {
     repoName: string,
     correlationId?: string,
   ): Promise<CloneJob> {
-    let resolved: Awaited<ReturnType<typeof this.paths.resolveUser>>;
+    let resolved: Awaited<ReturnType<typeof this.paths.resolveOrg>>;
     try {
-      // uuid-validated user scope + project-bound dest (400 on garbage);
+      // uuid-validated org scope + project-bound dest (400 on garbage);
       // empty REPOS_ROOT denies with 503 before any mkdir/clone.
-      resolved = await this.paths.resolveUser(userId, repoName);
+      resolved = await this.paths.resolveOrg(userId, repoName);
     } catch (err) {
       if (err instanceof ExternalServiceError && err.code === 'EXTERNAL_UNAVAILABLE') {
         storageUnavailable('workspaces.clone', this.logger, correlationId, err);
@@ -115,7 +118,7 @@ export class WorkspaceCloneService {
         repoName: pid,
         repoUrl: url,
       });
-      // NOTE: enqueue keyed on the normalized (userUuid, projectUuid) pair.
+      // NOTE: enqueue keyed on the normalized (orgUuid, projectUuid) pair.
       void this.runClone(uid, job.repoName, url, resolved.absRepo, created);
       return this.jobs.get(uid, job.repoName) ?? job;
     });
@@ -136,14 +139,14 @@ export class WorkspaceCloneService {
     }
     this.jobs.markCloning(userId, repoName);
     this.logger.info(
-      `[workspaces] cloning ${sanitizeForLog(repoUrl)} → users/${userId}/projects/${repoName}`,
+      `[workspaces] cloning ${sanitizeForLog(repoUrl)} → orgs/${userId}/projects/${repoName}`,
     );
     try {
       // Fast path: dest already holds a valid repo (manual drop or retry) → ready.
       const existing = await isValidGitRepo(absDest);
       if (existing.ok) {
         this.jobs.markReady(userId, repoName);
-        this.logger.info(`[workspaces] clone ready (exists) users/${userId}/projects/${repoName}`);
+        this.logger.info(`[workspaces] clone ready (exists) orgs/${userId}/projects/${repoName}`);
         return;
       }
       const empty = await dirIsEmpty(absDest);
@@ -164,23 +167,23 @@ export class WorkspaceCloneService {
       } catch (subErr) {
         // Submodule init is best-effort: the clone itself succeeded.
         this.logger.warn(
-          `[workspaces] submodule init skipped for users/${userId}/projects/${repoName}: ${(subErr as Error).message}`,
+          `[workspaces] submodule init skipped for orgs/${userId}/projects/${repoName}: ${(subErr as Error).message}`,
         );
       }
       await readSubmodules(absDest, this.logger).catch(() => []);
       this.jobs.markReady(userId, repoName);
-      this.logger.info(`[workspaces] clone ready users/${userId}/projects/${repoName}`);
+      this.logger.info(`[workspaces] clone ready orgs/${userId}/projects/${repoName}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.jobs.markFailed(userId, repoName, message.slice(0, 500));
       // Terminal failure of the clone operation → error (not warn):
       // the job settled on 'failed' and the caller must retry.
       this.logger.error(
-        `[workspaces] clone failed users/${userId}/projects/${repoName}: ${sanitizeForLog(message).slice(0, 200)}`,
+        `[workspaces] clone failed orgs/${userId}/projects/${repoName}: ${sanitizeForLog(message).slice(0, 200)}`,
       );
       try {
         // Best-effort cleanup of half-cloned dest (never outside the jail —
-        // absDest came from WorkspacePathService.resolveUser).
+        // absDest came from WorkspacePathService.resolveOrg).
         const st = await stat(absDest).catch(() => null);
         if (st && !(await isValidGitRepo(absDest)).ok) {
           const { rm } = await import('node:fs/promises');

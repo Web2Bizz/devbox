@@ -18,11 +18,14 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 // Fixture BEFORE AppModule import (ConfigModule.validate at import reads REPOS_ROOT).
+// Org-only layout: the scanner reads orgs/<org>/projects/<id>/content only
+// (user homes are not scanned). The fixture org id matches the Bearer
+// identity id so the DB-less own-space listing still resolves.
 const REPOS_ROOT = mkdtempSync(path.join(tmpdir(), 'repos-e2e-'));
 const E2E_UID = '123e4567-e89b-12d3-a456-426614174001';
 const E2E_PID = '123e4567-e89b-12d3-a456-426614174002';
 {
-  const home = path.join(REPOS_ROOT, 'users', E2E_UID, 'projects');
+  const home = path.join(REPOS_ROOT, 'orgs', E2E_UID, 'projects');
   const valid = path.join(home, E2E_PID, 'content');
   mkdirSync(valid, { recursive: true });
   execFileSync('git', ['init', '-q', valid]);
@@ -30,7 +33,7 @@ const E2E_PID = '123e4567-e89b-12d3-a456-426614174002';
   const broken = path.join(home, '123e4567-e89b-12d3-a456-426614174004', 'content');
   mkdirSync(path.join(broken, '.git'), { recursive: true });
   writeFileSync(path.join(broken, '.git', 'HEAD'), 'garbage-not-a-ref\n');
-  mkdirSync(path.join(REPOS_ROOT, 'users', 'lonely-scope'), { recursive: true });
+  mkdirSync(path.join(REPOS_ROOT, 'orgs', 'lonely-scope'), { recursive: true });
 }
 process.env.REPOS_ROOT = REPOS_ROOT;
 
@@ -99,7 +102,7 @@ async function main(): Promise<void> {
       assert.ok(Array.isArray(body));
       assert.equal(body.length, 1);
       assert.equal(body[0].name, E2E_PID);
-      assert.equal(body[0].path, `users/${E2E_UID}/projects/${E2E_PID}/content`);
+      assert.equal(body[0].path, `orgs/${E2E_UID}/projects/${E2E_PID}/content`);
     });
 
     await check('GET /api/v1/repos anon → 401', async () => {

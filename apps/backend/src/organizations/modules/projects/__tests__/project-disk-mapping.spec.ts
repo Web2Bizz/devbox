@@ -5,12 +5,12 @@
  *   `bun run build && bun dist/organizations/modules/projects/__tests__/project-disk-mapping.spec.js`
  * Also executes under `bun test dist` (top-level run, throws on failure).
  *
- * Covers the frozen disk-first layout spec from ProjectsService
- * (organizations epic, no `workspace` segment):
- * ownerKey=ownerKeyOrThrow(ownerId ?? SYSTEM_OWNER_UUID), home=
- * users/<ownerUuid>/projects/<projectUuid>/{content,.secrets} — uuid ids
- * are 400-rejected otherwise, the layout is stable across renames, and
+ * Covers the frozen org-only disk-first layout spec from ProjectsService
+ * (no `workspace` segment, no user homes):
+ * home = orgs/<orgUuid>/projects/<projectUuid>/{content,.secrets} —
+ * non-uuid ids are 400-rejected, the layout is stable across renames, and
  * traversal shapes are rejected (400/403) before any disk write.
+ * ownerId is audit-only and never participates in path resolution.
  */
 import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
@@ -18,78 +18,85 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { WorkspacePathService } from '../../../../common/storage/workspace-path.service';
-import { SYSTEM_OWNER_UUID, ownerKeyOrThrow } from '../projects.service';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
   {
-    name: 'ownerId ?? SYSTEM_OWNER_UUID maps deterministically to one user home',
+    name: 'org home is deterministic per (orgId, projectId)',
     run: async () => {
-      assert.match(SYSTEM_OWNER_UUID, UUID_RE);
-      assert.equal(ownerKeyOrThrow(null), SYSTEM_OWNER_UUID);
       const paths = new WorkspacePathService();
+      const orgId = randomUUID();
       const id = randomUUID();
-      const a = await paths.resolveUser(ownerKeyOrThrow(null), id);
-      const b = await paths.resolveUser(SYSTEM_OWNER_UUID, id);
+      const a = await paths.resolveOrg(orgId, id);
+      const b = await paths.resolveOrg(orgId, id);
       assert.equal(a.absRepo, b.absRepo);
-      const other = await paths.resolveUser(randomUUID(), id);
+      const other = await paths.resolveOrg(randomUUID(), id);
       assert.notEqual(a.absRepo, other.absRepo);
     },
   },
   {
-    name: 'non-uuid ownerId rejected (400) before any write',
-    run: () => {
-      assert.throws(() => ownerKeyOrThrow('alice'), /ownerId must be a uuid/);
-      assert.throws(() => ownerKeyOrThrow('system'), /ownerId must be a uuid/);
-      assert.throws(() => ownerKeyOrThrow('../escape'), /ownerId must be a uuid/);
+    name: 'ownerId is audit-only: no owner-derived homes exist',
+    run: async () => {
+      const paths = new WorkspacePathService();
+      const svc = (await import('../projects.service')) as Record<string, unknown>;
+      assert.equal(svc.SYSTEM_OWNER_UUID, undefined);
+      assert.equal(svc.ownerKeyOrThrow, undefined);
+      assert.equal(
+        (paths as unknown as Record<string, unknown>).resolveUser,
+        undefined,
+      );
     },
   },
   {
-    name: 'uuid project id is a valid home under the user jail',
+    name: 'uuid project id is a valid home under the org jail',
     run: async () => {
       const root = mkdtempSync(path.join(tmpdir(), 'proj-map-'));
       process.env.REPOS_ROOT = root;
       const paths = new WorkspacePathService();
+      const orgId = randomUUID();
       const id = randomUUID();
       assert.match(id, UUID_RE);
-      const resolved = await paths.resolveUser(SYSTEM_OWNER_UUID, id);
+      const resolved = await paths.resolveOrg(orgId, id);
       assert.equal(
         resolved.absRepo,
-        path.resolve(root, 'users', SYSTEM_OWNER_UUID, 'projects', id, 'content'),
+        path.resolve(root, 'orgs', orgId, 'projects', id, 'content'),
       );
       assert.ok(!resolved.absRepo.includes('workspace'));
+      assert.ok(!resolved.absBase.includes(`${path.sep}users${path.sep}`));
     },
   },
   {
     name: 'layout is stable across renames (name is display-only)',
     run: async () => {
       const paths = new WorkspacePathService();
+      const orgId = randomUUID();
       const id = randomUUID();
-      const before = await paths.resolveUser(SYSTEM_OWNER_UUID, id);
-      const after = await paths.resolveUser(SYSTEM_OWNER_UUID, id);
+      const before = await paths.resolveOrg(orgId, id);
+      const after = await paths.resolveOrg(orgId, id);
       assert.equal(before.absRepo, after.absRepo);
     },
   },
   {
-    name: 'non-uuid project ids rejected before any write (400)',
+    name: 'non-uuid org/project ids rejected before any write (400)',
     run: async () => {
       const paths = new WorkspacePathService();
-      await assert.rejects(() => paths.resolveUser(SYSTEM_OWNER_UUID, '..'));
-      await assert.rejects(() => paths.resolveUser(SYSTEM_OWNER_UUID, '.'));
-      await assert.rejects(() => paths.resolveUser(SYSTEM_OWNER_UUID, '../escape'));
-      await assert.rejects(() => paths.resolveUser('alice', randomUUID()));
+      await assert.rejects(() => paths.resolveOrg(randomUUID(), '..'));
+      await assert.rejects(() => paths.resolveOrg(randomUUID(), '.'));
+      await assert.rejects(() => paths.resolveOrg(randomUUID(), '../escape'));
+      await assert.rejects(() => paths.resolveOrg('alice', randomUUID()));
     },
   },
   {
     name: 'nested escape via subPath rejected (403, incl. .secrets)',
     run: async () => {
       const paths = new WorkspacePathService();
+      const orgId = randomUUID();
       const id = randomUUID();
-      await assert.rejects(() => paths.resolveUser(SYSTEM_OWNER_UUID, id, '../../etc'));
-      await assert.rejects(() => paths.resolveUser(SYSTEM_OWNER_UUID, id, '/absolute'));
-      await assert.rejects(() => paths.resolveUser(SYSTEM_OWNER_UUID, id, '../.secrets'));
+      await assert.rejects(() => paths.resolveOrg(orgId, id, '../../etc'));
+      await assert.rejects(() => paths.resolveOrg(orgId, id, '/absolute'));
+      await assert.rejects(() => paths.resolveOrg(orgId, id, '../.secrets'));
     },
   },
 ];

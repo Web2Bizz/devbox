@@ -254,7 +254,30 @@ async function main(): Promise<void> {
         assert.equal(res.headers.get("x-robots-tag"), "noindex");
       });
 
-      await check("stranger GET org → 404 (no leak) + member list empty", async () => {
+      await check("register minted a personal org (isPersonal, undeletable)", async () => {
+        const listed = await fetch(
+          `${base}/api/v1/organizations`,
+          auth(a.token),
+        );
+        assert.equal(listed.status, 200);
+        const mine = (await readJson(listed)) as Array<{
+          id?: string;
+          isPersonal?: boolean;
+        }>;
+        const personal = mine.find((o) => o.isPersonal === true);
+        assert.ok(personal?.id, "register must create a personal org");
+        const del = await fetch(
+          `${base}/api/v1/organizations/${personal?.id}`,
+          { method: "DELETE", ...auth(a.token) },
+        );
+        assert.equal(del.status, 400);
+        assert.equal(
+          ((await readJson(del)) as { code?: string }).code,
+          "personal_org_immutable",
+        );
+      });
+
+      await check("stranger GET org → 404 (no leak) + list shows only own personal org", async () => {
         const single = await fetch(
           `${base}/api/v1/organizations/${orgId}`,
           auth(b.token),
@@ -265,7 +288,15 @@ async function main(): Promise<void> {
           auth(b.token),
         );
         assert.equal(listed.status, 200);
-        assert.deepEqual(await readJson(listed), []);
+        const body = (await readJson(listed)) as Array<{
+          id?: string;
+          isPersonal?: boolean;
+        }>;
+        assert.ok(body.length > 0, "personal org must be listed");
+        assert.ok(
+          body.every((o) => o.isPersonal === true),
+          "only the personal org is visible to a stranger",
+        );
       });
 
       await check("stranger PATCH org → 404; owner PATCH → 200", async () => {
@@ -475,53 +506,28 @@ async function main(): Promise<void> {
         assert.equal(anonTop.status, 401);
       });
 
-      await check("user-space project: owner passes, non-owner 404, ownerless denied (C5)", async () => {
-        // New API rows always carry an org (orgId required on create) —
-        // legacy user-space / ownerless rows are seeded directly (the hand
-        // migration surface): org_id NULL + owner, and org_id NULL + owner
-        // NULL (pre-auth legacy → deny-by-default, C5).
+      await check("org-only: NULL orgId insert rejected, access is membership-only", async () => {
+        // projects.org_id is NOT NULL (org-only model): a direct NULL insert
+        // must fail at the DB, and no user-space/ownerless access branch
+        // remains — membership is the only rule (covered by the nested
+        // project check above: member passes, stranger 404).
         const { DbService } = await import("../../common/db/db.service");
         const { projects: projectsTable } = await import("../../common/db/schema");
-        const { eq: eqOp } = await import("drizzle-orm");
         const db = app.get(DbService, { strict: false }) as {
           client: {
             insert: (t: typeof projectsTable) => {
               values: (v: Array<typeof projectsTable.$inferInsert>) => Promise<unknown>;
             };
-            delete: (t: typeof projectsTable) => {
-              where: (c: unknown) => Promise<unknown>;
-            };
           };
         };
-        const soloId = "123e4567-e89b-12d3-a456-426614174071";
-        const ownerlessId = "123e4567-e89b-12d3-a456-426614174072";
-        // DELETE with no match succeeds with 0 rows (idempotent seed reset).
-        await db.client.delete(projectsTable).where(eqOp(projectsTable.id, soloId));
-        await db.client.delete(projectsTable).where(eqOp(projectsTable.id, ownerlessId));
-        await db.client.insert(projectsTable).values([
-          { id: soloId, orgId: null, name: "solo-project", ownerId: a.id },
-          { id: ownerlessId, orgId: null, name: "ownerless-project", ownerId: null },
-        ]);
-        const ownerOk = await fetch(
-          `${base}/api/v1/projects/${soloId}/sessions`,
-          json({}, "POST", a.token),
+        await assert.rejects(
+          db.client
+            .insert(projectsTable)
+            .values([
+              // @ts-expect-error NULL org_id must be rejected by the schema
+              { id: "123e4567-e89b-12d3-a456-426614174071", orgId: null, name: "no-org-project" },
+            ]),
         );
-        assert.equal(ownerOk.status, 201);
-        const stranger = await fetch(
-          `${base}/api/v1/projects/${soloId}/sessions`,
-          json({}, "POST", b.token),
-        );
-        assert.equal(stranger.status, 404);
-        const ownerlessOwner = await fetch(
-          `${base}/api/v1/projects/${ownerlessId}`,
-          auth(a.token),
-        );
-        assert.equal(ownerlessOwner.status, 404);
-        const ownerlessStranger = await fetch(
-          `${base}/api/v1/projects/${ownerlessId}`,
-          auth(b.token),
-        );
-        assert.equal(ownerlessStranger.status, 404);
       });
 
       await check("GET /api/v1/users/:id — own 200, чужой 403, без токена 401", async () => {

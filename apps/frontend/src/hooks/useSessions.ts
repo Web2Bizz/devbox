@@ -18,7 +18,7 @@ import { useI18n } from '../i18n';
 import { sessionStatusQueryKey, sessionsQueryKey } from './query-keys';
 
 export type UseSessionsResult = {
-  sessions: SessionInfo[];
+  sessions: Array<SessionInfo>;
   /** sessionId → derived runtime status (GET /api/v1/sessions/status). */
   statusMap: SessionRunStatusMap;
   loading: boolean;
@@ -165,7 +165,7 @@ export function useSessions(options?: UseSessionsOptions): UseSessionsResult {
       return createSession({ projectId, ...(title !== undefined ? { title } : {}) });
     },
     onSuccess: (created) => {
-      queryClient.setQueryData<SessionInfo[]>(queryKey, (old) =>
+      queryClient.setQueryData<Array<SessionInfo>>(queryKey, (old) =>
         old ? [created, ...old] : [created],
       );
       void queryClient.invalidateQueries({ queryKey });
@@ -195,9 +195,9 @@ export function useSessions(options?: UseSessionsOptions): UseSessionsResult {
   });
 
   const mutationErrorText = useMemo(() => {
-    const e = createMutation.error ?? abortMutation.error;
-    if (!e) return null;
-    return describeError(e, t.errors.sessionExpired, t.errors.unexpected);
+    const mutationError = createMutation.error ?? abortMutation.error;
+    if (!mutationError) return null;
+    return describeError(mutationError, t.errors.sessionExpired, t.errors.unexpected);
   }, [createMutation.error, abortMutation.error, t]);
 
   const error = mutationErrorText ?? queryErrorText;

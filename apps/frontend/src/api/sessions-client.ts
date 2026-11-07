@@ -72,7 +72,7 @@ export async function ensureSessionAuth(): Promise<void> {
 export function listSessions(
   projectId: string,
   opts?: { signal?: AbortSignal },
-): Promise<SessionInfo[]> {
+): Promise<Array<SessionInfo>> {
   return withAuth((token) => api.listSessions(token, projectId, opts));
 }
 
@@ -96,7 +96,7 @@ export function listSessionMessages(
   projectId: string,
   sessionId: string,
   opts?: { limit?: number; cursor?: string; signal?: AbortSignal },
-): Promise<SessionMessage[]> {
+): Promise<Array<SessionMessage>> {
   return withAuth((token) => api.listSessionMessages(token, sessionId, projectId, opts));
 }
 
@@ -152,14 +152,14 @@ export function interruptSession(
 export function listSessionProviders(
   projectId: string,
   opts?: { signal?: AbortSignal },
-): Promise<SessionRunnerProvider[]> {
+): Promise<Array<SessionRunnerProvider>> {
   return withAuth((token) => api.listSessionProviders(token, projectId, opts));
 }
 
 export function listSessionModels(
   projectId: string,
   opts?: { signal?: AbortSignal },
-): Promise<SessionModel[]> {
+): Promise<Array<SessionModel>> {
   return withAuth((token) => api.listSessionModels(token, projectId, opts));
 }
 
@@ -168,7 +168,7 @@ export function listSessionModels(
  * AgentInfo rows, boundary-parsed in ./client. Project-independent (the
  * registry is global), so no projectId travels.
  */
-export function listAgents(opts?: { signal?: AbortSignal }): Promise<AgentInfo[]> {
+export function listAgents(opts?: { signal?: AbortSignal }): Promise<Array<AgentInfo>> {
   return withAuth((token) => api.listAgents(token, opts));
 }
 
@@ -204,14 +204,14 @@ export async function* sessionEventStream(
   signal: AbortSignal,
   opts?: SessionEventStreamOpts,
 ): AsyncGenerator<SessionStreamFrame, void, undefined> {
-  const res = await withAuth((token) =>
+  const response = await withAuth((token) =>
     api.streamSessionEvents(token, projectId, {
       signal,
       ...(opts?.sessionId ? { sessionId: opts.sessionId } : {}),
       ...(opts?.lastEventId ? { lastEventId: opts.lastEventId } : {}),
     }),
   );
-  const body = res.body;
+  const body = response.body;
   if (!body) {
     throw new ApiClientError({
       code: 'no_stream_body',
@@ -233,17 +233,17 @@ export async function* sessionEventStream(
       buffer += decoder.decode(value, { stream: true });
       // SSE frames are separated by a blank line; CRLF normalized first.
       buffer = buffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-      let idx = buffer.indexOf('\n\n');
-      while (idx >= 0) {
-        const chunk = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 2);
-        idx = buffer.indexOf('\n\n');
+      let separatorIndex = buffer.indexOf('\n\n');
+      while (separatorIndex >= 0) {
+        const chunk = buffer.slice(0, separatorIndex);
+        buffer = buffer.slice(separatorIndex + 2);
+        separatorIndex = buffer.indexOf('\n\n');
         // One SSE dispatch may carry its payload on several `data:` lines
         // (chunked JSON) — join them with '\n' into ONE payload and parse
         // once. Parsing line-by-line broke multi-line JSON; lines without
         // `data:` are heartbeat framing (`: ping`, `id:`) and stay skipped
         // as frames — while still signalling watchdog activity.
-        const dataLines: string[] = [];
+        const dataLines: Array<string> = [];
         for (const line of chunk.split('\n')) {
           if (!line.startsWith('data:')) continue;
           dataLines.push(line.slice(5).trim());
@@ -310,7 +310,7 @@ export function stageRevert(
   projectId: string,
   sessionId: string,
   messageID: string,
-  files?: string[],
+  files?: Array<string>,
 ): Promise<RevertInfo> {
   return withAuth((token) =>
     api.stageSessionRevert(token, sessionId, files ? { projectId, messageID, files } : { projectId, messageID }),

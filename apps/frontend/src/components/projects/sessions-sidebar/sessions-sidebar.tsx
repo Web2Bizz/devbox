@@ -6,8 +6,9 @@ import { Button } from '@web2bizz/ui/components';
 import { ChatRowSkeleton, ErrorState } from '../../states';
 import { useSessions } from '../../../hooks/useSessions';
 import { projectSessionPath } from '../../../lib/navigation';
-import { SidebarNav, type SidebarNavItem, useSidebarClose } from '../../layout/Sidebar';
+import { SidebarNav, useSidebarClose } from '../../layout/Sidebar';
 import { type Dictionary, type Locale, useI18n } from '../../../i18n';
+import type { SessionListProps, SessionsSidebarProps } from './types';
 
 /**
  * Sidebar panel of the project shell.
@@ -51,12 +52,7 @@ export function SessionsSidebar({
   orgId,
   projectId,
   items,
-}: {
-  orgId: string;
-  projectId: string;
-  /** Project nav items — rendered on every non-session route. */
-  items?: readonly SidebarNavItem[];
-}) {
+}: SessionsSidebarProps) {
   const pathname = usePathname() ?? '';
   const sessionsBase = `/organizations/${encodeURIComponent(orgId)}/projects/${encodeURIComponent(projectId)}/sessions`;
   const onSessionsRoute =
@@ -95,11 +91,7 @@ export function SessionList({
   orgId,
   projectId,
   currentSessionId,
-}: {
-  orgId: string;
-  projectId: string;
-  currentSessionId?: string;
-}) {
+}: SessionListProps) {
   const { t, locale } = useI18n();
   const router = useRouter();
   const closeSidebar = useSidebarClose();
@@ -140,8 +132,8 @@ export function SessionList({
 
       {loading && (
         <ul aria-busy="true" className="flex w-full min-w-0 list-none flex-col gap-1.5 m-0 p-0">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <li key={i} className="w-full min-w-0">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <li key={index} className="w-full min-w-0">
               <ChatRowSkeleton />
             </li>
           ))}
@@ -156,16 +148,16 @@ export function SessionList({
 
       {!loading && !error && sessions.length > 0 && (
         <ul className="flex w-full min-w-0 list-none flex-col gap-1.5 m-0 p-0">
-          {sessions.map((s) => {
-            const title = s.title?.trim() || t.sessions.untitled;
-            const time = formatRelativeTime(s.updatedAt, locale, t.sessions.time);
-            const current = s.id === currentSessionId;
-            const canAbort = s.status.type === 'busy' || s.status.type === 'retry';
+          {sessions.map((session) => {
+            const title = session.title?.trim() || t.sessions.untitled;
+            const time = formatRelativeTime(session.updatedAt, locale, t.sessions.time);
+            const current = session.id === currentSessionId;
+            const canAbort = session.status.type === 'busy' || session.status.type === 'retry';
             return (
-              <li key={s.id} className="w-full min-w-0">
+              <li key={session.id} className="w-full min-w-0">
                 <div className="flex w-full min-w-0 items-center gap-1">
                   <Link
-                    href={projectSessionPath(orgId, projectId, s.id)}
+                    href={projectSessionPath(orgId, projectId, session.id)}
                     onClick={closeSidebar}
                     aria-current={current ? 'page' : undefined}
                     aria-label={t.sessions.openSession(title)}
@@ -175,15 +167,15 @@ export function SessionList({
                       <span className="truncate text-sm font-semibold">{title}</span>
                       <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs">
                         {time ? (
-                          <time dateTime={s.updatedAt} className="shrink-0">
+                          <time dateTime={session.updatedAt} className="shrink-0">
                             {time}
                           </time>
                         ) : null}
-                        {s.model ? (
+                        {session.model ? (
                           <>
                             {time ? <span aria-hidden="true">·</span> : null}
                             <code className="truncate font-mono text-[0.95em]">
-                              {s.model.id}
+                              {session.model.id}
                             </code>
                           </>
                         ) : null}
@@ -195,10 +187,10 @@ export function SessionList({
                       type="button"
                       variant="ghost"
                       size="xs"
-                      onClick={() => void abort(s.id)}
-                      disabled={abortingId === s.id}
+                      onClick={() => void abort(session.id)}
+                      disabled={abortingId === session.id}
                     >
-                      {abortingId === s.id ? t.common.loading : t.sessions.abort}
+                      {abortingId === session.id ? t.common.loading : t.sessions.abort}
                     </Button>
                   )}
                 </div>

@@ -60,7 +60,7 @@ type Stub = {
   body: unknown;
   headers?: Record<string, string>;
 };
-let stubs: Stub[] = [];
+let stubs: Array<Stub> = [];
 const calls: Array<{ url: string; init: RequestInit }> = [];
 
 function jsonResponse(stub: Stub): Response {
@@ -218,12 +218,12 @@ describe('sessions-client domain boundary', () => {
       createdAt: '2026-10-29T10:01:00.000Z',
       text: 'hi',
     };
-    const delays: unknown[] = [];
+    const delays: Array<unknown> = [];
     const origSetTimeout = globalThis.setTimeout;
     const timerSpy = spyOn(globalThis, 'setTimeout').mockImplementation(
-      ((cb: (...args: unknown[]) => void, ms?: number, ...rest: unknown[]) => {
+      ((cb: (...args: Array<unknown>) => void, ms?: number, ...rest: Array<unknown>) => {
         delays.push(ms);
-        return (origSetTimeout as (...a: unknown[]) => unknown)(cb, ms, ...rest);
+        return (origSetTimeout as (...a: Array<unknown>) => unknown)(cb, ms, ...rest);
       }) as typeof setTimeout,
     );
     try {

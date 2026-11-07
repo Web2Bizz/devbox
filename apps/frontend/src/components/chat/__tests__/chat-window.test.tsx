@@ -34,7 +34,7 @@ try {
 
 const { cleanup, render, screen } = await import('@testing-library/react');
 const userEvent = (await import('@testing-library/user-event')).default;
-const { ChatThread: ChatWindow } = await import('../../../features/chat-thread');
+const { ChatWindow } = await import('../chat-window');
 const { ChatInput } = await import('../chat-input');
 const { I18nProvider } = await import('../../../i18n');
 

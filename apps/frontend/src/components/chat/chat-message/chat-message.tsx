@@ -12,8 +12,8 @@ import {
 } from '@web2bizz/ui/widgets';
 import { GitFork, History } from 'lucide-react';
 import { useState } from 'react';
-import type { ChatMessage } from '../../../hooks/useChat';
 import { useI18n } from '../../../i18n';
+import type { ChatMessageRowProps } from './types';
 
 type TextBlock = {
   kind: 'text' | 'code';
@@ -83,11 +83,7 @@ export function ChatMessageRow({
   message,
   onFork,
   onRevert,
-}: {
-  message: ChatMessage;
-  onFork?: (messageId: string) => void;
-  onRevert?: (messageId: string) => void;
-}) {
+}: ChatMessageRowProps) {
   const isUser = message.role === 'user';
   const { t } = useI18n();
   const [feedback, setFeedback] = useState<'up' | 'down' | undefined>();

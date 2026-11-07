@@ -6,22 +6,8 @@ import {
   PromptInputTextarea,
 } from '@web2bizz/ui/widgets';
 import { Slot } from '@web2bizz/ui/components';
-import type { ReactNode } from 'react';
 import { useI18n } from '../../../i18n';
-
-export type ChatInputProps = {
-  onSend: (text: string) => void | Promise<void>;
-  onStop?: () => void;
-  sending?: boolean;
-  placeholder?: string;
-  /**
-   * Content pinned to the START of the composer's action row — the runner
-   * (model) selector. Kit layout: `PromptInput.SlotActions` splits children
-   * into `Slot.Left` / `Slot.Right`, so the picker sits inside the card next
-   * to the send action instead of above the thread.
-   */
-  leftSlot?: ReactNode;
-};
+import type { ChatInputProps } from './types';
 
 /**
  * Composer on top of the kit `PromptInput` widget (0.26.3 `widgets`).

@@ -1,16 +1,18 @@
-'use client';
-
-import { useParams } from 'next/navigation';
 import { ChatSection } from '@/features/chat-section';
+import { SESSION_COMPOSER_CLASSNAME, SESSION_THREAD_CLASSNAME } from './layout';
 
-export default function NestedSessionPage() {
-  const params = useParams();
-  const pick = (k: string) => {
-    const v = params?.[k];
-    return Array.isArray(v) ? v[0] : (v as string | undefined);
-  };
-  const sessionId = pick('sessionId');
-  const projectId = pick('projectId');
+type SessionChatPageParams = {
+  orgId: string;
+  projectId: string;
+  sessionId: string;
+};
+
+export default async function SessionChatPage({
+  params,
+}: {
+  params: Promise<SessionChatPageParams>;
+}) {
+  const { sessionId, projectId } = await params;
 
   if (!sessionId) {
     return (
@@ -20,5 +22,12 @@ export default function NestedSessionPage() {
     );
   }
 
-  return <ChatSection sessionId={sessionId} projectId={projectId} />;
+  return (
+    <ChatSection
+      sessionId={sessionId}
+      projectId={projectId}
+      className={SESSION_THREAD_CLASSNAME}
+      composerClassName={SESSION_COMPOSER_CLASSNAME}
+    />
+  );
 }

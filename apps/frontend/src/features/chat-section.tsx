@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { ChatInput, AgentSelector } from '../components/chat';
-import { ChatThread } from './chat-thread';
+import { ChatThread } from '../components/chat/chat-thread';
 import { DEFAULT_AGENT_ID, listAgents } from '../api/sessions-client';
 import { useChat } from '../hooks/useChat';
 import { agentsQueryKey } from '../hooks/query-keys';
@@ -17,6 +17,8 @@ export type ChatSectionProps = {
   sessionId?: string;
   /** Rush Code project uuid — the C4 gate on every domain call. */
   projectId?: string;
+  className?: string;
+  composerClassName?: string;
 };
 
 /**
@@ -31,13 +33,30 @@ export type ChatSectionProps = {
  *
  * States: loading skeleton, upstream failures (ErrorState + retry, `reload`
  * redials SSE + refetches history) and empty copy are all owned by
- * `ChatWindow` — the section just wires props so there is a single render
+ * `ChatThread` — the section just wires props so there is a single render
  * path and the alert is never duplicated under the thread. STOP keeps the
  * partial stream as the assistant answer (see `useChat.stop`).
+ *
+ * Geometry comes from the route layout via `className`/`composerClassName` —
+ * the section owns no `h-[calc]`/`absolute` pin of its own.
  */
-export function ChatSection({ sessionId, projectId }: ChatSectionProps) {
+export function ChatSection({ sessionId, projectId, className, composerClassName }: ChatSectionProps) {
   const { t } = useI18n();
   const [aborting, setAborting] = useState(false);
+  const [composerHeight, setComposerHeight] = useState(0);
+  const composerRef = useRef<HTMLDivElement | null>(null);
+
+  // The jump button lives in the thread but must clear the composer, whose
+  // height grows with the prompt (autoresize up to maxHeight). Measure it.
+  useEffect(() => {
+    const node = composerRef.current;
+    if (!node) return;
+    const measure = () => setComposerHeight(node.getBoundingClientRect().height);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
   const [forkMessageId, setForkMessageId] = useState<string | null>(null);
   const [revertMessageId, setRevertMessageId] = useState<string | null>(null);
   const chat = useChat({ sessionId, projectId });
@@ -130,7 +149,7 @@ export function ChatSection({ sessionId, projectId }: ChatSectionProps) {
   }, [activeSessionId, pathname]);
 
   return (
-    <section aria-label={t.chat.title} className="grid gap-2">
+    <section aria-label={t.chat.title} className={className ? `grid min-h-0 gap-2 ${className}` : 'grid min-h-0 gap-2'}>
       <ChatThread
         messages={messages}
         streamingText={streamingText}
@@ -143,14 +162,10 @@ export function ChatSection({ sessionId, projectId }: ChatSectionProps) {
         activeToolName={activeToolName ?? undefined}
         onFork={setForkMessageId}
         onRevert={setRevertMessageId}
+        className={className}
+        composerHeight={composerHeight}
       />
-      {/*
-        Pinned composer: `fixed` to the viewport bottom, inset to the Content
-        column (layer `p-2` + sidebar 300px + grid gap + content `px-4`).
-        `z-20` stays under the Header (`z-30`). The section `pb-36` reserves
-        scroll space so the last message never hides behind the card.
-      */}
-      <div className="absolute bottom-2 right-[calc((100%-300px)*0.25)] z-20 bg-background m-auto w-[50%]">
+      <div ref={composerRef} className={composerClassName}>
         <ChatInput
           onSend={handleSend}
           onStop={handleStop}

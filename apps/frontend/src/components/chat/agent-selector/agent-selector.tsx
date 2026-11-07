@@ -11,15 +11,10 @@ import {
 import { useI18n } from '../../../i18n';
 import { DEFAULT_AGENT_ID, listAgents } from '../../../api/sessions-client';
 import { agentsQueryKey } from '../../../hooks/query-keys';
+import type { AgentSelectorProps } from './types';
 
 /** Default agent answering chat turns (re-exported domain default). */
 export { DEFAULT_AGENT_ID };
-
-export type AgentSelectorProps = {
-  agentId: string;
-  onChange: (agentId: string) => void;
-  disabled?: boolean;
-};
 
 /**
  * Agent picker on the kit `Select` (0.26.3 `components`) — the chat

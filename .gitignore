@@ -1,4 +1,4 @@
-# graphify — индексы вне репо (/tmp/opencode), на случай in-repo кеша — игнор
+# graphify — индексы в проекте (.graphify/ — персистентно, переживает reboot /tmp), в git не отправлять
 .graphify/
 .tmp/
 tmp/opencode/

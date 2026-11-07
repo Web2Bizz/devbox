@@ -12,12 +12,12 @@
   // integration. Per-app exceptions live in each app's own biome.jsonc
   // (files under apps/<name>/ are governed by the nearest config, and
   // shared override globs resolve from each extending package directory).
-  "extends": ["./packages/biome-config/biome.json"],
+  "extends": ["./node_modules/@web2bizz/code-quality/src/biome.json"],
   // Plugin paths resolve from THIS config (not from the shared one), so the
   // shared plugins entry is repeated here with a root-relative path.
   "plugins": [
     {
-      "path": "./packages/biome-config/plugins/no-literal-args.grit",
+      "path": "./node_modules/@web2bizz/code-quality/src/plugins/no-literal-args.grit",
       "includes": [
         "apps/backend/**",
         "apps/frontend/**",

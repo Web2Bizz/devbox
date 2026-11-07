@@ -76,13 +76,16 @@ src/
 ├─ hooks/ — useSessions, useSessionMessages, useSessionEvents, useChat (стриминг-исключение:
 │   useEffect+domain SSE, финал session.step.ended, stop() глушит кадры), useAiProviders,
 │   useProjects/useProject/useOrganizations/... ; query-keys.ts — ЕДИНСТВЕННЫЙ источник ключей
-├─ components/chat/ — папки компонентов: `chat-thread/`, `chat-row/`,
-│   `chat-tool-timeline/`, `chat-input/`, `chat-message/`, `model-selector/`
+├─ components/chat/ — папки компонентов: `chat-thread/`, `chat-thinking-row/`,
+│   `chat-streaming-row/`, `chat-thread-empty/`, `chat-thread-loading/`,
+│   `chat-tool-timeline/`, `chat-live-status/`, `chat-input/`, `chat-message/`,
+│   `agent-selector/`
 │   (в каждой `<Имя>.tsx` + `types.ts` + `index.ts`; плоских `chat-*.tsx`
-│   в корне `chat/` нет; модельный dropdown — единый из
-│   GET /api/v1/sessions/models, без provider-селектора)
+│   в корне `chat/` нет; агентный dropdown — единый `AgentSelector` из
+│   GET /api/v1/agents, без provider-селектора)
 ├─ features/ — плоско: `chat-section.tsx` (тонкая сборка useChat+kit),
-│   `chat-thread.tsx`, `usage-section.tsx` (без подпапок — см. `CODE_OF_CONDUCT.md` §1)
+│   `chat-fork-dialog.tsx`, `chat-revert-dialog.tsx`, `usage-section.tsx`
+│   (без подпапок — см. `CODE_OF_CONDUCT.md` §1)
 ├─ lib/ — auth-store, format-error, session-expired, словари-схемы
 ├─ i18n/ — en/ru/types (namespace t.sessions/t.chat)
 └─ __tests__/no-opencode-transport.test.ts — guard: запрет @opencode-ai/sdk и /api/opencode/*

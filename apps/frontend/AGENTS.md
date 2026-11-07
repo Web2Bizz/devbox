@@ -33,13 +33,22 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 | Слой | Путь | Что класть |
 | ---- | ---- | ---------- |
-| Маршруты | `app/` | `page.tsx`, `layout.tsx`, `loading.tsx`, `error.tsx`; `globals.css` |
-| Фичи | `src/features/<имя>/` | фича-модуль целиком: UI-секция + диалоги + локальный статус |
+| Маршруты | `app/` | `layout.tsx` — владелец расположения (Server по умолчанию, без `'use client'`: `grid`/высоты/пины/слоты); `page.tsx` — тонкая (params → `<ФичаСекция />`); `loading.tsx`/`error.tsx`; `globals.css` |
+| Фичи | `src/features/*.tsx` (плоско, без подпапок — см. `CODE_OF_CONDUCT.md` §1) | фича-файл: состояние + порядок строк + UI-секция + диалоги + локальный статус; геометрию маршрута получает через `className` от `layout.tsx`, своей не задаёт (см. `CODE_OF_CONDUCT.md` §2) |
 | Компоненты | `src/components/` | общие презентационные компоненты |
 | Хуки | `src/hooks/` | data-хуки + `query-keys.ts` (единственный источник ключей) |
 | API | `src/api/` | `client.ts` (единственный fetch-слой) + `sessions-client.ts` (доменный фасад); своих типов не заводить |
 | Lib | `src/lib/` | утилиты, сторы + алиасы схем (реэкспорт пакета) |
 | i18n | `src/i18n/` | словарь en/ru, провайдер |
+
+### Server/Client-граница (Next App Router)
+
+- `app/**/layout.tsx` — Server по умолчанию: никакого `'use client'`,
+  `useState`/`useEffect`/`usePathname` там запрещены; владеет только
+  расположением (`grid`/высоты/пины) и пробрасывает интерактив через
+  `children`/слоты.
+- `'use client'` — только интерактив: `src/features/*`, `src/components/*`,
+  `src/hooks/*` (стриминг-исключение `useChat` — см. ниже).
 
 ### Data-хуки — только React Query
 
@@ -88,3 +97,8 @@ src/
 - `app/` — только тонкая композиция; бизнес-логика в `features/` + `hooks/`. Query-ключи — только из `query-keys.ts`; data-хуки на React Query (streaming/SSE — `useEffect` с комментом-обоснованием, wontfix).
 - Доменный `SessionInfo.directory` — реальное поле (Q6 закрыт на бэкенде); `title`/`text` могут быть `null`.
 - Все поверхности доменные: abort → `POST /api/v1/sessions/:id/interrupt` (best-effort, `interrupted:false` = idle no-op, не ошибка), провайдеры → `GET /api/v1/sessions/providers`, модели для `ModelSelector` → `GET /api/v1/sessions/models` (единый dropdown, без provider-селектора). `stop()` в `useChat` прерывает prompt, шлёт interrupt, коммитит partial и **глушит дальнейшие SSE-кадры** (`sendingRef`-гард). Выбранная модель живёт в состоянии чата и уходит только на create сессии (prompt её не принимает); перезагрузка страницы её не сохраняет — см. корень «Модель пинится созданием сессии».
+
+## Дополнительные правила
+
+- [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md) — обязательно к прочтению
+  перед написанием кода (плоские фичи `features-flat`).

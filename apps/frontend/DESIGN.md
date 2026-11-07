@@ -128,9 +128,17 @@ frontend. Новый компонент **не считается зарегис
 ### 3.2 Компоненты (`src/components/`)
 
 - `AuthHeader`
+- `AgentThinking`
+- `ChatErrorBanner`
 - `ChatInput`
+- `ChatLiveStatusWidget`
 - `ChatMessageRow`
-- `ChatWindow`
+- `ChatStreamingRow`
+- `ChatThinkingRow`
+- `ChatThreadEmpty`
+- `ChatThreadLoading`
+- `ChatThreadWidget`
+- `ChatToolsTimeline`
 - `CreateOrganizationDialog`
 - `CreateProjectDialog`
 - `OrganizationSwitcher`
@@ -142,9 +150,13 @@ frontend. Новый компонент **не считается зарегис
 - `ProjectDetailSkeleton`
 - `ProjectsHeaderSkeleton`
 
-### 3.3 Фичи (`src/features/`)
+### 3.3 Фичи (`src/features/`, плоско — без подпапок)
 
 - `ApiKeyDialog`
+- `ChatForkDialog`
+- `ChatRevertDialog`
+- `ChatSection`
+- `ChatThread`
 - `UsageSection`
 
 ### 3.4 Инфраструктура (`src/i18n`, `src/providers`)

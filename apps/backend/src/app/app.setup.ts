@@ -73,6 +73,7 @@ export function configureApp(app: INestApplication): void {
       'x-correlation-id',
       'x-user-id',
       'authorization',
+      'last-event-id',
     ],
     exposedHeaders: ['x-correlation-id'],
     // true: the auth refresh httpOnly cookie (rush-code-refresh) + marker must

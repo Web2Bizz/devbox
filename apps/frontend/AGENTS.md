@@ -35,7 +35,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 | ---- | ---- | ---------- |
 | Маршруты | `app/` | `layout.tsx` — владелец расположения (Server по умолчанию, без `'use client'`: `grid`/высоты/пины/слоты); `page.tsx` — тонкая (params → `<ФичаСекция />`); `loading.tsx`/`error.tsx`; `globals.css` |
 | Фичи | `src/features/*.tsx` (плоско, без подпапок — см. `CODE_OF_CONDUCT.md` §1) | фича-файл: состояние + порядок строк + UI-секция + диалоги + локальный статус; геометрию маршрута получает через `className` от `layout.tsx`, своей не задаёт (см. `CODE_OF_CONDUCT.md` §2) |
-| Компоненты | `src/components/` | общие презентационные компоненты |
+| Компоненты | `src/components/` | папка на компонент: `<имя>/<Имя>.tsx` + `types.ts` + `index.ts` (барелль); типы — только в `types.ts` (`export type`, без `interface`); россыпь файлов `chat-*.tsx` в одной папке запрещена (см. `CODE_OF_CONDUCT.md` §3) |
 | Хуки | `src/hooks/` | data-хуки + `query-keys.ts` (единственный источник ключей) |
 | API | `src/api/` | `client.ts` (единственный fetch-слой) + `sessions-client.ts` (доменный фасад); своих типов не заводить |
 | Lib | `src/lib/` | утилиты, сторы + алиасы схем (реэкспорт пакета) |
@@ -76,9 +76,13 @@ src/
 ├─ hooks/ — useSessions, useSessionMessages, useSessionEvents, useChat (стриминг-исключение:
 │   useEffect+domain SSE, финал session.step.ended, stop() глушит кадры), useAiProviders,
 │   useProjects/useProject/useOrganizations/... ; query-keys.ts — ЕДИНСТВЕННЫЙ источник ключей
-├─ components/chat/ — chat-input, chat-message, chat-window, model-selector
-│   (единый dropdown моделей из GET /api/v1/sessions/models; без provider-селектора)
-├─ features/ — chat/chat-section.tsx (тонкая сборка useChat+kit), usage/
+├─ components/chat/ — папки компонентов: `chat-thread/`, `chat-row/`,
+│   `chat-tool-timeline/`, `chat-input/`, `chat-message/`, `model-selector/`
+│   (в каждой `<Имя>.tsx` + `types.ts` + `index.ts`; плоских `chat-*.tsx`
+│   в корне `chat/` нет; модельный dropdown — единый из
+│   GET /api/v1/sessions/models, без provider-селектора)
+├─ features/ — плоско: `chat-section.tsx` (тонкая сборка useChat+kit),
+│   `chat-thread.tsx`, `usage-section.tsx` (без подпапок — см. `CODE_OF_CONDUCT.md` §1)
 ├─ lib/ — auth-store, format-error, session-expired, словари-схемы
 ├─ i18n/ — en/ru/types (namespace t.sessions/t.chat)
 └─ __tests__/no-opencode-transport.test.ts — guard: запрет @opencode-ai/sdk и /api/opencode/*

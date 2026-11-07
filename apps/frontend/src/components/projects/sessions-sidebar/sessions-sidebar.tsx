@@ -3,7 +3,7 @@
 import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@web2bizz/ui/components';
-import { ErrorState, LoadingState } from '../../states';
+import { ChatRowSkeleton, ErrorState } from '../../states';
 import { useSessions } from '../../../hooks/useSessions';
 import { projectSessionPath } from '../../../lib/navigation';
 import { SidebarNav, type SidebarNavItem, useSidebarClose } from '../../layout/Sidebar';
@@ -138,7 +138,15 @@ export function SessionList({
         </Button>
       </div>
 
-      {loading && <LoadingState rows={2} />}
+      {loading && (
+        <ul aria-busy="true" className="flex w-full min-w-0 list-none flex-col gap-1.5 m-0 p-0">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <li key={i} className="w-full min-w-0">
+              <ChatRowSkeleton />
+            </li>
+          ))}
+        </ul>
+      )}
 
       {!loading && error && <ErrorState message={error} onRetry={reload} />}
 
@@ -164,7 +172,7 @@ export function SessionList({
                     className="flex min-w-0 flex-1 items-center gap-2 rounded-md bg-muted/60 px-2 py-1.5 text-left no-underline transition-colors duration-150 hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sidebar-ring,var(--ring))] aria-[current=page]:bg-muted aria-[current=page]:text-foreground"
                   >
                     <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <span className="truncate text-sm font-medium">{title}</span>
+                      <span className="truncate text-sm font-semibold">{title}</span>
                       <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs">
                         {time ? (
                           <time dateTime={s.updatedAt} className="shrink-0">
@@ -180,9 +188,6 @@ export function SessionList({
                           </>
                         ) : null}
                       </span>
-                    </span>
-                    <span aria-hidden="true" className="text-muted-foreground">
-                      ›
                     </span>
                   </Link>
                   {canAbort && (

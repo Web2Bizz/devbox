@@ -60,6 +60,21 @@ export function ProjectDetailSkeleton() {
   );
 }
 
+/** Row skeleton — mirrors the SessionList chat row (bg-muted/60, rounded-md, px-2 py-1.5). */
+export function ChatRowSkeleton() {
+  return (
+    <div
+      aria-hidden="true"
+      className="flex min-w-0 flex-1 items-center gap-2 rounded-md bg-muted/60 px-2 py-1.5"
+    >
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <Skeleton className="h-5 w-2/3" />
+        <Skeleton className="h-4 w-1/3" />
+      </span>
+    </div>
+  );
+}
+
 /** Grid skeleton — matches the loading grid layout. */
 export function LoadingState({ rows = 3 }: { rows?: number }) {
   const { t } = useI18n();

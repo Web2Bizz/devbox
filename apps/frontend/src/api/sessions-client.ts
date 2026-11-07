@@ -4,6 +4,8 @@ import { SessionExpiredError } from '../lib/session-expired';
 import type {
   AgentInfo,
   CreateSessionRequest,
+  RevertInfo,
+  SessionForkResponse,
   SessionInfo,
   SessionInterruptResult,
   SessionMessage,
@@ -11,6 +13,7 @@ import type {
   SessionRunnerProvider,
   SessionModel,
   SessionStreamFrame,
+  SnapshotDiffList,
 } from '@rush-code/contracts';
 import { sessionStreamFrameSchema } from '@rush-code/contracts';
 
@@ -179,20 +182,35 @@ export const DEFAULT_AGENT_ID = 'ask';
 
 /**
  * SSE live frames of GET /api/v1/sessions/events as domain
- * SessionStreamFrame rows. Every `data:` payload is parsed with
- * sessionStreamFrameSchema — a malformed frame FAILS LOUD (throws out of
- * the generator; the caller treats it as a stream break and redials with
- * backoff), never a silent cast or default. Heartbeat comments (lines
- * without `data:`) are not frames and are skipped by transport framing,
- * not by guessing shapes. Cancellation arrives via the caller's
- * AbortSignal: it reaches the fetch body reader (no sdk stream to close —
- * plain fetch is the transport here).
+ * SessionStreamFrame rows. Fail-soft (C3): every `data:` payload is parsed as
+ * `JSON.parse` in try + `sessionStreamFrameSchema.safeParse` (never `.parse`);
+ * a broken chunk bumps a counter and is SKIPPED — the generator stays alive.
+ * Heartbeat comments (`: ping`, no `data:`) are not frames: skipped, but they
+ * count as activity for the caller's watchdog via `onActivity`. Transport
+ * failures (fetch throw, `!body`, abort-tear) still throw outward — the caller
+ * (useChat) decides quiet redial vs terminal; parse failures never throw.
+ * `opts.sessionId` narrows the server subscription (`?session=`), `opts.lastEventId`
+ * resumes after the cursor (`Last-Event-ID`, `?cursor=` fallback server-side).
+ * No frame bodies are logged; `withAuth`/401 rotation is unchanged.
  */
+export type SessionEventStreamOpts = {
+  sessionId?: string;
+  lastEventId?: string;
+  onActivity?: () => void;
+};
+
 export async function* sessionEventStream(
   projectId: string,
   signal: AbortSignal,
+  opts?: SessionEventStreamOpts,
 ): AsyncGenerator<SessionStreamFrame, void, undefined> {
-  const res = await withAuth((token) => api.streamSessionEvents(token, projectId, { signal }));
+  const res = await withAuth((token) =>
+    api.streamSessionEvents(token, projectId, {
+      signal,
+      ...(opts?.sessionId ? { sessionId: opts.sessionId } : {}),
+      ...(opts?.lastEventId ? { lastEventId: opts.lastEventId } : {}),
+    }),
+  );
   const body = res.body;
   if (!body) {
     throw new ApiClientError({
@@ -205,6 +223,9 @@ export async function* sessionEventStream(
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  // Broken-chunk counter (metadata only — bodies never logged).
+  let skipped = 0;
+  const activity = opts?.onActivity;
   try {
     for (;;) {
       const { done, value } = await reader.read();
@@ -219,23 +240,42 @@ export async function* sessionEventStream(
         idx = buffer.indexOf('\n\n');
         // One SSE dispatch may carry its payload on several `data:` lines
         // (chunked JSON) — join them with '\n' into ONE payload and parse
-        // once. Parsing line-by-line broke multi-line JSON (throw → stream
-        // death → lost deltas); lines without `data:` are heartbeat
-        // framing and stay skipped.
+        // once. Parsing line-by-line broke multi-line JSON; lines without
+        // `data:` are heartbeat framing (`: ping`, `id:`) and stay skipped
+        // as frames — while still signalling watchdog activity.
         const dataLines: string[] = [];
         for (const line of chunk.split('\n')) {
           if (!line.startsWith('data:')) continue;
           dataLines.push(line.slice(5).trim());
         }
-        if (dataLines.length === 0) continue;
+        if (dataLines.length === 0) {
+          // Heartbeat comment or id-only dispatch — liveness, not a frame.
+          if (chunk.trim().length > 0) activity?.();
+          continue;
+        }
         const payload = dataLines.join('\n');
-        if (!payload) continue;
-        const parsed: unknown = JSON.parse(payload);
-        const frame = sessionStreamFrameSchema.parse(parsed);
-        yield frame;
+        if (!payload) {
+          activity?.();
+          continue;
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(payload);
+        } catch {
+          skipped += 1;
+          continue;
+        }
+        const checked = sessionStreamFrameSchema.safeParse(parsed);
+        if (!checked.success) {
+          skipped += 1;
+          continue;
+        }
+        activity?.();
+        yield checked.data;
       }
     }
   } finally {
+    void skipped;
     // Downstream gone (unmount/reconnect/abort): release + cancel the
     // body reader best-effort so the socket is not pinned.
     try {
@@ -249,6 +289,55 @@ export async function* sessionEventStream(
       /* stream already released — noop */
     }
   }
+}
+
+/**
+ * Fork a session at a message boundary (POST /api/v1/sessions/{id}/fork).
+ * `before` is the boundary message id; omitted → the whole thread is copied.
+ */
+export function forkSession(
+  projectId: string,
+  sessionId: string,
+  before?: string,
+): Promise<SessionForkResponse> {
+  return withAuth((token) =>
+    api.forkSession(token, sessionId, before ? { projectId, before } : { projectId }),
+  );
+}
+
+/** Stage a revert of the files touched after a message boundary. */
+export function stageRevert(
+  projectId: string,
+  sessionId: string,
+  messageID: string,
+  files?: string[],
+): Promise<RevertInfo> {
+  return withAuth((token) =>
+    api.stageSessionRevert(token, sessionId, files ? { projectId, messageID, files } : { projectId, messageID }),
+  );
+}
+
+/** Discard the staged revert (files return to their pre-stage state). */
+export function clearRevert(projectId: string, sessionId: string): Promise<void> {
+  return withAuth((token) => api.clearSessionRevert(token, sessionId, projectId));
+}
+
+/** Keep the restored files and drop the staged revert state. */
+export function commitRevert(projectId: string, sessionId: string): Promise<void> {
+  return withAuth((token) => api.commitSessionRevert(token, sessionId, projectId));
+}
+
+/** Per-file diff between two session snapshots (git tree ids). */
+export function snapshotDiff(
+  projectId: string,
+  sessionId: string,
+  from: string,
+  to: string,
+  context?: number,
+): Promise<SnapshotDiffList> {
+  return withAuth((token) =>
+    api.getSessionSnapshotDiff(token, sessionId, projectId, from, to, context !== undefined ? { context } : undefined),
+  );
 }
 
 /**

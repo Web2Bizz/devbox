@@ -27,6 +27,8 @@ import type {
 } from '@rush-code/contracts';
 import {
   agentInfoListSchema,
+  revertInfoSchema,
+  sessionForkResponseSchema,
   sessionInfoListSchema,
   sessionInfoSchema,
   sessionInterruptResultSchema,
@@ -35,6 +37,7 @@ import {
   sessionRunStatusMapSchema,
   sessionRunnerProviderListSchema,
   sessionModelListSchema,
+  snapshotDiffListSchema,
   runInfoListSchema,
   runInfoSchema,
 } from '@rush-code/contracts';
@@ -42,6 +45,10 @@ import type {
   AgentInfo,
   CreateSessionRequest,
   InterruptSessionRequest,
+  RevertInfo,
+  RevertStageRequest,
+  SessionForkRequest,
+  SessionForkResponse,
   SessionInfo,
   SessionInterruptResult,
   SessionMessage,
@@ -49,6 +56,7 @@ import type {
   SessionRunnerProvider,
   SessionModel,
   SendMessageRequest,
+  SnapshotDiffList,
 } from '@rush-code/contracts';
 
 // Base URL resolution (Next.js App Router):
@@ -316,17 +324,20 @@ export const api = {
   streamSessionEvents: async (
     accessToken: string,
     projectId: string,
-    opts?: { signal?: AbortSignal },
+    opts?: { signal?: AbortSignal; sessionId?: string; lastEventId?: string },
   ): Promise<Response> => {
     const correlationId = crypto.randomUUID();
+    const q = new URLSearchParams({ projectId });
+    if (opts?.sessionId) q.set('session', opts.sessionId);
     const res = await fetch(
-      `${BASE_URL}/api/v1/sessions/events?projectId=${encodeURIComponent(projectId)}`,
+      `${BASE_URL}/api/v1/sessions/events?${q.toString()}`,
       {
         method: 'GET',
         headers: {
           accept: 'text/event-stream',
           authorization: `Bearer ${accessToken}`,
           'x-correlation-id': correlationId,
+          ...(opts?.lastEventId ? { 'Last-Event-ID': opts.lastEventId } : {}),
         },
         ...(opts?.signal ? { signal: opts.signal } : {}),
       },
@@ -362,6 +373,79 @@ export const api = {
         body: JSON.stringify(body),
       }),
     ),
+  // ── Fork / revert / snapshot diff (D1 domain contract). Same stance: the
+  // project gate rides the body (fork/stage) or the query (clear/commit/diff),
+  // every answer is boundary-parsed, and 204 answers carry no body. ──
+  forkSession: async (
+    accessToken: string,
+    sessionId: string,
+    body: SessionForkRequest,
+  ): Promise<SessionForkResponse> =>
+    parseBoundary(
+      'POST /api/v1/sessions/:id/fork',
+      sessionForkResponseSchema,
+      await request<unknown>(`/api/v1/sessions/${encodeURIComponent(sessionId)}/fork`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify(body),
+      }),
+    ),
+  stageSessionRevert: async (
+    accessToken: string,
+    sessionId: string,
+    body: RevertStageRequest,
+  ): Promise<RevertInfo> =>
+    parseBoundary(
+      'POST /api/v1/sessions/:id/revert/stage',
+      revertInfoSchema,
+      await request<unknown>(`/api/v1/sessions/${encodeURIComponent(sessionId)}/revert/stage`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify(body),
+      }),
+    ),
+  clearSessionRevert: async (
+    accessToken: string,
+    sessionId: string,
+    projectId: string,
+  ): Promise<void> => {
+    await request<unknown>(
+      `/api/v1/sessions/${encodeURIComponent(sessionId)}/revert?projectId=${encodeURIComponent(projectId)}`,
+      { method: 'DELETE', headers: { authorization: `Bearer ${accessToken}` } },
+    );
+  },
+  commitSessionRevert: async (
+    accessToken: string,
+    sessionId: string,
+    projectId: string,
+  ): Promise<void> => {
+    await request<unknown>(
+      `/api/v1/sessions/${encodeURIComponent(sessionId)}/revert/commit?projectId=${encodeURIComponent(projectId)}`,
+      { method: 'POST', headers: { authorization: `Bearer ${accessToken}` } },
+    );
+  },
+  getSessionSnapshotDiff: async (
+    accessToken: string,
+    sessionId: string,
+    projectId: string,
+    from: string,
+    to: string,
+    opts?: { context?: number; signal?: AbortSignal },
+  ): Promise<SnapshotDiffList> => {
+    const q = new URLSearchParams({ projectId, from, to });
+    if (opts?.context !== undefined) q.set('context', String(opts.context));
+    return parseBoundary(
+      'GET /api/v1/sessions/:id/snapshots/diff',
+      snapshotDiffListSchema,
+      await request<unknown>(
+        `/api/v1/sessions/${encodeURIComponent(sessionId)}/snapshots/diff?${q.toString()}`,
+        {
+          headers: { authorization: `Bearer ${accessToken}` },
+          ...(opts?.signal ? { signal: opts.signal } : {}),
+        },
+      ),
+    );
+  },
   listSessionProviders: async (
     accessToken: string,
     projectId: string,

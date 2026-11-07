@@ -13,12 +13,14 @@
  *   (PromptInputTextarea + PromptInputSubmit that becomes Stop while
  *   streaming).
  *
- * Covers: empty (EmptyState), loading (Skeleton), error (Alert + retry),
+ * Covers: empty (EmptyState), loading (Skeleton), error (C6 policy: banner
+ * above a live thread with retry, full ErrorState only on an empty thread),
  * thread (kit rows + code-fence + no role badges + ghost assistant bubble),
  * scroller roles + height contract,
  * streaming (ghost bubble + ShimmerText status below text + cursor), thinking
  * (sending && !streamingText bare ShimmerText line with rotating phrases),
- * send (Enter/button via onSend, clears, disabled while sending, custom
+ * timeline (toolTrace/liveToolName inside MessageScrollerContent as an
+ * ordinary item without scrollAnchor), send (Enter/button via onSend, clears, disabled while sending, custom
  * placeholder).
  */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
@@ -68,20 +70,55 @@ describe('ChatWindow', () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
-  test('error: replaces a non-empty thread instead of rendering under it', async () => {
+  test('error: banner above a live thread preserves messages + streaming (C6 policy)', async () => {
     const onRetry = mock(() => {});
     const user = userEvent.setup();
-    renderWindow({
+    const { container } = renderWindow({
       messages: [{ id: 'u1', role: 'user', text: 'hello' }],
+      streamingText: 'partial…',
       error: 'boom',
       onRetry,
     });
+    // Terminal failure never replaces the thread: banner + thread coexist.
     expect(await screen.findByText('boom')).toBeDefined();
-    // The thread is gone — the alert is the only body, so it cannot slide
-    // under the fixed composer.
-    expect(screen.queryByText('hello')).toBeNull();
+    expect(await screen.findByText('hello')).toBeDefined();
+    expect(await screen.findByTestId('chat-streaming')).toBeDefined();
+    // The banner sits ABOVE the thread in the DOM.
+    const banner = screen.getByText('boom');
+    const threadRow = screen.getByText('hello');
+    expect(
+      banner.compareDocumentPosition(threadRow) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(container.querySelector('[data-testid="chat-streaming"]')).not.toBeNull();
     await user.click(screen.getByRole('button', { name: 'Retry' }));
     expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  test('error: empty thread renders the full ErrorState (nothing to preserve)', async () => {
+    const onRetry = mock(() => {});
+    const user = userEvent.setup();
+    renderWindow({ error: 'boom', onRetry });
+    expect(await screen.findByText('boom')).toBeDefined();
+    expect(screen.queryByText('Start a conversation')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  test('error: falsy error renders no banner and keeps the thread clean', async () => {
+    renderWindow({
+      messages: [{ id: 'u1', role: 'user', text: 'hello' }],
+      error: null,
+    });
+    expect(await screen.findByText('hello')).toBeDefined();
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+
+    cleanup();
+    renderWindow({
+      messages: [{ id: 'u1', role: 'user', text: 'hello' }],
+      error: '',
+    });
+    expect(await screen.findByText('hello')).toBeDefined();
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 
   test('thread: renders kit user/assistant rows', async () => {
@@ -233,6 +270,61 @@ describe('ChatWindow', () => {
     });
     expect(await screen.findByTestId('chat-streaming')).toBeDefined();
     expect(screen.queryByTestId('chat-thinking')).toBeNull();
+  });
+
+  test('timeline: tool calls render INSIDE the scroller as an ordinary item (no scrollAnchor)', async () => {
+    const { container } = renderWindow({
+      messages: [{ id: 'u1', role: 'user', text: 'go' }],
+      toolTrace: [{ id: 't1', at: 1700000000000, kind: 'tool', label: 'bash' }],
+    });
+    const timeline = await screen.findByTestId('chat-tools-timeline');
+    expect(timeline).toBeDefined();
+    // Inside the kit Content (role=log), not outside the scroller.
+    const log = container.querySelector('[role="log"]') as HTMLElement;
+    expect(log).not.toBeNull();
+    expect(log.contains(timeline)).toBe(true);
+    const item = container.querySelector('[data-message-id="chat-tools-timeline"]') as HTMLElement;
+    expect(item).not.toBeNull();
+    // Ordinary thread item: must NOT steal the auto-follow anchor.
+    expect(item.getAttribute('data-scroll-anchor')).not.toBe('true');
+  });
+
+  test('timeline: live tool name renders inside the thread with ShimmerText while thinking keeps the anchor', async () => {
+    const { container } = renderWindow({
+      messages: [{ id: 'u1', role: 'user', text: 'go' }],
+      sending: true,
+      activeToolName: 'bash',
+      toolTrace: [],
+    });
+    const timeline = await screen.findByTestId('chat-tools-timeline');
+    expect(timeline).toBeDefined();
+    expect(await screen.findByText('bash')).toBeDefined();
+    // Thinking stays the scroll anchor; the timeline item does not.
+    const thinkingAnchor = container.querySelector('[data-message-id="chat-thinking"]') as HTMLElement;
+    expect(thinkingAnchor.getAttribute('data-scroll-anchor')).toBe('true');
+    const timelineItem = container.querySelector(
+      '[data-message-id="chat-tools-timeline"]',
+    ) as HTMLElement;
+    expect(timelineItem.getAttribute('data-scroll-anchor')).not.toBe('true');
+    // Timeline sits in the thread before the thinking row.
+    expect(
+      timelineItem.compareDocumentPosition(thinkingAnchor) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  test('timeline: hidden on empty/loading/error-empty threads (only a real thread shows it)', async () => {
+    const trace = [{ id: 't1', at: 1700000000000, kind: 'tool' as const, label: 'bash' }];
+    cleanup();
+    renderWindow({ toolTrace: trace });
+    expect(screen.queryByTestId('chat-tools-timeline')).toBeNull();
+
+    cleanup();
+    renderWindow({ loading: true, toolTrace: trace });
+    expect(screen.queryByTestId('chat-tools-timeline')).toBeNull();
+
+    cleanup();
+    renderWindow({ error: 'boom', toolTrace: trace });
+    expect(screen.queryByTestId('chat-tools-timeline')).toBeNull();
   });
 });
 

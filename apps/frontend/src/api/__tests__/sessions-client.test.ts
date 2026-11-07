@@ -13,7 +13,7 @@
  * {interrupted} parsed, drift loud) and the domain provider inventory
  * (required rows parse, non-contract members stripped), and the SSE frame
  * parser (data: frames → SessionStreamFrame, heartbeats skipped, malformed
- * frame throws).
+ * frame skipped fail-soft with the stream alive).
  */
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import { GlobalRegistrator } from '@happy-dom/global-registrator';
@@ -95,6 +95,7 @@ const ROW = {
   id: 'ses_1',
   title: null,
   createdAt: '2026-10-29T10:00:00.000Z',
+  updatedAt: '2026-10-29T11:00:00.000Z',
   directory: '/srv/projects/p1',
   projectId: PROJECT,
   model: null,
@@ -117,6 +118,17 @@ describe('sessions-client domain boundary', () => {
 
   test('shape drift: a row without createdAt fails loud as shape_mismatch (never a cast)', async () => {
     stubs = [{ status: 200, body: [{ id: 'ses_1' }] }];
+    const err = await listSessions(PROJECT).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiClientError);
+    expect((err as ApiClientError).code).toBe('shape_mismatch');
+  });
+
+  test('shape drift: a row without updatedAt fails loud as shape_mismatch (no silent fallback)', async () => {
+    const { createdAt: _created, ...rest } = ROW;
+    void _created;
+    const { updatedAt: _updated, ...withoutUpdatedAt } = rest;
+    void _updated;
+    stubs = [{ status: 200, body: [withoutUpdatedAt] }];
     const err = await listSessions(PROJECT).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ApiClientError);
     expect((err as ApiClientError).code).toBe('shape_mismatch');
@@ -290,17 +302,22 @@ describe('sessions-client domain boundary', () => {
     expect((err as ApiClientError).code).toBe('shape_mismatch');
   });
 
-  test('sessionEventStream: data: frames parse to domain rows, heartbeats skipped, malformed frame throws', async () => {
+  test('sessionEventStream: data: frames parse to domain rows, heartbeats skipped, malformed frame skipped (fail-soft)', async () => {
     const sse = [
       'data: {"id":"e1","type":"message.part.delta","data":{"sessionID":"ses_1","messageID":"m","partID":"p","field":"text","delta":"Hi"},"session":"ses_1"}\n\n',
-      ': heartbeat\n\n',
+      ': ping\n\n',
       'data: {"id":"e2","type":"session.idle","data":{"sessionID":"ses_1"},"session":"ses_1"}\n\n',
     ].join('');
+    let activity = 0;
     globalThis.fetch = (async () =>
       new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } })) as unknown as typeof fetch;
     const ctrl = new AbortController();
     const frames = [];
-    for await (const frame of sessionEventStream(PROJECT, ctrl.signal)) {
+    for await (const frame of sessionEventStream(PROJECT, ctrl.signal, {
+      onActivity: () => {
+        activity += 1;
+      },
+    })) {
       frames.push(frame);
       if (frames.length === 2) break;
     }
@@ -308,19 +325,71 @@ describe('sessions-client domain boundary', () => {
     expect(frames[0]?.type).toBe('message.part.delta');
     expect(frames[0]?.session).toBe('ses_1');
     expect(frames[1]?.type).toBe('session.idle');
+    // 2 frames + 1 heartbeat all count as activity for the watchdog.
+    expect(activity).toBe(3);
 
-    // Malformed frame (id missing) — fails loud, never a silent skip.
+    // Malformed frame (id missing) — skipped fail-soft, the stream stays alive.
     globalThis.fetch = (async () =>
-      new Response('data: {"type":"x","data":{}}\n\n', {
-        status: 200,
-        headers: { 'content-type': 'text/event-stream' },
-      })) as unknown as typeof fetch;
+      new Response(
+        'data: {"type":"x","data":{}}\n\n' +
+          'data: {"id":"e9","type":"session.idle","data":{"sessionID":"ses_1"},"session":"ses_1"}\n\n',
+        {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        },
+      )) as unknown as typeof fetch;
     const ctrl2 = new AbortController();
-    const err = await (async () => {
-      for await (const _f of sessionEventStream(PROJECT, ctrl2.signal)) return _f;
-      return null;
-    })().catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(Error);
+    const frames2 = [];
+    for await (const f of sessionEventStream(PROJECT, ctrl2.signal)) {
+      frames2.push(f);
+      if (frames2.length === 1) break;
+    }
+    ctrl2.abort();
+    expect(frames2.length).toBe(1);
+    expect(frames2[0]?.id).toBe('e9');
+  });
+
+  test('sessionEventStream: broken-json and broken-schema chunks are skipped, good frames survive', async () => {
+    const sse = [
+      'data: {"id":"g1","type":"session.idle","data":{"sessionID":"ses_1"},"session":"ses_1"}\n\n',
+      'data: {"id":"broken-json",\n\n',
+      'data: {"id":"g2","type":"session.idle","data":{"sessionID":"ses_1"},"session":"ses_1"}\n\n',
+      'data: {"type":"x","data":{}}\n\n',
+      'data: {"id":"g3","type":"session.idle","data":{"sessionID":"ses_1"},"session":"ses_1"}\n\n',
+      ': ping\n\n',
+    ].join('');
+    globalThis.fetch = (async () =>
+      new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } })) as unknown as typeof fetch;
+    const ctrl = new AbortController();
+    const frames = [];
+    for await (const frame of sessionEventStream(PROJECT, ctrl.signal)) {
+      frames.push(frame);
+      if (frames.length === 3) break;
+    }
+    ctrl.abort();
+    // The broken-json chunk and the schema-violating chunk (missing id) are
+    // skipped fail-soft; the 3 good frames arrive in order, stream never dies.
+    expect(frames.map((f) => f.id)).toEqual(['g1', 'g2', 'g3']);
+  });
+
+  test('sessionEventStream: ?session= and Last-Event-ID travel on the wire', async () => {
+    const seen: Array<{ url: string; init: RequestInit }> = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push({ url: String(input), init: init ?? {} });
+      return new Response(': ping\n\n', { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    }) as unknown as typeof fetch;
+    const ctrl = new AbortController();
+    for await (const _f of sessionEventStream(PROJECT, ctrl.signal, {
+      sessionId: 'ses_A',
+      lastEventId: 'e42',
+    })) {
+      break;
+    }
+    ctrl.abort();
+    expect(seen[0]?.url).toContain('projectId=');
+    expect(seen[0]?.url).toContain('session=ses_A');
+    const headers = seen[0]?.init.headers as Record<string, string>;
+    expect(headers['Last-Event-ID']).toBe('e42');
   });
 
   test('sessionEventStream: multi-line data: chunk joins into one frame (no stream death)', async () => {
@@ -340,5 +409,195 @@ describe('sessions-client domain boundary', () => {
     expect(frames.length).toBe(1);
     expect(frames[0]?.type).toBe('message.part.delta');
     expect(frames[0]?.session).toBe('ses_1');
+  });
+
+  test('sessionEventStream: id:-only + CRLF heartbeat dispatches are liveness (activity, no frame)', async () => {
+    const sse = 'id: e5\n: ping\n\n'.replace(/\n/g, '\r\n') +
+      'data: {"id":"g1","type":"session.idle","data":{"sessionID":"ses_1"},"session":"ses_1"}\r\n\r\n' +
+      ': ping\n\n';
+    let activity = 0;
+    globalThis.fetch = (async () =>
+      new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } })) as unknown as typeof fetch;
+    const ctrl = new AbortController();
+    const frames = [];
+    for await (const frame of sessionEventStream(PROJECT, ctrl.signal, {
+      onActivity: () => {
+        activity += 1;
+      },
+    })) {
+      frames.push(frame);
+      if (frames.length === 1) break;
+    }
+    ctrl.abort();
+    expect(frames.map((f) => f.id)).toEqual(['g1']);
+    // id-only dispatch + the good frame count; trailing :ping after break is never read (generator semantics).
+    expect(activity).toBe(2);
+  });
+
+  test('sessionEventStream: empty data:/whitespace chunks never yield, stream stays alive', async () => {
+    const sse = 'data:\n\n   \n\n' +
+      'data:   \n\n' +
+      'data: {"id":"g1","type":"session.idle","data":{"sessionID":"ses_1"},"session":"ses_1"}\n\n';
+    let activity = 0;
+    globalThis.fetch = (async () =>
+      new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } })) as unknown as typeof fetch;
+    const ctrl = new AbortController();
+    const frames = [];
+    for await (const frame of sessionEventStream(PROJECT, ctrl.signal, {
+      onActivity: () => {
+        activity += 1;
+      },
+    })) {
+      frames.push(frame);
+      if (frames.length === 1) break;
+    }
+    ctrl.abort();
+    expect(frames.map((f) => f.id)).toEqual(['g1']);
+    // Two empty data: payloads count as activity; pure whitespace does not.
+    expect(activity).toBe(3);
+  });
+
+  test('sessionEventStream: hostile JSON payloads (null/number/array/string) are skipped', async () => {
+    const sse = [
+      'data: null\n\n',
+      'data: 42\n\n',
+      'data: [1,2]\n\n',
+      'data: "just a string"\n\n',
+      'data: true\n\n',
+      'data: {"id":"g1","type":"session.idle","data":{"sessionID":"ses_1"},"session":"ses_1"}\n\n',
+    ].join('');
+    globalThis.fetch = (async () =>
+      new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } })) as unknown as typeof fetch;
+    const ctrl = new AbortController();
+    const frames = [];
+    for await (const frame of sessionEventStream(PROJECT, ctrl.signal)) {
+      frames.push(frame);
+      if (frames.length === 1) break;
+    }
+    ctrl.abort();
+    expect(frames.map((f) => f.id)).toEqual(['g1']);
+  });
+
+  test('sessionEventStream: envelope violations (empty id/type, missing data) are skipped', async () => {
+    const sse = [
+      'data: {"id":"","type":"session.idle","data":{"sessionID":"s"},"session":"s"}\n\n',
+      'data: {"id":"x","type":"","data":{}}\n\n',
+      'data: {"id":"y","type":"session.idle"}\n\n',
+      'data: {"type":"session.idle","data":{}}\n\n',
+      'data: {"id":"g1","type":"session.idle","data":{"sessionID":"ses_1"},"session":"ses_1"}\n\n',
+    ].join('');
+    globalThis.fetch = (async () =>
+      new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } })) as unknown as typeof fetch;
+    const ctrl = new AbortController();
+    const frames = [];
+    for await (const frame of sessionEventStream(PROJECT, ctrl.signal)) {
+      frames.push(frame);
+      if (frames.length === 1) break;
+    }
+    ctrl.abort();
+    expect(frames.map((f) => f.id)).toEqual(['g1']);
+  });
+
+  test('sessionEventStream: unknown future frame types pass the permissive envelope', async () => {
+    const sse = 'data: {"id":"f1","type":"custom.future.v9","data":{"anything":1},"session":"ses_1"}\n\n';
+    globalThis.fetch = (async () =>
+      new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } })) as unknown as typeof fetch;
+    const ctrl = new AbortController();
+    const frames = [];
+    for await (const frame of sessionEventStream(PROJECT, ctrl.signal)) {
+      frames.push(frame);
+      if (frames.length === 1) break;
+    }
+    ctrl.abort();
+    // The envelope stays forward-compatible: unknown types yield, never drop.
+    expect(frames[0]?.type).toBe('custom.future.v9');
+    expect(frames[0]?.id).toBe('f1');
+  });
+
+  test('sessionEventStream: a frame split across TCP reads still parses once complete', async () => {
+    const full = 'data: {"id":"e1","type":"session.idle","data":{"sessionID":"ses_1"},"session":"ses_1"}\n\n';
+    const cut = 37;
+    const stream = new ReadableStream({
+      start(c) {
+        c.enqueue(new TextEncoder().encode(full.slice(0, cut)));
+        c.enqueue(new TextEncoder().encode(full.slice(cut)));
+        c.close();
+      },
+    });
+    globalThis.fetch = (async () =>
+      new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } })) as unknown as typeof fetch;
+    const ctrl = new AbortController();
+    const frames = [];
+    for await (const frame of sessionEventStream(PROJECT, ctrl.signal)) {
+      frames.push(frame);
+      if (frames.length === 1) break;
+    }
+    ctrl.abort();
+    expect(frames.map((f) => f.id)).toEqual(['e1']);
+  });
+
+  test('sessionEventStream: huge delta payloads survive intact', async () => {
+    const big = 'x'.repeat(200_000);
+    const sse = `data: {"id":"big","type":"session.idle","data":{"sessionID":"ses_1","blob":"${big}"},"session":"ses_1"}\n\n`;
+    globalThis.fetch = (async () =>
+      new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } })) as unknown as typeof fetch;
+    const ctrl = new AbortController();
+    const frames = [];
+    for await (const frame of sessionEventStream(PROJECT, ctrl.signal)) {
+      frames.push(frame);
+      if (frames.length === 1) break;
+    }
+    ctrl.abort();
+    expect(frames.length).toBe(1);
+    expect((frames[0]?.data as Record<string, unknown>).blob).toBe(big);
+  });
+
+  test('sessionEventStream: transport failures throw outward (fetch throw, null body)', async () => {
+    globalThis.fetch = (async () => {
+      throw new TypeError('network down');
+    }) as unknown as typeof fetch;
+    const ctrl = new AbortController();
+    const errFetch = await sessionEventStream(PROJECT, ctrl.signal).next().catch((e: unknown) => e);
+    expect(errFetch).toBeInstanceOf(TypeError);
+    ctrl.abort();
+
+    globalThis.fetch = (async () =>
+      ({ ok: true, body: null, headers: new Headers() }) as unknown as Response) as unknown as typeof fetch;
+    const ctrl2 = new AbortController();
+    const errBody = await sessionEventStream(PROJECT, ctrl2.signal).next().catch((e: unknown) => e);
+    expect(errBody).toBeInstanceOf(ApiClientError);
+    expect((errBody as ApiClientError).code).toBe('no_stream_body');
+    ctrl2.abort();
+  });
+
+  test('sessionEventStream: without opts no session param and no Last-Event-ID travel', async () => {
+    const seen: Array<{ url: string; init: RequestInit }> = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push({ url: String(input), init: init ?? {} });
+      return new Response(': ping\n\n', { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    }) as unknown as typeof fetch;
+    const ctrl = new AbortController();
+    for await (const _f of sessionEventStream(PROJECT, ctrl.signal)) {
+      break;
+    }
+    ctrl.abort();
+    expect(seen[0]?.url).toContain('projectId=');
+    expect(seen[0]?.url).not.toContain('session=');
+    const headers = seen[0]?.init.headers as Record<string, string>;
+    expect(headers['Last-Event-ID']).toBeUndefined();
+  });
+
+  test('sessionEventStream: session ids are URL-encoded on the wire', async () => {
+    const seen: Array<{ url: string; init: RequestInit }> = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push({ url: String(input), init: init ?? {} });
+      return new Response(': ping\n\n', { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    }) as unknown as typeof fetch;
+    const ctrl = new AbortController();
+    for await (const _f of sessionEventStream(PROJECT, ctrl.signal, { sessionId: 'ses A/B?c' })) {
+      break;
+    }
+    ctrl.abort();
+    expect(new URL(seen[0]?.url).searchParams.get('session')).toBe('ses A/B?c');
   });
 });

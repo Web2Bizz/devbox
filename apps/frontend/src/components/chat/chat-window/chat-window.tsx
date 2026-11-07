@@ -1,6 +1,6 @@
 'use client';
 
-import { Skeleton } from '@web2bizz/ui/components';
+import { Badge, Skeleton } from '@web2bizz/ui/components';
 import {
   Bubble,
   BubbleContent,
@@ -16,9 +16,10 @@ import {
   ShimmerText,
 } from '@web2bizz/ui/widgets';
 import { EmptyState, ErrorState } from '../../states';
-import type { ChatMessage } from '../../../hooks/useChat';
+import type { ChatMessage, ChatToolEvent } from '../../../hooks/useChat';
 import { useI18n } from '../../../i18n';
 import { ChatMessageRow } from '../chat-message';
+import { ChatToolsTimeline } from './chat-tools-timeline';
 import { AgentThinking } from './agent-thinking';
 
 export type ChatWindowProps = {
@@ -28,6 +29,16 @@ export type ChatWindowProps = {
   sending?: boolean;
   error?: string | null;
   onRetry?: () => void;
+  /** Chronological tool trace (see useChat) — rendered as a timeline inside the thread. */
+  toolTrace?: ChatToolEvent[];
+  /** Display name of the agent owning the in-flight turn. */
+  activeAgentName?: string;
+  /** Tool name reported by the live part frames (null/absent while idle). */
+  activeToolName?: string;
+  /** Fork action from a message row (see ChatSection dialog wiring). */
+  onFork?: (messageId: string) => void;
+  /** Revert action from a message row (see ChatSection dialog wiring). */
+  onRevert?: (messageId: string) => void;
 };
 
 /**
@@ -37,9 +48,10 @@ export type ChatWindowProps = {
  * auto-follow, `scroll-fade-*` edges, the "jump to latest" button and the
  * `role=log` / `aria-relevant` content semantics all come from it
  * (`MessageScrollerProvider autoScroll defaultScrollPosition="end"`). Rows
- * are `MessageScrollerItem`s keyed by message id; the live answer is the
- * last item with `scrollAnchor` so auto-follow tracks it while it streams.
- * The height contract stays app-owned: the scroller fills the column from
+ * are `MessageScrollerItem`s keyed by message id; the tool timeline is an
+ * ordinary item (no `scrollAnchor`) so it never steals auto-follow; only
+ * the live rows (thinking/streaming) carry `scrollAnchor` so auto-follow
+ * tracks them while they stream. The height contract stays app-owned: the scroller fills the column from
  * the very top of the panel (its box slides UNDER the Header — Header is
  * `z-30` with a translucent `bg-card/80` + blur, so the thread visibly goes
  * behind the bar) down to the pinned composer. The scroll content itself
@@ -53,15 +65,11 @@ export type ChatWindowProps = {
  * streaming row renders its `ShimmerText` after the ghost bubble, not in a
  * header marker.
  *
- * Error replaces the thread instead of being appended below it. The
- * scroller already fills the viewport down to the pinned composer
- * (fixed, `z-20`, `chat-section.tsx`), so anything rendered after the
- * scroller lands under/below the composer and is invisible. The error
- * branch is therefore checked first and renders `ErrorState` in the same
- * viewport-bound box as loading/empty (`100dvh − 9rem`, `min-h`, `pt`),
- * so the alert sits in the visible area above the composer. `onRetry` is
- * passed through optional — `ErrorState` only draws the button when the
- * callback exists.
+ * Error policy (C6): the error NEVER replaces the thread. A terminal
+ * failure (`stream.error`, failed REST history) renders as an `ErrorState`
+ * banner ABOVE the thread with retry — messages + live streaming stay
+ * visible. Only an empty thread with an error renders the full ErrorState.
+ * Transient SSE breaks never set an error at all (quiet backoff in useChat).
  */
 export function ChatWindow({
   messages,
@@ -70,11 +78,16 @@ export function ChatWindow({
   sending = false,
   error = null,
   onRetry,
+  toolTrace = [],
+  activeAgentName,
+  activeToolName,
+  onFork,
+  onRevert,
 }: ChatWindowProps) {
   const { t } = useI18n();
   const thinking = sending && !streamingText;
 
-  if (loading && messages.length === 0 && !streamingText) {
+  if (loading && messages.length === 0 && !streamingText && !error) {
     return (
       <div
         className="grid gap-2 px-1 pt-[calc(var(--header-height)_+_1rem)]"
@@ -88,7 +101,9 @@ export function ChatWindow({
     );
   }
 
-  if (error) {
+  // Terminal error with an empty thread: full ErrorState (nothing to preserve).
+  // With a live thread the error renders as a banner ABOVE it (see below).
+  if (error && messages.length === 0 && !streamingText && !thinking) {
     return (
       <div className="h-[calc(100dvh_-_9rem)] min-h-[20rem] px-1 pt-[calc(var(--header-height)_+_1rem)]">
         <ErrorState message={error} onRetry={onRetry} retryLabel={t.chat.retry} />
@@ -111,6 +126,7 @@ export function ChatWindow({
 
   return (
     <div className="grid gap-2">
+      {error ? <ErrorState message={error} onRetry={onRetry} retryLabel={t.chat.retry} /> : null}
       <MessageScrollerProvider autoScroll defaultScrollPosition="end">
         <MessageScroller className="h-[calc(100dvh_-_9rem)] min-h-[20rem]">
           <MessageScrollerViewport aria-label={t.chat.title} className="px-1">
@@ -120,13 +136,41 @@ export function ChatWindow({
             >
               {messages.map((m) => (
                 <MessageScrollerItem key={m.id} messageId={m.id}>
-                  <ChatMessageRow message={m} />
+                  <ChatMessageRow message={m} onFork={onFork} onRevert={onRevert} />
                 </MessageScrollerItem>
               ))}
+              {/*
+                Tool timeline INSIDE the thread (ordinary MessageScrollerItem,
+                never scrollAnchor): kit auto-follow keeps tracking only
+                thinking/streaming. Empty/error states return above, so the
+                timeline only ever sits on a real thread.
+              */}
+              {toolTrace.length > 0 || activeToolName ? (
+                <MessageScrollerItem messageId="chat-tools-timeline">
+                  <ChatToolsTimeline events={toolTrace} liveToolName={activeToolName} />
+                </MessageScrollerItem>
+              ) : null}
               {thinking && (
                 <MessageScrollerItem messageId="chat-thinking" scrollAnchor>
-                  <div data-testid="chat-thinking" aria-busy="true" className="py-2">
-                    <AgentThinking />
+                  <div
+                    data-testid="chat-thinking"
+                    aria-busy="true"
+                    className="flex flex-wrap items-center gap-2 py-2"
+                  >
+                    <AgentThinking
+                      activeAgentName={activeAgentName}
+                      activeToolName={activeToolName}
+                    />
+                    {activeAgentName ? (
+                      <Badge variant="secondary" data-testid="chat-active-agent">
+                        {t.chat.activeAgent}: {activeAgentName}
+                      </Badge>
+                    ) : null}
+                    {activeToolName ? (
+                      <Badge variant="secondary" data-testid="chat-active-tool">
+                        {t.chat.activeTool}: {activeToolName}
+                      </Badge>
+                    ) : null}
                   </div>
                 </MessageScrollerItem>
               )}
@@ -147,8 +191,17 @@ export function ChatWindow({
                           </span>
                         </BubbleContent>
                       </Bubble>
-                      <div className="pt-1" data-testid="chat-streaming-status">
+                      <div
+                        className="flex flex-wrap items-center gap-2 pt-1"
+                        data-testid="chat-streaming-status"
+                      >
                         <ShimmerText>{t.chat.streaming}</ShimmerText>
+                        {activeAgentName ? (
+                          <Badge variant="secondary">{t.chat.activeAgent}: {activeAgentName}</Badge>
+                        ) : null}
+                        {activeToolName ? (
+                          <Badge variant="secondary">{t.chat.activeTool}: {activeToolName}</Badge>
+                        ) : null}
                       </div>
                     </MessageContent>
                   </Message>

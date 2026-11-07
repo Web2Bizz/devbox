@@ -302,6 +302,37 @@ export type Dictionary = {
     like: string;
     /** Accessible name of the assistant-message dislike toggle. */
     dislike: string;
+    /** Collapsible caption of the chronological tool-call timeline. */
+    toolsTitle: string;
+    /** Timeline caption when no tool call was recorded yet. */
+    toolsEmpty: string;
+    /** Label of the agent currently owning the in-flight turn. */
+    activeAgent: string;
+    /** Label of the tool currently reported by the live part frames. */
+    activeTool: string;
+    /** Idle status hint (nothing running). */
+    idle: string;
+    /** Busy status hint while a turn runs. */
+    busy: string;
+    /** Fork action label. */
+    fork: string;
+    forkTitle: string;
+    forkDesc: string;
+    forkBefore: string;
+    forkWhole: string;
+    forkSuccess: string;
+    forkEmpty: string;
+    /** Revert action label. */
+    revert: string;
+    revertTitle: string;
+    revertDesc: string;
+    revertStage: string;
+    revertEmpty: string;
+    revertCommit: string;
+    revertDiscard: string;
+    revertSuccess: string;
+    revertCleared: string;
+    dialogClose: string;
   };
   language: {
     label: string;

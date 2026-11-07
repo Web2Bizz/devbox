@@ -150,7 +150,7 @@ export function SessionList({
         <ul className="flex w-full min-w-0 list-none flex-col gap-1.5 m-0 p-0">
           {sessions.map((s) => {
             const title = s.title?.trim() || t.sessions.untitled;
-            const time = formatRelativeTime(s.createdAt, locale, t.sessions.time);
+            const time = formatRelativeTime(s.updatedAt, locale, t.sessions.time);
             const current = s.id === currentSessionId;
             const canAbort = s.status.type === 'busy' || s.status.type === 'retry';
             return (
@@ -167,7 +167,7 @@ export function SessionList({
                       <span className="truncate text-sm font-medium">{title}</span>
                       <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs">
                         {time ? (
-                          <time dateTime={s.createdAt} className="shrink-0">
+                          <time dateTime={s.updatedAt} className="shrink-0">
                             {time}
                           </time>
                         ) : null}

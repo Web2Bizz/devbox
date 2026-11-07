@@ -68,6 +68,18 @@ function describeError(error: unknown, sessionExpired: string, unexpected: strin
 }
 
 /**
+ * Newest-first by last activity: `updatedAt` desc, tie-break `createdAt`
+ * desc, then `id` for full determinism. Pure — operates on the given array
+ * order without mutating it (callers pass a copy); defensive: the API
+ * already sorts, but cached/optimistic rows must not depend on it.
+ */
+export function compareSessionsByActivity(a: SessionInfo, b: SessionInfo): number {
+  if (a.updatedAt !== b.updatedAt) return a.updatedAt < b.updatedAt ? 1 : -1;
+  if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+/**
  * Project-scoped sessions through the domain contract (`GET /api/v1/sessions`,
  * `GET /api/v1/sessions/status`, `POST /api/v1/sessions`, interrupt alias — see
  * api/sessions-client). Same loading/error/empty/reload contract as
@@ -189,7 +201,13 @@ export function useSessions(options?: UseSessionsOptions): UseSessionsResult {
   }, [createMutation.error, abortMutation.error, t]);
 
   const error = mutationErrorText ?? queryErrorText;
-  const sessions = data ?? [];
+  // Defensive newest-first copy: never mutate the react-query cache (`data`
+  // stays reference-stable for other consumers); the API already sorts by
+  // updatedAt desc, this only guards cached/optimistic order.
+  const sessions = useMemo(
+    () => [...(data ?? [])].sort(compareSessionsByActivity),
+    [data],
+  );
   const statusMap = statusData ?? {};
   const loading = isLoading && !data;
 

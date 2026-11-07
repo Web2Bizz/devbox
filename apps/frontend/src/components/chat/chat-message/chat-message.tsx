@@ -1,14 +1,16 @@
 'use client';
 
-import { ToggleGroup, ToggleGroupItem } from '@web2bizz/ui/components';
+import { Button, ToggleGroup, ToggleGroupItem } from '@web2bizz/ui/components';
 import {
   Bubble,
   BubbleContent,
+  CopyButton,
   Message,
   MessageContent,
   MessageFooter,
   MessageText,
 } from '@web2bizz/ui/widgets';
+import { GitFork, History } from 'lucide-react';
 import { useState } from 'react';
 import type { ChatMessage } from '../../../hooks/useChat';
 import { useI18n } from '../../../i18n';
@@ -40,14 +42,25 @@ function splitBlocks(text: string): TextBlock[] {
 }
 
 /**
- * Feedback toggles: kit `toggleVariants` always ships `hover:bg-accent` and has
- * no "no-hover" variant, so the hover background is overridden with
- * `hover:bg-transparent`. `ToggleGroupItem` joins classes via `cn`
- * (tailwind-merge) with `className` last, so this local class wins. The kit's
- * `hover:text-accent-foreground` is left as-is (text colour follows the kit);
- * the selected-state background (`data-[state=on]:bg-accent`) is untouched.
+ * Footer actions (copy/fork/revert + feedback toggles) share one hover/focus
+ * look: transparent background, muted icon/text by default, `foreground` on
+ * hover and keyboard focus. Icons use `currentColor`, so `text-*` on the button
+ * also recolours the glyph.
+ *
+ * The kit ships `hover:bg-accent hover:text-accent-foreground` on both
+ * `buttonVariants` and `toggleVariants`; `cn` (tailwind-merge) keeps the last
+ * class, so this local fragment overrides the kit. `toggleVariants` also lacks
+ * `cursor-pointer`, so it is set here explicitly (kit `Button` already has it).
  */
-const FEEDBACK_TOGGLE_CLASS = 'bg-transparent text-muted-foreground hover:bg-transparent';
+const FOOTER_ACTION_HOVER_CLASS =
+  'cursor-pointer text-muted-foreground hover:bg-transparent hover:text-foreground focus-visible:bg-transparent focus-visible:text-foreground';
+
+/**
+ * Feedback toggles only need the shared hover/focus fragment plus an explicit
+ * transparent idle background; the selected-state look
+ * (`data-[state=on]:bg-accent`) is untouched.
+ */
+const FEEDBACK_TOGGLE_CLASS = `bg-transparent ${FOOTER_ACTION_HOVER_CLASS}`;
 
 /**
  * One chat row on top of kit `widgets` primitives (0.26.3: `Message`,
@@ -66,7 +79,15 @@ const FEEDBACK_TOGGLE_CLASS = 'bg-transparent text-muted-foreground hover:bg-tra
  * is sent anywhere and the choice resets on reload.
  * Linear row — no Card wrapper (DESIGN §7: kit tokens only, no hex).
  */
-export function ChatMessageRow({ message }: { message: ChatMessage }) {
+export function ChatMessageRow({
+  message,
+  onFork,
+  onRevert,
+}: {
+  message: ChatMessage;
+  onFork?: (messageId: string) => void;
+  onRevert?: (messageId: string) => void;
+}) {
   const isUser = message.role === 'user';
   const { t } = useI18n();
   const [feedback, setFeedback] = useState<'up' | 'down' | undefined>();
@@ -107,8 +128,8 @@ export function ChatMessageRow({ message }: { message: ChatMessage }) {
           </BubbleContent>
         </Bubble>
       </MessageContent>
-      {!isUser && (
-        <MessageFooter className="mt-1">
+      <MessageFooter className={isUser ? 'mt-1 justify-end' : 'mt-1'}>
+        {!isUser && (
           <ToggleGroup
             type="multiple"
             size="sm"
@@ -183,8 +204,47 @@ export function ChatMessageRow({ message }: { message: ChatMessage }) {
               </svg>
             </ToggleGroupItem>
           </ToggleGroup>
-        </MessageFooter>
-      )}
+        )}
+        {!isUser && (
+          <CopyButton
+            content={message.text}
+            variant="ghost"
+            size="icon"
+            className={FOOTER_ACTION_HOVER_CLASS}
+            aria-label={t.common.copy}
+            title={t.common.copy}
+            data-testid="chat-message-copy"
+          />
+        )}
+        {onFork ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className={`h-7 px-2 text-xs ${FOOTER_ACTION_HOVER_CLASS}`}
+            aria-label={t.chat.forkBefore}
+            title={t.chat.forkBefore}
+            data-testid="chat-message-fork"
+            onClick={() => onFork(message.id)}
+          >
+            <GitFork size={16} aria-hidden="true" />
+          </Button>
+        ) : null}
+        {onRevert ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className={`h-7 px-2 text-xs ${FOOTER_ACTION_HOVER_CLASS}`}
+            aria-label={t.chat.revert}
+            title={t.chat.revert}
+            data-testid="chat-message-revert"
+            onClick={() => onRevert(message.id)}
+          >
+            <History size={16} aria-hidden="true" />
+          </Button>
+        ) : null}
+      </MessageFooter>
     </Message>
   );
 }

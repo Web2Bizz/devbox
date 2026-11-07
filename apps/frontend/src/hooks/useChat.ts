@@ -25,6 +25,22 @@ export type ChatMessage = {
   text: string;
 };
 
+/**
+ * One chronological entry of the tool timeline: every real domain call the
+ * current chat turn performs, in call order (auth → create-session →
+ * history → prompt → SSE frames → interrupt). Host tool lifecycle
+ * (`session.tool.called/progress/success/failed`) appends additive `tool`
+ * rows — ephemeral SSE status, never durable history. Rendered by
+ * `ChatToolsTimeline` — append-only per session, never reordered.
+ */
+export type ChatToolEvent = {
+  id: string;
+  at: number;
+  kind: 'auth' | 'create-session' | 'history' | 'prompt' | 'sse' | 'interrupt' | 'reload' | 'tool';
+  label: string;
+  detail?: string;
+};
+
 export type UseChatOptions = {
   /** Existing session to scope the chat to (session = chat). */
   sessionId?: string;
@@ -44,13 +60,25 @@ export type UseChatResult = {
   /** Agent answering the next prompt (registry id; default 'ask', survives reload). */
   agentId: string;
   setAgentId: (agentId: string) => void;
+  /** Agent id that owns the in-flight turn (null when idle). */
+  activeAgentId: string | null;
+  /** Tool name reported by the live part frames (null when idle/text-only). */
+  activeToolName: string | null;
   send: (text: string, opts?: { agentId?: string }) => Promise<void>;
   stop: () => void;
   reload: () => void;
+  /** Chronological tool trace of the session (append-only, reset on session change). */
+  toolTrace: ChatToolEvent[];
 };
 
 const BASE_DELAY_MS = 1000;
 const MAX_DELAY_MS = 15000;
+// Watchdog (C4): the server heartbeats every ~15s (sse-relay HEARTBEAT_MS),
+// so silence beyond 2 missed pings + margin means a dead socket, not idle.
+const WATCHDOG_MS = 40_000;
+// Sending insurance (C4): a turn silent this long is verified against REST
+// history (lost terminator) instead of hanging forever.
+const STUCK_SENDING_MS = 90_000;
 
 function newId(): string {
   try {
@@ -159,6 +187,112 @@ function formatError(e: unknown, fallback: string): string {
   return formatted === 'Unexpected error' ? fallback : formatted;
 }
 
+/**
+ * Host tool lifecycle frames the live runner emits (opencode 2.2.x
+ * `session.tool.*`): called → (input.* | progress)* → success/failed.
+ * `session.tool.input.*` frames carry argument deltas, not the answer —
+ * they resolve the same tool name and feed timeline detail, never text.
+ */
+const TOOL_FRAME_TYPES = new Set([
+  'session.tool.called',
+  'session.tool.progress',
+  'session.tool.success',
+  'session.tool.failed',
+  'session.tool.input.started',
+  'session.tool.input.delta',
+  'session.tool.input.ended',
+]);
+
+/**
+ * Guarded tool-name read of one variant-owned record: `tool`/`toolName`/
+ * `name` as non-empty strings. Text parts (`type: 'text'`) are chat
+ * content, not tool calls, and answer null. Anything else (missing keys,
+ * wrong shapes) answers null — never throws, never invents a name.
+ */
+function readToolName(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const record = value as Record<string, unknown>;
+  if (record.type === 'text') return null;
+  for (const key of ['tool', 'toolName', 'name'] as const) {
+    const candidate = record[key];
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Tool name carried by a tool-lifecycle frame, read with guarded field
+ * access (variant-owned passthrough — never a cast, never a narrowed
+ * schema: the SSE envelope stays permissive/additive by contract).
+ *
+ * Sources, in order:
+ * - legacy `message.part.updated` non-text part (`tool/toolName/name`;
+ *   text parts are chat content, not tool calls, and answer null);
+ * - host `session.tool.called/progress/success/failed` and
+ *   `session.tool.input.*` frames: the same three keys are read at the
+ *   top-level `data` record and, defensively, inside nested `call`, `part`,
+ *   `tool` and `payload` objects (D1: the runner's exact nest level is not
+ *   pinned — every level answers the same guarded read).
+ *
+ * `session.reasoning.*` is deliberately NOT a tool frame: thinking
+ * internals never become `activeToolName` (they surface nowhere — neither
+ * status nor answer text).
+ */
+function frameToolName(frame: SessionStreamFrame): string | null {
+  if (frame.type === 'message.part.updated') {
+    const part = (frame.data as { part?: unknown }).part;
+    return readToolName(part);
+  }
+  if (!TOOL_FRAME_TYPES.has(frame.type)) return null;
+  const data = frame.data as Record<string, unknown>;
+  return (
+    readToolName(data) ??
+    readToolName(data.call) ??
+    readToolName(data.part) ??
+    readToolName(data.payload) ??
+    (typeof data.tool === 'object' && data.tool !== null ? readToolName(data.tool) : null)
+  );
+}
+
+/**
+ * Short timeline detail for a host tool frame (phase fallback when the
+ * payload carries no status snippet). Free-text snippets are single-lined
+ * and truncated — full argument/result bodies (and any secret material)
+ * never reach the timeline or the logs.
+ */
+function frameToolDetail(frame: SessionStreamFrame): string | undefined {
+  if (!TOOL_FRAME_TYPES.has(frame.type)) return undefined;
+  const data = frame.data as Record<string, unknown>;
+  const nestedCall =
+    typeof data.call === 'object' && data.call !== null
+      ? (data.call as Record<string, unknown>)
+      : null;
+  const candidates: unknown[] = [
+    data.progress,
+    data.message,
+    data.status,
+    data.text,
+    nestedCall?.progress,
+    nestedCall?.status,
+    ...(frame.type === 'session.tool.failed' ? [data.error] : []),
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim().length > 0) {
+      const singleLine = candidate.replace(/\s+/g, ' ').trim();
+      return singleLine.length > 120 ? `${singleLine.slice(0, 117)}…` : singleLine;
+    }
+  }
+  if (frame.type === 'session.tool.called' || frame.type === 'session.tool.input.started') {
+    return 'called';
+  }
+  if (frame.type === 'session.tool.progress' || frame.type.startsWith('session.tool.input.')) {
+    return 'progress';
+  }
+  if (frame.type === 'session.tool.failed') return 'failed';
+  if (frame.type === 'session.tool.success') return 'done';
+  return undefined;
+}
+
 function projectGateError(): ApiClientError {
   // Honest client-side gate — the domain route answers the same fixed
   // PROJECT_REQUIRED 400. Never a default project, never an anonymous
@@ -191,11 +325,20 @@ function projectGateError(): ApiClientError {
  *   response — it streams over events), and stays `sending` until the
  *   session's `session.idle` frame commits the streamed text as the
  *   assistant row.
- * - Live deltas: `GET /api/v1/sessions/events` SSE subscription (self-healing
- *   backoff 1s → 15s, same as useSessionEvents), scoped by the frame's
+ * - Live deltas: `GET /api/v1/sessions/events` SSE subscription (self-healing:
+ *   quiet backoff 1s → 15s on transient breaks, watchdog redial on silence,
+ *   resync on online/visible, resume via Last-Event-ID), scoped by the frame's
  *   top-level `session` field (never an upstream id name at the domain
  *   layer); `message.part.delta` appends, `message.part.updated` appends
- *   the growth of its absolute snapshot (part-keyed).
+ *   the growth of its absolute snapshot (part-keyed). Host tool frames
+  *   (`session.tool.called/progress/success/failed`, `session.tool.input.*`)
+  *   project to `activeToolName` + a per-turn `tool` trace row (ephemeral SSE
+  *   status — never appended to the streamed text); `session.reasoning.*` is
+  *   intentionally dropped (thinking internals are neither status nor answer).
+  *   The subscription
+ *   accumulates regardless of `sending` (F5 catch-up); only `finalize()` is
+ *   gated on a live turn. Terminal `stream.error` surfaces separately —
+ *   the thread is preserved.
  * - Cancel: `stop()` commits the partial stream as the assistant answer so
  *   nothing is lost and fires a best-effort server interrupt
  *   (POST /api/v1/sessions/{id}/interrupt — the domain route; an idle session
@@ -217,6 +360,54 @@ export function useChat(options?: UseChatOptions): UseChatResult {
   // Agent answering the next prompt (registry id, default 'ask'). Plain
   // state — survives reload() (reload only refetches history + redials SSE).
   const [agentId, setAgentId] = useState<string>(DEFAULT_AGENT_ID);
+  // Live status: the agent that owns the in-flight turn and the tool name
+  // carried by the current non-text part frame (both null while idle).
+  const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
+  const [activeToolName, setActiveToolName] = useState<string | null>(null);
+  // Chronological tool trace (see ChatToolEvent): every real domain call of
+  // the session in call order. Append-only within a session — send() of a
+  // new prompt keeps appending, only a session change resets it.
+  const [toolTrace, setToolTrace] = useState<ChatToolEvent[]>([]);
+
+  const pushTrace = useCallback(
+    (kind: ChatToolEvent['kind'], label: string, detail?: string): void => {
+      const event: ChatToolEvent = {
+        id: newId(),
+        at: Date.now(),
+        kind,
+        label,
+        ...(detail ? { detail } : {}),
+      };
+      setToolTrace((prev) => [...prev, event]);
+    },
+    [],
+  );
+
+  // Per-turn transition guards so SSE frame kinds are logged once per turn
+  // (first text.delta, first text.ended, first turn commit, tool
+  // called-once-per-tool / progress-once-per-turn / done-once-per-tool) —
+  // never per delta/frame. `connected` is per connection: reset on
+  // send()/reload() so a redialed stream logs its fresh connect once.
+  const traceFlagsRef = useRef({
+    connected: false,
+    delta: false,
+    ended: false,
+    committed: false,
+    toolCalled: new Set<string>(),
+    toolProgress: false,
+    toolDone: new Set<string>(),
+  });
+  const resetTraceFlags = useCallback((): void => {
+    traceFlagsRef.current = {
+      connected: false,
+      delta: false,
+      ended: false,
+      committed: false,
+      toolCalled: new Set<string>(),
+      toolProgress: false,
+      toolDone: new Set<string>(),
+    };
+  }, []);
 
   const sessionIdRef = useRef<string | null>(initialSessionId ?? null);
   const promptCtrlRef = useRef<AbortController | null>(null);
@@ -225,6 +416,14 @@ export function useChat(options?: UseChatOptions): UseChatResult {
   // synchronously); `streamingText` state mirrors it for rendering.
   const streamingRef = useRef('');
   const attemptRef = useRef(0);
+  // Self-healing refs (C4): resume cursor, watchdog liveness, abort-turn epoch,
+  // and a messages mirror for the stuck-sending REST verification.
+  const lastEventIdRef = useRef<string | null>(null);
+  const lastActivityRef = useRef<number>(Date.now());
+  const abortedTurnRef = useRef(false);
+  const sendingSinceRef = useRef<number | null>(null);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  messagesRef.current = messages;
 
   const resetStream = useCallback(() => {
     streamingRef.current = '';
@@ -232,12 +431,13 @@ export function useChat(options?: UseChatOptions): UseChatResult {
   }, []);
 
   // Live SSE deltas + idle finalization for the active session
-  // (self-healing backoff).
+  // (self-healing: quiet backoff redial, watchdog, resync — C4).
   useEffect(() => {
     if (!projectId) return;
     let disposed = false;
     let ctrl: AbortController | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let watchdog: ReturnType<typeof setTimeout> | null = null;
     // Absolute-snapshot fallback: track the last emitted length per part so
     // a full-text (no-delta) frame only appends its growth.
     const partLens = new Map<string, number>();
@@ -248,16 +448,44 @@ export function useChat(options?: UseChatOptions): UseChatResult {
     };
 
     // session.idle for the bound session — the queued answer is done:
-    // commit whatever streamed and clear `sending`.
+    // commit whatever streamed and clear `sending`. Only a live turn may
+    // finalize: after stop() the partial answer already belongs to the thread.
     const finalize = (): void => {
-      if (!sendingRef.current) return;
+      if (!sendingRef.current || abortedTurnRef.current) return;
       const partial = streamingRef.current;
       if (partial) {
         setMessages((prev) => [...prev, { id: newId(), role: 'assistant', text: partial }]);
       }
       resetStream();
       sendingRef.current = false;
+      sendingSinceRef.current = null;
       setSending(false);
+      setActiveAgentId(null);
+      setActiveToolName(null);
+    };
+
+    // Terminal transport frame (C0 stream.error): the thread is PRESERVED,
+    // the error surfaces separately (C6 renders it as a banner, not a
+    // replacement). Transient failures never reach here — they redial quietly.
+    const failTerminal = (frame: { data?: unknown }): void => {
+      const data =
+        frame.data && typeof frame.data === 'object' ? (frame.data as Record<string, unknown>) : {};
+      const message =
+        typeof data.message === 'string' && data.message
+          ? data.message
+          : (t.errors.unexpected as string);
+      resetStream();
+      sendingRef.current = false;
+      sendingSinceRef.current = null;
+      setSending(false);
+      setActiveAgentId(null);
+      setActiveToolName(null);
+      setError(message);
+    };
+
+    const clearWatchdog = (): void => {
+      if (watchdog) clearTimeout(watchdog);
+      watchdog = null;
     };
 
     const scheduleReconnect = () => {
@@ -269,26 +497,162 @@ export function useChat(options?: UseChatOptions): UseChatResult {
       }, delay);
     };
 
+    // Stuck-sending insurance: if the terminator was lost mid-turn, REST
+    // history outgrows the local thread — adopt it and clear `sending`
+    // instead of hanging forever. Quiet by contract (never setError here).
+    const verifyStuckSending = async (): Promise<void> => {
+      if (disposed || !sendingRef.current || abortedTurnRef.current) return;
+      const since = sendingSinceRef.current;
+      if (since === null || Date.now() - since < STUCK_SENDING_MS) return;
+      const sid = sessionIdRef.current;
+      if (!sid || !projectId) return;
+      try {
+        const rows = await listSessionMessages(projectId, sid);
+        if (disposed || !sendingRef.current || abortedTurnRef.current) return;
+        const next = toChatMessages(rows);
+        if (next.length > messagesRef.current.length) {
+          setMessages(next);
+          resetStream();
+          sendingRef.current = false;
+          sendingSinceRef.current = null;
+          setSending(false);
+          setActiveAgentId(null);
+          setActiveToolName(null);
+        }
+      } catch {
+        /* transient — the next watchdog cycle retries */
+      }
+    };
+
+    const armWatchdog = (): void => {
+      clearWatchdog();
+      watchdog = setTimeout(() => {
+        if (disposed) return;
+        // Silence past the watchdog = dead socket: abort the hanging read and
+        // redial quietly with the resume cursor (never setError on transient).
+        void verifyStuckSending().finally(() => {
+          if (disposed) return;
+          try {
+            ctrl?.abort();
+          } catch {
+            /* abort is idempotent */
+          }
+          scheduleReconnect();
+        });
+      }, WATCHDOG_MS);
+    };
+
+    const onActivity = (): void => {
+      lastActivityRef.current = Date.now();
+      attemptRef.current = 0;
+      if (!disposed) armWatchdog();
+    };
+
     const connect = async () => {
       if (disposed) return;
-      ctrl?.abort();
+      try {
+        ctrl?.abort();
+      } catch {
+        /* idempotent */
+      }
       ctrl = new AbortController();
       const active = ctrl;
+      armWatchdog();
       try {
-        for await (const frame of sessionEventStream(projectId, active.signal)) {
+        for await (const frame of sessionEventStream(projectId, active.signal, {
+          ...(sessionIdRef.current ? { sessionId: sessionIdRef.current } : {}),
+          ...(lastEventIdRef.current ? { lastEventId: lastEventIdRef.current } : {}),
+          onActivity,
+        })) {
           if (disposed || active.signal.aborted) break;
-          // After stop() (user cancellation) no more frames should be
-          // committed — the partial answer is already saved and sending
-          // is cleared. Drop everything until the next send() (which
-          // resets sendingRef via resetStream + setSending(true)).
-          if (!sendingRef.current) continue;
+          // Late frames of an aborted turn (stop()) are dropped — the partial
+          // answer is already committed and sending is cleared. The NEXT
+          // send() resets abortedTurnRef, re-arming the subscription.
+          if (abortedTurnRef.current) continue;
           const sid = sessionIdRef.current;
           if (!sid || frame.session !== sid) continue;
+          // Terminal error channel — never the text tract, never finalize().
+          if (frame.type === 'stream.error') {
+            failTerminal(frame);
+            continue;
+          }
+          // Resume cursor tracks OWN-session frames only (and never the
+          // synthetic stream.error id, which is absent from the server
+          // buffer): a foreign/terminal id would corrupt our replay position
+          // after a redial.
+          lastEventIdRef.current = frame.id;
+          const toolName = frameToolName(frame);
+          if (toolName) {
+            // Host tool lifecycle (session.tool.*) and legacy non-text
+            // parts: live status + an additive per-turn `tool` trace row —
+            // then CONTINUE past the text tract. Tool payloads NEVER enter
+            // `append()`/`streamingRef`/`partLens`, so the streamed answer
+            // stays clean; `finalize()` still owns the commit.
+            setActiveToolName(toolName);
+            const toolDetail = frameToolDetail(frame);
+            const toolFlags = traceFlagsRef.current;
+            if (frame.type === 'session.tool.success' || frame.type === 'session.tool.failed') {
+              if (!toolFlags.toolDone.has(toolName)) {
+                toolFlags.toolDone.add(toolName);
+                pushTrace(
+                  'tool',
+                  toolName,
+                  toolDetail ?? (frame.type === 'session.tool.failed' ? 'failed' : 'done'),
+                );
+              }
+            } else if (frame.type === 'session.tool.progress') {
+              // Throttled: first progress per turn only, never per-frame.
+              if (!toolFlags.toolProgress) {
+                toolFlags.toolProgress = true;
+                pushTrace('tool', toolName, toolDetail ?? 'progress');
+              }
+            } else if (!toolFlags.toolCalled.has(toolName)) {
+              // session.tool.called, session.tool.input.started
+              // (called-equivalent when the runner skips `called`), and
+              // legacy non-text part frames — once per tool per turn.
+              toolFlags.toolCalled.add(toolName);
+              pushTrace('tool', toolName, toolDetail ?? 'called');
+            }
+            // First frame of the bound session on this connection — the SSE
+            // subscription is live. Once per connection (redials log again).
+            if (!traceFlagsRef.current.connected) {
+              traceFlagsRef.current.connected = true;
+              pushTrace('sse', 'SSE /api/v1/sessions/events connected');
+            }
+            continue;
+          }
+          // First frame of the bound session on this connection — the SSE
+          // subscription is live. Once per connection (redials log again).
+          if (!traceFlagsRef.current.connected) {
+            traceFlagsRef.current.connected = true;
+            pushTrace('sse', 'SSE /api/v1/sessions/events connected');
+          }
           const ft = frameText(frame);
           if (!ft) continue;
+          // The subscription accumulates REGARDLESS of `sending` (F5-dogон:
+          // after reload sending=false but the thread must catch up); only
+          // `finalize()` is gated on a live turn (see below).
           if (ft.kind === 'idle') {
             finalize();
             continue;
+          }
+          // Frame transitions only: first delta, ended, turn commit — never
+          // every delta.
+          if (frame.type === 'session.text.delta' && !traceFlagsRef.current.delta) {
+            traceFlagsRef.current.delta = true;
+            pushTrace('sse', 'session.text.delta', 'text.delta started');
+          }
+          if (frame.type === 'session.text.ended' && !traceFlagsRef.current.ended) {
+            traceFlagsRef.current.ended = true;
+            pushTrace('sse', 'session.text.ended', 'text.ended');
+          }
+          if (
+            (frame.type === 'session.execution.succeeded' ||
+              frame.type === 'session.step.ended') &&
+            !traceFlagsRef.current.committed
+          ) {
+            traceFlagsRef.current.committed = true;
+            pushTrace('sse', frame.type, 'turn committed');
           }
           if (ft.kind === 'full') {
             // Complete text of a block (opencode 2.2.0 session.text.ended).
@@ -343,23 +707,72 @@ export function useChat(options?: UseChatOptions): UseChatResult {
           }
         }
         if (disposed || active.signal.aborted) return;
+        // Clean EOF (server ended an idle stream): quiet redial, no error.
         scheduleReconnect();
       } catch (e: unknown) {
         if (disposed || (e as Error)?.name === 'AbortError' || active.signal.aborted) return;
-        setError(formatError(e, t.errors.unexpected));
+        // Transient transport failure — quiet backoff redial (C4): the thread
+        // is preserved and NO ErrorState is set. Only stream.error (above) or
+        // a failed REST history load surfaces an error.
         scheduleReconnect();
       }
     };
 
+    // Resync (C4): online / back-to-visible → quiet history refresh + redial,
+    // never setError. Listeners are cleaned on unmount.
+    const resync = (): void => {
+      if (disposed) return;
+      const sid = sessionIdRef.current;
+      traceFlagsRef.current.connected = false;
+      if (!sid || !projectId) {
+        attemptRef.current = 0;
+        setNonce((n) => n + 1);
+        return;
+      }
+      listSessionMessages(projectId, sid)
+        .then((rows) => {
+          if (disposed) return;
+          setMessages(toChatMessages(rows));
+        })
+        .catch(() => {
+          /* transient — keep the local thread, redial anyway */
+        })
+        .finally(() => {
+          if (disposed) return;
+          attemptRef.current = 0;
+          setNonce((n) => n + 1);
+        });
+    };
+    const onOnline = (): void => {
+      resync();
+    };
+    const onVisibility = (): void => {
+      if (document.visibilityState === 'visible') resync();
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', onOnline);
+      document.addEventListener('visibilitychange', onVisibility);
+    }
+
     attemptRef.current = 0;
+    lastActivityRef.current = Date.now();
     void connect();
 
     return () => {
       disposed = true;
-      ctrl?.abort();
+      clearWatchdog();
+      try {
+        ctrl?.abort();
+      } catch {
+        /* idempotent */
+      }
       if (timer) clearTimeout(timer);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('online', onOnline);
+        document.removeEventListener('visibilitychange', onVisibility);
+      }
     };
-  }, [nonce, projectId, t]);
+  }, [nonce, projectId, t, pushTrace]);
 
   // Scoped mode: bind to the given sessionId + load its history
   // (same rows → ChatMessage mapping as reload()).
@@ -367,10 +780,17 @@ export function useChat(options?: UseChatOptions): UseChatResult {
     if (!initialSessionId) return;
     let cancelled = false;
     sessionIdRef.current = initialSessionId;
+    lastEventIdRef.current = null;
+    abortedTurnRef.current = false;
+    sendingSinceRef.current = null;
+    lastActivityRef.current = Date.now();
     setSessionId(initialSessionId);
     resetStream();
     setMessages([]);
     setError(null);
+    // New bound session — the tool timeline starts over.
+    resetTraceFlags();
+    setToolTrace([]);
     if (!projectId) {
       // Honest gate, no request fired (same contract as the backend 400).
       setLoading(false);
@@ -378,6 +798,7 @@ export function useChat(options?: UseChatOptions): UseChatResult {
       return;
     }
     setLoading(true);
+    pushTrace('history', `GET /api/v1/sessions/${initialSessionId}/messages`);
     listSessionMessages(projectId, initialSessionId)
       .then((rows) => {
         if (cancelled) return;
@@ -410,13 +831,15 @@ export function useChat(options?: UseChatOptions): UseChatResult {
       if (!projectId) throw projectGateError();
       const effective = agentOverride ?? agentId;
       const created = await createSession({ projectId, agentId: effective });
+      pushTrace('create-session', 'POST /api/v1/sessions');
       sessionIdRef.current = created.id;
+      lastEventIdRef.current = null;
       setSessionId(created.id);
       // Fresh session — deltas accumulate from zero.
       resetStream();
       return created.id;
     },
-    [projectId, resetStream, agentId],
+    [projectId, resetStream, agentId, pushTrace],
   );
 
   const send = useCallback(
@@ -429,12 +852,26 @@ export function useChat(options?: UseChatOptions): UseChatResult {
       }
       const effective = opts?.agentId ?? agentId;
       sendingRef.current = true;
+      abortedTurnRef.current = false;
+      sendingSinceRef.current = Date.now();
       setSending(true);
       setError(null);
+      setActiveAgentId(effective);
+      setActiveToolName(null);
       resetStream();
+      // New turn on the same session: per-turn SSE transitions may log
+      // again, the connection event too after a redial; history stays.
+      traceFlagsRef.current.delta = false;
+      traceFlagsRef.current.ended = false;
+      traceFlagsRef.current.committed = false;
+      traceFlagsRef.current.connected = false;
+      traceFlagsRef.current.toolCalled = new Set<string>();
+      traceFlagsRef.current.toolProgress = false;
+      traceFlagsRef.current.toolDone = new Set<string>();
       const userMsg: ChatMessage = { id: newId(), role: 'user', text: trimmed };
       setMessages((prev) => [...prev, userMsg]);
       try {
+        pushTrace('auth', 'auth');
         await ensureSessionAuth();
         const sid = await ensureSession(effective);
         const ctrl = new AbortController();
@@ -443,6 +880,7 @@ export function useChat(options?: UseChatOptions): UseChatResult {
         // chains take minutes — hence the long send timeout); the answer
         // streams over events and `sending` clears on the session.idle
         // frame (or stop()). Abort arrives via this signal (stop()/unmount).
+        pushTrace('prompt', `POST /api/v1/sessions/${sid}/messages`, effective);
         await sendSessionMessage(projectId, sid, trimmed, {
           signal: ctrl.signal,
           agentId: effective,
@@ -451,20 +889,26 @@ export function useChat(options?: UseChatOptions): UseChatResult {
         if ((e as Error)?.name === 'AbortError') return;
         setError(formatError(e, t.errors.unexpected));
         sendingRef.current = false;
+        sendingSinceRef.current = null;
         setSending(false);
       } finally {
         promptCtrlRef.current = null;
       }
     },
-    [projectId, ensureSession, resetStream, t, agentId],
+    [projectId, ensureSession, resetStream, t, agentId, pushTrace],
   );
 
   const stop = useCallback(() => {
     promptCtrlRef.current?.abort();
     promptCtrlRef.current = null;
+    // Abort-turn epoch (C4): late frames of the interrupted turn are dropped
+    // by the SSE loop (abortedTurnRef) — the partial answer below is the only
+    // commit. The next send() resets the flag, re-arming the subscription.
+    abortedTurnRef.current = true;
     const sid = sessionIdRef.current;
     if (sid && projectId) {
       // Best-effort server interrupt (idle answers interrupted=false).
+      pushTrace('interrupt', `POST /api/v1/sessions/${sid}/interrupt`);
       void interruptSession(projectId, sid).catch(() => null);
     }
     // Keep the partial stream as the assistant answer so nothing is lost.
@@ -474,12 +918,17 @@ export function useChat(options?: UseChatOptions): UseChatResult {
     }
     resetStream();
     sendingRef.current = false;
+    sendingSinceRef.current = null;
     setSending(false);
-  }, [projectId, resetStream]);
+    setActiveAgentId(null);
+    setActiveToolName(null);
+  }, [projectId, resetStream, pushTrace]);
 
   const reload = useCallback(() => {
     setError(null);
     const sid = sessionIdRef.current;
+    // A redialed stream logs its fresh connect once (see the SSE loop).
+    traceFlagsRef.current.connected = false;
     if (!sid) {
       // No session yet — just redial the SSE stream.
       attemptRef.current = 0;
@@ -491,6 +940,7 @@ export function useChat(options?: UseChatOptions): UseChatResult {
       return;
     }
     setLoading(true);
+    pushTrace('reload', `GET /api/v1/sessions/${sid}/messages`);
     listSessionMessages(projectId, sid)
       .then((rows) => {
         setMessages(toChatMessages(rows));
@@ -503,7 +953,7 @@ export function useChat(options?: UseChatOptions): UseChatResult {
         attemptRef.current = 0;
         setNonce((n) => n + 1);
       });
-  }, [projectId, t]);
+  }, [projectId, t, pushTrace]);
 
   return {
     messages,
@@ -515,8 +965,11 @@ export function useChat(options?: UseChatOptions): UseChatResult {
     sessionId,
     agentId,
     setAgentId,
+    activeAgentId,
+    activeToolName,
     send,
     stop,
     reload,
+    toolTrace,
   };
 }

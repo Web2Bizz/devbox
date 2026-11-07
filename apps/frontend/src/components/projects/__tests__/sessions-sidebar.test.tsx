@@ -28,10 +28,11 @@ mock.module('next/navigation', () => ({
 }));
 
 const iso = (ms: number) => new Date(ms).toISOString();
-const sessionInfo = (id: string, title: string | null) => ({
+const sessionInfo = (id: string, title: string | null, updatedAt = iso(1700000000000)) => ({
   id,
   title,
-  createdAt: iso(1700000000000),
+  createdAt: iso(1699990000000),
+  updatedAt,
   directory: `/srv/projects/${PRJ}`,
   projectId: PRJ,
   model: null,
@@ -112,6 +113,16 @@ describe('SessionsSidebar', () => {
     expect(untitled.getAttribute('href')).toBe(`${BASE}/sessions/ses-2`);
     expect(untitled.getAttribute('aria-current')).toBeNull();
     expect(screen.queryByText('ses-2')).toBeNull();
+  });
+
+  test('meta line renders last-activity time (updatedAt datetime)', () => {
+    currentPath = `${BASE}/sessions`;
+    setup();
+    const times = document.querySelectorAll('time');
+    expect(times.length).toBe(2);
+    for (const t of times) {
+      expect(t.getAttribute('datetime')).toBe(iso(1700000000000));
+    }
   });
 
   test('create action routes to the new session chat', async () => {

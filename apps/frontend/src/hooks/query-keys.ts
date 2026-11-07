@@ -74,6 +74,17 @@ export const sessionMessagesQueryKey = (sessionId: string | null, projectId?: st
   ['session-messages', sessionId ?? 'none', projectId ?? 'none'] as const;
 
 /**
+ * GET /api/v1/sessions/{id}/snapshots/diff — two captured trees of a
+ * session. The key carries the snapshot pair (a diff is a pure function of
+ * it), never the file contents.
+ */
+export const sessionSnapshotDiffQueryKey = (
+  sessionId: string | null,
+  from: string | null,
+  to: string | null,
+) => ['session-snapshot-diff', sessionId ?? 'none', from ?? 'none', to ?? 'none'] as const;
+
+/**
  * GET /api/v1/runs — project-scoped run list. `projectId` nullish maps to the
  * shared `'none'` scope (same convention as the session keys).
  */

@@ -20,6 +20,14 @@ const LOCAL_SESSION_ID =
  * Durable session history — the ONLY place the sessions domain touches
  * drizzle.
  *
+ * Durable vs live (explicit): this repository stores ONLY the durable chat
+ * thread — user receipts and assistant text answers (`role` user/assistant,
+ * `text` non-empty). Reasoning (`session.reasoning.*`) and tool lifecycle
+ * (`session.tool.*`) are live-only SSE detail: they stream project-scoped
+ * via SessionHarnessService.streamEvents, are never appended here, and do
+ * not survive reload. Reload refetches this durable thread (REST) while the
+ * live trace restarts empty — an explicit product decision, not a loss.
+ *
  * Why a separate `session_messages` table instead of reusing
  * `project_sessions`: a project_sessions.id is a uuid, while chat messages
  * are addressed by the DOMAIN session id — upstream `ses_*` values are not

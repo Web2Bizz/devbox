@@ -3,4 +3,6 @@ export type ChatLiveStatusProps = {
   activeAgentName?: string;
   /** Tool name reported by the live part frames. */
   activeToolName?: string;
+  /** Live thinking active (reasoning frames streaming, never durable). */
+  reasoningActive?: boolean;
 };

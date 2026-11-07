@@ -306,6 +306,19 @@ export type Dictionary = {
     toolsTitle: string;
     /** Timeline caption when no tool call was recorded yet. */
     toolsEmpty: string;
+    /** Collapsed debug block with the raw technical trace (never user-facing). */
+    toolsDetails: string;
+    /** Human label of a reasoning step (agent thinking, never a raw URL). */
+    reasoningLabel: string;
+    /** Tool lifecycle statuses (human words for the timeline, via t.chat). */
+    toolCalled: string;
+    toolProgress: string;
+    toolDone: string;
+    toolFailed: string;
+    /** Reasoning phase fallbacks (human words, via t.chat). */
+    reasoningStarted: string;
+    reasoningThinking: string;
+    reasoningDone: string;
     /** Label of the agent currently owning the in-flight turn. */
     activeAgent: string;
     /** Label of the tool currently reported by the live part frames. */

@@ -9,7 +9,13 @@ import {
 } from '@web2bizz/ui/components';
 import { ShimmerText } from '@web2bizz/ui/widgets';
 import { useI18n } from '../../../i18n';
-import type { ChatToolTimelineProps } from './types';
+import {
+  formatRawToolEventLine,
+  formatToolEventStatus,
+  formatToolEventTitle,
+  getVisibleToolEvents,
+  type ChatToolTimelineProps,
+} from './types';
 
 /**
  * Chronological tool timeline of the current chat request, rendered INSIDE
@@ -18,16 +24,25 @@ import type { ChatToolTimelineProps } from './types';
  * Hidden while empty, and the error/empty branches of `ChatThread` return before it, so it never shows on those
  * states either.
  *
+ * User view shows agent steps only (`tool` + `reasoning` with human labels
+ * via `t.chat`); internal transport kinds (`auth/create-session/history/
+ * prompt/sse/reload/interrupt`) stay in `useChat` state for debugging and
+ * surface only as `title` tooltips + the collapsed technical `<details>`
+ * block — never as default rows, never a raw `POST /api/...`.
+ *
  * Kit-only chrome: `Collapsible` for the fold, `Badge` for the call count,
  * token classes (`text-muted-foreground`, `bg-muted`) for the rows — no hex.
  */
-export function ChatToolTimeline({ events, liveToolName }: ChatToolTimelineProps) {
+export function ChatToolTimeline({ events, liveToolName, liveReasoningText = null }: ChatToolTimelineProps) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
 
-  if (events.length === 0 && !liveToolName) return null;
+  const visibleEvents = getVisibleToolEvents(events);
 
-  const total = events.length + (liveToolName ? 1 : 0);
+  if (visibleEvents.length === 0 && !liveToolName && !liveReasoningText) return null;
+
+  const total = visibleEvents.length + (liveToolName ? 1 : 0) + (liveReasoningText ? 1 : 0);
+  const hasRawDetails = events.length > 0;
 
   return (
     <Collapsible
@@ -50,35 +65,57 @@ export function ChatToolTimeline({ events, liveToolName }: ChatToolTimelineProps
         </button>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        {events.length === 0 && !liveToolName ? (
+        {visibleEvents.length === 0 && !liveToolName && !liveReasoningText ? (
           <p className="px-2 py-1 text-sm text-muted-foreground">{t.chat.toolsEmpty}</p>
         ) : (
           <ol className="grid gap-1 px-2 py-1">
-            {events.map((event, index) => (
+            {visibleEvents.map((event, index) => {
+              const title = formatToolEventTitle(event, t);
+              const status = formatToolEventStatus(event, t);
+              const rawLine = formatRawToolEventLine(event);
+              return (
+                <li
+                  key={event.id}
+                  data-testid="chat-tool-event"
+                  data-kind={event.kind}
+                  title={rawLine}
+                  className="flex items-baseline gap-2 text-sm"
+                >
+                  <span
+                    aria-hidden="true"
+                    className="shrink-0 tabular-nums text-muted-foreground"
+                  >
+                    {index + 1}.
+                  </span>
+                  <span className="shrink-0 tabular-nums text-xs text-muted-foreground">
+                    {new Date(event.at).toLocaleTimeString()}
+                  </span>
+                  <span className="min-w-0 flex-1 break-words font-mono text-xs">
+                    {title}
+                  </span>
+                  {status ? (
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {status}
+                    </span>
+                  ) : null}
+                </li>
+              );
+            })}
+            {liveReasoningText ? (
               <li
-                key={event.id}
-                data-testid="chat-tool-event"
+                data-testid="chat-reasoning-live"
                 className="flex items-baseline gap-2 text-sm"
+                aria-busy="true"
               >
                 <span
                   aria-hidden="true"
                   className="shrink-0 tabular-nums text-muted-foreground"
                 >
-                  {index + 1}.
+                  {visibleEvents.length + (liveToolName ? 2 : 1)}.
                 </span>
-                <span className="shrink-0 tabular-nums text-xs text-muted-foreground">
-                  {new Date(event.at).toLocaleTimeString()}
-                </span>
-                <span className="min-w-0 flex-1 break-words font-mono text-xs">
-                  {event.label}
-                </span>
-                {event.detail ? (
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    {event.detail}
-                  </span>
-                ) : null}
+                <ShimmerText>{liveReasoningText.slice(0, 120)}</ShimmerText>
               </li>
-            ))}
+            ) : null}
             {liveToolName ? (
               <li
                 data-testid="chat-tool-live"
@@ -89,13 +126,38 @@ export function ChatToolTimeline({ events, liveToolName }: ChatToolTimelineProps
                   aria-hidden="true"
                   className="shrink-0 tabular-nums text-muted-foreground"
                 >
-                  {events.length + 1}.
+                  {visibleEvents.length + 1}.
                 </span>
                 <ShimmerText>{liveToolName}</ShimmerText>
               </li>
             ) : null}
           </ol>
         )}
+        {hasRawDetails ? (
+          <details className="px-2 py-1" data-testid="chat-tools-details">
+            <summary className="cursor-pointer text-xs text-muted-foreground">
+              {t.chat.toolsDetails}
+            </summary>
+            <ol className="grid gap-1 py-1">
+              {events.map((event, index) => (
+                <li
+                  key={event.id}
+                  data-testid="chat-tool-raw-event"
+                  data-kind={event.kind}
+                  title={formatRawToolEventLine(event)}
+                  className="flex items-baseline gap-2 text-xs text-muted-foreground"
+                >
+                  <span aria-hidden="true" className="shrink-0 tabular-nums">
+                    {index + 1}.
+                  </span>
+                  <span className="min-w-0 flex-1 break-words font-mono">
+                    {formatRawToolEventLine(event)}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </details>
+        ) : null}
       </CollapsibleContent>
     </Collapsible>
   );

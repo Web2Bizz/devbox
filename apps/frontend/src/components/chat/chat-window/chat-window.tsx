@@ -19,6 +19,7 @@ import { EmptyState, ErrorState } from '../../states';
 import type { ChatMessage, ChatToolEvent } from '../../../hooks/useChat';
 import { useI18n } from '../../../i18n';
 import { ChatMessageRow } from '../chat-message';
+import { getVisibleToolEvents } from '../chat-tool-timeline/types';
 import { ChatToolsTimeline } from './chat-tools-timeline';
 import { AgentThinking } from './agent-thinking';
 
@@ -86,11 +87,14 @@ export function ChatWindow({
 }: ChatWindowProps) {
   const { t } = useI18n();
   const thinking = sending && !streamingText;
+  // User-visible steps only: internal transport (POST/SSE/auth/…) stays in
+  // state for the debug `<details>` but never creates a timeline item alone.
+  const hasVisibleTrace = getVisibleToolEvents(toolTrace).length > 0;
 
   if (loading && messages.length === 0 && !streamingText && !error) {
     return (
       <div
-        className="grid gap-2 px-1 pt-[calc(var(--header-height)_+_1rem)]"
+        className="grid auto-rows-min content-start gap-2 self-start px-1 pt-[calc(var(--header-height)_+_1rem)]"
         aria-busy="true"
         aria-label={t.common.loadingPage}
       >
@@ -145,7 +149,7 @@ export function ChatWindow({
                 thinking/streaming. Empty/error states return above, so the
                 timeline only ever sits on a real thread.
               */}
-              {toolTrace.length > 0 || activeToolName ? (
+              {hasVisibleTrace || activeToolName ? (
                 <MessageScrollerItem messageId="chat-tools-timeline">
                   <ChatToolsTimeline events={toolTrace} liveToolName={activeToolName} />
                 </MessageScrollerItem>
@@ -161,11 +165,6 @@ export function ChatWindow({
                       activeAgentName={activeAgentName}
                       activeToolName={activeToolName}
                     />
-                    {activeAgentName ? (
-                      <Badge variant="secondary" data-testid="chat-active-agent">
-                        {t.chat.activeAgent}: {activeAgentName}
-                      </Badge>
-                    ) : null}
                     {activeToolName ? (
                       <Badge variant="secondary" data-testid="chat-active-tool">
                         {t.chat.activeTool}: {activeToolName}
@@ -196,9 +195,6 @@ export function ChatWindow({
                         data-testid="chat-streaming-status"
                       >
                         <ShimmerText>{t.chat.streaming}</ShimmerText>
-                        {activeAgentName ? (
-                          <Badge variant="secondary">{t.chat.activeAgent}: {activeAgentName}</Badge>
-                        ) : null}
                         {activeToolName ? (
                           <Badge variant="secondary">{t.chat.activeTool}: {activeToolName}</Badge>
                         ) : null}

@@ -5,6 +5,10 @@ import type { SessionMessage, SessionStreamFrame } from '@rush-code/contracts';
 import {
   sessionMessagePartDeltaFrameSchema,
   sessionMessagePartUpdatedFrameSchema,
+  sessionReasoningFrameSchema,
+  sessionTextDeltaFrameSchema,
+  sessionTextEndedFrameSchema,
+  sessionToolLifecycleFrameSchema,
 } from '@rush-code/contracts';
 import { ApiClientError } from '../api/client';
 import {
@@ -30,13 +34,28 @@ export type ChatMessage = {
  * current chat turn performs, in call order (auth → create-session →
  * history → prompt → SSE frames → interrupt). Host tool lifecycle
  * (`session.tool.called/progress/success/failed`) appends additive `tool`
- * rows — ephemeral SSE status, never durable history. Rendered by
- * `ChatToolsTimeline` — append-only per session, never reordered.
+ * rows and host reasoning (`session.reasoning.started/delta/ended`)
+ * appends additive `reasoning` rows — both ephemeral live SSE status, never
+ * durable history. Rendered by `ChatToolsTimeline` — append-only per
+ * session, never reordered.
+ *
+ * Durable vs live (explicit): `messages` come from REST history (Postgres,
+ * survive reload); `streamingText`/`reasoningText`/`toolTrace` are live-only
+ * (cleared on reload/session change/finalize, never persisted).
  */
 export type ChatToolEvent = {
   id: string;
   at: number;
-  kind: 'auth' | 'create-session' | 'history' | 'prompt' | 'sse' | 'interrupt' | 'reload' | 'tool';
+  kind:
+    | 'auth'
+    | 'create-session'
+    | 'history'
+    | 'prompt'
+    | 'sse'
+    | 'interrupt'
+    | 'reload'
+    | 'tool'
+    | 'reasoning';
   label: string;
   detail?: string;
 };
@@ -49,8 +68,10 @@ export type UseChatOptions = {
 };
 
 export type UseChatResult = {
-  messages: ChatMessage[];
+  messages: Array<ChatMessage>;
   streamingText: string;
+  /** Live thinking trace of the in-flight turn (never chat text, never durable). */
+  reasoningText: string;
   loading: boolean;
   sending: boolean;
   error: string | null;
@@ -68,7 +89,7 @@ export type UseChatResult = {
   stop: () => void;
   reload: () => void;
   /** Chronological tool trace of the session (append-only, reset on session change). */
-  toolTrace: ChatToolEvent[];
+  toolTrace: Array<ChatToolEvent>;
 };
 
 const BASE_DELAY_MS = 1000;
@@ -94,8 +115,8 @@ function newId(): string {
  * carries no chat text (shell/compaction/…) come as `text: null` and are
  * skipped — nothing is invented client-side.
  */
-function toChatMessages(rows: SessionMessage[]): ChatMessage[] {
-  const next: ChatMessage[] = [];
+function toChatMessages(rows: Array<SessionMessage>): Array<ChatMessage> {
+  const next: Array<ChatMessage> = [];
   for (const row of rows) {
     if (row.text === null) continue;
     next.push({
@@ -124,21 +145,24 @@ type FrameText =
   | null;
 
 function frameText(frame: SessionStreamFrame): FrameText {
-  // opencode 2.2.0 native stream (provenance: contracts/opencode-stand-2.2.0.json
-  // eventFrames.usedVariants): text deltas arrive as session.text.delta with
-  // data.delta, the complete text as session.text.ended with data.text, and
-  // session.execution.succeeded signals the end of the turn. These are the
-  // types the live runner actually emits — the legacy message.part.* /
-  // session.idle names do not exist on 2.2.0.
+  // Live 2.2.x stream (provenance: contracts/opencode-stand-2.2.0.json
+  // eventFrames + live capture): text deltas arrive as session.text.delta
+  // with data.delta, the complete text as session.text.ended with data.text,
+  // and session.execution.succeeded / session.step.ended signal the end of
+  // the turn. Narrow contract schemas validate the live text variants
+  // (safeParse, never a cast) — a frame that does not match is NOT this
+  // signal. Legacy message.part.* / session.idle stay for backward compat.
   if (frame.type === 'session.text.delta') {
-    const data = frame.data as { delta?: unknown; sessionID?: unknown };
-    if (typeof data.delta !== 'string' || !data.delta) return null;
-    return { kind: 'delta', text: data.delta, partId: 'default', messageId: 'default' };
+    const parsed = sessionTextDeltaFrameSchema.safeParse(frame);
+    if (!parsed.success) return null;
+    if (!parsed.data.data.delta) return null;
+    return { kind: 'delta', text: parsed.data.data.delta, partId: 'default', messageId: 'default' };
   }
   if (frame.type === 'session.text.ended') {
-    const data = frame.data as { text?: unknown };
-    if (typeof data.text === 'string' && data.text) {
-      return { kind: 'full', text: data.text };
+    const parsed = sessionTextEndedFrameSchema.safeParse(frame);
+    if (!parsed.success) return null;
+    if (typeof parsed.data.data.text === 'string' && parsed.data.data.text) {
+      return { kind: 'full', text: parsed.data.data.text };
     }
     return { kind: 'idle' };
   }
@@ -234,9 +258,9 @@ function readToolName(value: unknown): string | null {
  *   `tool` and `payload` objects (D1: the runner's exact nest level is not
  *   pinned — every level answers the same guarded read).
  *
- * `session.reasoning.*` is deliberately NOT a tool frame: thinking
- * internals never become `activeToolName` (they surface nowhere — neither
- * status nor answer text).
+ * `session.reasoning.*` is deliberately NOT a tool frame: thinking has its
+ * own `reasoningText` state + `reasoning` trace rows (see frameReasoning),
+ * never `activeToolName`.
  */
 function frameToolName(frame: SessionStreamFrame): string | null {
   if (frame.type === 'message.part.updated') {
@@ -261,13 +285,14 @@ function frameToolName(frame: SessionStreamFrame): string | null {
  * never reach the timeline or the logs.
  */
 function frameToolDetail(frame: SessionStreamFrame): string | undefined {
-  if (!TOOL_FRAME_TYPES.has(frame.type)) return undefined;
+  const parsed = sessionToolLifecycleFrameSchema.safeParse(frame);
+  if (!parsed.success && !TOOL_FRAME_TYPES.has(frame.type)) return undefined;
   const data = frame.data as Record<string, unknown>;
   const nestedCall =
     typeof data.call === 'object' && data.call !== null
       ? (data.call as Record<string, unknown>)
       : null;
-  const candidates: unknown[] = [
+  const candidates: Array<unknown> = [
     data.progress,
     data.message,
     data.status,
@@ -291,6 +316,61 @@ function frameToolDetail(frame: SessionStreamFrame): string | undefined {
   if (frame.type === 'session.tool.failed') return 'failed';
   if (frame.type === 'session.tool.success') return 'done';
   return undefined;
+}
+
+/**
+ * Live reasoning frames the runner emits (`session.reasoning.started/delta/
+ * ended`): thinking trace of the turn, never chat text. Validated with the
+ * narrow contract schema (safeParse, never a cast) — a frame that does not
+ * match is NOT this signal.
+ */
+const REASONING_FRAME_TYPES = new Set([
+  'session.reasoning.started',
+  'session.reasoning.delta',
+  'session.reasoning.ended',
+]);
+
+type FrameReasoning =
+  | { kind: 'delta'; text: string }
+  | { kind: 'full'; text: string }
+  | { kind: 'started' }
+  | null;
+
+function frameReasoning(frame: SessionStreamFrame): FrameReasoning {
+  if (!REASONING_FRAME_TYPES.has(frame.type)) return null;
+  const parsed = sessionReasoningFrameSchema.safeParse(frame);
+  if (!parsed.success) return null;
+  const delta = parsed.data.data.delta;
+  if (typeof delta === 'string' && delta) {
+    return { kind: 'delta', text: delta };
+  }
+  const full = parsed.data.data.text;
+  if (typeof full === 'string' && full) {
+    return { kind: 'full', text: full };
+  }
+  if (parsed.data.type === 'session.reasoning.started') {
+    return { kind: 'started' };
+  }
+  if (parsed.data.type === 'session.reasoning.ended' && !full) {
+    return { kind: 'started' };
+  }
+  return null;
+}
+
+/**
+ * Short timeline detail for a reasoning frame: first single-lined snippet of
+ * the thinking delta (truncated), phase fallback otherwise. Full thinking
+ * bodies never reach the timeline or the logs.
+ */
+function frameReasoningDetail(frame: SessionStreamFrame, text: string | null): string | undefined {
+  if (!REASONING_FRAME_TYPES.has(frame.type)) return undefined;
+  if (text !== null && text.trim().length > 0) {
+    const singleLine = text.replace(/\s+/g, ' ').trim();
+    return singleLine.length > 120 ? `${singleLine.slice(0, 117)}…` : singleLine;
+  }
+  if (frame.type === 'session.reasoning.started') return 'started';
+  if (frame.type === 'session.reasoning.delta') return 'thinking';
+  return 'done';
 }
 
 function projectGateError(): ApiClientError {
@@ -334,7 +414,7 @@ function projectGateError(): ApiClientError {
   *   (`session.tool.called/progress/success/failed`, `session.tool.input.*`)
   *   project to `activeToolName` + a per-turn `tool` trace row (ephemeral SSE
   *   status — never appended to the streamed text); `session.reasoning.*` is
-  *   intentionally dropped (thinking internals are neither status nor answer).
+  *   surfaced as live reasoning steps with timeline rows.
   *   The subscription
  *   accumulates regardless of `sending` (F5 catch-up); only `finalize()` is
  *   gated on a live turn. Terminal `stream.error` surfaces separately —
@@ -350,8 +430,9 @@ export function useChat(options?: UseChatOptions): UseChatResult {
   const { t } = useI18n();
   const initialSessionId = options?.sessionId;
   const projectId = options?.projectId;
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<Array<ChatMessage>>([]);
   const [streamingText, setStreamingText] = useState('');
+  const [reasoningText, setReasoningText] = useState('');
   const [loading, setLoading] = useState(() => Boolean(initialSessionId));
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -367,7 +448,7 @@ export function useChat(options?: UseChatOptions): UseChatResult {
   // Chronological tool trace (see ChatToolEvent): every real domain call of
   // the session in call order. Append-only within a session — send() of a
   // new prompt keeps appending, only a session change resets it.
-  const [toolTrace, setToolTrace] = useState<ChatToolEvent[]>([]);
+  const [toolTrace, setToolTrace] = useState<Array<ChatToolEvent>>([]);
 
   const pushTrace = useCallback(
     (kind: ChatToolEvent['kind'], label: string, detail?: string): void => {
@@ -396,6 +477,7 @@ export function useChat(options?: UseChatOptions): UseChatResult {
     toolCalled: new Set<string>(),
     toolProgress: false,
     toolDone: new Set<string>(),
+    reasoningStarted: false,
   });
   const resetTraceFlags = useCallback((): void => {
     traceFlagsRef.current = {
@@ -406,6 +488,7 @@ export function useChat(options?: UseChatOptions): UseChatResult {
       toolCalled: new Set<string>(),
       toolProgress: false,
       toolDone: new Set<string>(),
+      reasoningStarted: false,
     };
   }, []);
 
@@ -414,7 +497,10 @@ export function useChat(options?: UseChatOptions): UseChatResult {
   const sendingRef = useRef(false);
   // streamingRef is the accumulator of truth (the SSE loop appends to it
   // synchronously); `streamingText` state mirrors it for rendering.
+  // reasoningRef is the same for the live thinking trace (`reasoningText`
+  // mirrors it) — never chat text, never durable, cleared like the stream.
   const streamingRef = useRef('');
+  const reasoningRef = useRef('');
   const attemptRef = useRef(0);
   // Self-healing refs (C4): resume cursor, watchdog liveness, abort-turn epoch,
   // and a messages mirror for the stuck-sending REST verification.
@@ -422,12 +508,14 @@ export function useChat(options?: UseChatOptions): UseChatResult {
   const lastActivityRef = useRef<number>(Date.now());
   const abortedTurnRef = useRef(false);
   const sendingSinceRef = useRef<number | null>(null);
-  const messagesRef = useRef<ChatMessage[]>([]);
+  const messagesRef = useRef<Array<ChatMessage>>([]);
   messagesRef.current = messages;
 
   const resetStream = useCallback(() => {
     streamingRef.current = '';
     setStreamingText('');
+    reasoningRef.current = '';
+    setReasoningText('');
   }, []);
 
   // Live SSE deltas + idle finalization for the active session
@@ -447,6 +535,11 @@ export function useChat(options?: UseChatOptions): UseChatResult {
       setStreamingText(streamingRef.current);
     };
 
+    const appendReasoning = (text: string): void => {
+      reasoningRef.current += text;
+      setReasoningText(reasoningRef.current);
+    };
+
     // session.idle for the bound session — the queued answer is done:
     // commit whatever streamed and clear `sending`. Only a live turn may
     // finalize: after stop() the partial answer already belongs to the thread.
@@ -462,6 +555,7 @@ export function useChat(options?: UseChatOptions): UseChatResult {
       setSending(false);
       setActiveAgentId(null);
       setActiveToolName(null);
+      traceFlagsRef.current.reasoningStarted = false;
     };
 
     // Terminal transport frame (C0 stream.error): the thread is PRESERVED,
@@ -480,6 +574,7 @@ export function useChat(options?: UseChatOptions): UseChatResult {
       setSending(false);
       setActiveAgentId(null);
       setActiveToolName(null);
+      traceFlagsRef.current.reasoningStarted = false;
       setError(message);
     };
 
@@ -518,6 +613,7 @@ export function useChat(options?: UseChatOptions): UseChatResult {
           setSending(false);
           setActiveAgentId(null);
           setActiveToolName(null);
+          traceFlagsRef.current.reasoningStarted = false;
         }
       } catch {
         /* transient — the next watchdog cycle retries */
@@ -626,6 +722,25 @@ export function useChat(options?: UseChatOptions): UseChatResult {
           if (!traceFlagsRef.current.connected) {
             traceFlagsRef.current.connected = true;
             pushTrace('sse', 'SSE /api/v1/sessions/events connected');
+          }
+          const reasoning = frameReasoning(frame);
+          if (reasoning) {
+            if (reasoning.kind === 'delta') {
+              appendReasoning(reasoning.text);
+            } else if (reasoning.kind === 'full') {
+              if (!reasoningRef.current.includes(reasoning.text)) {
+                appendReasoning(reasoning.text);
+              }
+            }
+            if (!traceFlagsRef.current.reasoningStarted) {
+              traceFlagsRef.current.reasoningStarted = true;
+              pushTrace('reasoning', 'reasoning', frameReasoningDetail(frame, reasoning.kind === 'started' ? null : reasoning.text) ?? 'thinking');
+            }
+            if (!traceFlagsRef.current.connected) {
+              traceFlagsRef.current.connected = true;
+              pushTrace('sse', 'SSE /api/v1/sessions/events connected');
+            }
+            continue;
           }
           const ft = frameText(frame);
           if (!ft) continue;
@@ -776,6 +891,8 @@ export function useChat(options?: UseChatOptions): UseChatResult {
 
   // Scoped mode: bind to the given sessionId + load its history
   // (same rows → ChatMessage mapping as reload()).
+  // Durable vs live: history is durable (survives reload); reasoningText,
+  // streamingText and toolTrace restarts are live-only (cleared here).
   useEffect(() => {
     if (!initialSessionId) return;
     let cancelled = false;
@@ -868,6 +985,7 @@ export function useChat(options?: UseChatOptions): UseChatResult {
       traceFlagsRef.current.toolCalled = new Set<string>();
       traceFlagsRef.current.toolProgress = false;
       traceFlagsRef.current.toolDone = new Set<string>();
+      traceFlagsRef.current.reasoningStarted = false;
       const userMsg: ChatMessage = { id: newId(), role: 'user', text: trimmed };
       setMessages((prev) => [...prev, userMsg]);
       try {
@@ -922,13 +1040,20 @@ export function useChat(options?: UseChatOptions): UseChatResult {
     setSending(false);
     setActiveAgentId(null);
     setActiveToolName(null);
+    traceFlagsRef.current.reasoningStarted = false;
   }, [projectId, resetStream, pushTrace]);
 
   const reload = useCallback(() => {
     setError(null);
     const sid = sessionIdRef.current;
     // A redialed stream logs its fresh connect once (see the SSE loop).
+    // Durable vs live: reload refetches the durable thread (REST) and
+    // clears the live thinking trace — reasoning/streaming never survive a
+    // reload, the session tool timeline stays append-only.
     traceFlagsRef.current.connected = false;
+    traceFlagsRef.current.reasoningStarted = false;
+    reasoningRef.current = '';
+    setReasoningText('');
     if (!sid) {
       // No session yet — just redial the SSE stream.
       attemptRef.current = 0;
@@ -958,10 +1083,11 @@ export function useChat(options?: UseChatOptions): UseChatResult {
   return {
     messages,
     streamingText,
+    reasoningText,
     loading,
     sending,
     error,
-    isEmpty: !loading && !error && messages.length === 0 && !streamingText,
+    isEmpty: !loading && !error && messages.length === 0 && !streamingText && !reasoningText,
     sessionId,
     agentId,
     setAgentId,

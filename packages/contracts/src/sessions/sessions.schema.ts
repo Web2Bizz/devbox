@@ -8,6 +8,7 @@ import type {
   RevertInfo,
   RevertStageRequest,
   SendMessageRequest,
+  SessionExecutionFrame,
   SessionForkBoundary,
   SessionForkRequest,
   SessionForkResponse,
@@ -20,12 +21,18 @@ import type {
   SessionMessageList,
   SessionMessagePartDeltaFrame,
   SessionMessagePartUpdatedFrame,
+  SessionReasoningFrame,
   SessionRunnerProvider,
   SessionRunnerProviderList,
   SessionRunStatus,
   SessionRunStatusMap,
+  SessionStepFrame,
   SessionStreamErrorFrame,
   SessionStreamFrame,
+  SessionTextDeltaFrame,
+  SessionTextEndedFrame,
+  SessionTextStartedFrame,
+  SessionToolLifecycleFrame,
   SnapshotDiff,
   SnapshotDiffList,
   ToolCallInfo,
@@ -202,6 +209,134 @@ export const sessionStreamErrorFrameSchema = z.object({
   }).catchall(z.unknown()),
   session: z.string().optional(),
 }) satisfies z.ZodType<SessionStreamErrorFrame>;
+
+/**
+ * session.text.started — live text block start (session-owned, no payload
+ * beyond the owner). Envelope stays additive: unknown extra keys tolerated.
+ */
+export const sessionTextStartedFrameSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  type: z.literal('session.text.started'),
+  data: z.object({
+    sessionID: z.string({ error: 'Field "data.sessionID" is required' }).min(1),
+  }).catchall(z.unknown()),
+  session: z.string().optional(),
+}) satisfies z.ZodType<SessionTextStartedFrame>;
+
+/** session.text.delta — live streaming text unit (session + delta required). */
+export const sessionTextDeltaFrameSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  type: z.literal('session.text.delta'),
+  data: z.object({
+    sessionID: z.string({ error: 'Field "data.sessionID" is required' }).min(1),
+    delta: z.string({ error: 'Field "data.delta" is required' }),
+  }).catchall(z.unknown()),
+  session: z.string().optional(),
+}) satisfies z.ZodType<SessionTextDeltaFrame>;
+
+/**
+ * session.text.ended — live text snapshot (session required, text optional:
+ * an empty end still terminates the block and reads as idle upstream).
+ */
+export const sessionTextEndedFrameSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  type: z.literal('session.text.ended'),
+  data: z.object({
+    sessionID: z.string({ error: 'Field "data.sessionID" is required' }).min(1),
+    text: z.string().optional(),
+  }).catchall(z.unknown()),
+  session: z.string().optional(),
+}) satisfies z.ZodType<SessionTextEndedFrame>;
+
+/**
+ * session.reasoning.* — live thinking trace (started/delta/ended). Session
+ * required, delta/text optional (started carries neither). Live-only, never
+ * durable: consumers render it as collapsed reasoning steps, never as chat
+ * text and never into the durable thread.
+ */
+export const sessionReasoningFrameSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  type: z.enum(['session.reasoning.started', 'session.reasoning.delta', 'session.reasoning.ended'], {
+    error: 'Field "type" must be a reasoning lifecycle value',
+  }),
+  data: z.object({
+    sessionID: z.string({ error: 'Field "data.sessionID" is required' }).min(1),
+    delta: z.string().optional(),
+    text: z.string().optional(),
+  }).catchall(z.unknown()),
+  session: z.string().optional(),
+}) satisfies z.ZodType<SessionReasoningFrame>;
+
+/**
+ * session.tool.* — live tool lifecycle (called/progress/success/failed plus
+ * input.started/delta/ended). Session required, detail keys optional and
+ * guarded (tool/toolName/name for the name, message/progress/status/text/
+ * error for the single-line timeline detail). Live-only, never durable and
+ * never chat text: consumers project it to live status + timeline rows.
+ */
+export const sessionToolLifecycleFrameSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  type: z.enum(
+    [
+      'session.tool.called',
+      'session.tool.progress',
+      'session.tool.success',
+      'session.tool.failed',
+      'session.tool.input.started',
+      'session.tool.input.delta',
+      'session.tool.input.ended',
+    ],
+    {
+      error: 'Field "type" must be a tool lifecycle value',
+    },
+  ),
+  data: z.object({
+    sessionID: z.string({ error: 'Field "data.sessionID" is required' }).min(1),
+    tool: z.string().optional(),
+    toolName: z.string().optional(),
+    name: z.string().optional(),
+    message: z.string().optional(),
+    progress: z.string().optional(),
+    status: z.string().optional(),
+    text: z.string().optional(),
+    error: z.string().optional(),
+  }).catchall(z.unknown()),
+  session: z.string().optional(),
+}) satisfies z.ZodType<SessionToolLifecycleFrame>;
+
+/**
+ * session.step.* — live turn boundary (started/streamed/ended/failed).
+ * `ended` commits the streamed answer. Live-only.
+ */
+export const sessionStepFrameSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  type: z.enum(['session.step.started', 'session.step.streamed', 'session.step.ended', 'session.step.failed'], {
+    error: 'Field "type" must be a step lifecycle value',
+  }),
+  data: z.object({
+    sessionID: z.string({ error: 'Field "data.sessionID" is required' }).min(1),
+  }).catchall(z.unknown()),
+  session: z.string().optional(),
+}) satisfies z.ZodType<SessionStepFrame>;
+
+/**
+ * session.execution.* — live run boundary
+ * (started/succeeded/failed/interrupted). `succeeded` commits the streamed
+ * answer. Live-only.
+ */
+export const sessionExecutionFrameSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  type: z.enum(
+    ['session.execution.started', 'session.execution.succeeded', 'session.execution.failed', 'session.execution.interrupted'],
+    {
+      error: 'Field "type" must be an execution lifecycle value',
+    },
+  ),
+  data: z.object({
+    sessionID: z.string({ error: 'Field "data.sessionID" is required' }).min(1),
+  }).catchall(z.unknown()),
+  session: z.string().optional(),
+}) satisfies z.ZodType<SessionExecutionFrame>;
 
 /** POST /api/v1/sessions/{id}/interrupt body — projectId is the gate uuid
  * (strict like the YAML format: uuid; backend-generated, Q2 precedent). */

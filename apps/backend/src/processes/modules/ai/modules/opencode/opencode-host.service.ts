@@ -210,7 +210,14 @@ export class OpencodeHostService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** In-process event bus subscription; cancelling the signal stops it. */
+  /** In-process event bus subscription; cancelling the signal stops it.
+   *
+   * Live-only detail (reasoning `session.reasoning.*`, tool lifecycle
+   * `session.tool.*`, text `session.text.*`, step/execution markers) rides
+   * this bus untouched: no filtering here, no persist here. Project scoping
+   * and durable-vs-live separation live in SessionHarnessService
+   * (streamEvents filterFrame + recordHostEvent) — this host only relays.
+   */
   async subscribeEvents(signal?: AbortSignal): Promise<AsyncIterable<HostEvent>> {
     const host = await this.getHost();
     // The SDK exposes two shapes depending on the entry point (owner wrapper

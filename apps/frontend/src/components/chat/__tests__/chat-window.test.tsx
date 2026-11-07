@@ -326,6 +326,68 @@ describe('ChatWindow', () => {
     renderWindow({ error: 'boom', toolTrace: trace });
     expect(screen.queryByTestId('chat-tools-timeline')).toBeNull();
   });
+
+  test('timeline: internal transport hidden, tool/reasoning shown with human labels', async () => {
+    const user = userEvent.setup();
+    renderWindow({
+      messages: [{ id: 'u1', role: 'user', text: 'go' }],
+      toolTrace: [
+        { id: 't-auth', at: 1700000000000, kind: 'auth' as const, label: 'auth' },
+        {
+          id: 't-prompt',
+          at: 1700000000100,
+          kind: 'prompt' as const,
+          label: 'POST /api/v1/sessions/ses-1/messages',
+          detail: 'auto',
+        },
+        {
+          id: 't-sse',
+          at: 1700000000200,
+          kind: 'sse' as const,
+          label: 'SSE /api/v1/sessions/events connected',
+        },
+        { id: 't-tool', at: 1700000000300, kind: 'tool' as const, label: 'bash', detail: 'called' },
+        {
+          id: 't-reason',
+          at: 1700000000400,
+          kind: 'reasoning' as const,
+          label: 'reasoning',
+          detail: 'started',
+        },
+      ],
+    });
+    const timeline = await screen.findByTestId('chat-tools-timeline');
+    expect(timeline).toBeDefined();
+    await user.click(screen.getByText('Tools used'));
+    expect(
+      screen.queryByText('POST /api/v1/sessions/ses-1/messages', {
+        selector: '[data-testid="chat-tool-event"] *',
+      }),
+    ).toBeNull();
+    expect(screen.getAllByTestId('chat-tool-event').length).toBe(2);
+    expect(timeline.textContent).toContain('bash');
+    expect(timeline.textContent).toContain('Thinking');
+    expect(screen.getByTestId('chat-tools-details').textContent).toContain(
+      'POST /api/v1/sessions/ses-1/messages',
+    );
+  });
+
+  test('timeline: only internal transport hides the timeline', async () => {
+    renderWindow({
+      messages: [{ id: 'u1', role: 'user', text: 'go' }],
+      toolTrace: [
+        {
+          id: 't-prompt',
+          at: 1700000000100,
+          kind: 'prompt' as const,
+          label: 'POST /api/v1/sessions/ses-1/messages',
+          detail: 'auto',
+        },
+      ],
+    });
+    expect(screen.queryByTestId('chat-tools-timeline')).toBeNull();
+    expect(screen.queryByText('POST /api/v1/sessions/ses-1/messages')).toBeNull();
+  });
 });
 
 describe('ChatInput', () => {

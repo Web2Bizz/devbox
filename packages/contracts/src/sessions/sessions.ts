@@ -316,3 +316,118 @@ export type ToolCallInfo = {
   namespace?: string;
   result: string;
 };
+
+/**
+ * Live text start frame (runner 2.2.x `session.text.started`): a text block
+ * began. Carries only the owning session — the text itself streams via
+ * `session.text.delta` and lands via `session.text.ended`. Live-only:
+ * never durable, never replayed from the local buffer.
+ */
+export type SessionTextStartedFrame = SessionStreamFrame & {
+  type: 'session.text.started';
+  data: {
+    sessionID: string;
+  };
+};
+
+/**
+ * Live text delta frame (`session.text.delta`): streaming text unit the chat
+ * renders. Additive and envelope-compatible: the generic
+ * `SessionStreamFrame` stays permissive, this narrow type lets consumers
+ * detect the text tract without casting.
+ */
+export type SessionTextDeltaFrame = SessionStreamFrame & {
+  type: 'session.text.delta';
+  data: {
+    sessionID: string;
+    delta: string;
+  };
+};
+
+/**
+ * Live text end frame (`session.text.ended`): absolute text snapshot of the
+ * block. `text` is optional: an empty end still terminates the block (the
+ * caller treats it as `idle` when no text travels).
+ */
+export type SessionTextEndedFrame = SessionStreamFrame & {
+  type: 'session.text.ended';
+  data: {
+    sessionID: string;
+    text?: string;
+  };
+};
+
+/**
+ * Live reasoning frame (`session.reasoning.started/delta/ended`): the
+ * thinking trace of the turn. Live-only, never durable history and never
+ * chat text — the chat renders it as collapsed reasoning steps beside the
+ * answer, never inside `streamingText` or `SessionMessage.text`.
+ */
+export type SessionReasoningFrame = SessionStreamFrame & {
+  type: 'session.reasoning.started' | 'session.reasoning.delta' | 'session.reasoning.ended';
+  data: {
+    sessionID: string;
+    delta?: string;
+    text?: string;
+  };
+};
+
+/**
+ * Live tool lifecycle frame (`session.tool.called/progress/success/failed`
+ * plus `session.tool.input.started/delta/ended`): one tool call of the turn.
+ * Live-only, never durable history and never chat text — the chat renders
+ * it as timeline steps (`activeToolName` + per-turn `tool` trace rows).
+ * `data` keeps the known detail keys optional (single-line status snippets
+ * only — full argument/result bodies never travel here); unknown extra keys
+ * stay tolerated via the envelope stance.
+ */
+export type SessionToolLifecycleFrame = SessionStreamFrame & {
+  type:
+    | 'session.tool.called'
+    | 'session.tool.progress'
+    | 'session.tool.success'
+    | 'session.tool.failed'
+    | 'session.tool.input.started'
+    | 'session.tool.input.delta'
+    | 'session.tool.input.ended';
+  data: {
+    sessionID: string;
+    tool?: string;
+    toolName?: string;
+    name?: string;
+    message?: string;
+    progress?: string;
+    status?: string;
+    text?: string;
+    error?: string;
+  };
+};
+
+/**
+ * Live step frame (`session.step.started/streamed/ended/failed`): turn
+ * boundary of the runner. `session.step.ended` commits the streamed answer
+ * (same terminator family as `session.execution.succeeded`). Live-only.
+ */
+export type SessionStepFrame = SessionStreamFrame & {
+  type: 'session.step.started' | 'session.step.streamed' | 'session.step.ended' | 'session.step.failed';
+  data: {
+    sessionID: string;
+  };
+};
+
+/**
+ * Live execution frame (`session.execution.started/succeeded/failed/
+ * interrupted`): run boundary of the turn. The `succeeded` variant commits
+ * the streamed answer; `failed`/`interrupted` end the turn without a commit.
+ * Live-only.
+ */
+export type SessionExecutionFrame = SessionStreamFrame & {
+  type:
+    | 'session.execution.started'
+    | 'session.execution.succeeded'
+    | 'session.execution.failed'
+    | 'session.execution.interrupted';
+  data: {
+    sessionID: string;
+  };
+};

@@ -3231,6 +3231,9 @@ components:
         is never mirrored here). Wire: `id:` line mirrors `id` (Last-Event-ID cursor),
         `: ping` comments are transport heartbeats (not frames), and `type: stream.error`
         is the terminal failure frame (finite data.message/code, then the stream ends).
+        Live-only variants (session.text.*, session.reasoning.*, session.tool.*, session.step.*,
+        session.execution.*) ride this envelope project-scoped and are never durable history:
+        reload refetches the durable thread (REST) while the live trace restarts empty.
       properties:
         id:
           type: string
@@ -3243,6 +3246,160 @@ components:
         session:
           type: string
           description: hoisted session id when the variant carries one
+    SessionTextStartedFrame:
+      type: object
+      required: [id, type, data]
+      description: Live text block start (session.text.started) — owner only, live-only, never durable.
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [session.text.started]
+        data:
+          type: object
+          required: [sessionID]
+          properties:
+            sessionID:
+              type: string
+        session:
+          type: string
+    SessionTextDeltaFrame:
+      type: object
+      required: [id, type, data]
+      description: Live streaming text unit (session.text.delta) — rendered as chat text, live-only.
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [session.text.delta]
+        data:
+          type: object
+          required: [sessionID, delta]
+          properties:
+            sessionID:
+              type: string
+            delta:
+              type: string
+        session:
+          type: string
+    SessionTextEndedFrame:
+      type: object
+      required: [id, type, data]
+      description: Live text snapshot (session.text.ended) — empty text still terminates the block.
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [session.text.ended]
+        data:
+          type: object
+          required: [sessionID]
+          properties:
+            sessionID:
+              type: string
+            text:
+              type: string
+        session:
+          type: string
+    SessionReasoningFrame:
+      type: object
+      required: [id, type, data]
+      description: >-
+        Live thinking trace (session.reasoning.started/delta/ended) — collapsed reasoning steps
+        beside the answer, never chat text and never durable history.
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [session.reasoning.started, session.reasoning.delta, session.reasoning.ended]
+        data:
+          type: object
+          required: [sessionID]
+          properties:
+            sessionID:
+              type: string
+            delta:
+              type: string
+            text:
+              type: string
+        session:
+          type: string
+    SessionToolLifecycleFrame:
+      type: object
+      required: [id, type, data]
+      description: >-
+        Live tool lifecycle (session.tool.called/progress/success/failed plus
+        session.tool.input.started/delta/ended) — timeline steps, never chat text, never durable.
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [session.tool.called, session.tool.progress, session.tool.success, session.tool.failed, session.tool.input.started, session.tool.input.delta, session.tool.input.ended]
+        data:
+          type: object
+          required: [sessionID]
+          properties:
+            sessionID:
+              type: string
+            tool:
+              type: string
+            toolName:
+              type: string
+            name:
+              type: string
+            message:
+              type: string
+            progress:
+              type: string
+            status:
+              type: string
+            text:
+              type: string
+            error:
+              type: string
+        session:
+          type: string
+    SessionStepFrame:
+      type: object
+      required: [id, type, data]
+      description: Live turn boundary (session.step.started/streamed/ended/failed) — ended commits the answer.
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [session.step.started, session.step.streamed, session.step.ended, session.step.failed]
+        data:
+          type: object
+          required: [sessionID]
+          properties:
+            sessionID:
+              type: string
+        session:
+          type: string
+    SessionExecutionFrame:
+      type: object
+      required: [id, type, data]
+      description: Live run boundary (session.execution.started/succeeded/failed/interrupted) — succeeded commits the answer.
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [session.execution.started, session.execution.succeeded, session.execution.failed, session.execution.interrupted]
+        data:
+          type: object
+          required: [sessionID]
+          properties:
+            sessionID:
+              type: string
+        session:
+          type: string
     InterruptSessionRequest:
       type: object
       required: [projectId]

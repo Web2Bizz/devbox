@@ -3,6 +3,7 @@ import type { ChatMessage, ChatToolEvent } from '../../../hooks/useChat';
 export type ChatThreadProps = {
   messages: Array<ChatMessage>;
   streamingText: string;
+  reasoningText?: string;
   loading?: boolean;
   sending?: boolean;
   error?: string | null;

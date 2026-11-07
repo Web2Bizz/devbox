@@ -6,11 +6,22 @@ import { useI18n } from '../../../i18n';
 import type { ChatStreamingRowProps } from './types';
 
 /** Live streaming row: ghost bubble + cursor + status line under it. */
-export function ChatStreamingRow({ streamingText, activeAgentName, activeToolName }: ChatStreamingRowProps) {
+export function ChatStreamingRow({ streamingText, activeToolName, reasoningText = '', fallbackText = null }: ChatStreamingRowProps) {
   const { t } = useI18n();
+  const hasReasoning = reasoningText.length > 0;
+  const fallback = typeof fallbackText === 'string' && fallbackText.trim().length > 0 ? fallbackText.slice(0, 500) : null;
   return (
     <Message align="start" className="py-3" data-testid="chat-streaming">
       <MessageContent>
+        {hasReasoning ? (
+          <p data-testid="chat-reasoning" className="whitespace-pre-wrap text-xs text-muted-foreground">
+            {reasoningText.slice(0, 500)}
+          </p>
+        ) : fallback ? (
+          <p data-testid="chat-reasoning-fallback" className="whitespace-pre-wrap text-xs text-muted-foreground">
+            {fallback}
+          </p>
+        ) : null}
         <Bubble variant="ghost" align="start">
           <BubbleContent>
             <MessageText className="whitespace-pre-wrap text-sm leading-relaxed">{streamingText}</MessageText>
@@ -21,11 +32,6 @@ export function ChatStreamingRow({ streamingText, activeAgentName, activeToolNam
         </Bubble>
         <div className="flex flex-wrap items-center gap-2 pt-1" data-testid="chat-streaming-status">
           <ShimmerText>{t.chat.streaming}</ShimmerText>
-          {activeAgentName ? (
-            <Badge variant="secondary">
-              {t.chat.activeAgent}: {activeAgentName}
-            </Badge>
-          ) : null}
           {activeToolName ? (
             <Badge variant="secondary">
               {t.chat.activeTool}: {activeToolName}

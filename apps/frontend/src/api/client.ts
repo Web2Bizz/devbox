@@ -320,7 +320,9 @@ export const api = {
   // answer: the backend answers an honest 503 EXTERNAL_UNAVAILABLE body
   // BEFORE any text/event-stream header when the runner is down). No
   // client-side timeout — the stream is long-lived; cancellation arrives
-  // via the caller's AbortSignal.
+  // via the caller's AbortSignal. The stream carries live-only detail
+  // (reasoning/tool/text/step markers) project-scoped — durable history
+  // stays on REST, never in this stream.
   streamSessionEvents: async (
     accessToken: string,
     projectId: string,

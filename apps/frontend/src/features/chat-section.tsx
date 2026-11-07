@@ -63,6 +63,7 @@ export function ChatSection({ sessionId, projectId, className, composerClassName
   const {
     messages,
     streamingText,
+    reasoningText,
     loading,
     sending,
     error,
@@ -153,6 +154,7 @@ export function ChatSection({ sessionId, projectId, className, composerClassName
       <ChatThread
         messages={messages}
         streamingText={streamingText}
+        reasoningText={reasoningText}
         loading={loading}
         sending={sending}
         error={error}

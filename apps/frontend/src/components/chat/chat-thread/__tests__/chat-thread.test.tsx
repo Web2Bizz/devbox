@@ -339,6 +339,113 @@ describe('ChatThread', () => {
     renderThread({ error: 'boom', toolTrace: trace });
     expect(screen.queryByTestId('chat-tools-timeline')).toBeNull();
   });
+
+  test('thinking: empty reasoning shows the last timeline line instead of a mute shimmer', async () => {
+    renderThread({
+      messages: [{ id: 'u1', role: 'user', text: 'go' }],
+      sending: true,
+      reasoningText: '',
+      toolTrace: [
+        { id: 't1', at: 1700000000000, kind: 'sse' as const, label: 'SSE /api/v1/sessions/events connected' },
+        { id: 't2', at: 1700000001000, kind: 'reasoning' as const, label: 'reasoning', detail: 'started' },
+      ],
+    });
+    expect(await screen.findByTestId('chat-thinking')).toBeDefined();
+    expect(await screen.findByTestId('chat-reasoning-fallback')).toBeDefined();
+    // Human label via t.chat (Thinking/Думает), never the raw `reasoning` transport label.
+    expect(screen.getByTestId('chat-reasoning-fallback').textContent).toContain('Thinking');
+    expect(screen.queryByTestId('chat-reasoning')).toBeNull();
+  });
+
+  test('thinking: non-empty reasoning keeps the real preview, no fallback', async () => {
+    renderThread({
+      messages: [{ id: 'u1', role: 'user', text: 'go' }],
+      sending: true,
+      reasoningText: 'THINKING-TRACE',
+      toolTrace: [{ id: 't1', at: 1700000000000, kind: 'sse' as const, label: 'SSE connected' }],
+    });
+    expect(await screen.findByTestId('chat-reasoning')).toBeDefined();
+    expect(screen.queryByTestId('chat-reasoning-fallback')).toBeNull();
+  });
+
+  test('streaming: empty reasoning shows the last timeline line under the ghost bubble', async () => {
+    renderThread({
+      messages: [{ id: 'u1', role: 'user', text: 'go' }],
+      streamingText: 'partial…',
+      reasoningText: '',
+      toolTrace: [{ id: 't1', at: 1700000000000, kind: 'tool' as const, label: 'bash', detail: 'called' }],
+    });
+    expect(await screen.findByTestId('chat-streaming')).toBeDefined();
+    expect(await screen.findByTestId('chat-reasoning-fallback')).toBeDefined();
+    expect(screen.getByTestId('chat-reasoning-fallback').textContent).toContain('bash');
+  });
+
+  test('timeline: internal transport kinds hidden, tool/reasoning shown with human labels', async () => {
+    const user = userEvent.setup();
+    renderThread({
+      messages: [{ id: 'u1', role: 'user', text: 'go' }],
+      toolTrace: [
+        { id: 't-auth', at: 1700000000000, kind: 'auth' as const, label: 'auth' },
+        {
+          id: 't-prompt',
+          at: 1700000000100,
+          kind: 'prompt' as const,
+          label: 'POST /api/v1/sessions/ses-1/messages',
+          detail: 'auto',
+        },
+        {
+          id: 't-sse',
+          at: 1700000000200,
+          kind: 'sse' as const,
+          label: 'SSE /api/v1/sessions/events connected',
+        },
+        { id: 't-tool', at: 1700000000300, kind: 'tool' as const, label: 'bash', detail: 'called' },
+        {
+          id: 't-reason',
+          at: 1700000000400,
+          kind: 'reasoning' as const,
+          label: 'reasoning',
+          detail: 'started',
+        },
+      ],
+    });
+    const timeline = await screen.findByTestId('chat-tools-timeline');
+    expect(timeline).toBeDefined();
+    // Open the collapsible to reveal user rows + debug details.
+    await user.click(screen.getByText('Tools used'));
+    // Raw transport never renders as user rows.
+    expect(screen.queryByText('POST /api/v1/sessions/ses-1/messages', { selector: '[data-testid="chat-tool-event"] *' })).toBeNull();
+    const rows = screen.getAllByTestId('chat-tool-event');
+    expect(rows.length).toBe(2);
+    expect(timeline.textContent).toContain('bash');
+    expect(timeline.textContent).toContain('Thinking');
+    // Full technical trace preserved for debugging in the collapsed details.
+    const details = screen.getByTestId('chat-tools-details');
+    expect(details.textContent).toContain('POST /api/v1/sessions/ses-1/messages');
+  });
+
+  test('timeline: only internal transport hides the timeline (no user steps yet)', async () => {
+    renderThread({
+      messages: [{ id: 'u1', role: 'user', text: 'go' }],
+      toolTrace: [
+        {
+          id: 't-prompt',
+          at: 1700000000100,
+          kind: 'prompt' as const,
+          label: 'POST /api/v1/sessions/ses-1/messages',
+          detail: 'auto',
+        },
+        {
+          id: 't-sse',
+          at: 1700000000200,
+          kind: 'sse' as const,
+          label: 'SSE /api/v1/sessions/events connected',
+        },
+      ],
+    });
+    expect(screen.queryByTestId('chat-tools-timeline')).toBeNull();
+    expect(screen.queryByText('POST /api/v1/sessions/ses-1/messages')).toBeNull();
+  });
 });
 
 describe('ChatInput', () => {

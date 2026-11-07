@@ -890,7 +890,7 @@ const streamError = (session: string, message?: string) => ({
     expect(result.current.messages[1]).toMatchObject({ role: 'assistant', text: 'just text' });
   });
 
-  test('reasoning frames surface nowhere: no tool, no text, no trace', async () => {
+  test('reasoning frames surface as live reasoning steps', async () => {
     const { result } = renderHook(() => useChat({ ...PROJECT }));
     await settle();
 
@@ -902,7 +902,9 @@ const streamError = (session: string, message?: string) => ({
 
     expect(result.current.activeToolName).toBeNull();
     expect(result.current.streamingText).toBe('');
+    expect(result.current.reasoningText).toContain('THINKING-NOT-CHAT');
     expect(result.current.toolTrace.filter((e) => e.kind === 'tool').length).toBe(0);
+    expect(result.current.toolTrace.filter((e) => e.kind === 'reasoning').length).toBe(1);
     expect(result.current.messages.length).toBe(1);
     expect(result.current.sending).toBe(true);
 
@@ -971,6 +973,27 @@ const streamError = (session: string, message?: string) => ({
     expect(result.current.streamingText).toBe('');
     expect(result.current.toolTrace.filter((e) => e.kind === 'tool').length).toBe(0);
     expect(result.current.error).toBeNull();
+
+    pushFrames([idle('ses-1')]);
+    await settle(16);
+  });
+
+  test('internal transport trace preserved in state for debugging (UI hides it)', async () => {
+    const { result } = renderHook(() => useChat({ ...PROJECT }));
+    await settle();
+
+    act(() => {
+      void result.current.send('hello');
+    });
+    pushFrames([toolCalled('ses-1', 'bash')]);
+    await settle(16);
+
+    // Full trace stays append-only: internal auth/prompt rows exist for the
+    // debug `<details>`, the timeline UI filters them (see chat-thread tests).
+    const kinds = result.current.toolTrace.map((e) => e.kind);
+    expect(kinds).toContain('auth');
+    expect(kinds).toContain('prompt');
+    expect(kinds).toContain('tool');
 
     pushFrames([idle('ses-1')]);
     await settle(16);

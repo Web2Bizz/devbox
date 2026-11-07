@@ -11,7 +11,7 @@ import {
 import { ErrorState } from '../../states';
 import { useI18n } from '../../../i18n';
 import { ChatMessageRow } from '../chat-message';
-import { ChatToolTimeline } from '../chat-tool-timeline';
+import { ChatToolTimeline, formatVisibleFallback, getVisibleToolEvents } from '../chat-tool-timeline';
 import { ChatThinkingRow } from '../chat-thinking-row';
 import { ChatStreamingRow } from '../chat-streaming-row';
 import { ChatThreadEmpty } from '../chat-thread-empty';
@@ -26,6 +26,7 @@ import type { ChatThreadProps } from './types';
 export function ChatThread({
   messages,
   streamingText,
+  reasoningText = '',
   loading = false,
   sending = false,
   error = null,
@@ -40,12 +41,24 @@ export function ChatThread({
 }: ChatThreadProps) {
   const { t } = useI18n();
   const thinking = sending && !streamingText;
+  const hasReasoning = reasoningText.length > 0;
+  const hasReasoningTrace = toolTrace.some((event) => event.kind === 'reasoning');
+  const reasoningActive = hasReasoning || hasReasoningTrace;
+  const visibleTrace = getVisibleToolEvents(toolTrace);
+  const hasLiveTrace = visibleTrace.length > 0 || activeToolName || hasReasoning;
+  // Explicit fallback when the thinking trace is empty (ask/direct idle or a
+  // model without reasoning): the last VISIBLE agent step keeps the thinking and
+  // streaming rows from rendering a mute shimmer. Never invents content and
+  // never leaks raw transport (`POST /api/...`, SSE) — only the human
+  // `tool`/`reasoning` line via `t.chat` (full raw trace stays in the
+  // timeline `<details>` for debugging).
+  const fallbackText = formatVisibleFallback(toolTrace, t);
 
-  if (loading && messages.length === 0 && !streamingText && !error) {
+  if (loading && messages.length === 0 && !streamingText && !hasReasoning && !error) {
     return <ChatThreadLoading />;
   }
 
-  if (error && messages.length === 0 && !streamingText && !thinking) {
+  if (error && messages.length === 0 && !streamingText && !hasReasoning && !thinking) {
     return (
       <div className="min-h-[20rem] px-1 pt-[calc(var(--header-height)_+_1rem)]">
         <ErrorState message={error} onRetry={onRetry} retryLabel={t.chat.retry} />
@@ -53,7 +66,7 @@ export function ChatThread({
     );
   }
 
-  if (messages.length === 0 && !streamingText && !thinking) {
+  if (messages.length === 0 && !streamingText && !hasReasoning && !thinking) {
     return <ChatThreadEmpty />;
   }
 
@@ -69,19 +82,19 @@ export function ChatThread({
                   <ChatMessageRow message={m} onFork={onFork} onRevert={onRevert} />
                 </MessageScrollerItem>
               ))}
-              {toolTrace.length > 0 || activeToolName ? (
+              {hasLiveTrace ? (
                 <MessageScrollerItem messageId="chat-tools-timeline">
-                  <ChatToolTimeline events={toolTrace} liveToolName={activeToolName} />
+                  <ChatToolTimeline events={toolTrace} liveToolName={activeToolName} liveReasoningText={hasReasoning ? reasoningText : null} />
                 </MessageScrollerItem>
               ) : null}
               {thinking && (
                 <MessageScrollerItem messageId="chat-thinking" scrollAnchor>
-                  <ChatThinkingRow activeAgentName={activeAgentName} activeToolName={activeToolName} />
+                  <ChatThinkingRow activeAgentName={activeAgentName} activeToolName={activeToolName} reasoningText={reasoningText} reasoningActive={reasoningActive} fallbackText={fallbackText} />
                 </MessageScrollerItem>
               )}
               {streamingText && (
                 <MessageScrollerItem messageId="chat-streaming" scrollAnchor>
-                  <ChatStreamingRow streamingText={streamingText} activeAgentName={activeAgentName} activeToolName={activeToolName} />
+                  <ChatStreamingRow streamingText={streamingText} activeAgentName={activeAgentName} activeToolName={activeToolName} reasoningText={reasoningText} fallbackText={fallbackText} />
                 </MessageScrollerItem>
               )}
             </MessageScrollerContent>

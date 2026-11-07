@@ -192,6 +192,14 @@ export const DEFAULT_AGENT_ID = 'ask';
  * `opts.sessionId` narrows the server subscription (`?session=`), `opts.lastEventId`
  * resumes after the cursor (`Last-Event-ID`, `?cursor=` fallback server-side).
  * No frame bodies are logged; `withAuth`/401 rotation is unchanged.
+ *
+ * Envelope stance: the schema stays permissive (`type: string`, variant-owned
+ * `data`) so live reasoning (`session.reasoning.*`), tool lifecycle
+ * (`session.tool.*`), text (`session.text.*`) and step/execution markers pass
+ * through without loss — narrowing to `SessionReasoningFrame`,
+ * `SessionToolLifecycleFrame`, `SessionTextDeltaFrame` and siblings happens in
+ * `useChat` via safeParse (never a cast). Durable vs live: history is durable
+ * (REST), these frames are live-only (cleared on reload, never persisted).
  */
 export type SessionEventStreamOpts = {
   sessionId?: string;

@@ -7,7 +7,7 @@ import type { ChatThreadLoadingProps } from './types';
 export function ChatThreadLoading(_props: ChatThreadLoadingProps) {
   const { t } = useI18n();
   return (
-    <div className="grid gap-2 px-1 pt-[calc(var(--header-height)_+_1rem)]" aria-busy="true" aria-label={t.common.loadingPage}>
+    <div className="grid auto-rows-min content-start gap-2 self-start px-1 pt-[calc(var(--header-height)_+_1rem)]" aria-busy="true" aria-label={t.common.loadingPage}>
       <Skeleton className="h-16" />
       <Skeleton className="h-16" />
       <Skeleton className="h-16" />

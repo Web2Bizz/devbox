@@ -44,6 +44,7 @@ export function ChatSection({ sessionId, projectId }: ChatSectionProps) {
   const {
     messages,
     streamingText,
+    reasoningText,
     loading,
     sending,
     error,
@@ -134,6 +135,7 @@ export function ChatSection({ sessionId, projectId }: ChatSectionProps) {
       <ChatThread
         messages={messages}
         streamingText={streamingText}
+        reasoningText={reasoningText}
         loading={loading}
         sending={sending}
         error={error}

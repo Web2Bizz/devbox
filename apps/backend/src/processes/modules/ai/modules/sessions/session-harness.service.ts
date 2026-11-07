@@ -523,6 +523,7 @@ export class SessionHarnessService implements SessionHarness, OnModuleInit, OnMo
     });
     await this.captureTurnSnapshot(directory, sessionId, receipt.id, cid);
     this.busyDirect.add(sessionId);
+    this.bufferDirectLifecycleStart(sessionId, agentId);
     try {
       let answer: string;
       if (created && createdAbs) {
@@ -566,6 +567,7 @@ export class SessionHarnessService implements SessionHarness, OnModuleInit, OnMo
         createdAt: assistant.createdAt,
       });
       this.bufferDirectFrames(sessionId, assistant);
+      this.bufferDirectLifecycleEnd(sessionId, agentId);
       this.bufferDirectIdle(sessionId);
       return receipt;
     } finally {
@@ -637,6 +639,7 @@ export class SessionHarnessService implements SessionHarness, OnModuleInit, OnMo
     // stage() can restore exactly the state the turn started from.
     await this.captureTurnSnapshot(directory, sessionId, receipt.id, cid);
     this.busyDirect.add(sessionId);
+    this.bufferDirectLifecycleStart(sessionId, agentId);
     const assistantId = Bun.randomUUIDv7();
     try {
       const answer = await this.agents.askQuestion(agentId, body.text, userId, cid);
@@ -661,6 +664,7 @@ export class SessionHarnessService implements SessionHarness, OnModuleInit, OnMo
         createdAt: assistant.createdAt,
       });
       this.bufferDirectFrames(sessionId, assistant);
+      this.bufferDirectLifecycleEnd(sessionId, agentId);
       this.bufferDirectIdle(sessionId);
       this.logger.info('[sessions] prompt answered directly', cid);
       return receipt;
@@ -679,6 +683,30 @@ export class SessionHarnessService implements SessionHarness, OnModuleInit, OnMo
     } finally {
       this.busyDirect.delete(sessionId);
     }
+  }
+
+  /**
+   * Live-only lifecycle markers for the direct runner (ask/text-only path):
+   * the direct transport has no host tool bus, so without these a direct
+   * turn would stream text with no reasoning/tool steps and the chat would
+   * show a mute shimmer. Markers ride the same bounded localFrames buffer
+   * (project-scoped via data.sessionID, filtered by streamEvents like text),
+   * never durable history (recordHostEvent skips reasoning/tool by type).
+   */
+  private bufferDirectLifecycleStart(sessionId: string, agentId: string): void {
+    this.pushLocalFrame('session.reasoning.started', { sessionID: sessionId });
+    this.pushLocalFrame('session.tool.called', { sessionID: sessionId, tool: agentId });
+  }
+
+  /**
+   * Closing markers for a completed direct turn (live-only, same scope as
+   * the start markers above): tool success + reasoning end, before the
+   * terminal session.idle. Never durable, never chat text — the frontend
+   * projects them to activeToolName + additive tool/reasoning trace rows.
+   */
+  private bufferDirectLifecycleEnd(sessionId: string, agentId: string): void {
+    this.pushLocalFrame('session.tool.success', { sessionID: sessionId, tool: agentId });
+    this.pushLocalFrame('session.reasoning.ended', { sessionID: sessionId });
   }
 
   /**
@@ -843,7 +871,15 @@ export class SessionHarnessService implements SessionHarness, OnModuleInit, OnMo
     }
   }
 
-  /** Accumulate assistant text and persist it idempotently on turn end. */
+  /**
+   * Accumulate assistant text and persist it idempotently on turn end.
+   *
+   * Durable vs live (explicit): only `session.text.*` assistant deltas become
+   * durable `session_messages` rows (reload-safe). Reasoning
+   * (`session.reasoning.*`) and tool lifecycle (`session.tool.*`) are
+   * live-only SSE detail — they ride `streamEvents` project-scoped but are
+   * never written here, never invent a durable row, and vanish on reload.
+   */
   private async recordHostEvent(event: unknown): Promise<void> {
     const frame = event as { type?: unknown; created?: unknown; data?: unknown } | null;
     const type = typeof frame?.type === 'string' ? frame.type : '';
@@ -858,6 +894,29 @@ export class SessionHarnessService implements SessionHarness, OnModuleInit, OnMo
     const createdRaw = frame?.created;
     const createdAt =
       typeof createdRaw === 'number' && Number.isFinite(createdRaw) ? createdRaw : Date.now();
+
+    if (
+      type === 'session.reasoning.started' ||
+      type === 'session.reasoning.delta' ||
+      type === 'session.reasoning.ended' ||
+      type === 'session.tool.called' ||
+      type === 'session.tool.progress' ||
+      type === 'session.tool.success' ||
+      type === 'session.tool.failed' ||
+      type === 'session.tool.input.started' ||
+      type === 'session.tool.input.delta' ||
+      type === 'session.tool.input.ended' ||
+      type === 'session.text.started' ||
+      type === 'session.step.started' ||
+      type === 'session.step.streamed' ||
+      type === 'session.step.failed' ||
+      type === 'session.execution.started'
+    ) {
+      // Live-only detail: reasoning/thinking + tool lifecycle + turn markers
+      // stream to the chat via SSE without loss, but never become durable
+      // history. No buffer, no persist — reload shows the durable thread only.
+      return;
+    }
 
     if (type === 'session.text.delta') {
       const delta = typeof data.delta === 'string' ? data.delta : '';
@@ -972,6 +1031,11 @@ export class SessionHarnessService implements SessionHarness, OnModuleInit, OnMo
    * {id, type, data} passthrough with the host session id re-keyed to OUR
    * session uuid via `resolve`; `session` is hoisted from data.sessionID.
    * Upstream top-level extras are dropped; data stays variant-owned.
+   *
+   * Reasoning (`session.reasoning.*`) and tool lifecycle (`session.tool.*`)
+   * pass through untouched (no truncation, no persist): the project-scoped
+   * `filterFrame` below admits them like text frames, so the chat sees every
+   * step without loss. Durable history stays text-only (see recordHostEvent).
    */
   private toStreamFrame(
     value: unknown,
@@ -997,9 +1061,17 @@ export class SessionHarnessService implements SessionHarness, OnModuleInit, OnMo
    * decides WHO may stream; the bus is process-global, so frames are filtered
    * to sessions of the gated project (our uuids).
    *
+   * Durable vs live (explicit): the durable thread (Postgres
+   * `session_messages`, text only) survives reload via REST history;
+   * reasoning (`session.reasoning.*`) and tool lifecycle (`session.tool.*`)
+   * are live-only SSE detail — project-scoped like text, replayed only from
+   * the bounded `localFrames` buffer when present there, otherwise live from
+   * the host bus and gone after redial. The resume cursor covers
+   * `localFrames` ids; host live frames carry their own ids forward.
+   *
    * The stream ends on downstream close (relaySse aborts the signal), on the
    * idle timeout (no busy direct turn AND no new local/host frame), or on
-   * the overall STREAM_CAP_MS. Full content remains available via history.
+   * the overall STREAM_CAP_MS. Full text content remains available via history.
    */
   async streamEvents(
     userId: string,

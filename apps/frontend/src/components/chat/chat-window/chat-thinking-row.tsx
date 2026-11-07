@@ -15,11 +15,6 @@ export function ChatThinkingRow({ activeAgentName, activeToolName }: ChatThinkin
   return (
     <div data-testid="chat-thinking" aria-busy="true" className="flex flex-wrap items-center gap-2 py-2">
       <AgentThinking activeAgentName={activeAgentName} activeToolName={activeToolName} />
-      {activeAgentName ? (
-        <Badge variant="secondary" data-testid="chat-active-agent">
-          {t.chat.activeAgent}: {activeAgentName}
-        </Badge>
-      ) : null}
       {activeToolName ? (
         <Badge variant="secondary" data-testid="chat-active-tool">
           {t.chat.activeTool}: {activeToolName}

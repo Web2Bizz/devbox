@@ -10,12 +10,15 @@ import type { ChatLiveStatusProps } from './types';
  * (`sending && !streamingText`).
  *
  * Live status first: when the turn reports an agent/tool, the line is the
- * flat `agent [· tool]` pair (no extra chrome, ShimmerText only). Without
- * that data it falls back to cycling `t.chat.thinking` every ~1.6s — the
- * rotation is a fallback, not the primary status. Language switch (`t`
- * identity) resets the index to the first phrase.
+ * flat `agent [· tool]` pair (no extra chrome, ShimmerText only). Reasoning
+ * (`session.reasoning.*`, live-only, never durable) keeps the same line —
+ * the thinking trace itself renders in `ChatThinkingRow`/`ChatStreamingRow`
+ * and the timeline, never in this status. Without agent/tool data it falls
+ * back to cycling `t.chat.thinking` every ~1.6s — the rotation is a
+ * fallback, not the primary status. Language switch (`t` identity) resets
+ * the index to the first phrase.
  */
-export function ChatLiveStatus({ activeAgentName, activeToolName }: ChatLiveStatusProps) {
+export function ChatLiveStatus({ activeAgentName, activeToolName, reasoningActive = false }: ChatLiveStatusProps) {
   const { t } = useI18n();
   const phrases = t.chat.thinking;
   const [index, setIndex] = useState(0);
@@ -37,6 +40,9 @@ export function ChatLiveStatus({ activeAgentName, activeToolName }: ChatLiveStat
   );
   if (live.length > 0) {
     return <ShimmerText>{live.join(' · ')}</ShimmerText>;
+  }
+  if (reasoningActive) {
+    return <ShimmerText>{phrases[0] ?? ''}</ShimmerText>;
   }
   return <ShimmerText>{phrases[index] ?? ''}</ShimmerText>;
 }

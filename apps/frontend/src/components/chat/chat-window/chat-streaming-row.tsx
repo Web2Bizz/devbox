@@ -11,7 +11,7 @@ export type ChatStreamingRowProps = {
 };
 
 /** Live streaming row: ghost bubble + cursor + status line under it. */
-export function ChatStreamingRow({ streamingText, activeAgentName, activeToolName }: ChatStreamingRowProps) {
+export function ChatStreamingRow({ streamingText, activeToolName }: ChatStreamingRowProps) {
   const { t } = useI18n();
   return (
     <Message align="start" className="py-3" data-testid="chat-streaming">
@@ -26,11 +26,6 @@ export function ChatStreamingRow({ streamingText, activeAgentName, activeToolNam
         </Bubble>
         <div className="flex flex-wrap items-center gap-2 pt-1" data-testid="chat-streaming-status">
           <ShimmerText>{t.chat.streaming}</ShimmerText>
-          {activeAgentName ? (
-            <Badge variant="secondary">
-              {t.chat.activeAgent}: {activeAgentName}
-            </Badge>
-          ) : null}
           {activeToolName ? (
             <Badge variant="secondary">
               {t.chat.activeTool}: {activeToolName}

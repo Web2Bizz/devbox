@@ -39,6 +39,48 @@ src/features/chat/thread/ChatThread.tsx
 find apps/frontend/src/features -mindepth 2 -print
 ```
 
+## 3. component-folders
+
+### Scope
+
+`apps/frontend/src/components/**/*` — все презентационные компоненты.
+
+### Rule
+
+Один компонент — одна папка: `<имя-кейс>/<Имя>.tsx` + `types.ts` + `index.ts`
+(барелль-экспорт). Типы пропсов/состояния — только в `types.ts` как
+`export type` (без `interface`, см. корневой `CODE_OF_CONDUCT.md` §1);
+в `<Имя>.tsx` типов не заводить (только импорт из `./types`).
+Россыпь `chat-*.tsx` в корне общей папки запрещена.
+
+```text
+// do
+chat-thread/ChatThread.tsx
+chat-thread/types.ts
+chat-thread/index.ts
+chat-row/ChatRow.tsx
+chat-row/types.ts
+chat-row/index.ts
+
+// don't
+chat/chat-thinking-row.tsx
+chat/chat-row.tsx
+chat/chat-tool-timeline.tsx
+```
+
+### Control
+
+```sh
+# каждый компонентный каталог с .tsx обязан иметь types.ts + index.ts
+for d in apps/frontend/src/components/*/; do
+  ls "$d" | grep -q '\.tsx$' || continue
+  test -f "$d/types.ts" || echo "NO types.ts: $d"
+  test -f "$d/index.ts" || echo "NO index.ts: $d"
+done
+# должен ничего не напечатать — типов в файлах компонентов нет
+rg -l 'export type \w+Props' apps/frontend/src/components --glob '*.tsx' --glob '!types.ts'
+```
+
 ## 2. layout-owns-placement
 
 ### Scope

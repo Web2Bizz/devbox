@@ -4,6 +4,7 @@ import { MODULE_METADATA } from "@nestjs/common/constants";
 import { AgentsModule } from "../modules/agents/agents.module";
 import { OpencodeModule } from "../modules/opencode/opencode.module";
 import { SessionsModule } from "../modules/sessions/sessions.module";
+import { ToolsModule } from "../modules/tools/tools.module";
 import { WorkersModule } from "../../workers/workers.module";
 import { AiModule } from "../ai.module";
 
@@ -32,11 +33,12 @@ describe("AiModule metadata", () => {
     assert.equal(AiModule.name, "AiModule");
   });
 
-  it("imports agents, workers, opencode and sessions modules", () => {
+  it("imports agents, workers, opencode, tools and sessions modules", () => {
     assert.deepEqual(meta<Array<unknown>>(MODULE_METADATA.IMPORTS), [
       AgentsModule,
       WorkersModule,
       OpencodeModule,
+      ToolsModule,
       SessionsModule,
     ]);
   });

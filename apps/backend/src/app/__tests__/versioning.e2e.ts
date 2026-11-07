@@ -44,6 +44,8 @@ const E2E_PROJECT_ID = '123e4567-e89b-12d3-a456-426614174090';
 // Hand-signed caller (TokenService.sign is pure, no DB — same pattern as
 // the organizations unreachable-branch probe).
 const E2E_USER_ID = '123e4567-e89b-12d3-a456-426614174091';
+// Org id the patched C4 gate reports (org-only model: directory jail needs it).
+const E2E_ORG_ID = '123e4567-e89b-12d3-a456-426614174095';
 
 type CheckResult = {
   name: string;
@@ -250,9 +252,9 @@ async function main(): Promise<void> {
           correlationId?: string,
         ) => Promise<{ ownerId: string | null; orgIds: Array<string> }>;
       };
-      orgsProto.assertProjectAccessById = async () => ({ ownerId: E2E_USER_ID, orgIds: [] });
+      orgsProto.assertProjectAccessById = async () => ({ ownerId: E2E_USER_ID, orgIds: [E2E_ORG_ID] });
       const pathsProto = WorkspacePathService.prototype as unknown as {
-        resolveUserStrict: (
+        resolveOrgStrict: (
           userId: string,
           projectId: string,
           subPath?: string,
@@ -260,7 +262,7 @@ async function main(): Promise<void> {
         realStrictRoot: () => Promise<string>;
         assertInsideJail: (abs: string, jailReal: string) => Promise<string>;
       };
-      pathsProto.resolveUserStrict = async () => ({ absRepo: '/tmp/rush-code-e2e-project' });
+      pathsProto.resolveOrgStrict = async () => ({ absRepo: '/tmp/rush-code-e2e-project' });
       pathsProto.realStrictRoot = async () => '/tmp/rush-code-e2e-root';
       pathsProto.assertInsideJail = async (abs: string) => abs;
       historyProto.listLocalSessions = async () => [];

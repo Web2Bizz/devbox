@@ -3,12 +3,17 @@ import type { Request as ExpressRequest, Response as ExpressResponse } from 'exp
 import type {
   CreateSessionInput,
   InterruptSessionInput,
+  RevertInfo,
+  RevertStageRequest,
   SendMessageInput,
+  SessionForkRequest,
+  SessionForkResponse,
   SessionInfo,
   SessionInterruptResult,
   SessionMessage,
   SessionRunStatusMap,
   SessionRunnerProvider,
+  SnapshotDiff,
 } from './sessions.dto';
 import { SessionHarnessService } from './session-harness.service';
 
@@ -98,5 +103,58 @@ export class SessionsService {
   /** GET /api/v1/sessions/models — runner model inventory (Go/Zen family). */
   async models(userId: string, projectId: string | undefined, cid: string): Promise<Array<{ id: string; name: string; providerID: string }>> {
     return this.harness.models(userId, projectId, cid);
+  }
+
+  /** POST /api/v1/sessions/{id}/fork — copy the durable thread up to a boundary. */
+  async fork(
+    userId: string,
+    sessionId: string,
+    body: SessionForkRequest,
+    cid: string,
+  ): Promise<SessionForkResponse> {
+    return this.harness.fork(userId, sessionId, body, cid);
+  }
+
+  /** POST /api/v1/sessions/{id}/revert/stage — restore + diff the boundary turn. */
+  async stageRevert(
+    userId: string,
+    sessionId: string,
+    body: RevertStageRequest,
+    cid: string,
+  ): Promise<RevertInfo> {
+    return this.harness.stageRevert(userId, sessionId, body, cid);
+  }
+
+  /** DELETE /api/v1/sessions/{id}/revert — discard the staged revert. */
+  async clearRevert(
+    userId: string,
+    sessionId: string,
+    projectId: string | undefined,
+    cid: string,
+  ): Promise<void> {
+    return this.harness.clearRevert(userId, sessionId, projectId, cid);
+  }
+
+  /** POST /api/v1/sessions/{id}/revert/commit — keep the restored files. */
+  async commitRevert(
+    userId: string,
+    sessionId: string,
+    projectId: string | undefined,
+    cid: string,
+  ): Promise<void> {
+    return this.harness.commitRevert(userId, sessionId, projectId, cid);
+  }
+
+  /** GET /api/v1/sessions/{id}/snapshots/diff?from&to — per-file diff rows. */
+  async snapshotDiff(
+    userId: string,
+    sessionId: string,
+    projectId: string | undefined,
+    from: string,
+    to: string,
+    contextRaw: string | undefined,
+    cid: string,
+  ): Promise<Array<SnapshotDiff>> {
+    return this.harness.snapshotDiff(userId, sessionId, projectId, from, to, contextRaw, cid);
   }
 }

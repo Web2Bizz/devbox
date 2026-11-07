@@ -2,12 +2,17 @@ import type { Request as ExpressRequest, Response as ExpressResponse } from 'exp
 import type {
   CreateSessionInput,
   InterruptSessionInput,
+  RevertInfo,
+  RevertStageRequest,
   SendMessageInput,
+  SessionForkRequest,
+  SessionForkResponse,
   SessionInfo,
   SessionInterruptResult,
   SessionMessage,
   SessionRunStatusMap,
   SessionRunnerProvider,
+  SnapshotDiff,
 } from './sessions.dto';
 
 /**
@@ -83,4 +88,47 @@ export interface SessionHarness {
     req: ExpressRequest,
     res: ExpressResponse,
   ): Promise<void>;
+
+  /** POST /api/v1/sessions/{id}/fork — copy the durable thread up to a boundary. */
+  fork(
+    userId: string,
+    sessionId: string,
+    body: SessionForkRequest,
+    cid: string,
+  ): Promise<SessionForkResponse>;
+
+  /** POST /api/v1/sessions/{id}/revert/stage — restore + diff the boundary turn. */
+  stageRevert(
+    userId: string,
+    sessionId: string,
+    body: RevertStageRequest,
+    cid: string,
+  ): Promise<RevertInfo>;
+
+  /** DELETE /api/v1/sessions/{id}/revert — discard the staged revert. */
+  clearRevert(
+    userId: string,
+    sessionId: string,
+    projectId: string | undefined,
+    cid: string,
+  ): Promise<void>;
+
+  /** POST /api/v1/sessions/{id}/revert/commit — keep the restored files. */
+  commitRevert(
+    userId: string,
+    sessionId: string,
+    projectId: string | undefined,
+    cid: string,
+  ): Promise<void>;
+
+  /** GET /api/v1/sessions/{id}/snapshots/diff?from&to — per-file diff rows. */
+  snapshotDiff(
+    userId: string,
+    sessionId: string,
+    projectId: string | undefined,
+    from: string,
+    to: string,
+    contextRaw: string | undefined,
+    cid: string,
+  ): Promise<Array<SnapshotDiff>>;
 }

@@ -8,7 +8,7 @@ import { SessionHarnessService } from '../session-harness.service';
 const UID = '123e4567-e89b-12d3-a456-426614174001';
 const PID = '123e4567-e89b-12d3-a456-426614174003';
 const JAIL = '/tmp/repos';
-const DIR = `${JAIL}/users/${UID}/projects/${PID}/content`;
+const DIR = `${JAIL}/orgs/${UID}/projects/${PID}/content`;
 
 type Case = { name: string; run: () => Promise<void> | void };
 
@@ -153,9 +153,21 @@ function harness(options: {
 }
 
 function parseWrites(writes: Array<string>): Array<unknown> {
-  return writes
-    .filter((chunk) => chunk.startsWith('data: '))
-    .map((chunk) => JSON.parse(chunk.slice('data: '.length).replace(/\n\n$/, '')));
+  // C0 wire format: every data frame is written as ONE chunk
+  // `id: <id>\nevent: message\ndata: {...}\n\n` (id-less frames are bare
+  // `data: {...}\n\n`); heartbeats (`: ping`) are transport-only. Extract
+  // the data: lines per chunk instead of matching the chunk start.
+  const out: Array<unknown> = [];
+  for (const chunk of writes) {
+    if (chunk.startsWith(': ping')) continue;
+    const dataLines: Array<string> = [];
+    for (const line of chunk.split('\n')) {
+      if (line.startsWith('data:')) dataLines.push(line.slice('data:'.length).trim());
+    }
+    if (dataLines.length === 0) continue;
+    out.push(JSON.parse(dataLines.join('\n')));
+  }
+  return out;
 }
 
 async function runStream(options: {

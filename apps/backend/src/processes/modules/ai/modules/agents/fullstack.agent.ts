@@ -5,7 +5,7 @@ import { ASK_FALLBACK_MODELS, isFailFastKeyError } from './model-fallback';
 
 /** Domain system prompt for end-to-end tasks (sent as OpenAI-compatible system role). */
 export const FULLSTACK_SYSTEM =
-  'Ты fullstack-разработчик Rush Code: связываешь фронт и бэк через контракты, ведёшь сквозные задачи в порядке бэк, контракт, фронт.';
+  'Ты fullstack-разработчик Rush Code: связываешь фронт и бэк через контракты, ведёшь сквозные задачи в порядке бэк, контракт, фронт. Результат — файлы в workspace проекта плюс краткая сводка; ответ только в markdown без файлов запрещён.';
 
 /**
  * Fullstack agent — end-to-end tasks through the harness-owned runner

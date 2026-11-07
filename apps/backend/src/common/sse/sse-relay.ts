@@ -12,8 +12,13 @@ import type { AppLogger } from '../logger';
  *   upstream would stream 200 silence);
  * - AbortController bound to the downstream socket: client disconnect stops
  *   the upstream fetch; backoff is capped so cleanup never hangs;
- * - mid-stream failures close quietly at debug (headers already sent — no
- *   response possible); an AbortError is a штатный disconnect (debug, no
+ * - heartbeat: `: ping` SSE comment every HEARTBEAT_MS (transport-level,
+ *   never a data frame — proxies with idle-timeouts keep the socket, parsers
+ *   skip it, the client watchdog treats it as liveness);
+ * - every data frame carries an `id:` line mirroring the envelope id
+ *   (Last-Event-ID redial);
+ * - mid-stream failures write ONE terminal `stream.error` frame then end the
+ *   stream (never silent); an AbortError is a штатный disconnect (debug, no
  *   answer) per AGENTS.md; warn/error stay one-liners;
  * - best-effort generator return() bounded by a 1500ms race.
  */
@@ -46,6 +51,9 @@ export type SseRelayParams = {
    * (never written, never counted) — undefined keeps earlier behaviour */
   filterFrame?: (frame: unknown) => boolean;
 };
+
+/** Interval between SSE heartbeat comments (transport-level, not a frame). */
+export const HEARTBEAT_MS = 15_000;
 
 /** True for AbortError shapes (name/code/20, incl. wrapped in cause). */
 export function isAbortError(err: unknown): boolean {
@@ -96,6 +104,33 @@ export async function relaySse(p: SseRelayParams): Promise<void> {
   let closed = false;
   /** Count of frames rejected by filterFrame (metadata only — never content). */
   let droppedByFilter = 0;
+  // Heartbeat (C0): SSE comment `: ping` on idle so proxies with an
+  // idle-timeout keep the socket; transport-level, never a data frame, so
+  // frame parsers and the filter predicate never see it.
+  let heartbeat: ReturnType<typeof setInterval> | null = null;
+  const startHeartbeat = (): void => {
+    stopHeartbeat();
+    heartbeat = setInterval(() => {
+      if (closed || req.destroyed || res.writableEnded || res.destroyed) return;
+      try {
+        res.write(': ping\n\n');
+      } catch {
+        /* write after close — the loop teardown handles it */
+      }
+    }, HEARTBEAT_MS);
+    // A pending heartbeat must never pin the process open.
+    const t = heartbeat as unknown as { unref?: () => void };
+    if (typeof t.unref === 'function') t.unref();
+  };
+  const stopHeartbeat = (): void => {
+    if (heartbeat !== null) {
+      clearInterval(heartbeat);
+      heartbeat = null;
+    }
+  };
+  startHeartbeat();
+  logger.debug(`${prefix} ${operation} heartbeat on`, cid);
+
   const onClose = (): void => {
     if (closed) return;
     closed = true;
@@ -122,6 +157,40 @@ export async function relaySse(p: SseRelayParams): Promise<void> {
     /* downstream socket error — noop, handled via close */
   });
 
+  // SSE `id:` for Last-Event-ID redial (C0/C1): the envelope carries the
+  // authoritative id; the transport line mirrors it so native clients and
+  // the browser EventSource can resume without parsing bodies.
+  const frameIdOf = (frame: unknown): string | undefined => {
+    if (frame && typeof frame === 'object') {
+      const id = (frame as { id?: unknown }).id;
+      if (typeof id === 'string' && id.length > 0) return id;
+    }
+    return undefined;
+  };
+  const writeFrame = (frame: unknown): void => {
+    const payload = JSON.stringify(frame);
+    const id = frameIdOf(frame);
+    res.write(id ? `id: ${id}\nevent: message\ndata: ${payload}\n\n` : `data: ${payload}\n\n`);
+  };
+  // Terminal error frame (C0): mid-stream failure is NOT silent — the client
+  // distinguishes terminal (ErrorState + retry) from transient (quiet redial).
+  // AbortError/disconnect stays quiet (debug only, no frame).
+  const writeStreamError = (err: unknown): void => {
+    if (closed || req.destroyed || res.writableEnded || res.destroyed) return;
+    const message = err instanceof Error && err.message ? err.message : 'stream interrupted';
+    const terminal = {
+      id: `stream-error-${Date.now()}`,
+      type: 'stream.error',
+      data: { message },
+    };
+    try {
+      const payload = JSON.stringify(terminal);
+      res.write(`id: ${terminal.id}\nevent: message\ndata: ${payload}\n\n`);
+    } catch {
+      /* best-effort — the end() below still closes the stream */
+    }
+  };
+
   try {
     const it = sub.stream[Symbol.asyncIterator]();
     while (!closed && !req.destroyed) {
@@ -144,7 +213,7 @@ export async function relaySse(p: SseRelayParams): Promise<void> {
           droppedByFilter += 1;
           continue;
         }
-        res.write(`data: ${JSON.stringify(frame)}\n\n`);
+        writeFrame(frame);
       } catch (err) {
         // Write after downstream close — то же, что disconnect.
         if (isAbortError(err) || closed || req.destroyed) {
@@ -155,14 +224,17 @@ export async function relaySse(p: SseRelayParams): Promise<void> {
       }
     }
   } catch (err) {
-    // Mid-stream failure: status is already 200, just close the stream
-    // (message only, never secrets). AbortError — штатный disconnect.
+    // Mid-stream failure: status is already 200, so the terminal error frame
+    // + end() is the only signal (message only, never secrets). AbortError —
+    // штатный disconnect (debug, no frame).
     if (isAbortError(err)) {
       logger.debug(`${prefix} client disconnected`, cid);
     } else {
-      logger.debug(`${prefix} event stream interrupted: ${(err as Error).message}`, cid);
+      logger.debug(`${prefix} stream.error ${(err as Error).message}`, cid);
+      writeStreamError(err);
     }
   } finally {
+    stopHeartbeat();
     // Distinguish "the filter dropped everything" from "upstream was silent":
     // count only, never frame ids/data.
     if (droppedByFilter > 0) {

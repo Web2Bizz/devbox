@@ -163,6 +163,33 @@ export class OpencodeHostService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * One jailed shell command in `directory` (SandboxProvider pattern: an
+   * ephemeral in-process SDK session pinned to the directory, then
+   * `sessions.shell({ sessionID, command })`). The session is always removed
+   * afterwards (best-effort) so no orphan host session leaks per command.
+   * Failures map through `failure()` (EXTERNAL_* envelope, no secrets).
+   */
+  async sessionShell(directory: string, command: string): Promise<unknown> {
+    const host = await this.getHost();
+    let sessionID: string | null = null;
+    try {
+      const session = await host.sessions.create({
+        location: { directory },
+        title: 'shell',
+      });
+      sessionID = session.id;
+      try {
+        return await host.sessions.shell({ sessionID, command });
+      } finally {
+        await host.sessions.remove({ sessionID }).catch(() => undefined);
+      }
+    } catch (err) {
+      if (sessionID === null && err instanceof ExternalServiceError) throw err;
+      throw this.failure('sessionShell', err);
+    }
+  }
+
   /** GET /api/provider in the gated jail. */
   async providerList(directory: string): Promise<HostProviderList> {
     const host = await this.getHost();

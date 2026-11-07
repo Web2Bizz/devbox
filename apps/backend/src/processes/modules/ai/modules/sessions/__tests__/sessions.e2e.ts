@@ -20,6 +20,7 @@
  * metadata.opencodeSessionId binding. Never logs secrets.
  */
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 
 // --- deterministic env (overrides repo .env AFTER bun/node dotenv load) ---
@@ -38,6 +39,7 @@ process.env.AUTH_LEGACY_MOCK_FALLBACK = 'false';
 
 const E2E_PROJECT_ID = '123e4567-e89b-12d3-a456-426614174090';
 const E2E_USER_ID = '123e4567-e89b-12d3-a456-426614174091';
+const E2E_ORG_ID = '123e4567-e89b-12d3-a456-426614174095';
 /** Jail dir the patched WorkspacePathService returns. */
 const JAIL_DIR = '/tmp/rush-code-e2e-project';
 /** Durable session ids are our own uuids (project_sessions.id uuid). */
@@ -54,6 +56,8 @@ type CheckResult = { name: string; ok: boolean; detail?: string };
 async function main(): Promise<void> {
   // The embedded host creates sessions in a real directory (jail).
   mkdirSync(JAIL_DIR, { recursive: true });
+  // git-backed snapshots (fork/revert) require the jail to be a worktree.
+  execFileSync('git', ['-C', JAIL_DIR, 'init', '-q']);
   const { startTestDb } = await import('../../../../../../common/db/e2e-db.container');
   const testDb = await startTestDb();
   process.env.DATABASE_URL = testDb.url;
@@ -72,15 +76,19 @@ async function main(): Promise<void> {
   const results: Array<CheckResult> = [];
 
   const { DbService } = await import('../../../../../../common/db/db.service');
-  const { projects, projectSessions, sessionAgents, sessionMessages } = await import(
+  const { organizations, projects, projectSessions, sessionAgents, sessionMessages } = await import(
     '../../../../../../common/db/schema'
   );
   const dbService = app.get(DbService, { strict: false }) as InstanceType<typeof DbService>;
   const { eq } = await import('drizzle-orm');
 
   await dbService.client
+    .insert(organizations)
+    .values({ id: E2E_ORG_ID, name: 'sessions-e2e-org' })
+    .onConflictDoNothing({ target: organizations.id });
+  await dbService.client
     .insert(projects)
-    .values({ id: E2E_PROJECT_ID, name: 'sessions-e2e' })
+    .values({ id: E2E_PROJECT_ID, orgId: E2E_ORG_ID, name: 'sessions-e2e' })
     .onConflictDoNothing({ target: projects.id });
 
   // Durable fixtures: two sessions of the project (A bound to the embedded
@@ -100,6 +108,9 @@ async function main(): Promise<void> {
         opencodeSessionId: HOST_SESSION_A,
       },
       createdAt: new Date(BASE_TIME),
+      // Explicit updatedAt that contradicts createdAt order: A is older by
+      // creation but B is the newest by activity → list must put B first.
+      updatedAt: new Date(BASE_TIME + 1000),
     },
     {
       id: SESSION_B,
@@ -109,6 +120,7 @@ async function main(): Promise<void> {
       origin: 'harness',
       metadata: { directory: JAIL_DIR, status: { type: 'idle' } },
       createdAt: new Date(BASE_TIME + 2000),
+      updatedAt: new Date(BASE_TIME + 5000),
     },
   ]);
   await dbService.client.insert(sessionAgents).values({
@@ -204,13 +216,17 @@ async function main(): Promise<void> {
   const { WorkspacePathService } = await import('../../../../../../common/storage/workspace-path.service');
   const allowAccess = async (): Promise<{ ownerId: string; orgIds: Array<string> }> => ({
     ownerId: E2E_USER_ID,
-    orgIds: [],
+    orgIds: [E2E_ORG_ID],
   });
   (
     ProjectAccessService.prototype as unknown as { assertProjectAccessById: unknown }
   ).assertProjectAccessById = allowAccess;
+  (
+    ProjectAccessService.prototype as unknown as { assertProjectAccess: unknown }
+  ).assertProjectAccess = async () => undefined;
   const pathsProto = WorkspacePathService.prototype as unknown as Record<string, unknown>;
-  pathsProto.resolveUserStrict = async () => ({ absRepo: JAIL_DIR });
+  pathsProto.resolveOrgStrict = async () => ({ absRepo: JAIL_DIR });
+  pathsProto.resolveOrg = async () => ({ abs: JAIL_DIR, rel: '.' });
   pathsProto.realStrictRoot = async () => '/tmp/rush-code-e2e-root';
   pathsProto.assertInsideJail = async (abs: string) => abs;
 
@@ -239,21 +255,25 @@ async function main(): Promise<void> {
       (_res, body) => {
         const rows = body as Array<Record<string, unknown>>;
         assert.ok(Array.isArray(rows) && rows.length === 2, `expected 2 rows, got ${JSON.stringify(body)?.slice(0, 120)}`);
-        const a = rows[0];
-        assert.equal(a.id, SESSION_A);
-        assert.equal(a.title, 'Alpha');
-        assert.equal(a.directory, JAIL_DIR);
-        assert.equal(a.projectId, E2E_PROJECT_ID);
-        assert.equal(a.createdAt, new Date(BASE_TIME).toISOString());
-        assert.deepEqual(a.model, { id: 'model-x', providerID: 'provider-y' });
-        assert.equal(a.agentId, 'ask');
-        assert.deepEqual(a.status, { type: 'idle' });
-        const b = rows[1];
+        // updatedAt desc: SESSION_B (newest activity) comes first even though
+        // SESSION_A is older by createdAt.
+        const b = rows[0];
         assert.equal(b.id, SESSION_B);
         assert.equal(b.title, null, 'title must be an explicit null, not absent');
         assert.equal(b.model, null);
         assert.equal(b.agentId, null);
         assert.deepEqual(b.status, { type: 'idle' });
+        assert.equal(b.updatedAt, new Date(BASE_TIME + 5000).toISOString());
+        const a = rows[1];
+        assert.equal(a.id, SESSION_A);
+        assert.equal(a.title, 'Alpha');
+        assert.equal(a.directory, JAIL_DIR);
+        assert.equal(a.projectId, E2E_PROJECT_ID);
+        assert.equal(a.createdAt, new Date(BASE_TIME).toISOString());
+        assert.equal(a.updatedAt, new Date(BASE_TIME + 1000).toISOString());
+        assert.deepEqual(a.model, { id: 'model-x', providerID: 'provider-y' });
+        assert.equal(a.agentId, 'ask');
+        assert.deepEqual(a.status, { type: 'idle' });
       },
     );
 
@@ -330,6 +350,173 @@ async function main(): Promise<void> {
         const ids = (body as Array<{ id?: string }>).map((r) => r.id);
         assert.ok(ids.includes(createdId), 'created id missing from list');
       });
+    }
+
+    // --- agent file tools (jailed project content) --------------------------
+    // The direct runner (SessionRunnerService.chat) is text-only with no
+    // working directory, so file commands are handled by the harness file
+    // bridge against the SAME gated jail create() passes to the embedded
+    // host (project content). Files land in content/ and are visible via
+    // GET project-files; traversal escapes answer 403.
+    if (createdId) {
+      await check(
+        'POST messages «создай файл hello.txt» → 200 (jailed write, no model key needed)',
+        `/api/v1/sessions/${createdId}/messages`,
+        jsonBody({ projectId: E2E_PROJECT_ID, text: 'создай файл hello.txt с текстом hi' }),
+        200,
+        (_res, body) => {
+          assert.equal((body as { type?: string }).type, 'user');
+        },
+      );
+      await check(
+        'GET messages after file command → durable user + assistant rows',
+        `/api/v1/sessions/${createdId}/messages?projectId=${E2E_PROJECT_ID}`,
+        undefined,
+        200,
+        (_res, body) => {
+          const rows = body as Array<Record<string, unknown>>;
+          assert.ok(
+            rows.some((r) => r.type === 'assistant' && typeof r.text === 'string' && (r.text as string).includes('hello.txt')),
+            `assistant file receipt missing: ${JSON.stringify(body)?.slice(0, 200)}`,
+          );
+        },
+      );
+      await check(
+        'GET project-files shows hello.txt created by the agent',
+        `/api/v1/projects/${E2E_PROJECT_ID}/files?path=.&depth=1`,
+        undefined,
+        200,
+        (_res, body) => {
+          const node = body as { children?: Array<{ path?: string; type?: string }> };
+          const names = (node.children ?? []).map((c) => c.path);
+          assert.ok(names.includes('hello.txt'), `hello.txt missing: ${JSON.stringify(body)?.slice(0, 200)}`);
+        },
+      );
+      await check(
+        'POST messages traversal «создай файл ../escape.txt» → 403 (never leaves the jail)',
+        `/api/v1/sessions/${createdId}/messages`,
+        jsonBody({ projectId: E2E_PROJECT_ID, text: 'создай файл ../escape.txt с текстом x' }),
+        403,
+        (_res, body) => {
+          assert.equal((body as { code?: string }).code, 'forbidden');
+        },
+      );
+    }
+
+    // --- fork ---------------------------------------------------------------
+    {
+      const whole = await request(`/api/v1/sessions/${SESSION_A}/fork`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ projectId: E2E_PROJECT_ID }),
+      });
+      const fork = whole.body as {
+        session?: { id?: string };
+        boundary?: { type?: string; messageID?: string };
+      } | null;
+      const wholeId = fork?.session?.id ?? '';
+      try {
+        assert.equal(whole.res.status, 200);
+        assert.equal(fork?.boundary?.type, 'through');
+        assert.equal(fork?.boundary?.messageID, 'msg_a1');
+        assert.ok(wholeId, 'fork answer carries no session id');
+        const copied = await request(
+          `/api/v1/sessions/${wholeId}/messages?projectId=${E2E_PROJECT_ID}`,
+        );
+        const rows = copied.body as Array<{ text?: string }>;
+        assert.deepEqual(
+          rows.map((row) => row.text),
+          ['Hello', 'Part one\n\nPart two'],
+        );
+        push('POST fork (whole thread) copies the durable messages through the newest', null);
+      } catch (err) {
+        push('POST fork (whole thread) copies the durable messages through the newest', err as Error);
+      }
+
+      const before = await request(`/api/v1/sessions/${SESSION_A}/fork`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ projectId: E2E_PROJECT_ID, before: 'msg_u1' }),
+      });
+      const beforeFork = before.body as {
+        session?: { id?: string };
+        boundary?: { type?: string; messageID?: string };
+      } | null;
+      const beforeId = beforeFork?.session?.id ?? '';
+      try {
+        assert.equal(before.res.status, 200);
+        assert.equal(beforeFork?.boundary?.type, 'before');
+        assert.equal(beforeFork?.boundary?.messageID, 'msg_u1');
+        const copied = await request(
+          `/api/v1/sessions/${beforeId}/messages?projectId=${E2E_PROJECT_ID}`,
+        );
+        assert.deepEqual(copied.body, []);
+        push('POST fork before the first message copies an empty thread', null);
+      } catch (err) {
+        push('POST fork before the first message copies an empty thread', err as Error);
+      }
+
+      await check(
+        'POST fork unknown boundary → 404 MessageNotFound',
+        `/api/v1/sessions/${SESSION_A}/fork`,
+        jsonBody({ projectId: E2E_PROJECT_ID, before: 'missing' }),
+        404,
+        (_res, body) => {
+          assert.equal((body as { code?: string }).code, 'MessageNotFound');
+        },
+      );
+    }
+
+    // --- revert (git snapshot of the file-command turn) --------------------
+    if (createdId) {
+      const thread = await request(
+        `/api/v1/sessions/${createdId}/messages?projectId=${E2E_PROJECT_ID}`,
+      );
+      const rows = thread.body as Array<{ id?: string; type?: string }>;
+      const assistantRow = [...rows].reverse().find((row) => row.type === 'assistant');
+      const messageID = assistantRow?.id ?? '';
+      const staged = messageID
+        ? await request(`/api/v1/sessions/${createdId}/revert/stage`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ projectId: E2E_PROJECT_ID, messageID }),
+          })
+        : null;
+      const info = staged?.body as {
+        snapshot?: string | null;
+        files?: Array<{ file?: string }>;
+      } | null;
+      try {
+        assert.equal(staged?.res.status, 200);
+        assert.ok((info?.files?.length ?? 0) > 0, 'stage must answer the files the turn changed');
+        assert.ok(
+          (info?.files ?? []).some((file) => (file.file ?? '').endsWith('hello.txt')),
+          'hello.txt missing from the staged diff',
+        );
+        push('POST revert/stage restores the pre-turn tree and answers a non-empty diff', null);
+      } catch (err) {
+        push('POST revert/stage restores the pre-turn tree and answers a non-empty diff', err as Error);
+      }
+      await check(
+        'DELETE revert → 204 (files return to the pre-stage tree)',
+        `/api/v1/sessions/${createdId}/revert?projectId=${E2E_PROJECT_ID}`,
+        { method: 'DELETE' },
+        204,
+      );
+      if (messageID) {
+        // Stage again so commit has a real staged row to keep.
+        await request(`/api/v1/sessions/${createdId}/revert/stage`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ projectId: E2E_PROJECT_ID, messageID }),
+        });
+      }
+      await check(
+        'POST revert/commit → 204 (keeps the restored files)',
+        `/api/v1/sessions/${createdId}/revert/commit?projectId=${E2E_PROJECT_ID}`,
+        { method: 'POST' },
+        204,
+      );
     }
 
     // --- message validation -------------------------------------------------
@@ -446,6 +633,11 @@ async function main(): Promise<void> {
       assert.ok(paths['/api/v1/sessions/events'], 'missing /api/v1/sessions/events in swagger');
       assert.ok(paths['/api/v1/sessions/providers'], 'missing /api/v1/sessions/providers in swagger');
       assert.ok(paths['/api/v1/sessions/{id}/interrupt'], 'missing /api/v1/sessions/{id}/interrupt in swagger');
+      assert.ok(paths['/api/v1/sessions/{id}/fork'], 'missing /api/v1/sessions/{id}/fork in swagger');
+      assert.ok(paths['/api/v1/sessions/{id}/revert/stage'], 'missing revert/stage in swagger');
+      assert.ok(paths['/api/v1/sessions/{id}/revert'], 'missing revert delete in swagger');
+      assert.ok(paths['/api/v1/sessions/{id}/revert/commit'], 'missing revert/commit in swagger');
+      assert.ok(paths['/api/v1/sessions/{id}/snapshots/diff'], 'missing snapshots/diff in swagger');
       assert.ok(paths['/api/v1/sessions']?.get?.tags?.includes('sessions'), 'sessions tag missing');
       assert.ok(!paths['/api/opencode/session'], 'removed /api/opencode mirror is still documented');
     });

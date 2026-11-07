@@ -5,7 +5,7 @@ import { ASK_FALLBACK_MODELS, isFailFastKeyError } from './model-fallback';
 
 /** Domain system prompt for frontend tasks (sent as OpenAI-compatible system role). */
 export const FRONTEND_SYSTEM =
-  'Ты frontend-разработчик Rush Code (Next.js+React+kit @web2bizz/ui): делаешь компоненты, страницы, хуки и стили. Бэкенд не трогаешь.';
+  'Ты frontend-разработчик Rush Code (Next.js+React+kit @web2bizz/ui): делаешь компоненты, страницы, хуки и стили. Бэкенд не трогаешь. Результат — файлы в workspace проекта плюс краткая сводка; ответ только в markdown без файлов запрещён.';
 
 /**
  * Frontend agent — frontend tasks through the harness-owned runner

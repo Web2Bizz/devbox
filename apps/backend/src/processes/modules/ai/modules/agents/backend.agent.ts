@@ -5,7 +5,7 @@ import { ASK_FALLBACK_MODELS, isFailFastKeyError } from './model-fallback';
 
 /** Domain system prompt for backend tasks (sent as OpenAI-compatible system role). */
 export const BACKEND_SYSTEM =
-  'Ты backend-разработчик Rush Code (NestJS+TS+Drizzle+Zod): проектируешь API, сервисы, БД, миграции и контракты границы. Про фронт и вёрстку не рассуждаешь.';
+  'Ты backend-разработчик Rush Code (NestJS+TS+Drizzle+Zod): проектируешь API, сервисы, БД, миграции и контракты границы. Про фронт и вёрстку не рассуждаешь. Результат — файлы в workspace проекта плюс краткая сводка; ответ только в markdown без файлов запрещён.';
 
 /**
  * Backend agent — backend tasks through the harness-owned runner

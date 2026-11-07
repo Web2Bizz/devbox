@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { AskAgent } from './ask.agent';
 import { AutoAgent } from './auto.agent';
 import type { AgentDto } from './agents.dto';
+import { AgentRegistry } from './agents.registry';
 
 /**
  * Registry of visible AI agent modes (Ask = single-answer mode, Auto =
@@ -15,13 +16,15 @@ export class AgentsService {
   constructor(
     private readonly ask: AskAgent,
     private readonly auto: AutoAgent,
+    private readonly registry: AgentRegistry,
   ) {}
 
   list(): Array<AgentDto> {
-    return [
-      { id: this.ask.id, name: this.ask.name, description: this.ask.description },
-      { id: this.auto.id, name: this.auto.name, description: this.auto.description },
-    ];
+    return this.registry.list().map((agent) => ({
+      id: agent.id,
+      name: agent.name,
+      description: agent.description,
+    }));
   }
 
   async askQuestion(

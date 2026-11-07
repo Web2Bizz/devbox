@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   HttpCode,
@@ -23,15 +24,22 @@ import { ApiErrorDto } from '../../../../../common/http/api/api.dto';
 import {
   createSessionRequestSchema,
   interruptSessionRequestSchema,
+  revertStageRequestSchema,
   sendMessageRequestSchema,
+  sessionForkRequestSchema,
   type CreateSessionInput,
   type InterruptSessionInput,
+  type RevertInfo,
+  type RevertStageRequest,
   type SendMessageInput,
+  type SessionForkRequest,
+  type SessionForkResponse,
   type SessionInfo,
   type SessionInterruptResult,
   type SessionMessage,
   type SessionRunStatusMap,
   type SessionRunnerProvider,
+  type SnapshotDiff,
 } from './sessions.dto';
 import { SessionsService } from './sessions.service';
 
@@ -190,6 +198,102 @@ export class SessionsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Post(':id/fork')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Fork a session at a message boundary (copy of the durable thread up to it)' })
+  @ApiResponse({ status: 200, description: "created session plus the boundary copied ('before' excludes the message, 'through' includes it)" })
+  @ApiResponse({ status: 400, description: 'missing projectId (PROJECT_REQUIRED, the C4 gate) or invalid body (bad_request — our zod) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 404, description: 'unknown project for this caller (not_found) or the boundary message is absent (MessageNotFound) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 409, description: 'the thread has no messages to fork (ForkEmpty) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'session runner or durable store unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
+  async fork(
+    @ReqUser() identity: RequestIdentity,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(sessionForkRequestSchema)) body: SessionForkRequest,
+    @Headers('x-correlation-id') correlationId?: string,
+  ): Promise<SessionForkResponse> {
+    return this.sessions.fork(identity.id, id, body, correlationId ?? '');
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/revert/stage')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Stage a revert of the files touched after a message boundary (snapshot restore + diff)' })
+  @ApiResponse({ status: 200, description: 'staged revert state (boundary, source snapshot or null, produced file diffs)' })
+  @ApiResponse({ status: 400, description: 'missing projectId (PROJECT_REQUIRED) or invalid body (bad_request) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 404, description: 'unknown project for this caller (not_found) or the boundary message is absent (MessageNotFound) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'snapshots unavailable (EXTERNAL_UNAVAILABLE, Retry-After) or the durable store is unreachable', type: ApiErrorDto })
+  async stageRevert(
+    @ReqUser() identity: RequestIdentity,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(revertStageRequestSchema)) body: RevertStageRequest,
+    @Headers('x-correlation-id') correlationId?: string,
+  ): Promise<RevertInfo> {
+    return this.sessions.stageRevert(identity.id, id, body, correlationId ?? '');
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete(':id/revert')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Discard the staged revert (restore the files to their pre-stage state)' })
+  @ApiResponse({ status: 204, description: 'staged revert cleared, files restored to their pre-stage state' })
+  @ApiResponse({ status: 400, description: 'missing projectId (PROJECT_REQUIRED) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 404, description: 'unknown project for this caller (not_found) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'snapshot restore unavailable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
+  async clearRevert(
+    @ReqUser() identity: RequestIdentity,
+    @Param('id') id: string,
+    @Query('projectId') projectId?: string,
+    @Headers('x-correlation-id') correlationId?: string,
+  ): Promise<void> {
+    await this.sessions.clearRevert(identity.id, id, projectId, correlationId ?? '');
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/revert/commit')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Commit the staged revert (keep the restored files, drop the staged state)' })
+  @ApiResponse({ status: 204, description: 'staged revert committed and cleared' })
+  @ApiResponse({ status: 400, description: 'missing projectId (PROJECT_REQUIRED) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 404, description: 'unknown project for this caller (not_found) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'durable store unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
+  async commitRevert(
+    @ReqUser() identity: RequestIdentity,
+    @Param('id') id: string,
+    @Query('projectId') projectId?: string,
+    @Headers('x-correlation-id') correlationId?: string,
+  ): Promise<void> {
+    await this.sessions.commitRevert(identity.id, id, projectId, correlationId ?? '');
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get(':id/snapshots/diff')
+  @ApiOperation({ summary: 'Per-file diff between two session snapshots (git tree ids)' })
+  @ApiResponse({ status: 200, description: 'per-file diff rows (empty when the trees are equal)' })
+  @ApiResponse({ status: 400, description: 'missing projectId (PROJECT_REQUIRED), absent/invalid from/to or invalid context (bad_request) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 404, description: 'unknown project for this caller (not_found) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'snapshots unavailable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
+  async snapshotDiff(
+    @ReqUser() identity: RequestIdentity,
+    @Param('id') id: string,
+    @Query('projectId') projectId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('context') context?: string,
+    @Headers('x-correlation-id') correlationId?: string,
+  ): Promise<Array<SnapshotDiff>> {
+    return this.sessions.snapshotDiff(
+      identity.id,
+      id,
+      projectId,
+      from ?? '',
+      to ?? '',
+      context,
+      correlationId ?? '',
+    );
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Get('events')
   @ApiOperation({ summary: 'Live session events (SSE; domain frames {id, type, data, session?})' })
   @ApiResponse({ status: 200, description: 'text/event-stream of domain SessionStreamFrame rows' })
@@ -201,8 +305,17 @@ export class SessionsController {
     @Req() req: ExpressRequest,
     @Res({ passthrough: false }) res: ExpressResponse,
     @Query('projectId') projectId?: string,
+    @Query('session') session?: string,
+    @Query('cursor') cursor?: string,
     @Headers('x-correlation-id') correlationId?: string,
+    @Headers('last-event-id') lastEventId?: string,
   ): Promise<void> {
+    // ?session=/?cursor=/Last-Event-ID ride the raw request into the harness
+    // (query-parser already populated req.query/req.headers) — referenced here
+    // so the params stay explicit in the signature and swagger.
+    void session;
+    void cursor;
+    void lastEventId;
     await this.sessions.streamEvents(identity.id, projectId, correlationId ?? '', req, res);
   }
 }

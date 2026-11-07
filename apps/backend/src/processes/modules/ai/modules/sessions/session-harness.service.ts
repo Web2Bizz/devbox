@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  ConflictException,
+  ForbiddenException,
   HttpException,
   Injectable,
   NotFoundException,
@@ -8,7 +10,9 @@ import {
   type OnModuleInit,
 } from '@nestjs/common';
 import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
+import path from 'node:path';
 import { ProjectAccessService } from '../../../../../organizations/modules/projects/modules/project-access/project-access.service';
+import { WorkspacePathService } from '../../../../../common/storage/workspace-path.service';
 import { SessionRunnerService } from '../../../../../common/zen/session-runner.service';
 import {
   OpencodeHostService,
@@ -24,15 +28,22 @@ import {
 } from '../../../../../common/external/external-error';
 import { AgentsService } from '../agents/agents.service';
 import { SessionHistoryRepository } from './session-history.repository';
+import { RevertService } from './modules/revert/revert.service';
+import { SnapshotsService } from './modules/snapshots/snapshots.service';
 import type {
   CreateSessionInput,
   InterruptSessionInput,
+  RevertInfo,
+  RevertStageRequest,
   SendMessageInput,
+  SessionForkRequest,
+  SessionForkResponse,
   SessionInfo,
   SessionInterruptResult,
   SessionMessage,
   SessionRunStatusMap,
   SessionRunnerProvider,
+  SnapshotDiff,
 } from './sessions.dto';
 import type { SessionHarness } from './session-harness.types';
 
@@ -63,6 +74,64 @@ function isMissingKey(err: unknown): boolean {
     res !== null &&
     (res as { code?: unknown }).code === 'opencode_key_missing'
   );
+}
+
+/** Strip wrapping quotes/backticks and trailing sentence punctuation. */
+function cleanFileToken(raw: string): string {
+  return raw
+    .trim()
+    .replace(/^["'`«»]+|["'`«»]+$/g, '')
+    .replace(/[,.;:!?]+$/g, '')
+    .trim();
+}
+
+/** "создай файл <name> [с текстом <text>]" / "create file <name> …". */
+function parseCreateFileCommand(text: string): { filename: string; content: string } | null {
+  const head = text.match(/(?:создай|создать|create)\s+(?:файл|file)\s+([^\s]+)([\s\S]*)$/i);
+  if (!head) return null;
+  const filename = cleanFileToken(head[1] ?? '');
+  if (!filename || filename.includes('\0')) return null;
+  const tail = (head[2] ?? '').trim();
+  if (!tail) return { filename, content: '' };
+  const marker = tail.match(
+    /(?:с\s+текстом|с\s+содержимым|with\s+text|with\s+content)\s*:?\s*([\s\S]*)$/i,
+  );
+  const rawContent = (marker?.[1] ?? tail.replace(/^:\s*/, '')).trim();
+  const content = rawContent.replace(/^["'`«»]+|["'`«»]+$/g, '').trim();
+  return { filename, content };
+}
+
+/** "прочитай|покажи файл <name>" / "read|show file <name>". */
+function parseReadFileCommand(text: string): { filename: string } | null {
+  const m = text.match(/(?:прочитай|покажи|показать|read|show)\s+(?:файл|file)\s+([^\s]+)/i);
+  if (!m) return null;
+  const filename = cleanFileToken(m[1] ?? '');
+  if (!filename || filename.includes('\0')) return null;
+  return { filename };
+}
+
+/** "выполни|запусти <cmd>" / "run <cmd>" / "shell: <cmd>". */
+function parseShellCommand(text: string): string | null {
+  const m = text.trim().match(/^(?:выполни|запусти|run|shell)\s*:?\s+([\s\S]+)$/i);
+  if (!m) return null;
+  const cmd = (m[1] ?? '').trim();
+  return cmd.length > 0 ? cmd : null;
+}
+
+/** Best-effort text projection of the host shell payload (shape-agnostic). */
+function formatShellOutput(out: unknown): string {
+  if (typeof out === 'string') return out;
+  if (typeof out !== 'object' || out === null) return '';
+  const rec = out as Record<string, unknown>;
+  for (const key of ['output', 'stdout', 'text', 'content', 'result'] as const) {
+    const value = rec[key];
+    if (typeof value === 'string' && value.length > 0) return value;
+  }
+  try {
+    return JSON.stringify(out);
+  } catch {
+    return '';
+  }
 }
 
 /**
@@ -115,6 +184,16 @@ export class SessionHarnessService implements SessionHarness, OnModuleInit, OnMo
     // unit specs wiring the harness by hand keep compiling — in the app the
     // module always provides it, and agent paths fail loud without it.
     @Optional() private readonly agents?: AgentsService,
+    // Jailed file primitives (WorkspacePathService readFile/writeFile +
+    // ensureDir, provided directly like ProjectAccessModule does). Optional
+    // so hand-wired specs keep compiling — without it the file-command
+    // bridge below is skipped and sendMessage keeps the previous behavior.
+    @Optional() private readonly paths?: WorkspacePathService,
+    // git-backed snapshots + staged revert state (SessionsModule provides
+    // both). Optional only for hand-wired specs; without them turns skip
+    // snapshotting and the revert/fork endpoints fail loud.
+    @Optional() private readonly snapshots?: SnapshotsService,
+    @Optional() private readonly revert?: RevertService,
   ) {}
 
   /**
@@ -245,6 +324,7 @@ export class SessionHarnessService implements SessionHarness, OnModuleInit, OnMo
       id,
       title: body.title ?? null,
       createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       directory: project.directory,
       projectId: project.projectId,
       model: body.model ?? null,
@@ -323,8 +403,11 @@ export class SessionHarnessService implements SessionHarness, OnModuleInit, OnMo
 
   /**
    * POST /api/v1/sessions/{id}/messages — direct agent turn when a per-user
-   * key exists, otherwise the bound embedded host session. The user receipt
-   * is persisted in the durable thread on both paths.
+   * key exists, otherwise the bound embedded host session. The `auto` agent
+   * always executes via the bound embedded host session (files/shell/
+   * snapshots), even when a key exists — the direct Zen text path stays for
+   * `ask` and other non-auto agents. The user receipt is persisted in the
+   * durable thread on both paths.
    */
   async sendMessage(
     userId: string,
@@ -332,23 +415,176 @@ export class SessionHarnessService implements SessionHarness, OnModuleInit, OnMo
     body: SendMessageInput,
     cid: string,
   ): Promise<SessionMessage> {
-    await this.access.resolveProjectDirectory(body.projectId, userId, cid);
+    const project = await this.access.resolveProjectDirectory(body.projectId, userId, cid);
     this.auth.assertServeUser(userId, cid);
     // Fail fast on an unknown agent (honest 404, no side effects) before any
     // transport work — both paths share this gate.
-    this.resolveAgentId(body.agentId, cid);
+    const explicitAgentId = this.resolveAgentId(body.agentId, cid);
+    // Jailed project-file commands (deterministic, no model round-trip):
+    // "создай файл <name> …" writes into the project content jail so the
+    // file is visible via GET project-files; traversal escapes answer 403.
+    // Null = not a file command — fall through to the transports below.
+    const fileTurn = await this.tryProjectFileCommand(
+      userId,
+      sessionId,
+      body,
+      project.directory,
+      cid,
+    );
+    if (fileTurn) return fileTurn;
+    // D1 auto→host: the auto agent always executes via the bound host
+    // session (jail/snapshot/recorder in sendMessageViaHost), even when a
+    // per-user Zen key exists — the direct text-only runner would otherwise
+    // answer markdown without touching the project workspace. Ask and other
+    // non-auto agents keep the transport selection below unchanged.
+    const effectiveAgentId =
+      explicitAgentId ?? (await this.history.getAgent(sessionId)) ?? 'ask';
+    if (effectiveAgentId === 'auto') {
+      this.logger.info('[sessions] auto forced host', cid);
+      return this.sendMessageViaHost(userId, sessionId, body, project.directory, cid);
+    }
     // Transport selection (explicit, user-sanctioned): a stored per-user Zen
     // key answers through the direct runner (no host prompt needed); without
     // a key (404 opencode_key_missing) the bound host session owns the turn.
     if (this.runner) {
       try {
-        return await this.sendMessageDirect(userId, sessionId, body, cid);
+        return await this.sendMessageDirect(userId, sessionId, body, project.directory, cid);
       } catch (err) {
         if (!isMissingKey(err)) throw err;
         this.logger.warn('[sessions] direct runner skipped code=opencode_key_missing', cid);
       }
     }
-    return this.sendMessageViaHost(userId, sessionId, body, cid);
+    return this.sendMessageViaHost(userId, sessionId, body, project.directory, cid);
+  }
+
+  /**
+   * Minimal jailed file/shell toolset for the text-only direct path
+   * (SessionRunnerService.chat has no tools and no working directory, so a
+   * "создай файл …" prompt would otherwise answer text without touching
+   * `content/`). Commands run against the ALREADY-gated project content dir
+   * (`resolveProjectDirectory` above — the same jail `create()` passes as the
+   * embedded host session location), never against tmpdir or the host root:
+   *
+   * - create/write: «создай файл <name> [с текстом <text>]» /
+   *   "create file <name> [with text <text>]" → jailed writeFile (+mkdir -p
+   *   for nested dirs), durable user+assistant rows, SSE frames buffered;
+   * - read: «прочитай|покажи файл <name>» / "read|show file <name>" →
+   *   jailed readFile, content echoed in the assistant row (missing file is
+   *   an honest text answer, not a 404);
+   * - shell: «выполни <cmd>» / "run <cmd>" / "shell: <cmd>" → ephemeral
+   *   host session in the same jail via OpencodeHostService.sessionShell
+   *   (SandboxProvider pattern), stdout echoed truncated in the assistant row.
+   *
+   * Traversal (`..`, absolute paths, null bytes) answers 403 via the same
+   * lexical jail WorkspacePathService enforces; disk/shell outages map to
+   * EXTERNAL_* (never a mock). Returns null when the text is not a file/shell
+   * command, or when the jail primitives are not wired (hand-wired specs).
+   */
+  private async tryProjectFileCommand(
+    userId: string,
+    sessionId: string,
+    body: SendMessageInput,
+    directory: string,
+    cid: string,
+  ): Promise<SessionMessage | null> {
+    const paths = this.paths;
+    if (!paths) return null;
+    const text = body.text ?? '';
+    const created = parseCreateFileCommand(text);
+    const readReq = created ? null : parseReadFileCommand(text);
+    const shellCmd = created || readReq ? null : parseShellCommand(text);
+    if (!created && !readReq && !shellCmd) return null;
+    const agentId =
+      this.resolveAgentId(body.agentId, cid) ??
+      (await this.history.getAgent(sessionId).catch(() => null)) ??
+      'ask';
+    // Jail first: a traversal escape answers 403 with NO durable side
+    // effects (no staged user row for a rejected command).
+    const createdAbs = created ? this.jailFile(directory, created.filename) : null;
+    const readAbs = !created && readReq ? this.jailFile(directory, readReq.filename) : null;
+    if (body.agentId !== undefined) {
+      await this.history.setAgent(sessionId, body.projectId, agentId);
+    }
+    const receipt: SessionMessage = {
+      id: Bun.randomUUIDv7(),
+      type: 'user',
+      createdAt: new Date().toISOString(),
+      text: body.text,
+    };
+    await this.history.appendMessage({
+      id: receipt.id,
+      sessionId,
+      projectId: body.projectId,
+      userId,
+      role: 'user',
+      agentId,
+      text: body.text,
+      createdAt: receipt.createdAt,
+    });
+    await this.captureTurnSnapshot(directory, sessionId, receipt.id, cid);
+    this.busyDirect.add(sessionId);
+    try {
+      let answer: string;
+      if (created && createdAbs) {
+        const abs = createdAbs;
+        await paths.ensureDir(path.dirname(abs));
+        try {
+          await paths.writeFile(abs, created.content);
+        } catch (err) {
+          throw fromUnknown('opencode', 'sessionFileWrite', err);
+        }
+        this.logger.info('[sessions] file created', cid);
+        answer = `Файл ${created.filename} создан.`;
+      } else if (readReq && readAbs) {
+        const abs = readAbs;
+        try {
+          const content = await paths.readFile(abs);
+          answer = content.length > 0 ? content.slice(0, 8000) : '(пустой файл)';
+        } catch {
+          answer = `Файл ${readReq.filename} не найден.`;
+        }
+        this.logger.info('[sessions] file read', cid);
+      } else {
+        const out = await this.host.sessionShell(directory, (shellCmd as string).slice(0, 500));
+        answer = formatShellOutput(out).slice(0, 8000) || '(без вывода)';
+        this.logger.info('[sessions] shell executed', cid);
+      }
+      const assistant: SessionMessage = {
+        id: Bun.randomUUIDv7(),
+        type: 'assistant',
+        createdAt: new Date().toISOString(),
+        text: answer,
+      };
+      await this.history.appendMessage({
+        id: assistant.id,
+        sessionId,
+        projectId: body.projectId,
+        userId,
+        role: 'assistant',
+        agentId,
+        text: answer,
+        createdAt: assistant.createdAt,
+      });
+      this.bufferDirectFrames(sessionId, assistant);
+      this.bufferDirectIdle(sessionId);
+      return receipt;
+    } finally {
+      this.busyDirect.delete(sessionId);
+    }
+  }
+
+  /**
+   * Lexical jail for a file-tool target: the absolute target must stay
+   * inside the gated project content dir (the same jail `create()` passes
+   * as the host session location). Escapes answer 403 — never tmpdir, never
+   * the host root.
+   */
+  private jailFile(directory: string, filename: string): string {
+    const abs = path.resolve(directory, filename);
+    if (abs !== directory && !abs.startsWith(directory + path.sep)) {
+      throw new ForbiddenException('Path traversal is forbidden');
+    }
+    return abs;
   }
 
   /**
@@ -362,6 +598,7 @@ export class SessionHarnessService implements SessionHarness, OnModuleInit, OnMo
     userId: string,
     sessionId: string,
     body: SendMessageInput,
+    directory: string,
     cid: string,
   ): Promise<SessionMessage> {
     const runner = this.runner;
@@ -396,6 +633,9 @@ export class SessionHarnessService implements SessionHarness, OnModuleInit, OnMo
       text: body.text,
       createdAt: receipt.createdAt,
     });
+    // Pre-turn tree for revert: the boundary message id keys it, so a later
+    // stage() can restore exactly the state the turn started from.
+    await this.captureTurnSnapshot(directory, sessionId, receipt.id, cid);
     this.busyDirect.add(sessionId);
     const assistantId = Bun.randomUUIDv7();
     try {
@@ -495,6 +735,7 @@ export class SessionHarnessService implements SessionHarness, OnModuleInit, OnMo
     userId: string,
     sessionId: string,
     body: SendMessageInput,
+    directory: string,
     cid: string,
   ): Promise<SessionMessage> {
     const agentId =
@@ -525,7 +766,11 @@ export class SessionHarnessService implements SessionHarness, OnModuleInit, OnMo
     });
     await this.ensureAssistantRecorder();
     void body.model; // model is pinned at create; prompt has no model field
+    // Capture BEFORE the prompt: the host owns the user receipt id, so the
+    // pre-turn tree is keyed to it once the prompt answers.
+    const preTurn = await this.captureSnapshot(directory, cid);
     const receipt = await this.host.sessionPrompt(hostSessionId, body.text);
+    if (preTurn) this.revert?.recordTurnStart(sessionId, receipt.id, preTurn);
     const mapped: SessionMessage = {
       id: receipt.id,
       type: receipt.type,
@@ -772,6 +1017,32 @@ export class SessionHarnessService implements SessionHarness, OnModuleInit, OnMo
     for (const sid of await this.history.listSessionIdsWithMessages(project.projectId)) {
       localSessionIds.add(sid);
     }
+    // C2: optional `?session=` narrows the subscription to one session.
+    // Unknown/foreign session → quiet empty stream (heartbeat flows, no
+    // frames), never 404 — the C4 gate must not leak existence.
+    const querySession =
+      typeof (req.query as Record<string, unknown> | undefined)?.session === 'string'
+        ? ((req.query as Record<string, unknown>).session as string)
+        : undefined;
+    if (querySession !== undefined) {
+      if (querySession.length > 0 && localSessionIds.has(querySession)) {
+        for (const sid of [...localSessionIds]) {
+          if (sid !== querySession) localSessionIds.delete(sid);
+        }
+      } else {
+        localSessionIds.clear();
+      }
+      this.logger.debug(`[sessions] events session filter applied`, cid);
+    }
+    // C1: resume cursor — `Last-Event-ID` header first, `?cursor=` fallback.
+    // Matched against localFrames ids; unknown/empty → full local replay
+    // (never empty, never global — only this project's sessions).
+    const headerCursorRaw = req.headers?.['last-event-id'];
+    const headerCursor = Array.isArray(headerCursorRaw) ? headerCursorRaw[0] : headerCursorRaw;
+    const queryCursorRaw = (req.query as Record<string, unknown> | undefined)?.cursor;
+    const resumeCursor =
+      (typeof headerCursor === 'string' && headerCursor.length > 0 ? headerCursor : undefined) ??
+      (typeof queryCursorRaw === 'string' && queryCursorRaw.length > 0 ? queryCursorRaw : undefined);
     const persisted = await this.history.listHostBindings(project.projectId);
     // Project-scoped resolver: the process-wide hostBindings map carries the
     // owner projectId, so a session of project B can never be re-keyed and
@@ -823,11 +1094,22 @@ export class SessionHarnessService implements SessionHarness, OnModuleInit, OnMo
         }),
       subscribeFailedError: (err) => fromUnknown('opencode', 'sessionEvents', err),
       subscribe: async (signal) => {
-        const replay = frames.filter((f) => {
+        // C1: replay starts AFTER the resume cursor (by localFrames id).
+        // Unknown cursor → full local replay (filtered to this subscription).
+        const cursorIndex =
+          resumeCursor !== undefined ? frames.findIndex((f) => f.id === resumeCursor) : -1;
+        const replayBase = cursorIndex >= 0 ? frames.slice(cursorIndex + 1) : frames;
+        const replay = replayBase.filter((f) => {
           const sid = typeof f.data.sessionID === 'string' ? f.data.sessionID : undefined;
           return sid !== undefined && localSessionIds.has(sid);
         });
-        let cursor = frames.length;
+        if (resumeCursor !== undefined) {
+          this.logger.debug(
+            `[sessions] replay from cursor count=${replay.length} buffered=${frames.length}`,
+            cid,
+          );
+        }
+        let liveCursor = frames.length;
         const live = await this.host.subscribeEvents(signal);
         let liveIt: AsyncIterator<unknown> | null = live[Symbol.asyncIterator]();
         const startedAt = Date.now();
@@ -842,9 +1124,9 @@ export class SessionHarnessService implements SessionHarness, OnModuleInit, OnMo
               yield frame;
             }
             while (!signal.aborted) {
-            while (cursor < frames.length) {
-              const f = frames[cursor];
-              cursor += 1;
+            while (liveCursor < frames.length) {
+              const f = frames[liveCursor];
+              liveCursor += 1;
               const sid = typeof f.data.sessionID === 'string' ? f.data.sessionID : undefined;
               if (sid !== undefined && localSessionIds.has(sid)) {
                 lastActivityAt = Date.now();
@@ -875,7 +1157,7 @@ export class SessionHarnessService implements SessionHarness, OnModuleInit, OnMo
                 break;
               }
             }
-            if (liveIt === null && !busyLocal && cursor >= frames.length) return;
+            if (liveIt === null && !busyLocal && liveCursor >= frames.length) return;
             if (liveIt === null) {
               await new Promise((resolveWait) => setTimeout(resolveWait, POLL_MS));
               if (signal.aborted) return;
@@ -1033,5 +1315,195 @@ export class SessionHarnessService implements SessionHarness, OnModuleInit, OnMo
     }
     this.logger.info('[sessions] models listed', cid);
     return out;
+  }
+
+  /**
+   * POST /api/v1/sessions/{id}/fork — create a new session and copy the
+   * durable thread up to the boundary. `before` excludes that message;
+   * without it the whole thread is copied ('through' the newest message).
+   * An empty thread answers 409 ForkEmpty, an absent boundary 404
+   * MessageNotFound — both honest non-retryable answers.
+   */
+  async fork(
+    userId: string,
+    sessionId: string,
+    body: SessionForkRequest,
+    cid: string,
+  ): Promise<SessionForkResponse> {
+    this.auth.assertServeUser(userId, cid);
+    const project = await this.access.resolveProjectDirectory(body.projectId, userId, cid);
+    const messages = await this.history.listMessages(sessionId);
+    const last = messages[messages.length - 1];
+    if (!last) {
+      throw new ConflictException({
+        code: 'ForkEmpty',
+        message: `Session '${sessionId}' has no messages to fork`,
+      });
+    }
+    let copied: Array<SessionMessage>;
+    let boundary: SessionForkResponse['boundary'];
+    if (body.before !== undefined) {
+      const index = messages.findIndex((message) => message.id === body.before);
+      if (index < 0) {
+        throw new NotFoundException({
+          code: 'MessageNotFound',
+          message: `Message '${body.before}' not found in session`,
+        });
+      }
+      copied = messages.slice(0, index);
+      boundary = { type: 'before', messageID: body.before };
+    } else {
+      copied = messages;
+      boundary = { type: 'through', messageID: last.id };
+    }
+    const sessions = await this.history.listLocalSessions(project.projectId);
+    const source = sessions.find((row) => row.id === sessionId);
+    const agentId = (await this.history.getAgent(sessionId)) ?? source?.agentId ?? 'ask';
+    const created = await this.create(
+      userId,
+      {
+        projectId: project.projectId,
+        ...(source?.title ? { title: source.title } : {}),
+        ...(source?.model ? { model: source.model } : {}),
+        agentId,
+      },
+      cid,
+    );
+    for (const message of copied) {
+      await this.history.appendMessage({
+        id: Bun.randomUUIDv7(),
+        sessionId: created.id,
+        projectId: project.projectId,
+        userId,
+        role: message.type === 'assistant' ? 'assistant' : 'user',
+        agentId,
+        text: message.text ?? '',
+        createdAt: message.createdAt,
+      });
+    }
+    this.pushLocalFrame('session.forked', {
+      sessionID: created.id,
+      parentID: sessionId,
+      boundary,
+    });
+    this.logger.info(`[sessions] forked messages=${copied.length}`, cid);
+    return { session: created, boundary };
+  }
+
+  /** POST /api/v1/sessions/{id}/revert/stage — restore + diff the boundary turn. */
+  async stageRevert(
+    userId: string,
+    sessionId: string,
+    body: RevertStageRequest,
+    cid: string,
+  ): Promise<RevertInfo> {
+    this.auth.assertServeUser(userId, cid);
+    const project = await this.access.resolveProjectDirectory(body.projectId, userId, cid);
+    if (!this.revert) throw new Error('RevertService is not wired');
+    const info = await this.revert.stage({
+      sessionId,
+      directory: project.directory,
+      messageID: body.messageID,
+      ...(body.files !== undefined ? { files: body.files } : {}),
+    });
+    this.pushLocalFrame('revert.staged', {
+      sessionID: sessionId,
+      messageID: info.messageID,
+      snapshot: info.snapshot,
+      files: info.files,
+    });
+    this.logger.info(`[sessions] revert staged files=${info.files.length}`, cid);
+    return info;
+  }
+
+  /** DELETE /api/v1/sessions/{id}/revert — discard the staged revert. */
+  async clearRevert(
+    userId: string,
+    sessionId: string,
+    projectId: string | undefined,
+    cid: string,
+  ): Promise<void> {
+    this.auth.assertServeUser(userId, cid);
+    await this.access.resolveProjectDirectory(projectId, userId, cid);
+    if (!this.revert) throw new Error('RevertService is not wired');
+    await this.revert.clear(sessionId);
+    this.pushLocalFrame('revert.cleared', { sessionID: sessionId });
+    this.logger.info('[sessions] revert cleared', cid);
+  }
+
+  /** POST /api/v1/sessions/{id}/revert/commit — keep the restored files. */
+  async commitRevert(
+    userId: string,
+    sessionId: string,
+    projectId: string | undefined,
+    cid: string,
+  ): Promise<void> {
+    this.auth.assertServeUser(userId, cid);
+    await this.access.resolveProjectDirectory(projectId, userId, cid);
+    if (!this.revert) throw new Error('RevertService is not wired');
+    await this.revert.commit(sessionId);
+    this.pushLocalFrame('revert.committed', { sessionID: sessionId });
+    this.logger.info('[sessions] revert committed', cid);
+  }
+
+  /** GET /api/v1/sessions/{id}/snapshots/diff?from&to — per-file diff rows. */
+  async snapshotDiff(
+    userId: string,
+    _sessionId: string,
+    projectId: string | undefined,
+    from: string,
+    to: string,
+    contextRaw: string | undefined,
+    cid: string,
+  ): Promise<Array<SnapshotDiff>> {
+    this.auth.assertServeUser(userId, cid);
+    const project = await this.access.resolveProjectDirectory(projectId, userId, cid);
+    if (!this.snapshots) throw new Error('SnapshotsService is not wired');
+    const treeID = /^[0-9a-f]{40}$/;
+    if (!treeID.test(from) || !treeID.test(to)) {
+      throw new BadRequestException('Query "from"/"to" must be snapshot tree ids');
+    }
+    const rows = await this.snapshots.diff(project.directory, from, to, this.parseContext(contextRaw));
+    this.logger.info(`[sessions] snapshot diff files=${rows.length}`, cid);
+    return rows;
+  }
+
+  /** Non-negative integer query guard for ?context (git -U). */
+  private parseContext(contextRaw?: string): number | undefined {
+    if (contextRaw === undefined) return undefined;
+    const context = Number(contextRaw);
+    if (!Number.isInteger(context) || context < 0 || context > 10) {
+      throw new BadRequestException('Query "context" must be an integer between 0 and 10');
+    }
+    return context;
+  }
+
+  /** Best-effort pre-turn tree (undefined on non-git / disabled / failure). */
+  private async captureSnapshot(directory: string, cid: string): Promise<string | undefined> {
+    if (!this.snapshots) return undefined;
+    try {
+      return await this.snapshots.capture(directory);
+    } catch (err) {
+      this.logger.warn('[sessions] snapshot skipped', cid);
+      this.logger.debug((err as Error).message, cid);
+      return undefined;
+    }
+  }
+
+  /** Capture before a turn and remember it by the user receipt id. */
+  private async captureTurnSnapshot(
+    directory: string,
+    sessionId: string,
+    messageID: string,
+    cid: string,
+  ): Promise<void> {
+    const snapshot = await this.captureSnapshot(directory, cid);
+    if (snapshot) this.revert?.recordTurnStart(sessionId, messageID, snapshot);
+  }
+
+  /** Append one harness-owned SSE frame (bounded like the other buffers). */
+  private pushLocalFrame(type: string, data: Record<string, unknown>): void {
+    this.localFrames.push({ id: Bun.randomUUIDv7(), type, data });
+    while (this.localFrames.length > 500) this.localFrames.shift();
   }
 }

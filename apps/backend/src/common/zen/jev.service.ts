@@ -24,7 +24,7 @@ const ROUTE_STATE_LIMIT = 2000;
 /** Confidence gate: a Jev choice below 0.5 is not trusted (fallback, never thrown). */
 const ROUTE_MIN_CONFIDENCE = 0.5;
 
-export type JevRoute = 'backend' | 'frontend' | 'fullstack' | 'unclear';
+export type JevRoute = 'backend' | 'frontend' | 'fullstack' | 'ask' | 'unclear';
 
 export type JevClassifyResult = {
   route: JevRoute;
@@ -57,7 +57,7 @@ const jevSystemOneSchema = z.object({
     .optional(),
 });
 
-const ROUTE_CHOICES: ReadonlySet<string> = new Set(['backend', 'frontend', 'fullstack']);
+const ROUTE_CHOICES: ReadonlySet<string> = new Set(['backend', 'frontend', 'fullstack', 'ask']);
 
 const FRONTEND_MARKERS = /(ui|в[её]рстк|верста|react|next|компонент|страниц|стил|хук|фронт|интерфейс|кнопк|форм|css|tailwind)/i;
 
@@ -67,19 +67,24 @@ const BACKEND_MARKERS =
 const FULLSTACK_MARKERS =
   /(связк|фронт.*бэк|бэк.*фронт|frontend.*backend|backend.*frontend|интеграци|сквозн|обе стороны|end-to-end|контракт)/i;
 
+const ASK_MARKERS =
+  /(что|как|почему|зачем|объясни|расскажи|подскажи|explain|what|why|how)/i;
+
 /**
  * Local domain heuristic (deterministic markers when Jev is unavailable):
  * frontend markers → frontend, backend markers → backend, both sides or
- * integration words → fullstack, NOTHING → 'unclear' (never guess —
- * the caller answers honestly instead of hallucinating a domain).
+ * integration words → fullstack, ask markers (question/answer without code
+ * changes) with no domain markers → 'ask', NOTHING → 'unclear' (never guess
+ * — the caller answers honestly instead of hallucinating a domain).
  */
-function heuristicRoute(question: string): 'backend' | 'frontend' | 'fullstack' | 'unclear' {
+function heuristicRoute(question: string): JevRoute {
   const hasFull = FULLSTACK_MARKERS.test(question);
   const hasFront = FRONTEND_MARKERS.test(question);
   const hasBack = BACKEND_MARKERS.test(question);
   if (hasFull || (hasFront && hasBack)) return 'fullstack';
   if (hasFront) return 'frontend';
   if (hasBack) return 'backend';
+  if (ASK_MARKERS.test(question)) return 'ask';
   return 'unclear';
 }
 
@@ -89,7 +94,7 @@ function heuristicRoute(question: string): 'backend' | 'frontend' | 'fullstack' 
  * JevService — paid System One choice classifier (NOT a chat model: no AI SDK
  * row, direct HTTPS like tools/classify_build.ts lines 161-174, reused 1:1):
  * POST {model:'jev-1.13', state, questions:{route:{type:'choice',
- * instructions, criteria:{backend,frontend,fullstack}}}} →
+ * instructions, criteria:{backend,frontend,fullstack,ask}}}} →
  * answers.route.{choice,confidence}.
  *
  * - Key: the caller's row from OpencodeKeysService, decrypted in memory via
@@ -102,14 +107,16 @@ function heuristicRoute(question: string): 'backend' | 'frontend' | 'fullstack' 
  *   service='jev' (distinguishable from 'zen' chat in logs),
  *   operation='classify'.
  * - Errors NEVER propagate: 401/403/400/429/5xx, network/timeout, bad json,
- *   bad shape, choice outside {backend,frontend,fullstack}, confidence < 0.5,
+ *   bad shape, choice outside {backend,frontend,fullstack,ask}, confidence < 0.5,
  *   missing/unreadable key — all return the honest heuristic domain (or
- *   'unclear' when nothing matches) with a warn one-liner carrying only the
- *   code (no bodies). Success returns {route, confidence} with an info
- *   one-liner. The error envelope is untouched: the caller's chain still
- *   answers its own honest 404/500 on the next hop.
+ *   'ask' on question markers, 'unclear' when nothing matches) with a warn
+ *   one-liner carrying only the code (no bodies). Success returns
+ *   {route, confidence} with an info one-liner. The error envelope is
+ *   untouched: the caller's chain still answers its own honest 404/500 on
+ *   the next hop.
  * - Cost note: +1 paid Jev call on every Auto request (pay-as-you-go
- *   jev-1.13). The domain-routed chain it unlocks saves misrouted calls; the
+ *   jev-1.13), including ask-routed questions answered directly without a
+ *   chain. The domain-routed chain it unlocks saves misrouted calls; the
  *   classify call itself always bills once.
  * - Logs: AppLogger one-liners with route/confidence/code/provider only (no
  *   URLs, headers, bodies or keys).
@@ -178,7 +185,7 @@ export class JevService {
               route: {
                 type: 'choice',
                 instructions:
-                  'Определи, к какому домену относится запрос пользователя: backend, frontend или fullstack.',
+                  'Определи, к какому домену относится запрос пользователя: backend, frontend, fullstack или ask.',
                 criteria: {
                   backend:
                     'сервер/API/БД: Nest, Drizzle, контроллеры, сервисы, миграции, база данных',
@@ -186,6 +193,7 @@ export class JevService {
                     'UI/вёрстка: React, Next, компоненты, страницы, хуки, стили',
                   fullstack:
                     'связка фронта и бэка: интеграция, сквозная задача, упоминаются обе стороны, контракты',
+                  ask: 'простой вопрос/ответ без изменений кода (что это, как работает, объясни, подскажи, разница между, зачем нужен) — ответы без декомпозиции и цепочки шагов',
                 },
               },
             },
@@ -223,7 +231,7 @@ export class JevService {
     if (typeof route.confidence !== 'number' || route.confidence < ROUTE_MIN_CONFIDENCE) {
       return this.fallback('low_confidence', question, cid);
     }
-    const decision = route.choice as 'backend' | 'frontend' | 'fullstack';
+    const decision = route.choice as 'backend' | 'frontend' | 'fullstack' | 'ask';
     this.logger.info(
       `[jev] classify route=${decision} confidence=${route.confidence} provider=jev`,
       cid,

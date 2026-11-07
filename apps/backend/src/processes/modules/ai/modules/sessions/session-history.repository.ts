@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { DbService, dbUnavailable } from '../../../../../common/db/db.service';
 import {
   projectSessions,
@@ -8,6 +8,13 @@ import {
 } from '../../../../../common/db/schema';
 import { AppLogger } from '../../../../../common/logger';
 import type { SessionInfo, SessionMessage } from './sessions.dto';
+
+/**
+ * `project_sessions.id` is a uuid column. Only a value matching this shape may
+ * be used as an update key; upstream session ids (`ses_*`) never do.
+ */
+const LOCAL_SESSION_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Durable session history — the ONLY place the sessions domain touches
@@ -59,6 +66,19 @@ export class SessionHistoryRepository {
           ...(row.createdAt !== undefined ? { createdAt: new Date(row.createdAt) } : {}),
         })
         .onConflictDoNothing({ target: sessionMessages.id });
+      // Bump "last activity" on our durable row after a successful (or
+      // replay-deduplicated) append. `session_messages.session_id` is a text
+      // domain id and may be an upstream `ses_*` value, while
+      // `project_sessions.id` is a uuid column: feeding a non-uuid value to
+      // it makes Postgres raise 22P02, which `dbUnavailable` would surface as
+      // a 503. Non-uuid ids are therefore a deliberate no-op (nothing to bump
+      // — upstream sessions have no local registry row).
+      if (LOCAL_SESSION_ID.test(row.sessionId)) {
+        await this.db.client
+          .update(projectSessions)
+          .set({ updatedAt: new Date() })
+          .where(eq(projectSessions.id, row.sessionId));
+      }
     } catch (err) {
       dbUnavailable('sessionMessagesAppend', err, this.logger);
     }
@@ -307,6 +327,7 @@ export class SessionHistoryRepository {
           projectId: projectSessions.projectId,
           metadata: projectSessions.metadata,
           createdAt: projectSessions.createdAt,
+          updatedAt: projectSessions.updatedAt,
           agentId: sessionAgents.agentId,
         })
         .from(projectSessions)
@@ -320,7 +341,7 @@ export class SessionHistoryRepository {
             isNull(projectSessions.deletedAt),
           ),
         )
-        .orderBy(asc(projectSessions.createdAt));
+        .orderBy(desc(projectSessions.updatedAt), desc(projectSessions.createdAt));
       return rows.map((row) => this.toSessionInfo(row));
     } catch (err) {
       dbUnavailable('sessionsListLocal', err, this.logger);
@@ -351,6 +372,7 @@ export class SessionHistoryRepository {
     projectId: string;
     metadata: Record<string, unknown> | null;
     createdAt: Date;
+    updatedAt: Date;
     agentId: string | null;
   }): SessionInfo {
     const meta = (row.metadata ?? {}) as Record<string, unknown>;
@@ -358,6 +380,7 @@ export class SessionHistoryRepository {
       id: row.id,
       title: typeof meta.title === 'string' ? meta.title : null,
       createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
       directory: typeof meta.directory === 'string' ? meta.directory : '',
       projectId: row.projectId,
       model: (meta.model ?? null) as SessionInfo['model'],

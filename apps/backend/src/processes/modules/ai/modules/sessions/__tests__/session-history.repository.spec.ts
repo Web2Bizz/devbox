@@ -98,6 +98,55 @@ function referencedValues(cond: unknown): Array<unknown> {
   return out;
 }
 
+/**
+ * Order term of the fake `orderBy`: drizzle wraps `asc(col)`/`desc(col)` in an
+ * SQL node whose column is reachable by the same walker the filters use; the
+ * direction lives in a raw string chunk (" desc"). Defaults to ascending so
+ * pre-existing `orderBy(asc(createdAt))` chains keep their old behaviour.
+ */
+type OrderTerm = { column: string; direction: 1 | -1 };
+
+function isDescOrder(node: unknown): boolean {
+  let desc = false;
+  const seen = new WeakSet<object>();
+  const visit = (value: unknown): void => {
+    if (typeof value === "string") {
+      if (/\bdesc\b/i.test(value)) desc = true;
+      return;
+    }
+    if (value === null || typeof value !== "object") return;
+    if (seen.has(value)) return;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (isColumn(value as Record<string, unknown>)) return;
+    for (const item of Object.values(value as Record<string, unknown>)) visit(item);
+  };
+  visit(node);
+  return desc;
+}
+
+function orderTerms(args: Array<unknown>): Array<OrderTerm> {
+  return args.map((arg) => ({
+    column: referencedColumns(arg)[0] ?? "createdAt",
+    direction: isDescOrder(arg) ? -1 : 1,
+  }));
+}
+
+/** Column name → row key used by the fake state (updated_at → updatedAt). */
+function rowKey(column: string): string {
+  return column.replace(/_([a-z])/g, (_match, char: string) => char.toUpperCase());
+}
+
+function timeValue(value: unknown): number {
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "number") return value;
+  if (typeof value === "string") return new Date(value).getTime();
+  return 0;
+}
+
 type State = {
   sessionMessages: Array<Row>;
   sessionAgents: Array<Row>;
@@ -137,6 +186,7 @@ function makeDb(seed: Partial<State> = {}) {
       values.some((value) => value === row[key]);
     let out = rows;
     if (table === sessionMessages) {
+      if (cols.includes("id")) out = out.filter((row) => matches("id", row));
       if (cols.includes("session_id")) out = out.filter((row) => matches("sessionId", row));
       if (cols.includes("project_id")) out = out.filter((row) => matches("projectId", row));
       if (cols.includes("deleted_at")) out = out.filter(isLive);
@@ -146,6 +196,8 @@ function makeDb(seed: Partial<State> = {}) {
       if (cols.includes("project_id")) out = out.filter((row) => matches("projectId", row));
     }
     if (table === projectSessions) {
+      // `id` first: appendMessage/discardSession update by the uuid primary key.
+      if (cols.includes("id")) out = out.filter((row) => matches("id", row));
       if (cols.includes("project_id")) out = out.filter((row) => matches("projectId", row));
       if (cols.includes("origin")) out = out.filter((row) => matches("origin", row));
       if (cols.includes("deleted_at")) out = out.filter(isLive);
@@ -156,14 +208,20 @@ function makeDb(seed: Partial<State> = {}) {
   function result(rows: Array<Row>) {
     const promise = Promise.resolve(rows);
     return {
-      orderBy: () =>
-        Promise.resolve(
-          [...rows].sort((a, b) => {
-            const at = (a.createdAt as Date | undefined)?.getTime() ?? 0;
-            const bt = (b.createdAt as Date | undefined)?.getTime() ?? 0;
-            return at - bt;
-          }),
-        ),
+      // Mirrors drizzle's orderBy: every argument is an order term (column +
+      // direction); multiple terms break ties left to right.
+      orderBy: (...args: Array<unknown>) => {
+        const terms = orderTerms(args);
+        const sorted = [...rows].sort((a, b) => {
+          for (const term of terms) {
+            const at = timeValue(a[rowKey(term.column)]);
+            const bt = timeValue(b[rowKey(term.column)]);
+            if (at !== bt) return (at - bt) * term.direction;
+          }
+          return 0;
+        });
+        return Promise.resolve(sorted);
+      },
       limit: (limit: number) => Promise.resolve(rows.slice(0, limit)),
       returning: () => Promise.resolve(rows),
       then: (
@@ -337,6 +395,70 @@ describe("SessionHistoryRepository.appendMessage", () => {
     assert.equal(inserts.length, 2);
     assert.ok(inserts.every((op) => op.conflict === "nothing"));
   });
+
+  it("bumps updatedAt only on the matching uuid row", async () => {
+    const before = new Date("2026-01-01T00:00:00.000Z");
+    const db = makeDb({
+      projectSessions: [
+        { id: HARNESS_ID, projectId: PID, updatedAt: before, deletedAt: null },
+        {
+          id: "0190a0b0-0000-7000-8000-000000000002",
+          projectId: PID,
+          updatedAt: before,
+          deletedAt: null,
+        },
+      ],
+    });
+    const repo = makeRepo(db);
+    await repo.appendMessage({
+      id: "m1",
+      sessionId: HARNESS_ID,
+      projectId: PID,
+      userId: UID,
+      role: "user" as const,
+      text: "hi",
+    });
+    const updates = db.ops.filter((op) => op.kind === "update");
+    assert.equal(updates.length, 1, "one bump update expected");
+    assert.equal(db.state.projectSessions[0].updatedAt instanceof Date, true);
+    assert.ok(
+      (db.state.projectSessions[0].updatedAt as Date).getTime() >= before.getTime(),
+      "matching row must be bumped",
+    );
+    assert.deepEqual(
+      db.state.projectSessions[1].updatedAt,
+      before,
+      "non-matching uuid row must stay untouched",
+    );
+  });
+
+  it("ses_* sessionId is a no-op (no update, no throw)", async () => {
+    const db = makeDb({
+      projectSessions: [
+        {
+          id: HARNESS_ID,
+          projectId: PID,
+          updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+          deletedAt: null,
+        },
+      ],
+    });
+    const repo = makeRepo(db);
+    await repo.appendMessage({
+      id: "m1",
+      sessionId: "ses_upstream",
+      projectId: PID,
+      userId: UID,
+      role: "user" as const,
+      text: "hi",
+    });
+    assert.equal(
+      db.ops.filter((op) => op.kind === "update").length,
+      0,
+      "upstream ses_* ids must not touch project_sessions",
+    );
+    assert.equal(db.state.sessionMessages.length, 1, "the message row itself is still stored");
+  });
 });
 
 describe("SessionHistoryRepository agents", () => {
@@ -397,6 +519,109 @@ describe("SessionHistoryRepository.listLocalSessions", () => {
     assert.deepEqual(out[0].status, { type: "idle" });
     assert.equal(out[0].agentId, "ask");
     assert.equal(out[0].projectId, PID);
+    assert.equal(out[0].createdAt, new Date("2026-01-01T00:00:00.000Z").toISOString());
+    assert.equal(out[0].updatedAt, new Date("2026-01-01T00:00:00.000Z").toISOString());
+  });
+
+  it("orders by updatedAt desc even when createdAt says otherwise", async () => {
+    const db = makeDb({
+      projectSessions: [
+        {
+          id: "0190a0b0-0000-7000-8000-000000000010",
+          projectId: PID,
+          origin: "harness",
+          metadata: { title: "Old", directory: "/tmp/jail", status: { type: "idle" } },
+          createdAt: new Date("2026-01-03T00:00:00.000Z"),
+          updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+          deletedAt: null,
+        },
+        {
+          id: "0190a0b0-0000-7000-8000-000000000011",
+          projectId: PID,
+          origin: "harness",
+          metadata: { title: "New", directory: "/tmp/jail", status: { type: "idle" } },
+          createdAt: new Date("2026-01-01T00:00:00.000Z"),
+          updatedAt: new Date("2026-01-05T00:00:00.000Z"),
+          deletedAt: null,
+        },
+      ],
+    });
+    const repo = makeRepo(db);
+    const out = await repo.listLocalSessions(PID);
+    assert.deepEqual(
+      out.map((row) => row.id),
+      ["0190a0b0-0000-7000-8000-000000000011", "0190a0b0-0000-7000-8000-000000000010"],
+      "updatedAt-newest must come first regardless of createdAt",
+    );
+    assert.equal(out[0].updatedAt, new Date("2026-01-05T00:00:00.000Z").toISOString());
+  });
+
+  it("tie on updatedAt breaks by createdAt desc", async () => {
+    const db = makeDb({
+      projectSessions: [
+        {
+          id: "0190a0b0-0000-7000-8000-000000000020",
+          projectId: PID,
+          origin: "harness",
+          metadata: { title: "Older", directory: "/tmp/jail", status: { type: "idle" } },
+          createdAt: new Date("2026-01-01T00:00:00.000Z"),
+          updatedAt: new Date("2026-01-05T00:00:00.000Z"),
+          deletedAt: null,
+        },
+        {
+          id: "0190a0b0-0000-7000-8000-000000000021",
+          projectId: PID,
+          origin: "harness",
+          metadata: { title: "Newer", directory: "/tmp/jail", status: { type: "idle" } },
+          createdAt: new Date("2026-01-03T00:00:00.000Z"),
+          updatedAt: new Date("2026-01-05T00:00:00.000Z"),
+          deletedAt: null,
+        },
+      ],
+    });
+    const repo = makeRepo(db);
+    const out = await repo.listLocalSessions(PID);
+    assert.deepEqual(
+      out.map((row) => row.id),
+      ["0190a0b0-0000-7000-8000-000000000021", "0190a0b0-0000-7000-8000-000000000020"],
+      "equal updatedAt must fall back to createdAt desc",
+    );
+  });
+
+  it("identical timestamps keep both rows (empty project returns [])", async () => {
+    const same = new Date("2026-01-05T00:00:00.000Z");
+    const db = makeDb({
+      projectSessions: [
+        {
+          id: "0190a0b0-0000-7000-8000-000000000030",
+          projectId: PID,
+          origin: "harness",
+          metadata: { title: "A", directory: "/tmp/jail", status: { type: "idle" } },
+          createdAt: same,
+          updatedAt: same,
+          deletedAt: null,
+        },
+        {
+          id: "0190a0b0-0000-7000-8000-000000000031",
+          projectId: PID,
+          origin: "harness",
+          metadata: { title: "B", directory: "/tmp/jail", status: { type: "idle" } },
+          createdAt: same,
+          updatedAt: same,
+          deletedAt: null,
+        },
+      ],
+    });
+    const repo = makeRepo(db);
+    const out = await repo.listLocalSessions(PID);
+    assert.equal(out.length, 2, "identical timestamps must not drop rows");
+    assert.deepEqual(
+      out.map((row) => row.id).sort(),
+      ["0190a0b0-0000-7000-8000-000000000030", "0190a0b0-0000-7000-8000-000000000031"],
+      "identical timestamps keep the full set (SQL has no id term — order is DB-defined)",
+    );
+    const empty = makeDb();
+    assert.deepEqual(await makeRepo(empty).listLocalSessions(PID), [], "empty project must be []");
   });
 });
 

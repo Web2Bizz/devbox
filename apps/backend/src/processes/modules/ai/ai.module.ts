@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AgentsModule } from './modules/agents/agents.module';
 import { OpencodeModule } from './modules/opencode/opencode.module';
 import { SessionsModule } from './modules/sessions/sessions.module';
+import { ToolsModule } from './modules/tools/tools.module';
 import { WorkersModule } from '../workers/workers.module';
 
 /**
@@ -13,7 +14,7 @@ import { WorkersModule } from '../workers/workers.module';
  * the AI runtime and its background workers boot together.
  */
 @Module({
-  imports: [AgentsModule, WorkersModule, OpencodeModule, SessionsModule],
+  imports: [AgentsModule, WorkersModule, OpencodeModule, ToolsModule, SessionsModule],
   exports: [OpencodeModule],
 })
 export class AiModule {}

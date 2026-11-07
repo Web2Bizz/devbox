@@ -1,11 +1,16 @@
 import { Module } from '@nestjs/common';
 import { OrganizationsModule } from '../../../../../organizations/organizations.module';
+import { WorkspacePathService } from '../../../../../common/storage/workspace-path.service';
 import { AgentsModule } from '../agents/agents.module';
 import { OpencodeModule } from '../opencode/opencode.module';
+import { ToolsModule } from '../tools/tools.module';
 import { SessionHarnessService } from './session-harness.service';
 import { SessionHistoryRepository } from './session-history.repository';
 import { SessionsController } from './sessions.controller';
 import { SessionsService } from './sessions.service';
+import { SessionTurnRunnerService } from './modules/runner/runner.service';
+import { RevertService } from './modules/revert/revert.service';
+import { SnapshotsService } from './modules/snapshots/snapshots.service';
 
 /**
  * Domain sessions module — /api/v1/sessions* (the product contract replacing
@@ -24,8 +29,16 @@ import { SessionsService } from './sessions.service';
  * ProjectAccessService.resolveProjectDirectory.
  */
 @Module({
-  imports: [AgentsModule, OpencodeModule, OrganizationsModule],
+  imports: [AgentsModule, OpencodeModule, ToolsModule, OrganizationsModule],
   controllers: [SessionsController],
-  providers: [SessionHarnessService, SessionHistoryRepository, SessionsService],
+  providers: [
+    SessionHarnessService,
+    SessionHistoryRepository,
+    SessionTurnRunnerService,
+    SessionsService,
+    RevertService,
+    SnapshotsService,
+    WorkspacePathService,
+  ],
 })
 export class SessionsModule {}

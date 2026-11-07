@@ -56,6 +56,11 @@ export type SessionInfo = {
   title: string | null;
   /** ISO-8601 creation timestamp */
   createdAt: string;
+  /**
+   * ISO-8601 timestamp of the last activity (message append / binding change).
+   * Required: the durable row always carries it (DB NOT NULL DEFAULT now()).
+   */
+  updatedAt: string;
   /** jailed project directory the session works in */
   directory: string;
   /** owning project (query-bound through the access gate) */
@@ -193,6 +198,21 @@ export type SessionMessagePartUpdatedFrame = SessionStreamFrame & {
 };
 
 /**
+ * Terminal transport frame (C0): the relay writes it instead of a quiet
+ * mid-stream break, then ends the stream. `data.message` is human-readable
+ * only (never secrets); `session` is present when the failure is scoped to
+ * one session. Consumers must NOT feed it into the text tract — it drives
+ * the error channel (ErrorState + retry), never `finalize()`.
+ */
+export type SessionStreamErrorFrame = SessionStreamFrame & {
+  type: "stream.error";
+  data: {
+    message?: string;
+    code?: string;
+  };
+};
+
+/**
  * POST /api/v1/sessions/{id}/interrupt body — projectId is the gate uuid.
  * The runner's own resume knob (artifact interrupt parameters `resume`)
  * has no UI consumer and is deliberately not exposed — nothing invented.
@@ -232,3 +252,67 @@ export type SessionRunnerProvider = {
 
 /** GET /api/v1/sessions/providers — provider inventory list. */
 export type SessionRunnerProviderList = Array<SessionRunnerProvider>;
+
+/**
+ * POST /api/v1/sessions/{id}/fork body — projectId is the C4 gate uuid.
+ * `before` is the message id the fork boundaries at: the copy keeps every
+ * message STRICTLY BEFORE it. Without `before` the whole thread is forked
+ * (boundary = the newest message, type 'through').
+ */
+export type SessionForkRequest = {
+  projectId: string;
+  before?: string;
+};
+
+/** Boundary the fork copied to: 'through' includes the message, 'before' excludes it. */
+export type SessionForkBoundary = {
+  type: 'before' | 'through';
+  messageID: string;
+};
+
+/** POST /api/v1/sessions/{id}/fork answer — the new session plus its copy boundary. */
+export type SessionForkResponse = {
+  session: SessionInfo;
+  boundary: SessionForkBoundary;
+};
+
+/**
+ * One file entry of a snapshot comparison. `hunks` is the unified diff body
+ * when the caller asked for patches (absent for the name-only listing).
+ */
+export type SnapshotDiff = {
+  file: string;
+  hunks?: string;
+};
+
+/** GET /api/v1/sessions/{id}/snapshots/diff — per-file diff list. */
+export type SnapshotDiffList = Array<SnapshotDiff>;
+
+/** POST /api/v1/sessions/{id}/revert/stage body — message boundary + optional path filter. */
+export type RevertStageRequest = {
+  projectId: string;
+  messageID: string;
+  files?: Array<string>;
+};
+
+/**
+ * Staged revert state: the message boundary, the snapshot the files were
+ * restored FROM (null when the project has no git snapshot for that turn)
+ * and the file diffs the revert produced.
+ */
+export type RevertInfo = {
+  messageID: string;
+  snapshot: string | null;
+  files: Array<SnapshotDiff>;
+};
+
+/**
+ * One tool call visible in the session timeline (id from the runtime call,
+ * registry name + optional namespace, textual result the model received).
+ */
+export type ToolCallInfo = {
+  id: string;
+  name: string;
+  namespace?: string;
+  result: string;
+};

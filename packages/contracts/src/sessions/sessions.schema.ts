@@ -5,7 +5,12 @@ import type {
   AgentInfoList,
   CreateSessionRequest,
   InterruptSessionRequest,
+  RevertInfo,
+  RevertStageRequest,
   SendMessageRequest,
+  SessionForkBoundary,
+  SessionForkRequest,
+  SessionForkResponse,
   SessionInfo,
   SessionInfoList,
   SessionInfoModel,
@@ -19,7 +24,11 @@ import type {
   SessionRunnerProviderList,
   SessionRunStatus,
   SessionRunStatusMap,
+  SessionStreamErrorFrame,
   SessionStreamFrame,
+  SnapshotDiff,
+  SnapshotDiffList,
+  ToolCallInfo,
 } from './sessions';
 import { opencodeSessionStatusSchema } from '../opencode-session/opencode-session.schema';
 
@@ -74,6 +83,9 @@ export const sessionInfoSchema = z.object({
   /** ISO-8601 (matches openapi.yaml format: date-time — the service emits
    * new Date(ms).toISOString(), always a Z-suffixed instant) */
   createdAt: z.iso.datetime({ error: 'Field "createdAt" must be an ISO-8601 timestamp' }),
+  /** ISO-8601 last activity (message append / binding change) — same
+   * strictness as createdAt: backend-emitted, never an upstream passthrough. */
+  updatedAt: z.iso.datetime({ error: 'Field "updatedAt" must be an ISO-8601 timestamp' }),
   directory: z.string({ error: 'Field "directory" is required' }).min(1),
   // Q2: strict like the YAML (format: uuid) — both projectId and createdAt
   // are backend-GENERATED values (gate uuid / toISOString), never upstream
@@ -177,6 +189,20 @@ export const sessionMessagePartUpdatedFrameSchema = z.object({
   session: z.string().optional(),
 }) satisfies z.ZodType<SessionMessagePartUpdatedFrame>;
 
+/** stream.error — terminal transport frame (C0). Narrow and optional:
+ * the envelope schema stays permissive (`type: string`), this schema lets
+ * consumers detect the terminal channel before the text tract. `data` is
+ * intentionally loose (message/code only) — never secrets. */
+export const sessionStreamErrorFrameSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  type: z.literal('stream.error'),
+  data: z.object({
+    message: z.string().optional(),
+    code: z.string().optional(),
+  }).catchall(z.unknown()),
+  session: z.string().optional(),
+}) satisfies z.ZodType<SessionStreamErrorFrame>;
+
 /** POST /api/v1/sessions/{id}/interrupt body — projectId is the gate uuid
  * (strict like the YAML format: uuid; backend-generated, Q2 precedent). */
 export const interruptSessionRequestSchema = z.object({
@@ -210,3 +236,62 @@ export const sessionRunnerProviderListSchema = z.array(sessionRunnerProviderSche
 export type SendMessageInput = z.infer<typeof sendMessageRequestSchema>;
 
 export type InterruptSessionInput = z.infer<typeof interruptSessionRequestSchema>;
+
+/**
+ * POST /api/v1/sessions/{id}/fork body — projectId is the gate uuid (strict,
+ * same rule as create/send): backend-generated, never runtime passthrough.
+ * `before` is the boundary message id; omitted → the whole thread is forked.
+ */
+export const sessionForkRequestSchema = z.object({
+  projectId: z.uuid({ error: 'Field "projectId" is required' }),
+  before: z.string().min(1).max(200).optional(),
+}) satisfies z.ZodType<SessionForkRequest>;
+
+/** Fork boundary — 'through' includes the message, 'before' excludes it. */
+export const sessionForkBoundarySchema = z.object({
+  type: z.enum(['before', 'through'], {
+    error: 'Field "type" must be one of before|through',
+  }),
+  messageID: z.string({ error: 'Field "messageID" is required' }).min(1),
+}) satisfies z.ZodType<SessionForkBoundary>;
+
+/** POST /api/v1/sessions/{id}/fork answer — the created session + its copy boundary. */
+export const sessionForkResponseSchema = z.object({
+  session: sessionInfoSchema,
+  boundary: sessionForkBoundarySchema,
+}) satisfies z.ZodType<SessionForkResponse>;
+
+/** One per-file snapshot diff (hunks absent for a name-only comparison). */
+export const snapshotDiffSchema = z.object({
+  file: z.string({ error: 'Field "file" is required' }).min(1),
+  hunks: z.string().optional(),
+}) satisfies z.ZodType<SnapshotDiff>;
+
+export const snapshotDiffListSchema = z.array(snapshotDiffSchema) satisfies z.ZodType<
+  SnapshotDiffList
+>;
+
+/** POST /api/v1/sessions/{id}/revert/stage body — boundary message + optional path filter. */
+export const revertStageRequestSchema = z.object({
+  projectId: z.uuid({ error: 'Field "projectId" is required' }),
+  messageID: z.string({ error: 'Field "messageID" is required' }).min(1).max(200),
+  files: z.array(z.string().min(1)).optional(),
+}) satisfies z.ZodType<RevertStageRequest>;
+
+/** Staged revert answer — boundary, source snapshot (nullable) and file diffs. */
+export const revertInfoSchema = z.object({
+  messageID: z.string({ error: 'Field "messageID" is required' }).min(1),
+  snapshot: z.string().nullable(),
+  files: z.array(snapshotDiffSchema),
+}) satisfies z.ZodType<RevertInfo>;
+
+/** Tool-call timeline row (call id, registry name, optional namespace, result text). */
+export const toolCallInfoSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  name: z.string({ error: 'Field "name" is required' }).min(1),
+  namespace: z.string().optional(),
+  result: z.string({ error: 'Field "result" is required' }),
+}) satisfies z.ZodType<ToolCallInfo>;
+
+export type SessionForkInput = z.infer<typeof sessionForkRequestSchema>;
+export type RevertStageInput = z.infer<typeof revertStageRequestSchema>;

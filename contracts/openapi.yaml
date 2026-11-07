@@ -1988,6 +1988,268 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+  /api/v1/sessions/{id}/fork:
+    post:
+      summary: Fork a session at a message boundary (copy of the durable thread up to it)
+      operationId: forkSessionDomain
+      tags: [sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionForkRequest'
+      responses:
+        '200':
+          description: created session plus the boundary that was copied ('before' excludes the message, 'through' includes it)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionForkResponse'
+        '400':
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or invalid body (code bad_request — our zod) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) or the boundary message is absent (code MessageNotFound) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: the thread has no messages to fork (code ForkEmpty) — non-retryable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: session runner or durable store unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/sessions/{id}/revert/stage:
+    post:
+      summary: Stage a revert of the files touched after a message boundary (snapshot restore + diff)
+      operationId: stageSessionRevertDomain
+      tags: [sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevertStageRequest'
+      responses:
+        '200':
+          description: staged revert state (boundary, source snapshot or null, produced file diffs)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevertInfo'
+        '400':
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or invalid body (code bad_request — our zod) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, nobody) or the boundary message is absent (code MessageNotFound) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: snapshots unavailable (not a git repository / code EXTERNAL_UNAVAILABLE, Retry-After) or the durable store is unreachable
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/sessions/{id}/revert:
+    delete:
+      summary: Discard the staged revert (restore the files to their pre-stage state)
+      operationId: clearSessionRevertDomain
+      tags: [sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: projectId
+          in: query
+          required: false
+          description: Owning project uuid — the C4 gate; missing answers 400 PROJECT_REQUIRED.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: staged revert cleared, files restored to their pre-stage state
+        '400':
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: snapshot restore unavailable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/sessions/{id}/revert/commit:
+    post:
+      summary: Commit the staged revert (keep the restored files, drop the staged state)
+      operationId: commitSessionRevertDomain
+      tags: [sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: projectId
+          in: query
+          required: false
+          description: Owning project uuid — the C4 gate; missing answers 400 PROJECT_REQUIRED.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: staged revert committed and cleared
+        '400':
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: durable store unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/sessions/{id}/snapshots/diff:
+    get:
+      summary: Per-file diff between two session snapshots (git tree ids)
+      operationId: sessionSnapshotDiffDomain
+      tags: [sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: projectId
+          in: query
+          required: false
+          description: Owning project uuid — the C4 gate; missing answers 400 PROJECT_REQUIRED.
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          required: true
+          description: Source snapshot id (git tree) from RevertInfo.snapshot.
+          schema:
+            type: string
+        - name: to
+          in: query
+          required: true
+          description: Target snapshot id (git tree).
+          schema:
+            type: string
+        - name: context
+          in: query
+          required: false
+          description: Unchanged lines around each hunk (git -U).
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        '200':
+          description: per-file diff rows (empty when the trees are equal)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SnapshotDiff'
+        '400':
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or missing/invalid from/to (code bad_request) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: snapshots unavailable (not a git repository / code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
   /api/v1/sessions/events:
     get:
       summary: Live session events (SSE; domain frames {id, type, data, session?})
@@ -2004,9 +2266,40 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: session
+          in: query
+          required: false
+          description: >-
+            Optional session id narrowing the subscription to one session (server-side predicate over
+            the existing localSessionIds filter, which stays as defense-in-depth). Unknown/foreign
+            session answers a quiet empty stream (heartbeat flows, no frames) — never 404, so the C4
+            gate does not leak existence. Omitted → multiplex of the caller's project sessions.
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          required: false
+          description: >-
+            Fallback resume cursor (frame id); the primary resume signal is the `Last-Event-ID`
+            request header. Replay starts after the cursor; unknown/empty cursor replays the full
+            local buffer filtered to this subscription.
+          schema:
+            type: string
+        - name: Last-Event-ID
+          in: header
+          required: false
+          description: SSE-native resume cursor (frame id from the `id:` line); `?cursor=` is the fallback.
+          schema:
+            type: string
       responses:
         '200':
-          description: text/event-stream of domain SessionStreamFrame rows
+          description: >-
+            text/event-stream of domain SessionStreamFrame rows. Transport: every data frame carries
+            an `id:` line (Last-Event-ID redial) and `event: message`; idle gaps emit the SSE comment
+            `: ping` every ~15s (never a data frame — parsers skip it, the watchdog treats it as
+            activity). A mid-stream failure writes one terminal `stream.error` frame then ends the
+            stream (quiet abort/disconnect stays silent). Clients parse fail-soft (broken chunks are
+            skipped, the stream stays alive) and narrow the subscription with `?session=`.
           content:
             text/event-stream:
               schema:
@@ -2780,7 +3073,7 @@ components:
           type: string
     SessionInfo:
       type: object
-      required: [id, title, createdAt, directory, projectId, model, agentId, status]
+      required: [id, title, createdAt, updatedAt, directory, projectId, model, agentId, status]
       description: >-
         Domain session row (GET/POST /api/v1/sessions) — OUR shape, stable while
         the runtime behind it changes: title/model are explicitly nullable
@@ -2799,6 +3092,10 @@ components:
         createdAt:
           type: string
           format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+          description: ISO-8601 timestamp of the last activity (message append / binding change)
         directory:
           type: string
         projectId:
@@ -2931,12 +3228,15 @@ components:
         artifact carries on session-scoped variants) so
         consumers never touch the upstream name at the top level; `data` stays the variant-owned
         payload passed through untouched (envelope-only stance of card 3 — the large variant union
-        is never mirrored here).
+        is never mirrored here). Wire: `id:` line mirrors `id` (Last-Event-ID cursor),
+        `: ping` comments are transport heartbeats (not frames), and `type: stream.error`
+        is the terminal failure frame (finite data.message/code, then the stream ends).
       properties:
         id:
           type: string
         type:
           type: string
+          description: frame variant; `stream.error` is the terminal failure (not chat text)
         data:
           type: object
           description: per-type upstream payload, passed through
@@ -2983,6 +3283,99 @@ components:
           type: string
           enum: [auto, enabled, disabled]
         package:
+          type: string
+    SessionForkRequest:
+      type: object
+      required: [projectId]
+      description: >-
+        POST /api/v1/sessions/{id}/fork body — projectId is the C4 gate uuid.
+        `before` is the boundary message id: the copy keeps every message
+        STRICTLY BEFORE it; omitted → the whole thread is forked (boundary =
+        the newest message, type 'through').
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        before:
+          type: string
+          minLength: 1
+          maxLength: 200
+    SessionForkBoundary:
+      type: object
+      required: [type, messageID]
+      description: Boundary the fork copied to — 'through' includes the message, 'before' excludes it.
+      properties:
+        type:
+          type: string
+          enum: [before, through]
+        messageID:
+          type: string
+    SessionForkResponse:
+      type: object
+      required: [session, boundary]
+      description: POST /api/v1/sessions/{id}/fork answer — the created session plus its copy boundary.
+      properties:
+        session:
+          $ref: '#/components/schemas/SessionInfo'
+        boundary:
+          $ref: '#/components/schemas/SessionForkBoundary'
+    SnapshotDiff:
+      type: object
+      required: [file]
+      description: >-
+        One file entry of a session snapshot comparison; `hunks` is the unified
+        diff body when patches were requested (absent for a name-only listing).
+      properties:
+        file:
+          type: string
+        hunks:
+          type: string
+    RevertStageRequest:
+      type: object
+      required: [projectId, messageID]
+      description: POST /api/v1/sessions/{id}/revert/stage body — boundary message plus optional path filter.
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        messageID:
+          type: string
+          minLength: 1
+          maxLength: 200
+        files:
+          type: array
+          items:
+            type: string
+            minLength: 1
+    RevertInfo:
+      type: object
+      required: [messageID, snapshot, files]
+      description: >-
+        Staged revert state — the boundary message, the snapshot files were
+        restored FROM (null when the project has no git snapshot for that
+        turn) and the file diffs the revert produced.
+      properties:
+        messageID:
+          type: string
+        snapshot:
+          type: string
+          nullable: true
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/SnapshotDiff'
+    ToolCallInfo:
+      type: object
+      required: [id, name, result]
+      description: One tool call visible in the session timeline (runtime call id, registry name, optional namespace, result text).
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        namespace:
+          type: string
+        result:
           type: string
     RunStatus:
       type: string

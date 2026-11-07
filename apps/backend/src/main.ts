@@ -1,17 +1,16 @@
 import * as dotenv from 'dotenv';
 import { expand } from 'dotenv-expand';
-
-// Expand ${VAR} / ${VAR:-default} from the local .env (single source).
-// Never overrides existing process.env (shell/nx with-env wins); never logs secrets.
-const dotenvResult = dotenv.config();
-expand(dotenvResult);
-
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app/app.module';
 import { AppLogger, nestLogLevels } from './common/logger';
 import { configureApp, setupSwagger } from './app/app.setup';
 import { validateEnvWithWarnings } from './common/env/env';
+
+// Expand ${VAR} / ${VAR:-default} from the local .env (single source).
+// Never overrides existing process.env (shell/nx with-env wins); never logs secrets.
+const dotenvResult = dotenv.config();
+expand(dotenvResult);
 
 function isAbortLike(e: unknown): boolean {
   const v = e as {

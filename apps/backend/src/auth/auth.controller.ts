@@ -43,6 +43,7 @@ import { ReqUser } from "./req-user.decorator";
 import type { RequestIdentity } from "./identity.service";
 import { TokenService } from "./token.service";
 import { UsersService, toPublicUser } from "../users/users.service";
+import { OrganizationsService } from "../organizations/organizations.service";
 
 /** httpOnly refresh cookie (read by POST /auth/refresh via body or cookie). */
 export const REFRESH_COOKIE = "rush-code-refresh";
@@ -141,6 +142,7 @@ export class AuthController {
     private readonly users: UsersService,
     private readonly tokens: TokenService,
     private readonly local: LocalAuthProvider,
+    private readonly organizations: OrganizationsService,
     private readonly logger: AppLogger = new AppLogger(AuthController.name),
   ) {}
 
@@ -166,6 +168,27 @@ export class AuthController {
           code: "email_taken",
           message: "Email is already registered",
         });
+      }
+      // Every user owns exactly one personal org (org-only model): it is
+      // created right after the user row via OrganizationsService.create
+      // with isPersonal=true (owner + maintainer = the new user). An org
+      // failure must not leave a user without an org — compensate by
+      // removing the just-created user, then propagate (500 for disk,
+      // 503 for DB outages via the services' dbUnavailable mapping).
+      try {
+        await this.organizations.create(
+          { name: `${created.email} personal`, isPersonal: true },
+          created.id,
+          correlationId,
+        );
+      } catch (orgErr) {
+        try {
+          await this.users.deleteById(created.id, correlationId);
+        } catch {
+          // Compensating delete is best-effort — the original org error
+          // below stays the caller's outcome (never masked).
+        }
+        throw orgErr;
       }
       const { access, refresh } = secrets();
       const { accessTtl, refreshTtl } = refreshTtlSec();

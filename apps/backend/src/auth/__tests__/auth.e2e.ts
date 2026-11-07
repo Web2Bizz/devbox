@@ -12,6 +12,9 @@
  * Never logs secrets.
  */
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 // Deterministic env — BEFORE AppModule import (ConfigModule.validate at create).
 // NOTE: DATABASE_URL is resolved inside main() (TEST_DATABASE_URL seam) —
@@ -150,8 +153,12 @@ async function main(): Promise<void> {
 
   let access = "";
   let refresh = "";
+  // Register mints a personal org on disk (org-only model): isolate it in a
+  // tmp REPOS_ROOT so the suite never touches the developer's real jail.
+  const reposRoot = await mkdtemp(path.join(tmpdir(), "rush-code-auth-e2e-"));
+  process.env.REPOS_ROOT = reposRoot;
   try {
-    await check("POST register → 201 pair", async () => {
+    await check("POST register → 201 pair + personal org minted", async () => {
       const res = await fetch(
         `${base}/api/v1/auth/register`,
         json({
@@ -178,6 +185,28 @@ async function main(): Promise<void> {
       assert.match(res.headers.get("set-cookie") ?? "", /rush-code-refresh/);
       access = body.accessToken as string;
       refresh = body.refreshToken as string;
+    });
+
+    await check("register minted an undeletable personal org", async () => {
+      const listed = await fetch(`${base}/api/v1/organizations`, {
+        headers: { authorization: `Bearer ${access}` },
+      });
+      assert.equal(listed.status, 200);
+      const orgs = (await readJson(listed)) as Array<{
+        id?: string;
+        isPersonal?: boolean;
+      }>;
+      const personal = orgs.find((o) => o.isPersonal === true);
+      assert.ok(personal?.id, "register must create a personal org");
+      const del = await fetch(`${base}/api/v1/organizations/${personal?.id}`, {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${access}` },
+      });
+      assert.equal(del.status, 400);
+      assert.equal(
+        ((await readJson(del)) as { code?: string }).code,
+        "personal_org_immutable",
+      );
     });
 
     await check("POST register duplicate → 409 email_taken", async () => {
@@ -439,6 +468,15 @@ async function main(): Promise<void> {
   } finally {
     await app.close();
     await testDb.stop();
+    try {
+      const root = process.env.REPOS_ROOT ?? "";
+      if (root.includes("rush-code-auth-e2e-")) {
+        await rm(root, { recursive: true, force: true });
+      }
+    } catch {
+      // ignore
+    }
+    delete process.env.REPOS_ROOT;
   }
 
   // --- Dual-mode: legacy fallback ON → mock identity accepted --------------

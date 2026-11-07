@@ -127,11 +127,11 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
     },
   },
   {
-    name: 'resolveUserStrict при пустом ROOT → rejects до любого touch диска/БД',
+    name: 'resolveOrgStrict при пустом ROOT → rejects до любого touch диска/БД',
     run: async () => {
       const paths = new WorkspacePathService();
       await assert.rejects(() =>
-        paths.resolveUserStrict(
+        paths.resolveOrgStrict(
           '123e4567-e89b-12d3-a456-426614174001',
           '123e4567-e89b-12d3-a456-426614174002',
         ),

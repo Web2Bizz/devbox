@@ -91,6 +91,7 @@ process.env.REPOS_ROOT = E2E_ROOT;
 
 const E2E_PROJECT_ID = '123e4567-e89b-12d3-a456-4266141740a0';
 const E2E_USER_ID = '123e4567-e89b-12d3-a456-4266141740a1';
+const E2E_ORG_ID = '123e4567-e89b-12d3-a456-4266141740a2';
 
 type CheckResult = { name: string; ok: boolean; detail?: string };
 type JsonRecord = Record<string, unknown>;
@@ -231,15 +232,20 @@ async function main(): Promise<void> {
   const base = await app.getUrl();
   const results: Array<CheckResult> = [];
 
-  // run_runs carries a real FK to projects; the C4 gate is patched below, so
-  // the project row only exists in this seed.
+  // run_runs carries a real FK to projects (projects.org_id is NOT NULL);
+  // the C4 gate is patched below, so the org + project rows only exist in
+  // this seed.
   if (testDb.mode === 'live') {
     const { DbService } = await import('../../../../common/db/db.service');
-    const { projects } = await import('../../../../common/db/schema');
+    const { organizations, projects } = await import('../../../../common/db/schema');
     const dbService = app.get(DbService, { strict: false }) as InstanceType<typeof DbService>;
     await dbService.client
+      .insert(organizations)
+      .values({ id: E2E_ORG_ID, name: 'runs-e2e-org' })
+      .onConflictDoNothing({ target: organizations.id });
+    await dbService.client
       .insert(projects)
-      .values({ id: E2E_PROJECT_ID, name: 'runs-e2e', ownerId: E2E_USER_ID })
+      .values({ id: E2E_PROJECT_ID, orgId: E2E_ORG_ID, name: 'runs-e2e', ownerId: E2E_USER_ID })
       .onConflictDoNothing({ target: projects.id });
   }
 
@@ -309,16 +315,16 @@ async function main(): Promise<void> {
   );
   const allowAccess = async (): Promise<{ ownerId: string; orgIds: Array<string> }> => ({
     ownerId: E2E_USER_ID,
-    orgIds: [],
+    orgIds: [E2E_ORG_ID],
   });
   (
     ProjectAccessService.prototype as unknown as { assertProjectAccessById: unknown }
   ).assertProjectAccessById = allowAccess;
   const pathsProto = WorkspacePathService.prototype as unknown as Record<string, unknown>;
-  const originalResolveUserStrict = pathsProto.resolveUserStrict;
+  const originalResolveOrgStrict = pathsProto.resolveOrgStrict;
   const originalRealStrictRoot = pathsProto.realStrictRoot;
   const originalAssertInsideJail = pathsProto.assertInsideJail;
-  pathsProto.resolveUserStrict = async () => ({ absRepo: JAIL_DIR });
+  pathsProto.resolveOrgStrict = async () => ({ absRepo: JAIL_DIR });
   pathsProto.realStrictRoot = async () => E2E_ROOT;
   pathsProto.assertInsideJail = async (abs: string) => abs;
 
@@ -736,7 +742,7 @@ async function main(): Promise<void> {
     (
       ProjectAccessService.prototype as unknown as { assertProjectAccessById: unknown }
     ).assertProjectAccessById = allowAccess;
-    pathsProto.resolveUserStrict = originalResolveUserStrict;
+    pathsProto.resolveOrgStrict = originalResolveOrgStrict;
     pathsProto.realStrictRoot = originalRealStrictRoot;
     pathsProto.assertInsideJail = originalAssertInsideJail;
     await app.close();

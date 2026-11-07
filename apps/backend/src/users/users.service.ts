@@ -115,6 +115,18 @@ export class UsersService {
     }
   }
 
+  /** Compensating rollback for register when personal-org creation fails. */
+  async deleteById(
+    id: string,
+    correlationId?: string,
+  ): Promise<void> {
+    try {
+      await this.usersRepository.deleteById(id);
+    } catch (error) {
+      dbUnavailable("users.deleteById", error, this.logger, correlationId);
+    }
+  }
+
   /** Test/e2e seam — DELETE FROM users (requires live Postgres). */
   async clearAllForTests(): Promise<void> {
     await this.usersRepository.deleteAll();

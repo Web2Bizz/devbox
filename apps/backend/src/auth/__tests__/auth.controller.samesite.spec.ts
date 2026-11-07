@@ -8,6 +8,7 @@ import type { LocalAuthProvider } from "../auth-provider";
 import type { LoginInput } from "../auth.dto";
 import type { TokenService } from "../token.service";
 import type { UsersService } from "../../users/users.service";
+import type { OrganizationsService } from "../../organizations/organizations.service";
 
 type Case = { name: string; run: () => Promise<void> | void };
 
@@ -61,6 +62,11 @@ function authHarness() {
       return storedUser();
     },
   } as unknown as LocalAuthProvider;
+  const organizations = {
+    async create() {
+      return { id: "org-id" };
+    },
+  } as unknown as OrganizationsService;
   const logger = {
     info() {},
     warn() {},
@@ -70,7 +76,7 @@ function authHarness() {
       return this;
     },
   } as unknown as AppLogger;
-  const ctl = new AuthController(users, tokens, local, logger);
+  const ctl = new AuthController(users, tokens, local, organizations, logger);
   return { ctl, res, cookieCalls };
 }
 

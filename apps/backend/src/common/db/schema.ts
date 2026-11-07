@@ -60,9 +60,11 @@ export const projects = pgTable("projects", {
   // RESTRICT (not cascade): rows are never physically deleted, so a hard
   // delete of an organization must fail loudly instead of silently wiping
   // its projects. Org removal soft-deletes (`deleted_at`) instead.
-  orgId: uuid("org_id").references(() => organizations.id, {
-    onDelete: "restrict",
-  }),
+  orgId: uuid("org_id")
+    .notNull()
+    .references(() => organizations.id, {
+      onDelete: "restrict",
+    }),
   name: text("name").notNull(),
   description: text("description"),
   githubOwner: text("github_owner"),
@@ -284,6 +286,9 @@ export const organizations = pgTable("organizations", {
     onDelete: "set null",
   }),
   isPrivate: boolean("is_private").notNull().default(true),
+  // Personal org of a single user (created at register, immutable — never
+  // deleted via the API). Default false so existing team orgs are unaffected.
+  isPersonal: boolean("is_personal").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

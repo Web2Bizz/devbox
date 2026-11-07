@@ -5,9 +5,9 @@
  *   `bun run build && bun dist/common/storage/__tests__/workspace-path.spec.js`
  * Also executes under `bun test dist` (top-level run, throws on failure).
  *
- * Covers the Card-2 canon (REPOS_ROOT strict, NO `workspace` segment):
- * - resolveUser/resolveOrg (+ *Strict) anchor under
- *   users/<uuid>/projects/<uuid>/content and orgs/<uuid>/projects/<uuid>/content;
+ * Covers the org-only canon (REPOS_ROOT strict, NO `workspace` segment,
+ * no user homes):
+ * - resolveOrg (+ *Strict) anchors under orgs/<uuid>/projects/<uuid>/content;
  * - non-uuid ids → 400; traversal subs → 403 (incl. `../.secrets` escape);
  * - empty REPOS_ROOT → 503 reads / 500 strict writes (no fallback);
  * - ensureProjectDirs creates content + empty `.secrets` reserves;
@@ -21,7 +21,6 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { WorkspacePathService } from '../workspace-path.service';
 
-const UID = randomUUID();
 const OID = randomUUID();
 const PID = randomUUID();
 
@@ -31,22 +30,7 @@ function statusOf(err: unknown): number | undefined {
 
 const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
   {
-    name: 'resolveUser canon has no workspace segment',
-    run: async () => {
-      const paths = new WorkspacePathService();
-      const r = await paths.resolveUser(UID, PID);
-      const root = path.resolve(process.env.REPOS_ROOT as string);
-      assert.equal(r.scope, 'user');
-      assert.equal(r.absBase, path.resolve(root, 'users', UID.toLowerCase(), 'projects', PID.toLowerCase()));
-      assert.equal(r.absRepo, path.join(r.absBase, 'content'));
-      assert.equal(r.absSecrets, path.join(r.absBase, '.secrets'));
-      assert.equal(r.abs, r.absRepo);
-      assert.equal(r.rel, '.');
-      assert.ok(!r.absRepo.includes('workspace'));
-    },
-  },
-  {
-    name: 'resolveOrg canon has no workspace segment',
+    name: 'resolveOrg canon has no workspace segment (no user homes)',
     run: async () => {
       const paths = new WorkspacePathService();
       const r = await paths.resolveOrg(OID, PID);
@@ -56,22 +40,29 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
       assert.equal(r.absRepo, path.join(r.absBase, 'content'));
       assert.equal(r.scopeSecrets, path.resolve(root, 'orgs', OID.toLowerCase(), '.secrets'));
       assert.ok(!r.absRepo.includes('workspace'));
+      assert.ok(!r.absBase.includes(`${path.sep}users${path.sep}`));
     },
   },
   {
-    name: 'non-uuid ids rejected with 400 on all four resolvers',
+    name: 'user-space resolution is removed (resolveUser gone)',
+    run: async () => {
+      const paths = new WorkspacePathService();
+      assert.equal(
+        (paths as unknown as Record<string, unknown>).resolveUser,
+        undefined,
+      );
+      assert.equal(
+        (paths as unknown as Record<string, unknown>).resolveUserStrict,
+        undefined,
+      );
+    },
+  },
+  {
+    name: 'non-uuid ids rejected with 400 on both org resolvers',
     run: async () => {
       const paths = new WorkspacePathService();
       const bad = ['alice', 'system', '', '../escape', 'not-a-uuid', 'x'.repeat(37)];
       for (const b of bad) {
-        await assert.rejects(() => paths.resolveUser(b, PID)).then(
-          () => {},
-          (err) => assert.equal(statusOf(err), 400),
-        );
-        await assert.rejects(() => paths.resolveUser(UID, b)).then(
-          () => {},
-          (err) => assert.equal(statusOf(err), 400),
-        );
         await assert.rejects(() => paths.resolveOrg(b, PID)).then(
           () => {},
           (err) => assert.equal(statusOf(err), 400),
@@ -80,7 +71,7 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
           () => {},
           (err) => assert.equal(statusOf(err), 400),
         );
-        await assert.rejects(() => paths.resolveUserStrict(b, PID)).then(
+        await assert.rejects(() => paths.resolveOrgStrict(b, PID)).then(
           () => {},
           (err) => assert.equal(statusOf(err), 400),
         );
@@ -97,16 +88,12 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
       const paths = new WorkspacePathService();
       const evil = ['..', '../..', '../../etc', '/absolute', '..%2f..%2fetc', '%2e%2e/x', '../.secrets', 'content/../../orgs', 'a/../../b'];
       for (const sub of evil) {
-        await assert.rejects(() => paths.resolveUser(UID, PID, sub)).then(
-          () => {},
-          (err) => assert.equal(statusOf(err), 403),
-        );
         await assert.rejects(() => paths.resolveOrg(OID, PID, sub)).then(
           () => {},
           (err) => assert.equal(statusOf(err), 403),
         );
       }
-      await assert.rejects(() => paths.resolveUser(UID, PID, 'a\0b')).then(
+      await assert.rejects(() => paths.resolveOrg(OID, PID, 'a\0b')).then(
         () => {},
         (err) => assert.equal(statusOf(err), 403),
       );
@@ -116,7 +103,7 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
     name: 'nested legit sub stays inside content',
     run: async () => {
       const paths = new WorkspacePathService();
-      const r = await paths.resolveUser(UID, PID, 'src/index.ts');
+      const r = await paths.resolveOrg(OID, PID, 'src/index.ts');
       assert.equal(r.rel, 'src/index.ts');
       assert.equal(r.abs, path.resolve(r.absRepo, 'src/index.ts'));
     },
@@ -126,22 +113,10 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
     run: async () => {
       const paths = new WorkspacePathService();
       try {
-        await paths.resolveUser(UID, PID);
-        assert.fail('must throw');
-      } catch (err) {
-        assert.equal((err as { code?: string }).code, 'EXTERNAL_UNAVAILABLE');
-      }
-      try {
         await paths.resolveOrg(OID, PID);
         assert.fail('must throw');
       } catch (err) {
         assert.equal((err as { code?: string }).code, 'EXTERNAL_UNAVAILABLE');
-      }
-      try {
-        await paths.resolveUserStrict(UID, PID);
-        assert.fail('must throw');
-      } catch (err) {
-        assert.equal(statusOf(err), 500);
       }
       try {
         await paths.resolveOrgStrict(OID, PID);
@@ -155,11 +130,6 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
     name: 'ensureProjectDirs creates content + empty .secrets reserves',
     run: async () => {
       const paths = new WorkspacePathService();
-      const r = await paths.resolveUserStrict(UID, PID);
-      await paths.ensureProjectDirs(r);
-      assert.equal(statSync(r.absRepo).isDirectory(), true);
-      assert.equal(statSync(r.absSecrets).isDirectory(), true);
-      assert.equal(statSync(r.scopeSecrets).isDirectory(), true);
       const o = await paths.resolveOrgStrict(OID, PID);
       await paths.ensureProjectDirs(o);
       assert.equal(statSync(o.absRepo).isDirectory(), true);

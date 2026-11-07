@@ -118,4 +118,9 @@ export class UsersRepository {
   async deleteAll(): Promise<void> {
     await this.client().delete(users);
   }
+
+  /** Compensating rollback for register: remove a just-created user. */
+  async deleteById(id: string): Promise<void> {
+    await this.client().delete(users).where(eq(users.id, id));
+  }
 }

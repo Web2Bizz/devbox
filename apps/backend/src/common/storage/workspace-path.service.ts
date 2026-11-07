@@ -5,7 +5,7 @@ import {
   InternalServerErrorException,
 } from '@nestjs/common';
 import { throwStorageNotConfigured } from './storage-unavailable';
-import { mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
+import { mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import type { Stats } from 'node:fs';
 import path from 'node:path';
 
@@ -35,13 +35,13 @@ export type OrgScopeResolved = {
 };
 
 export type ProjectResolved = {
-  /** 'user' → users/<uuid>/…, 'org' → orgs/<uuid>/… (no workspace segment). */
+  /** 'org' → orgs/<uuid>/… (no workspace segment; user homes removed). */
   scope: ProjectScope;
-  /** Scope owner id (user uuid or org uuid, as passed — validated uuid). */
+  /** Scope owner id (org uuid, as passed — validated uuid). */
   scopeId: string;
   /** Project id (validated uuid). */
   projectId: string;
-  /** Absolute project home: <root>/(users|orgs)/<scopeId>/projects/<projectId>. */
+  /** Absolute project home: <root>/orgs/<scopeId>/projects/<projectId>. */
   absBase: string;
   /** Absolute content root: <absBase>/content (git repo lives here). */
   absRepo: string;
@@ -62,14 +62,14 @@ export type ProjectResolved = {
  * provided directly (no WorkspacesModule dependency).
  *
  * Canonical layout on disk (REPOS_ROOT, strict, БЕЗ сегмента `workspace`):
- *   users/<user_uuid>/projects/<project_uuid>/{content,.secrets}
- *   users/<user_uuid>/.secrets
  *   orgs/<org_uuid>/projects/<project_uuid>/{content,.secrets}
  *   orgs/<org_uuid>/.secrets
  *
- * - `resolveUser(userId, projectId, sub?)` / `resolveOrg(orgId, projectId,
- *   sub?)` (+ `*Strict` write variants) validate every id as uuid (400 on
- *   garbage) and jail the result (403 on traversal): `..`, absolute paths,
+ * User homes (users/<user_uuid>/…) are removed (org-only model): path
+ * resolution is org-scoped only.
+ *
+ * - `resolveOrg(orgId, projectId, sub?)` (+ `*Strict` write variant)
+ *   validates every id as uuid (400 on garbage) and jails the result (403 on traversal): `..`, absolute paths,
  *   URL-encoded escapes (`%2e%2e`, `%2f`), null bytes and symlinks pointing
  *   outside the jail are all rejected.
  * - Jail root: REPOS_ROOT only (unified catalog, single source for reads
@@ -175,7 +175,7 @@ export class WorkspacePathService {
    * common/storage (CoC: repository is the only other place allowed to touch
    * fs). Every method here is a thin, behaviour-preserving wrapper: the
    * CALLER passes a path already validated by the jail
-   * (`resolveUser`/`resolveOrg`/`ensureProjectDirs`…), these helpers do NO
+   * (`resolveOrg`/`ensureProjectDirs`…), these helpers do NO
    * path validation and NO storage-config gate of their own.
    */
 
@@ -212,6 +212,24 @@ export class WorkspacePathService {
   /** `readdir` with dirents (names + type predicates) for a jailed path. */
   async readDir(abs: string): Promise<Array<DirEntry>> {
     return readdir(abs, { withFileTypes: true });
+  }
+
+  /**
+   * `readFile` (utf8) for a jailed path: the CALLER passes a path already
+   * validated by the jail (`resolveOrg`/`resolveOrgStrict` + lexical prefix
+   * against the project content dir), this helper does NO path validation
+   * of its own — same contract as `ensureDir`/`statPath`/`readDir` above.
+   */
+  async readFile(abs: string): Promise<string> {
+    return readFile(abs, 'utf8');
+  }
+
+  /**
+   * `writeFile` (utf8, overwrite) for a jailed path: same caller-validated
+   * contract as `readFile` — no validation and no storage-config gate here.
+   */
+  async writeFile(abs: string, content: string): Promise<void> {
+    await writeFile(abs, content, 'utf8');
   }
 
   /** Decode once (`%2e%2e` → `..`) so encoded escapes are caught too. */
@@ -303,26 +321,13 @@ export class WorkspacePathService {
   }
 
   /**
-   * Resolve + jail `REPOS_ROOT/users/<userUuid>/projects/<projectUuid>/content[/subPath]`.
+   * Resolve + jail `REPOS_ROOT/orgs/<orgUuid>/projects/<projectUuid>/content[/subPath]`.
    * Storage gate first (503 when REPOS_ROOT empty), then uuid 400s, then
    * traversal 403s. `.secrets` siblings are never addressable: `sub` is
    * always anchored under `content`.
-   */
-  async resolveUser(
-    userId: string,
-    projectId: string,
-    subPath?: string,
-  ): Promise<ProjectResolved> {
-    const root = this.resolveRoot();
-    const rootReal = await this.realRoot();
-    const uid = this.checkUuid(userId, 'userId');
-    const pid = this.checkUuid(projectId, 'projectId');
-    return this.resolveScoped('user', root, rootReal, uid, pid, subPath);
-  }
-
-  /**
-   * Resolve + jail `REPOS_ROOT/orgs/<orgUuid>/projects/<projectUuid>/content[/subPath]`.
-   * Same gates as `resolveUser()` (503 → 400 → 403).
+   *
+   * User-space resolution (`users/<userUuid>/…`) was removed with the
+   * org-only model — use `resolveOrg` for every project home.
    */
   async resolveOrg(
     orgId: string,
@@ -337,24 +342,11 @@ export class WorkspacePathService {
   }
 
   /**
-   * Strict write variant of `resolveUser()` — same validation/jail, rooted
-   * at `requireExplicitRoot()` (empty REPOS_ROOT → 500 before anything else).
-   */
-  async resolveUserStrict(
-    userId: string,
-    projectId: string,
-    subPath?: string,
-  ): Promise<ProjectResolved> {
-    const root = this.requireExplicitRoot();
-    const rootReal = await this.realStrictRoot();
-    const uid = this.checkUuid(userId, 'userId');
-    const pid = this.checkUuid(projectId, 'projectId');
-    return this.resolveScoped('user', root, rootReal, uid, pid, subPath);
-  }
-
-  /**
    * Strict write variant of `resolveOrg()` — same validation/jail, rooted
    * at `requireExplicitRoot()` (empty REPOS_ROOT → 500 before anything else).
+   *
+   * User-space resolution (`users/<userUuid>/…`) was removed with the
+   * org-only model — use `resolveOrgStrict` for every project write.
    */
   async resolveOrgStrict(
     orgId: string,

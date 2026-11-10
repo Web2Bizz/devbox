@@ -22,6 +22,7 @@ import {
   pendingCalls,
   stepMessages,
   type StepAttempt,
+  type StepMeta,
   type StepRequest,
   type TokenUsage,
   type TurnFrame,
@@ -419,7 +420,7 @@ export function createStepExecutor(deps: StepExecutorDeps): StepExecutor {
         const chat = client as ChatOpenAI;
         const bound =
           deps.tools.length > 0
-            ? chat.bindTools(deps.tools, { tool_choice: toolChoice })
+            ? chat.bindTools([...deps.tools], { tool_choice: toolChoice })
             : chat;
         const response = await bound.invoke(messages.map(toLangChainMessage));
         return loopStepFromResponse(response as AIMessage);

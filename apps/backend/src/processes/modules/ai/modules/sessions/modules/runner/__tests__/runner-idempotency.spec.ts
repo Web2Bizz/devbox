@@ -206,7 +206,9 @@ function fakeClient(responses: Array<AIMessage>, calls: Array<FakeCall>): unknow
       return {
         invoke: async (messages: Array<unknown>): Promise<AIMessage> => {
           calls.push({ messages, toolChoice: kwargs?.tool_choice });
-          const response: AIMessage = responses[index] ?? responses[responses.length - 1] as AIMessage;
+          const fallback: AIMessage =
+            responses[responses.length - 1] ?? new AIMessage({ content: "" });
+          const response: AIMessage = responses[index] ?? fallback;
           index += 1;
           return response;
         },

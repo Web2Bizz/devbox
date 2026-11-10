@@ -411,7 +411,9 @@ function projectGateError(): ApiClientError {
  *   `POST /api/v1/sessions/{id}/messages` (the answer does NOT come from this
  *   response — it streams over events), and stays `sending` until the
  *   session's `session.idle` frame commits the streamed text as the
- *   assistant row.
+ *   assistant row. `session.execution.failed` / `session.step.failed` are the
+ *   failure terminators: the partial stream is committed and the fixed
+ *   `data.message` surfaces as the error (no spinner without an error).
  * - Live deltas: `GET /api/v1/sessions/events` SSE subscription (self-healing:
  *   quiet backoff 1s → 15s on transient breaks, watchdog redial on silence,
  *   resync on online/visible, resume via Last-Event-ID), scoped by the frame's

@@ -125,6 +125,9 @@ export class InProcessTurnService {
         runId: receipt.id,
         effects: new InMemoryToolEffectsStore(),
         mode,
+        // Retries belong to the model router (`maxRetries: 0` on the client):
+        // the runner loop must not fan a failed step out again.
+        retry: { attempts: 1, delayMs: 0 },
         publish: (frame: TurnFrame) => this.publishFrame(sessionId, assistantId, frame),
         correlationId,
       });

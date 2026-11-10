@@ -609,19 +609,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/v1/key:
+  /api/v1/vault/secrets:
     get:
-      summary: Whether you have an OpenCode API key stored (existence only, never the key)
-      operationId: getOpencodeKeyStatusV1
+      summary: List your stored vault secrets
+      operationId: listVaultSecretsV1
       security:
         - bearerAuth: []
       responses:
         '200':
-          description: key status
+          description: vault secrets of the caller (never ciphertext)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OpencodeKeyStatus'
+                $ref: '#/components/schemas/VaultSecretList'
         '401':
           description: missing/invalid bearer
           content:
@@ -634,9 +634,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-    put:
-      summary: Store your own OpenCode API key (AES-256-GCM at rest, never returned or logged)
-      operationId: putOpencodeKeyV1
+    post:
+      summary: Store a vault secret (AES-256-GCM at rest, never echoed)
+      operationId: createVaultSecretV1
       security:
         - bearerAuth: []
       requestBody:
@@ -644,14 +644,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/OpencodeKeyBody'
+              $ref: '#/components/schemas/VaultSecretInput'
       responses:
-        '200':
-          description: stored (ok + updatedAt, no secret echo)
+        '201':
+          description: stored (identity, label and timestamps only — no secret echo)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OpencodeKeyResult'
+                $ref: '#/components/schemas/VaultSecretInfo'
         '400':
           description: bad request (validation)
           content:
@@ -664,8 +664,46 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
-          description: key encryption is not configured (code opencode_keys_unconfigured)
+          description: key storage is not configured (code opencode_keys_unconfigured)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/vault/secrets/{id}:
+    get:
+      summary: Get one of your vault secrets (never the ciphertext)
+      operationId: getVaultSecretV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: vault secret (identity, label and timestamps only)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VaultSecretInfo'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: vault_secret_not_found (missing or owned by another consumer)
           content:
             application/json:
               schema:
@@ -676,20 +714,347 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-    delete:
-      summary: Delete your stored OpenCode API key (idempotent)
-      operationId: deleteOpencodeKeyV1
+    put:
+      summary: Update a vault secret (re-encrypts a new key and/or label)
+      operationId: updateVaultSecretV1
       security:
         - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultSecretUpdateInput'
+      responses:
+        '200':
+          description: updated secret (identity, label and timestamps only)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VaultSecretInfo'
+        '400':
+          description: bad request (validation)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: vault_secret_not_found (missing or owned by another consumer)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: key storage is not configured (code opencode_keys_unconfigured)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    delete:
+      summary: Delete a vault secret (404 when not owned/missing)
+      operationId: deleteVaultSecretV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
       responses:
         '200':
           description: deleted
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OpencodeKeyDeleteResult'
+                $ref: '#/components/schemas/VaultSecretDeleteResult'
         '401':
           description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: vault_secret_not_found (missing or owned by another consumer)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/vault/organizations/{orgId}/secrets:
+    get:
+      summary: List organization vault secrets (members only)
+      operationId: listOrganizationVaultSecretsV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: organization vault secrets (never ciphertext)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VaultSecretList'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: not found (or not a member — existence is not leaked)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    post:
+      summary: Store an organization vault secret (maintainer only)
+      operationId: createOrganizationVaultSecretV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultSecretInput'
+      responses:
+        '201':
+          description: stored (identity, label and timestamps only — no secret echo)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VaultSecretInfo'
+        '400':
+          description: bad request (validation)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: member without the maintainer role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: not found (or not a member — existence is not leaked)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: key storage is not configured (code opencode_keys_unconfigured)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/vault/organizations/{orgId}/secrets/{id}:
+    get:
+      summary: Get one organization vault secret (members only)
+      operationId: getOrganizationVaultSecretV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: vault secret (identity, label and timestamps only)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VaultSecretInfo'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: not found (or not a member/secret — existence is not leaked)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    put:
+      summary: Update an organization vault secret (maintainer only)
+      operationId: updateOrganizationVaultSecretV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultSecretUpdateInput'
+      responses:
+        '200':
+          description: updated secret (identity, label and timestamps only)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VaultSecretInfo'
+        '400':
+          description: bad request (validation)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: member without the maintainer role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: not found (or not a member/secret — existence is not leaked)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: key storage is not configured (code opencode_keys_unconfigured)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    delete:
+      summary: Delete an organization vault secret (maintainer only)
+      operationId: deleteOrganizationVaultSecretV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VaultSecretDeleteResult'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: member without the maintainer role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: not found (or not a member/secret — existence is not leaked)
           content:
             application/json:
               schema:
@@ -3218,6 +3583,13 @@ components:
           type: string
           description: registry agent id (e.g. ask)
           example: ask
+        mode:
+          type: string
+          enum: [auto, ask]
+          description: >-
+            execution mode of the turn (additive); omitted = auto, ask is
+            read-only (mutating tools are filtered at bind time and refused
+            again by dispatch)
     SessionStreamFrame:
       type: object
       required: [id, type, data]
@@ -4118,44 +4490,72 @@ components:
           properties:
             user:
               $ref: '#/components/schemas/AuthUser'
-    OpencodeKeyBody:
+    VaultSecretInfo:
       type: object
-      required: [apiKey]
-      description: Your own OpenCode API key (stored AES-256-GCM encrypted, never returned or logged).
+      required: [id, provider, label, createdAt, updatedAt]
+      description: Stored vault secret as exposed by the API (never the key or ciphertext).
+      properties:
+        id:
+          type: string
+          format: uuid
+        provider:
+          type: string
+          example: opencode
+        label:
+          type: string
+          example: primary
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    VaultSecretList:
+      type: object
+      required: [secrets]
+      properties:
+        secrets:
+          type: array
+          items:
+            $ref: '#/components/schemas/VaultSecretInfo'
+    VaultSecretInput:
+      type: object
+      required: [provider, apiKey]
+      description: Write-only vault input (the plaintext key is encrypted at rest and never returned or logged).
+      properties:
+        provider:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: '^[a-z0-9][a-z0-9._-]*$'
+          example: opencode
+        apiKey:
+          type: string
+          minLength: 20
+          maxLength: 1024
+        label:
+          type: string
+          maxLength: 64
+          example: primary
+    VaultSecretUpdateInput:
+      type: object
+      description: Partial update — at least one of apiKey/label must be present.
       properties:
         apiKey:
           type: string
           minLength: 20
           maxLength: 1024
-    OpencodeKeyResult:
-      type: object
-      required: [ok, updatedAt]
-      properties:
-        ok:
-          type: boolean
-          example: true
-        updatedAt:
+        label:
           type: string
-          format: date-time
-    OpencodeKeyDeleteResult:
+          maxLength: 64
+    VaultSecretDeleteResult:
       type: object
       required: [ok]
-      description: Idempotent delete acknowledgement (no timestamp).
+      description: Delete acknowledgement (404 when the secret is missing or owned by another consumer).
       properties:
         ok:
           type: boolean
           example: true
-    OpencodeKeyStatus:
-      type: object
-      required: [configured]
-      description: Key existence only (never the key itself).
-      properties:
-        configured:
-          type: boolean
-          example: true
-        updatedAt:
-          type: string
-          format: date-time
     OpencodeUsage:
       type: object
       required: [updatedAt]

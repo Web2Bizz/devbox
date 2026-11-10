@@ -1,5 +1,12 @@
 import { Injectable, InternalServerErrorException } from "@nestjs/common";
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+  type CipherGCM,
+  type DecipherGCM,
+} from "node:crypto";
 import { AppLogger } from "../logger";
 import {
   DEFAULT_OPENCODE_KEYS_ACTIVE_KEY_ID,
@@ -9,8 +16,8 @@ import {
 } from "../env/env";
 
 /** AES-256-GCM params: 12-byte IV, 16-byte auth tag (both base64 at rest). */
-const IV_BYTES = 12;
-const TAG_BYTES = 16;
+const IV_BYTES: number = 12;
+const TAG_BYTES: number = 16;
 
 /**
  * Encrypted per-user OpenCode API key (at-rest shape, never logged).
@@ -30,7 +37,7 @@ export type EncryptedOpencodeKey = {
 };
 
 /** Decrypt input — `keyId` is optional so pre-versioning rows stay readable. */
-export type EncryptedOpencodeKeyInput = {
+export type EncryptedVaultSecretInput = {
   /** KEK version id, or missing/empty for legacy rows. */
   keyId?: string | null;
   /** base64(12-byte random IV) */
@@ -60,10 +67,10 @@ function unconfigured(): InternalServerErrorException {
  * Reads the active KEK id (`OPENCODE_KEYS_ACTIVE_KEY_ID`, default "v1").
  * Explicit-but-malformed ids fail closed (same 500, fixed message).
  */
-function resolveKeyId(raw: string | undefined, fallback: string): string {
-  const id = (raw ?? "").trim() || fallback;
-  if (!OPENCODE_KEYS_KEY_ID_PATTERN.test(id)) throw unconfigured();
-  return id;
+function resolveKeyId(rawKeyId: string | undefined, fallback: string): string {
+  const keyId: string = (rawKeyId ?? "").trim() || fallback;
+  if (!OPENCODE_KEYS_KEY_ID_PATTERN.test(keyId)) throw unconfigured();
+  return keyId;
 }
 
 /** SHA-256 key material from a ≥32-char secret (never echoed, never logged). */
@@ -87,7 +94,7 @@ function materialize(secret: string): Buffer {
  * module except as key material.
  */
 function resolveKeyring(): Keyring {
-  const activeSecret = (process.env.OPENCODE_KEYS_ENCRYPTION_KEY ?? "").trim();
+  const activeSecret: string = (process.env.OPENCODE_KEYS_ENCRYPTION_KEY ?? "").trim();
   const active: KeyEntry = {
     id: resolveKeyId(
       process.env.OPENCODE_KEYS_ACTIVE_KEY_ID,
@@ -95,7 +102,7 @@ function resolveKeyring(): Keyring {
     ),
     key: materialize(activeSecret),
   };
-  const previousSecret = (
+  const previousSecret: string = (
     process.env.OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS ?? ""
   ).trim();
   if (!previousSecret) return { active };
@@ -114,14 +121,14 @@ function resolveKeyring(): Keyring {
 function decryptWith(
   entry: KeyEntry,
   iv: Buffer,
-  raw: Buffer,
+  payload: Buffer,
 ): string {
-  if (iv.length !== IV_BYTES || raw.length < TAG_BYTES) {
+  if (iv.length !== IV_BYTES || payload.length < TAG_BYTES) {
     throw new Error("malformed envelope");
   }
-  const tag = raw.subarray(raw.length - TAG_BYTES);
-  const ciphertext = raw.subarray(0, raw.length - TAG_BYTES);
-  const decipher = createDecipheriv("aes-256-gcm", entry.key, iv);
+  const tag: Buffer = payload.subarray(payload.length - TAG_BYTES);
+  const ciphertext: Buffer = payload.subarray(0, payload.length - TAG_BYTES);
+  const decipher: DecipherGCM = createDecipheriv("aes-256-gcm", entry.key, iv);
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString(
     "utf8",
@@ -151,7 +158,9 @@ function decryptWith(
  */
 @Injectable()
 export class CryptoService {
-  constructor(private readonly logger: AppLogger = new AppLogger(CryptoService.name)) {}
+  constructor(
+    private readonly logger: AppLogger = new AppLogger(CryptoService.name),
+  ) {}
 
   /** Active KEK id new rows are wrapped with (fail-closed when unconfigured). */
   activeKeyId(): string {
@@ -170,11 +179,15 @@ export class CryptoService {
   }
 
   encrypt(plain: string): EncryptedOpencodeKey {
-    const { active } = resolveKeyring();
-    const iv = randomBytes(IV_BYTES);
-    const cipher = createCipheriv("aes-256-gcm", active.key, iv);
-    const ciphertext = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
-    const tag = cipher.getAuthTag();
+    const keyring: Keyring = resolveKeyring();
+    const active: KeyEntry = keyring.active;
+    const iv: Buffer = randomBytes(IV_BYTES);
+    const cipher: CipherGCM = createCipheriv("aes-256-gcm", active.key, iv);
+    const ciphertext: Buffer = Buffer.concat([
+      cipher.update(plain, "utf8"),
+      cipher.final(),
+    ]);
+    const tag: Buffer = cipher.getAuthTag();
     return {
       keyId: active.id,
       iv: iv.toString("base64"),
@@ -182,13 +195,13 @@ export class CryptoService {
     };
   }
 
-  decrypt(input: EncryptedOpencodeKeyInput): string {
-    const ring = resolveKeyring();
+  decrypt(input: EncryptedVaultSecretInput): string {
+    const keyring: Keyring = resolveKeyring();
     let iv: Buffer;
-    let raw: Buffer;
+    let payload: Buffer;
     try {
       iv = Buffer.from(input.iv, "base64");
-      raw = Buffer.from(input.data, "base64");
+      payload = Buffer.from(input.data, "base64");
     } catch {
       this.logger.error("[crypto] decrypt failed code=opencode_key_unreadable");
       throw new InternalServerErrorException({
@@ -200,14 +213,14 @@ export class CryptoService {
     // (dual-read across the rotation window); legacy envelopes without an
     // id try active → previous.
     const ordered: Array<KeyEntry> =
-      input.keyId && input.keyId === ring.previous?.id
-        ? [ring.previous, ring.active]
-        : ring.previous
-          ? [ring.active, ring.previous]
-          : [ring.active];
+      input.keyId && input.keyId === keyring.previous?.id
+        ? [keyring.previous, keyring.active]
+        : keyring.previous
+          ? [keyring.active, keyring.previous]
+          : [keyring.active];
     for (const entry of ordered) {
       try {
-        return decryptWith(entry, iv, raw);
+        return decryptWith(entry, iv, payload);
       } catch {
         // try the next KEK — report only when none opens the envelope.
       }

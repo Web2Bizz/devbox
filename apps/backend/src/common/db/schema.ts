@@ -1,6 +1,11 @@
 /**
  * Drizzle schema — projects domain (module in module).
  *
+ * Type note (CoC §5): the `pgTable(...)` constants stay inferred on purpose —
+ * an explicit annotation cannot express `PgTable` with its column types
+ * without duplicating drizzle's inferred shape, and `$inferSelect` row types
+ * derive from those constants.
+ *
  * Tables:
  * - projects: registry of projects (chats/sessions live underneath).
  * - project_chats: chats bound to a project (FK RESTRICT on project delete).
@@ -27,6 +32,8 @@
  * - run_leases: ephemeral claim/heartbeat row per run (simplified fencing —
  *   no `epoch` yet); CASCADE on run delete because a lease is disposable
  *   runtime state, not history.
+ * - vault_secrets: shared per-consumer (user|org), per-provider encrypted
+ *   secret store (AES-256-GCM ciphertext only; polymorphic consumer_id).
  *
  * Strict Postgres runtime (ProjectsService / GithubInstallationsService /
  * UsersService hit these tables only — no memory fallback); the tables are
@@ -45,6 +52,7 @@ import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -230,28 +238,59 @@ export const users = pgTable("users", {
 export type UserRow = typeof users.$inferSelect;
 
 /**
- * Per-user OpenCode API keys (durable contract).
- * One row per user (user_id is both PK and FK → users(id) ON DELETE CASCADE,
- * so deleting a user drops their key). The API key itself is stored ONLY as
- * AES-256-GCM ciphertext (encrypted_key = base64(ct || tag), iv =
- * base64(iv)) — plaintext never touches the DB, the logs, or the wire back
- * to the client. `keyId` names the KEK version that wrapped the row
- * (dual-read decrypt across the rotation window; legacy '' = pre-versioning
- * row, readable via the active → previous fallback, lazily re-wrapped).
+ * Shared vault (durable contract): per-consumer, per-provider secrets.
+ *
+ * One row per stored secret. `consumer_type` is 'user' | 'org' (CHECK in SQL)
+ * and `consumer_id` is the owning uuid — the pair is polymorphic on purpose,
+ * so an org can reuse the same mechanism without a second table. The provider
+ * id is arbitrary (`vaultSecretInputSchema` in @rush-code/contracts), so the
+ * vault is not limited to AI providers. The secret itself is stored ONLY as
+ * AES-256-GCM ciphertext (encrypted_key = base64(ct || tag), iv = base64(iv));
+ * plaintext never touches the DB, the logs, or the wire back to the client.
+ * `key_id` names the KEK version that wrapped the row (dual-read decrypt
+ * across the rotation window; legacy '' = pre-versioning row).
+ *
+ * Polymorphic-consumer trade-off: `consumer_id` intentionally has NO foreign
+ * key (it points at `users` OR `organizations`), so Postgres cannot cascade.
+ * User cleanup is compensated in `UsersRepository.deleteById`/`deleteAll`
+ * (vault rows are deleted in the same transaction as the user). Org deletion
+ * is soft (`deleted_at`) and its secrets stay in place, inaccessible but
+ * restorable; a future hard org delete must clear `consumer_type = 'org'`
+ * rows explicitly.
  */
-export const userOpencodeKeys = pgTable("user_opencode_keys", {
-  userId: uuid("user_id")
-    .primaryKey()
-    .references(() => users.id, { onDelete: "cascade" }),
-  encryptedKey: text("encrypted_key").notNull(),
-  iv: text("iv").notNull(),
-  keyId: text("key_id").notNull().default("v1"),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
+export const vaultSecrets = pgTable(
+  "vault_secrets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    consumerType: text("consumer_type").notNull(),
+    consumerId: uuid("consumer_id").notNull(),
+    provider: text("provider").notNull(),
+    label: text("label").notNull().default(""),
+    encryptedKey: text("encrypted_key").notNull(),
+    iv: text("iv").notNull(),
+    keyId: text("key_id").notNull().default("v1"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    index("vault_secrets_consumer_provider_idx").on(
+      t.consumerType,
+      t.consumerId,
+      t.provider,
+    ),
+    check(
+      "vault_secrets_consumer_type_check",
+      sql`${t.consumerType} in ('user', 'org')`,
+    ),
+  ],
+);
 
-export type UserOpencodeKeyRow = typeof userOpencodeKeys.$inferSelect;
+export type VaultSecretRow = typeof vaultSecrets.$inferSelect;
+
 
 export type GithubInstallationRow = typeof githubInstallations.$inferSelect;
 

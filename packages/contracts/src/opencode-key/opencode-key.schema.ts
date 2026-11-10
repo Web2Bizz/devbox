@@ -1,48 +1,13 @@
 import { z } from 'zod';
 
-import type {
-  OpencodeKeyDeleteResult,
-  OpencodeKeyResult,
-  OpencodeKeyStatus,
-  OpencodeLimitBucket,
-  OpencodeUsage,
-} from './opencode-key';
+import type { OpencodeLimitBucket, OpencodeUsage } from './opencode-key';
 
 /**
- * Boundary schemas for opencode-key.ts.
- * opencodeKeySchema is verbatim apps/backend/src/opencode/modules/keys/keys.schema.ts
- * (same trim/min/max + error strings): short strings are almost certainly
- * a paste mistake, so min 20 fails fast. Response schemas mirror
- * contracts/openapi.yaml (OpencodeKeyResult/Status/Usage/LimitBucket).
+ * Boundary schemas for opencode-key.ts (billing usage only).
+ * Response schemas mirror contracts/openapi.yaml
+ * (OpencodeUsage/OpencodeLimitBucket). Per-user API keys live in the vault
+ * schemas (`vault.schema.ts`) — the legacy per-user key surface is gone.
  */
-
-export const opencodeKeySchema = z.object({
-  apiKey: z
-    .string()
-    .trim()
-    .min(20, { error: 'must be at least 20 characters' })
-    .max(1024, { error: 'must be ≤ 1024 chars' }),
-});
-
-export type OpencodeKeyInput = z.infer<typeof opencodeKeySchema>;
-
-export const opencodeKeyResultSchema = z.object({
-  ok: z.boolean(),
-  /** ISO-8601 timestamp */
-  updatedAt: z.iso.datetime({ error: 'Field "updatedAt" must be an ISO-8601 timestamp' }),
-}) satisfies z.ZodType<OpencodeKeyResult>;
-
-export const opencodeKeyDeleteResultSchema = z.object({
-  ok: z.boolean(),
-}) satisfies z.ZodType<OpencodeKeyDeleteResult>;
-
-export const opencodeKeyStatusSchema = z.object({
-  configured: z.boolean(),
-  /** ISO-8601 timestamp (present only when configured). */
-  updatedAt: z.iso
-    .datetime({ error: 'Field "updatedAt" must be an ISO-8601 timestamp' })
-    .optional(),
-}) satisfies z.ZodType<OpencodeKeyStatus>;
 
 export const opencodeLimitBucketSchema = z.object({
   used: z.number(),

@@ -18,6 +18,7 @@ export * from './auth';
 export * from './project';
 export * from './organization';
 export * from './opencode-key';
+export * from './vault';
 export * from './opencode';
 export * from './opencode-session';
 export * from './opencode-event';

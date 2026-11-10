@@ -5,25 +5,40 @@ import {
   formatReport,
   getExpectedSchema,
   runSchemaIntegrityCheck,
+  type CatalogSnapshot,
+  type IntegrityCheck,
 } from "../schema-integrity";
+
+/** Expected-table shape is internal to the checker; derive it from the public API. */
+type ExpectedTableShape = ReturnType<typeof getExpectedSchema>[number];
+type ExpectedIndex = ExpectedTableShape["indexes"][number];
+type ExpectedForeignKey = ExpectedTableShape["foreignKeys"][number];
 
 const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
   {
     name: "detects missing or changed partial index predicate and non-exact columns",
     run: () => {
-      const expected = getExpectedSchema().find((table) => table.name === "organization_members");
-      assert.ok(expected);
-      const index = expected.indexes.find(
-        (candidate) => candidate.name === "organization_members_single_maintainer_idx",
+      const expected: ExpectedTableShape | undefined = getExpectedSchema().find(
+        (table) => table.name === "organization_members",
       );
+      assert.ok(expected);
+      const index: ExpectedIndex | undefined =
+        expected.indexes.find(
+          (candidate) => candidate.name === "organization_members_single_maintainer_idx",
+        );
       assert.ok(index);
       assert.ok(index.predicate);
-      const reportIndex = (candidate: {
+      const reportIndex: (candidate: {
         name: string;
         unique: boolean;
         predicate: string | null;
         columns: Array<string>;
-      }) =>
+      }) => IntegrityCheck | undefined = (candidate: {
+        name: string;
+        unique: boolean;
+        predicate: string | null;
+        columns: Array<string>;
+      }): IntegrityCheck | undefined =>
         compareSchema([expected], {
           tables: [{ name: expected.name, columns: expected.columns }],
           keys: [],
@@ -63,14 +78,18 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
   {
     name: "detects missing foreign keys and indexes from string-array catalog data",
     run: () => {
-      const expected = getExpectedSchema().find((table) => table.name === "organization_members");
+      const expected: ExpectedTableShape | undefined = getExpectedSchema().find(
+        (table) => table.name === "organization_members",
+      );
       assert.ok(expected);
-      const missingForeignKey = expected.foreignKeys[0];
-      const missingIndex = expected.indexes[0];
+      const missingForeignKey: ExpectedForeignKey | undefined =
+        expected.foreignKeys[0];
+      const missingIndex: ExpectedIndex | undefined =
+        expected.indexes[0];
       assert.ok(missingForeignKey);
       assert.ok(missingIndex);
 
-      const actual = {
+      const actual: CatalogSnapshot = {
         tables: [{ name: expected.name, columns: [...expected.columns] }],
         keys: [],
         foreignKeys: expected.foreignKeys
@@ -96,7 +115,7 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
       assert.ok(Array.isArray(actual.tables[0]?.columns));
       assert.ok(actual.foreignKeys.every((key) => Array.isArray(key.columns) && Array.isArray(key.foreignColumns)));
       assert.ok(actual.indexes.every((index) => Array.isArray(index.columns)));
-      const report = compareSchema([expected], actual);
+      const report: Array<IntegrityCheck> = compareSchema([expected], actual);
       assert.equal(report.find((check) => check.name === `schema.foreign_keys.${expected.name}`)?.status, "FAIL");
       assert.equal(report.find((check) => check.name === `schema.index.${missingIndex.name}`)?.status, "FAIL");
     },
@@ -110,13 +129,16 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
   {
     name: "missing migration journal or directory becomes a safe FAIL check",
     run: async () => {
-      const result = await runSchemaIntegrityCheck("postgres://unused", {
-        readMigrations: () => {
-          throw new Error("ENOENT /private/path/_journal.json");
-        },
-        checkDatabase: async () => [],
-      });
-      const check = result.checks.find((item) => item.name === "migrations.metadata");
+      const result: Awaited<ReturnType<typeof runSchemaIntegrityCheck>> =
+        await runSchemaIntegrityCheck("postgres://unused", {
+          readMigrations: () => {
+            throw new Error("ENOENT /private/path/_journal.json");
+          },
+          checkDatabase: async () => [],
+        });
+      const check: IntegrityCheck | undefined = result.checks.find(
+        (item) => item.name === "migrations.metadata",
+      );
       assert.equal(check?.status, "FAIL");
       assert.doesNotMatch(formatReport(result.checks), /private|ENOENT/);
     },
@@ -124,8 +146,9 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
   {
     name: "missing DATABASE_URL fails without reading migrations or database",
     run: async () => {
-      let touched = false;
-      const result = await runSchemaIntegrityCheck(undefined, {
+      let touched: boolean = false;
+      const result: Awaited<ReturnType<typeof runSchemaIntegrityCheck>> =
+        await runSchemaIntegrityCheck(undefined, {
         readMigrations: () => {
           touched = true;
           return [];
@@ -143,9 +166,11 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
   {
     name: "detect missing required column from Drizzle schema",
     run: () => {
-      const expected = getExpectedSchema().find((table) => table.name === "projects");
+      const expected: ExpectedTableShape | undefined = getExpectedSchema().find(
+        (table) => table.name === "projects",
+      );
       assert.ok(expected);
-      const actual = {
+      const actual: CatalogSnapshot = {
         tables: [
           {
             name: "projects",
@@ -156,8 +181,10 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
         foreignKeys: [],
         indexes: [],
       };
-      const report = compareSchema([expected], actual);
-      const columns = report.find((check) => check.name === "schema.columns.projects");
+      const report: Array<IntegrityCheck> = compareSchema([expected], actual);
+      const columns: IntegrityCheck | undefined = report.find(
+        (check) => check.name === "schema.columns.projects",
+      );
       assert.equal(columns?.status, "FAIL");
       assert.match(columns?.detail ?? "", /org_id/);
     },
@@ -165,7 +192,7 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
   {
     name: "fail on empty journal while SQL migrations exist",
     run: () => {
-      const report = auditMigrationMetadata(
+      const report: Array<IntegrityCheck> = auditMigrationMetadata(
         '{"version":"7","dialect":"postgresql","entries":[]}',
         ["0001_projects.sql"],
       );
@@ -176,9 +203,14 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
   {
     name: "fail on SQL migration orphaned from journal",
     run: () => {
-      const journal = JSON.stringify({ entries: [{ tag: "0001_projects" }] });
-      const report = auditMigrationMetadata(journal, ["0001_projects.sql", "0002_orphan.sql"]);
-      const orphan = report.find((check) => check.name === "migrations.orphan_sql_files");
+      const journal: string = JSON.stringify({ entries: [{ tag: "0001_projects" }] });
+      const report: Array<IntegrityCheck> = auditMigrationMetadata(journal, [
+        "0001_projects.sql",
+        "0002_orphan.sql",
+      ]);
+      const orphan: IntegrityCheck | undefined = report.find(
+        (check) => check.name === "migrations.orphan_sql_files",
+      );
       assert.equal(orphan?.status, "FAIL");
       assert.match(orphan?.detail ?? "", /0002_orphan\.sql/);
     },
@@ -186,15 +218,16 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
   {
     name: "database failure report never includes URL or driver error message",
     run: async () => {
-      const secretUrl = "postgres://private-user:private-password@private-host/db";
-      const driverSecret = "password private-password at private-host";
-      const result = await runSchemaIntegrityCheck(secretUrl, {
-        readMigrations: () => [],
-        checkDatabase: async () => {
-          throw Object.assign(new Error(driverSecret), { code: "28P01" });
-        },
-      });
-      const output = formatReport(result.checks);
+      const secretUrl: string = "postgres://private-user:private-password@private-host/db";
+      const driverSecret: string = "password private-password at private-host";
+      const result: Awaited<ReturnType<typeof runSchemaIntegrityCheck>> =
+        await runSchemaIntegrityCheck(secretUrl, {
+          readMigrations: () => [],
+          checkDatabase: async () => {
+            throw Object.assign(new Error(driverSecret), { code: "28P01" });
+          },
+        });
+      const output: string = formatReport(result.checks);
       assert.ok(!output.includes(secretUrl));
       assert.ok(!output.includes("private-password"));
       assert.ok(!output.includes("private-host"));
@@ -205,7 +238,7 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
 ];
 
 async function main(): Promise<void> {
-  let failed = 0;
+  let failed: number = 0;
   for (const check of checks) {
     try {
       await check.run();

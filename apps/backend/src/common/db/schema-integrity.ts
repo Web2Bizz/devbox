@@ -2,8 +2,13 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import { expand } from "dotenv-expand";
 import * as dotenv from "dotenv";
-import { getTableConfig, PgDialect } from "drizzle-orm/pg-core";
-import { Pool, type PoolClient, type QueryResultRow } from "pg";
+import { getTableConfig, PgDialect, type PgTable } from "drizzle-orm/pg-core";
+import {
+  Pool,
+  type PoolClient,
+  type QueryResult,
+  type QueryResultRow,
+} from "pg";
 import {
   githubInstallations,
   organizationInvites,
@@ -19,8 +24,8 @@ import {
   runSteps,
   sessionAgents,
   sessionMessages,
-  userOpencodeKeys,
   users,
+  vaultSecrets,
 } from "./schema";
 
 export type CheckStatus = "PASS" | "WARN" | "FAIL";
@@ -88,7 +93,7 @@ export type CatalogSnapshot = {
   indexes: Array<CatalogIndex>;
 };
 
-const DRIZZLE_TABLES = [
+const DRIZZLE_TABLES: ReadonlyArray<PgTable> = [
   projects,
   projectChats,
   projectSessions,
@@ -96,7 +101,7 @@ const DRIZZLE_TABLES = [
   sessionAgents,
   githubInstallations,
   users,
-  userOpencodeKeys,
+  vaultSecrets,
   organizations,
   organizationMembers,
   organizationInvites,
@@ -105,15 +110,15 @@ const DRIZZLE_TABLES = [
   runSteps,
   runEvents,
   runLeases,
-] as const;
+];
 
-const pgDialect = new PgDialect();
+const pgDialect: PgDialect = new PgDialect();
 
 function normalizePredicate(predicate: string): string {
-  let normalized = predicate.trim();
+  let normalized: string = predicate.trim();
   while (normalized.startsWith("(") && normalized.endsWith(")")) {
-    let depth = 0;
-    let wrapsWholeExpression = true;
+    let depth: number = 0;
+    let wrapsWholeExpression: boolean = true;
     for (let i = 0; i < normalized.length - 1; i += 1) {
       if (normalized[i] === "(") depth += 1;
       if (normalized[i] === ")") depth -= 1;
@@ -125,9 +130,9 @@ function normalizePredicate(predicate: string): string {
     if (!wrapsWholeExpression) break;
     normalized = normalized.slice(1, -1).trim();
   }
-  let canonical = "";
+  let canonical: string = "";
   for (let i = 0; i < normalized.length; ) {
-    const character = normalized[i];
+    const character: string = normalized[i];
     if (character === "'") {
       canonical += character;
       i += 1;
@@ -147,14 +152,14 @@ function normalizePredicate(predicate: string): string {
       continue;
     }
     if (character === '"') {
-      let identifier = "";
+      let identifier: string = "";
       i += 1;
       while (i < normalized.length && normalized[i] !== '"') {
         identifier += normalized[i];
         i += 1;
       }
       i += 1;
-      let next = i;
+      let next: number = i;
       while (next < normalized.length && /\s/.test(normalized[next])) next += 1;
       if (normalized[next] === ".") {
         i = next + 1;
@@ -168,10 +173,10 @@ function normalizePredicate(predicate: string): string {
       continue;
     }
     if (/[a-zA-Z_]/.test(character)) {
-      const start = i;
+      const start: number = i;
       while (i < normalized.length && /[a-zA-Z0-9_$]/.test(normalized[i])) i += 1;
-      const token = normalized.slice(start, i);
-      let next = i;
+      const token: string = normalized.slice(start, i);
+      let next: number = i;
       while (next < normalized.length && /\s/.test(normalized[next])) next += 1;
       if (normalized[next] === ".") {
         i = next + 1;
@@ -193,8 +198,8 @@ function normalizePredicate(predicate: string): string {
 /** The deprecated projectsAndOrganizations stub is deliberately excluded. */
 export function getExpectedSchema(): Array<ExpectedTable> {
   return DRIZZLE_TABLES.map((table) => {
-    const config = getTableConfig(table);
-    const uniqueKeys = [
+    const config: ReturnType<typeof getTableConfig> = getTableConfig(table);
+    const uniqueKeys: Array<Array<string>> = [
       ...config.uniqueConstraints.map((constraint) =>
         constraint.columns.map((column) => column.name),
       ),
@@ -202,7 +207,7 @@ export function getExpectedSchema(): Array<ExpectedTable> {
         .filter((column) => column.isUnique)
         .map((column) => [column.name]),
     ];
-    const indexes = config.indexes.map((entry) => ({
+    const indexes: ExpectedTable["indexes"] = config.indexes.map((entry) => ({
       name: entry.config.name ?? "",
       columns: entry.config.columns.flatMap((column) =>
         "name" in column && typeof column.name === "string"
@@ -213,7 +218,8 @@ export function getExpectedSchema(): Array<ExpectedTable> {
       predicate: entry.config.where
         ? (() => {
             try {
-              const query = pgDialect.sqlToQuery(entry.config.where);
+              const query: ReturnType<typeof pgDialect.sqlToQuery> =
+                pgDialect.sqlToQuery(entry.config.where);
               return query.params.length === 0 ? query.sql : undefined;
             } catch {
               return undefined;
@@ -228,7 +234,8 @@ export function getExpectedSchema(): Array<ExpectedTable> {
         key.columns.map((column) => column.name),
       ),
       foreignKeys: config.foreignKeys.map((key) => {
-        const reference = key.reference();
+        const reference: ReturnType<(typeof key)["reference"]> =
+          key.reference();
         return {
           columns: reference.columns.map((column) => column.name),
           foreignTable: getTableConfig(reference.foreignTable).name,
@@ -275,10 +282,14 @@ export function compareSchema(
   actual: CatalogSnapshot,
 ): Array<IntegrityCheck> {
   const checks: Array<IntegrityCheck> = [];
-  const actualTables = new Map(actual.tables.map((table) => [table.name, table]));
+  const actualTables: Map<string, CatalogTable> = new Map(
+    actual.tables.map((table) => [table.name, table]),
+  );
 
   for (const expectedTable of expected) {
-    const table = actualTables.get(expectedTable.name);
+    const table: CatalogTable | undefined = actualTables.get(
+      expectedTable.name,
+    );
     if (!table) {
       checks.push({
         name: `schema.table.${expectedTable.name}`,
@@ -288,7 +299,7 @@ export function compareSchema(
       continue;
     }
 
-    const missingColumns = expectedTable.columns.filter(
+    const missingColumns: Array<string> = expectedTable.columns.filter(
       (column) => !table.columns.includes(column),
     );
     checks.push({
@@ -299,7 +310,7 @@ export function compareSchema(
         : `${expectedTable.columns.length} required columns present`,
     });
 
-    const missingPrimaryKeys = expectedTable.primaryKeys.filter(
+    const missingPrimaryKeys: Array<Array<string>> = expectedTable.primaryKeys.filter(
       (columns) => !hasKey(actual.keys, expectedTable.name, columns, true, true),
     );
     checks.push({
@@ -310,7 +321,7 @@ export function compareSchema(
         : "required primary keys present",
     });
 
-    const missingForeignKeys = expectedTable.foreignKeys.filter(
+    const missingForeignKeys: ExpectedTable["foreignKeys"] = expectedTable.foreignKeys.filter(
       (expectedKey) =>
         !actual.foreignKeys.some(
           (key) =>
@@ -331,7 +342,7 @@ export function compareSchema(
         : "required foreign keys present",
     });
 
-    const missingUniqueKeys = expectedTable.uniqueKeys.filter(
+    const missingUniqueKeys: Array<Array<string>> = expectedTable.uniqueKeys.filter(
       (columns) => !hasKey(actual.keys, expectedTable.name, columns, false, true),
     );
     checks.push({
@@ -343,7 +354,7 @@ export function compareSchema(
     });
 
     for (const index of expectedTable.indexes) {
-      const found = actual.indexes.some(
+      const found: boolean = actual.indexes.some(
         (candidate) =>
           candidate.table === expectedTable.name &&
           candidate.name === index.name &&
@@ -397,9 +408,9 @@ export function auditMigrationMetadata(
     ];
   }
 
-  const sqlFiles = migrationFiles.filter((file) => /^.+\.sql$/.test(file));
-  const tags = journal.entries.map((entry) => entry.tag);
-  const invalidTag = tags.some(
+  const sqlFiles: Array<string> = migrationFiles.filter((file) => /^.+\.sql$/.test(file));
+  const tags: Array<unknown> = journal.entries.map((entry) => entry.tag);
+  const invalidTag: boolean = tags.some(
     (tag) => typeof tag !== "string" || !/^[A-Za-z0-9_-]+$/.test(tag),
   );
   if (invalidTag) {
@@ -412,12 +423,18 @@ export function auditMigrationMetadata(
     ];
   }
 
-  const duplicateTags = [...new Set(tags.filter((tag, i) => tags.indexOf(tag) !== i))] as Array<string>;
-  const missingFiles = [...new Set(tags as Array<string>)].filter(
+  const duplicateTags: Array<string> = [
+    ...new Set(tags.filter((tag, i) => tags.indexOf(tag) !== i)),
+  ] as Array<string>;
+  const missingFiles: Array<string> = [...new Set(tags as Array<string>)].filter(
     (tag) => !sqlFiles.includes(`${tag}.sql`),
   );
-  const journalFiles = new Set((tags as Array<string>).map((tag) => `${tag}.sql`));
-  const orphanFiles = sqlFiles.filter((file) => !journalFiles.has(file));
+  const journalFiles: Set<string> = new Set(
+    (tags as Array<string>).map((tag) => `${tag}.sql`),
+  );
+  const orphanFiles: Array<string> = sqlFiles.filter(
+    (file) => !journalFiles.has(file),
+  );
 
   const emptyStatus: CheckStatus =
     tags.length === 0 && sqlFiles.length > 0 ? "FAIL" : "PASS";
@@ -458,7 +475,7 @@ export function auditMigrationMetadata(
 }
 
 export function formatReport(checks: Array<IntegrityCheck>): string {
-  const overall = checks.some((check) => check.status === "FAIL")
+  const overall: CheckStatus = checks.some((check) => check.status === "FAIL")
     ? "FAIL"
     : checks.some((check) => check.status === "WARN")
       ? "WARN"
@@ -472,7 +489,7 @@ export function formatReport(checks: Array<IntegrityCheck>): string {
 // Migrations live at the backend root (apps/backend/drizzle): three levels up
 // from both `src/common/db` and `dist/common/db` (file was moved out of
 // `src/db` — keep this in sync with the source location).
-const drizzleDir = joinPath(__dirname, "..", "..", "..", "drizzle");
+const drizzleDir: string = joinPath(__dirname, "..", "..", "..", "drizzle");
 
 function keyArray(row: QueryResultRow, field: string): Array<string> {
   const value: unknown = row[field];
@@ -480,7 +497,13 @@ function keyArray(row: QueryResultRow, field: string): Array<string> {
 }
 
 async function readCatalog(client: PoolClient): Promise<CatalogSnapshot> {
-  const tablesResult = await client.query<{ table_name: string; columns: Array<string> }>(`
+  const tablesResult: QueryResult<{
+    table_name: string;
+    columns: Array<string>;
+  }> = await client.query<{
+    table_name: string;
+    columns: Array<string>;
+  }>(`
     SELECT c.relname AS table_name,
            ARRAY(SELECT a.attname::text
                  FROM pg_attribute a
@@ -490,7 +513,8 @@ async function readCatalog(client: PoolClient): Promise<CatalogSnapshot> {
     JOIN pg_namespace n ON n.oid = c.relnamespace
      WHERE n.nspname = 'public' AND c.relkind = 'r'
   `);
-  const keysResult = await client.query<QueryResultRow>(`
+  const keysResult: QueryResult<QueryResultRow> =
+    await client.query<QueryResultRow>(`
     SELECT t.relname AS table_name, i.indisprimary AS is_primary,
            i.indisunique AS is_unique, ix.relname AS index_name,
             ARRAY(SELECT a.attname::text
@@ -504,7 +528,8 @@ async function readCatalog(client: PoolClient): Promise<CatalogSnapshot> {
     JOIN pg_class ix ON ix.oid = i.indexrelid
      WHERE n.nspname = 'public'
   `);
-  const foreignResult = await client.query<QueryResultRow>(`
+  const foreignResult: QueryResult<QueryResultRow> =
+    await client.query<QueryResultRow>(`
     SELECT source.relname AS table_name, target.relname AS foreign_table,
            c.confdeltype AS on_delete,
             ARRAY(SELECT a.attname::text FROM unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord)
@@ -519,7 +544,8 @@ async function readCatalog(client: PoolClient): Promise<CatalogSnapshot> {
     JOIN pg_class target ON target.oid = c.confrelid
      WHERE c.contype = 'f' AND n.nspname = 'public'
   `);
-  const indexesResult = await client.query<QueryResultRow>(`
+  const indexesResult: QueryResult<QueryResultRow> =
+    await client.query<QueryResultRow>(`
     SELECT t.relname AS table_name, ix.relname AS index_name,
             i.indisunique AS is_unique,
             i.indnkeyatts AS key_column_count, i.indnatts AS total_column_count,
@@ -575,7 +601,7 @@ async function readCatalog(client: PoolClient): Promise<CatalogSnapshot> {
 }
 
 async function checkTarget(url: string): Promise<Array<IntegrityCheck>> {
-  const pool = new Pool({
+  const pool: Pool = new Pool({
     connectionString: url,
     connectionTimeoutMillis: 8000,
     max: 1,
@@ -585,7 +611,7 @@ async function checkTarget(url: string): Promise<Array<IntegrityCheck>> {
   try {
     client = await pool.connect();
     await client.query("BEGIN READ ONLY");
-    const snapshot = await readCatalog(client);
+    const snapshot: CatalogSnapshot = await readCatalog(client);
     return compareSchema(getExpectedSchema(), snapshot);
   } finally {
     if (client) {
@@ -597,9 +623,11 @@ async function checkTarget(url: string): Promise<Array<IntegrityCheck>> {
 }
 
 function migrationChecks(): Array<IntegrityCheck> {
-  const journalPath = joinPath(drizzleDir, "meta", "_journal.json");
-  const journal = readFileSync(journalPath, "utf8");
-  const migrationFiles = readdirSync(drizzleDir).filter((file) => file.endsWith(".sql"));
+  const journalPath: string = joinPath(drizzleDir, "meta", "_journal.json");
+  const journal: string = readFileSync(journalPath, "utf8");
+  const migrationFiles: Array<string> = readdirSync(drizzleDir).filter((file) =>
+    file.endsWith(".sql"),
+  );
   return auditMigrationMetadata(journal, migrationFiles);
 }
 
@@ -612,7 +640,7 @@ function migrationFailure(): IntegrityCheck {
 }
 
 function safeErrorCode(error: unknown): string {
-  const candidate =
+  const candidate: unknown =
     typeof error === "object" && error !== null && "code" in error
       ? (error as { code?: unknown }).code
       : undefined;
@@ -667,8 +695,11 @@ export async function runSchemaIntegrityCheck(
   };
 }
 
+// CLI entry (`bun run db:check-integrity`): stdout/stderr is this command's
+// output channel, not runtime logging — `console.*` is exempt here
+// (biome.json: noConsole override for **/schema-integrity.ts).
 if (require.main === module) {
-  const dotenvResult = dotenv.config();
+  const dotenvResult: ReturnType<typeof dotenv.config> = dotenv.config();
   expand(dotenvResult);
   void runSchemaIntegrityCheck(process.env.DATABASE_URL)
     .then(({ checks, exitCode }) => {

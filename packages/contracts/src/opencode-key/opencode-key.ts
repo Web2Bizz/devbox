@@ -1,32 +1,10 @@
 /**
- * Per-user OpenCode key + usage contracts.
+ * OpenCode usage contracts (billing surface).
  *
- * Mirrors contracts/openapi.yaml components/schemas: OpencodeKeyResult,
- * OpencodeKeyDeleteResult, OpencodeKeyStatus, OpencodeUsage,
- * OpencodeLimitBucket (+ OpencodeKeyBody input). Key input type lives in
- * opencode-key.schema.ts (inferred from the backend-verbatim zod schema).
- * The key value itself is never returned or logged — only existence +
- * timestamps cross the wire.
+ * Mirrors contracts/openapi.yaml components/schemas: OpencodeUsage,
+ * OpencodeLimitBucket. Per-user API keys moved to the vault contracts
+ * (`vault.ts`) — this module keeps only the read-only usage payload.
  */
-
-/** PUT /api/v1/key result (carries no secret). */
-export type OpencodeKeyResult = {
-  ok: boolean;
-  /** ISO-8601 timestamp */
-  updatedAt: string;
-};
-
-/** DELETE /api/v1/key result (idempotent, no timestamp). */
-export type OpencodeKeyDeleteResult = {
-  ok: boolean;
-};
-
-/** GET /api/v1/key — whether the caller has a key stored. */
-export type OpencodeKeyStatus = {
-  configured: boolean;
-  /** ISO-8601 timestamp (present only when configured). */
-  updatedAt?: string;
-};
 
 /** Single usage bucket — real `used/limit` pair from upstream (no derivation). */
 export type OpencodeLimitBucket = {

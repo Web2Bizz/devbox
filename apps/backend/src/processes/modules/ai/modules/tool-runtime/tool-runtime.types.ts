@@ -1,5 +1,8 @@
+import type { ToolView } from '@rush-code/contracts';
+
 /**
- * Tool contracts of the AI tool layer (ai/modules/tools).
+ * Tool runtime contracts of the AI tool layer (ai/modules/tool-runtime):
+ * handlers, registry, dispatch and runner.
  *
  * Pure shapes only: a handler answers the registry name (`name` or
  * `namespace.name`), the prompt-facing definition and one `execute` call.
@@ -8,12 +11,20 @@
  * the text back and may retry).
  */
 
+/** Execution mode of a turn: `ask` is read-only, `auto` allows mutations. */
+export type ToolMode = 'auto' | 'ask';
+
 /** Execution context of one call (the gated project directory + session). */
 export type ToolContext = {
   /** Absolute project content directory (already passed the C4 gate). */
   directory: string;
   /** Domain session id — used by stateful tools (todo list). */
   sessionId?: string;
+  /**
+   * Execution mode of the turn. Optional: omitted = auto. `ask` is read-only
+   * — mutating tools are refused before their handler runs.
+   */
+  mode?: ToolMode;
 };
 
 /** Prompt-facing tool definition (name/namespace/description/input hint). */
@@ -41,6 +52,12 @@ export type ToolCall = {
   id: string;
   name: string;
   arguments: string;
+  /**
+   * Idempotency key of the call effect (`runId + stepSeq + toolCallId`).
+   * Optional: with a `ToolEffectsStore` dispatch replays the committed result
+   * instead of running the handler twice (no key = no dedup).
+   */
+  effectKey?: string;
 };
 
 /** Settled call — `callID`/`name` mirror the request, `result` is model text. */
@@ -54,3 +71,24 @@ export type ToolSettlement = {
 export function toolLabel(name: string): string {
   return name;
 }
+
+/**
+ * Model-facing projection of prompt definitions: one `ToolView` per
+ * definition, registration order preserved (D3 — the projection is the only
+ * thing the model ever sees).
+ *
+ * The `native:` prefix is mandatory: `isMutatingToolView` and
+ * `isMutatingToolName` classify a tool by that prefix, so an id without it
+ * would be treated as an unknown (mutating) tool.
+ */
+export function toolViewsFromDefinitions(
+  definitions: ReadonlyArray<ToolDefinition>,
+): Array<ToolView> {
+  return definitions.map((definition) => ({
+    id: `native:${definition.name}`,
+    title: definition.name,
+    description: definition.description,
+    inputSchema: definition.inputSchema,
+  }));
+}
+

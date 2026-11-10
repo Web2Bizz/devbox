@@ -258,13 +258,13 @@ async function main(): Promise<void> {
           userId: string,
           projectId: string,
           subPath?: string,
-        ) => Promise<{ absRepo: string }>;
+        ) => Promise<{ absoluteRepo: string }>;
         realStrictRoot: () => Promise<string>;
-        assertInsideJail: (abs: string, jailReal: string) => Promise<string>;
+        assertInsideJail: (absolutePath: string, jailReal: string) => Promise<string>;
       };
-      pathsProto.resolveOrgStrict = async () => ({ absRepo: '/tmp/rush-code-e2e-project' });
+      pathsProto.resolveOrgStrict = async () => ({ absoluteRepo: '/tmp/rush-code-e2e-project' });
       pathsProto.realStrictRoot = async () => '/tmp/rush-code-e2e-root';
-      pathsProto.assertInsideJail = async (abs: string) => abs;
+      pathsProto.assertInsideJail = async (absolutePath: string) => absolutePath;
       historyProto.listLocalSessions = async () => [];
       historyProto.listMessages = async () => [];
 

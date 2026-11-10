@@ -25,6 +25,9 @@ const TUI_APP_PARTS = [
   "screens/projects/index.tsx",
   "screens/repl/ReplScreen.tsx",
   "screens/repl/index.tsx",
+  "screens/chat/ChatScreen.tsx",
+  "screens/chat/SessionsSidebar.tsx",
+  "screens/chat/index.tsx",
   "screens/error/ErrorScreen.tsx",
   "screens/error/index.tsx",
   "screens/index.ts",
@@ -345,10 +348,32 @@ describe("tui react-only (native kinds, no core renderables)", () => {
     expect(TUI_SOURCE).toContain("createCliRenderer");
   });
 
-  test("ReplScreen renders plain (no border anywhere)", () => {
+  test("ReplScreen input frame uses borderStyle (plain rows stay borderless)", () => {
     const repl = readFileSync(join(UI_DIR, "screens", "repl", "ReplScreen.tsx"), "utf8");
     expect(repl).toContain("<box");
-    expect(repl).not.toContain("border");
+    expect(repl).toContain("borderStyle");
+    expect(repl).toContain("ReplBorderStyle");
+    expect(repl).toContain('"rounded"');
+    expect(repl).toContain("focused");
+    expect(repl).toContain("maxLength");
+    expect(repl).toContain("onInput");
+    expect(repl).toContain("onSubmit");
+  });
+
+  test("ChatScreen row sidebar reuses Repl + listSessionLines (plain modules stay borderless)", () => {
+    const chat = readFileSync(join(UI_DIR, "screens", "chat", "ChatScreen.tsx"), "utf8");
+    const sidebar = readFileSync(join(UI_DIR, "screens", "chat", "SessionsSidebar.tsx"), "utf8");
+    expect(chat).toContain('flexDirection="row"');
+    expect(chat).toContain('width="30%"');
+    expect(chat).toContain("SessionsSidebar");
+    expect(chat).toContain("SessionTodoPanel");
+    expect(sidebar).toContain("listSessionLines");
+    expect(sidebar).toContain("›");
+    expect(sidebar).not.toContain("border");
+    const plain = ["screens/projects/ProjectsScreen.tsx", "screens/projects/DirInputScreen.tsx", "screens/error/ErrorScreen.tsx", "components/Spinner.tsx"]
+      .map((rel) => readFileSync(join(UI_DIR, rel), "utf8"))
+      .join("\n");
+    expect(plain).not.toContain("border");
   });
 
   test("store carries typed kind/variant", () => {

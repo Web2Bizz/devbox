@@ -22,16 +22,26 @@ import { SessionExpiredError, mapUsageStatus } from './usage-status';
 
 const MIN_KEY_LENGTH = 20;
 
+async function upsertApiKey(token: string, rawKey: string): Promise<void> {
+  const list = await api.listVaultSecrets(token);
+  const current = list.secrets.find((secret) => secret.provider === 'opencode');
+  if (current) {
+    await api.updateVaultSecret(token, current.id, { apiKey: rawKey });
+    return;
+  }
+  await api.createVaultSecret(token, { provider: 'opencode', apiKey: rawKey });
+}
+
 async function saveApiKey(rawKey: string): Promise<void> {
   const token = await getValidAccessToken();
   if (!token) throw new SessionExpiredError();
   try {
-    await api.putKey(token, { apiKey: rawKey });
+    await upsertApiKey(token, rawKey);
   } catch (err) {
     if (err instanceof ApiClientError && err.status === 401) {
       const retryToken = await refreshAccessToken();
       if (!retryToken) throw new SessionExpiredError();
-      await api.putKey(retryToken, { apiKey: rawKey });
+      await upsertApiKey(retryToken, rawKey);
       return;
     }
     throw err;

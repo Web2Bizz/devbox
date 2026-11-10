@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { ChatInput, AgentSelector } from '../../components/chat';
-import { ChatThread } from '../chat-thread';
+import { ChatThread } from '../../components/chat/chat-thread';
 import { DEFAULT_AGENT_ID, listAgents } from '../../api/sessions-client';
 import { useChat } from '../../hooks/useChat';
 import { agentsQueryKey } from '../../hooks/query-keys';

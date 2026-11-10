@@ -39,11 +39,13 @@ export type {
   OrganizationMember as BackendOrganizationMember,
   OrganizationInvite as BackendOrganizationInvite,
   OrgRole,
-  OpencodeKeyStatus,
-  OpencodeKeyResult,
-  OpencodeKeyDeleteResult,
   OpencodeUsage,
   OpencodeLimitBucket,
+  VaultSecretInfo,
+  VaultSecretList,
+  VaultSecretInput,
+  VaultSecretUpdateInput,
+  VaultSecretDeleteResult,
 } from "@rush-code/contracts";
 
 export {
@@ -61,11 +63,13 @@ export {
   orgRoleSchema,
   createOrganizationSchema,
   updateOrganizationSchema,
-  opencodeKeyStatusSchema,
-  opencodeKeyResultSchema,
-  opencodeKeyDeleteResultSchema,
   opencodeUsageSchema,
   opencodeLimitBucketSchema,
+  vaultSecretInfoSchema,
+  vaultSecretListSchema,
+  vaultSecretInputSchema,
+  vaultSecretUpdateSchema,
+  vaultSecretDeleteResultSchema,
 } from "@rush-code/contracts";
 
 import {

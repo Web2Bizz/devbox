@@ -14,8 +14,6 @@ import type {
   OrganizationInvite as InviteDto,
   OrganizationMember as MemberDto,
   NpmRegistryStatusResponse,
-  OpencodeKeyResult,
-  OpencodeKeyStatus,
   OpencodeUsage,
   OrgRole,
   Project as ProjectApiDto,
@@ -24,6 +22,11 @@ import type {
   RunInfoList,
   UpdateMemberRoleInput as UpdateMemberRoleRequest,
   UpdateOrganizationInput as UpdateOrganizationRequest,
+  VaultSecretDeleteResult,
+  VaultSecretInfo,
+  VaultSecretInput,
+  VaultSecretList,
+  VaultSecretUpdateInput,
 } from '@rush-code/contracts';
 import {
   agentInfoListSchema,
@@ -788,17 +791,40 @@ export const api = {
     requestV1<OpencodeUsage>('/usage', {
       headers: { authorization: `Bearer ${accessToken}` },
     }),
-  // Per-user OpenCode key — PUT /api/v1/key { apiKey } (zod min 20, max
-  // 1024, encrypted AES-256-GCM at rest, never echoed/logged),
-  // GET /api/v1/key (existence only { configured, updatedAt? }).
-  putKey: (accessToken: string, input: { apiKey: string }) =>
-    requestV1<OpencodeKeyResult>('/key', {
+  // Per-consumer vault secrets — Bearer-scoped to the caller. The API key is
+  // write-only: create/update accept plaintext once (encrypted AES-256-GCM at
+  // rest), reads answer identity/label/timestamps only. Missing/foreign ids
+  // answer 404 vault_secret_not_found.
+  listVaultSecrets: (accessToken: string) =>
+    requestV1<VaultSecretList>('/vault/secrets', {
+      headers: { authorization: `Bearer ${accessToken}` },
+    }),
+  createVaultSecret: (accessToken: string, input: VaultSecretInput) =>
+    requestV1<VaultSecretInfo>('/vault/secrets', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(input),
+    }),
+  getVaultSecret: (accessToken: string, id: string) =>
+    requestV1<VaultSecretInfo>(`/vault/secrets/${encodeURIComponent(id)}`, {
+      headers: { authorization: `Bearer ${accessToken}` },
+    }),
+  updateVaultSecret: (
+    accessToken: string,
+    id: string,
+    input: VaultSecretUpdateInput,
+  ) =>
+    requestV1<VaultSecretInfo>(`/vault/secrets/${encodeURIComponent(id)}`, {
       method: 'PUT',
       headers: { authorization: `Bearer ${accessToken}` },
       body: JSON.stringify(input),
     }),
-  getKeyStatus: (accessToken: string) =>
-    requestV1<OpencodeKeyStatus>('/key', {
-      headers: { authorization: `Bearer ${accessToken}` },
-    }),
+  deleteVaultSecret: (accessToken: string, id: string) =>
+    requestV1<VaultSecretDeleteResult>(
+      `/vault/secrets/${encodeURIComponent(id)}`,
+      {
+        method: 'DELETE',
+        headers: { authorization: `Bearer ${accessToken}` },
+      },
+    ),
 };

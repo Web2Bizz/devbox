@@ -31,10 +31,6 @@ export type {
   LoginInput,
   MessagesResponse,
   NpmRegistryStatusResponse,
-  OpencodeKeyDeleteResult,
-  OpencodeKeyInput,
-  OpencodeKeyResult,
-  OpencodeKeyStatus,
   OpencodeLimitBucket,
   OpencodeUsage,
   Organization,
@@ -54,6 +50,11 @@ export type {
   UpdateMemberRoleInput,
   UpdateOrganizationInput,
   UpdateProjectInput,
+  VaultSecretDeleteResult,
+  VaultSecretInfo,
+  VaultSecretInput,
+  VaultSecretList,
+  VaultSecretUpdateInput,
 } from '@rush-code/contracts';
 
 export type {

@@ -9,6 +9,8 @@ import type { ReactElement } from "react";
 import type { createRoot } from "@opentui/react";
 import { createLineStore, type LineStore } from "../ui/shared/store.js";
 import type { HomeOptionIndex } from "../ui/screens/home/index.js";
+import type { SessionInfo, SessionOrigin } from "../core/queries/sessions/index.js";
+import { createSessionsClient, type SessionsClient } from "../core/queries/sessions/index.js";
 
 type TuiHostMount<T> = (
   react: typeof import("react"),
@@ -203,6 +205,97 @@ export async function startTuiDirInput(initialValue?: string): Promise<string | 
       initialValue,
       onSubmit: (value: string) => finish(value),
       onCancel: () => finish(null),
+    }),
+  );
+}
+
+// Shared sessions data-layer client (QueryClient-shaped cache over
+// core/queries/sessions fetchers). Hooks stay in screens/*; runners and
+// interactive only call refresh()/invalidate()/setLocal().
+let sharedSessionsClient: SessionsClient | null = null;
+
+export function getSessionsClient(): SessionsClient {
+  if (!sharedSessionsClient) sharedSessionsClient = createSessionsClient();
+  return sharedSessionsClient;
+}
+
+/** OpenTUI login hint: <LoginScreen/> with health status. True on Enter, false on Esc. */
+export async function startTuiLogin(loginUrl?: string): Promise<boolean> {
+  return withTuiHost<boolean>((react, app, finish) =>
+    react.createElement(app.LoginScreen, {
+      loginUrl,
+      onDone: () => finish(true),
+      onCancel: () => finish(false),
+    }),
+  );
+}
+
+/** OpenTUI sessions picker: <SessionsScreen/> resolves the picked session, null on cancel. */
+export async function startTuiSessions(sessions: SessionInfo[]): Promise<SessionInfo | null> {
+  return withTuiHost<SessionInfo | null>((react, app, finish) =>
+    react.createElement(app.SessionsScreen, {
+      sessions,
+      onSelect: (_index: number | null, session: SessionInfo | null) => finish(session),
+      onCancel: () => finish(null),
+    }),
+  );
+}
+
+export type SessionsGridResult =
+  | { action: "open"; session: SessionInfo }
+  | { action: "close"; session: SessionInfo }
+  | { action: "back" };
+
+/**
+ * OpenTUI sessions grid: <SessionsGridScreen/> 2D picker.
+ * Enter opens, x/d closes (caller invalidates the client), Esc goes back.
+ */
+export async function startTuiSessionsGrid(sessions: SessionInfo[], columns = 2): Promise<SessionsGridResult> {
+  return withTuiHost<SessionsGridResult>((react, app, finish) =>
+    react.createElement(app.SessionsGridScreen, {
+      sessions,
+      columns,
+      onOpen: (session: SessionInfo) => finish({ action: "open", session }),
+      onCloseSession: (session: SessionInfo) => finish({ action: "close", session }),
+      onBack: () => finish({ action: "back" }),
+    }),
+  );
+}
+
+export type TuiChatOptions = {
+  sessionId: string;
+  origin: SessionOrigin;
+  greeting: string;
+  initialLines?: string[];
+  sessions?: SessionInfo[];
+  onLine?: (line: string) => Promise<{ exit: boolean; reply?: string }>;
+};
+
+/**
+ * OpenTUI chat page: <ChatScreen/> wraps ReplApp (sessionId/origin/
+ * initialLines, LineStore seeded inside). Default onLine goes through
+ * chatLocal (backend API, cached session untouched by list fetches).
+ */
+export async function startTuiChat(options: TuiChatOptions): Promise<void> {
+  const { chatLocal } = await import("../agents/opencode/index.js");
+  const onLine =
+    options.onLine ??
+    (async (line: string) => {
+      const clean = line.trim();
+      if (clean === "/exit" || clean === "/quit") return { exit: true };
+      if (!clean) return { exit: false };
+      const reply = await chatLocal(clean);
+      return { exit: false, reply };
+    });
+  return withTuiHost<void>((react, app, finish) =>
+    react.createElement(app.ChatScreen, {
+      sessionId: options.sessionId,
+      origin: options.origin,
+      greeting: options.greeting,
+      initialLines: options.initialLines,
+      sessions: options.sessions,
+      onLine,
+      onExit: () => finish(undefined),
     }),
   );
 }

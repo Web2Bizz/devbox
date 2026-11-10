@@ -8,11 +8,13 @@ import { titleTextOptions } from "../home/index.js";
 import { Spinner } from "../../components/index.js";
 import type { LineStore, ReplLine } from "../../shared/store.js";
 
+export type ReplBorderStyle = "single" | "double" | "rounded" | "heavy";
 export type ReplAppProps = {
   store: LineStore;
   maxLength: number;
   onSubmitLine: (raw: string) => void;
   onWidth: (width: number) => void;
+  borderStyle?: ReplBorderStyle;
 };
 
 function padCell(cell: string, width: number): string {
@@ -111,7 +113,7 @@ function MessageRow({ line, verbatimWidth }: { line: ReplLine; verbatimWidth: "1
 }
 
 /** REPL tree: sticky-bottom history + prompt input pinned last (space-between). */
-export function ReplApp({ store, maxLength, onSubmitLine, onWidth }: ReplAppProps) {
+export function ReplApp({ store, maxLength, onSubmitLine, onWidth, borderStyle = "rounded" }: ReplAppProps) {
   const [lines, setLines] = useState<ReplLine[]>(() => store.snapshot());
   const [value, setValue] = useState("");
   const { width } = useTerminalDimensions();
@@ -133,14 +135,16 @@ export function ReplApp({ store, maxLength, onSubmitLine, onWidth }: ReplAppProp
           <MessageRow key={line.id} line={line} verbatimWidth={verbatimWidth} />
         ))}
       </scrollbox>
-      <input
-        placeholder="prompt > "
-        maxLength={maxLength}
-        focused
-        value={value}
-        onInput={(v: any) => setValue(typeof v === "string" ? v : String(v ?? ""))}
-        onSubmit={handleSubmit}
-      />
+      <box border borderStyle={borderStyle} width="100%">
+        <input
+          placeholder="prompt > "
+          maxLength={maxLength}
+          focused
+          value={value}
+          onInput={(v: any) => setValue(typeof v === "string" ? v : String(v ?? ""))}
+          onSubmit={handleSubmit}
+        />
+      </box>
     </box>
   );
 }

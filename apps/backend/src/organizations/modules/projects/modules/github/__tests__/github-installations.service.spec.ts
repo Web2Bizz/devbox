@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { ForbiddenException } from "@nestjs/common";
-import type { DbService } from "../../../../../../common/db/db.service";
-import type { GithubInstallationRow } from "../../../../../../common/db/schema";
+import type { DbService } from "@common/db/db.service";
+import type { GithubInstallationRow } from "@common/db/schema";
 import { GithubInstallationsService } from "../github-installations.service";
 
 type Case = { name: string; run: () => Promise<void> | void };

@@ -24,15 +24,15 @@ import type { AppLogger } from '../logger';
  */
 
 export type SseSubscription = {
-  stream: AsyncIterable<unknown> & { return?: (v?: unknown) => Promise<unknown> };
+  stream: AsyncIterable<unknown> & { return?: (value?: unknown) => Promise<unknown> };
 };
 
 export type SseRelayParams = {
   /** operation label for logs/errors, e.g. 'GET /event' */
   operation: string;
-  cid: string;
-  req: ExpressRequest;
-  res: ExpressResponse;
+  correlationId: string;
+  request: ExpressRequest;
+  response: ExpressResponse;
   /** open the upstream subscription with the relay's abort signal */
   subscribe: (signal: AbortSignal) => Promise<SseSubscription>;
   logger: AppLogger;
@@ -43,7 +43,7 @@ export type SseRelayParams = {
   /** typed error when the probe says down (pre-headers → normal JSON 503) */
   unreachableError: () => Error;
   /** typed error for a failed subscribe (pre-headers → normal JSON answer) */
-  subscribeFailedError: (err: unknown) => Error;
+  subscribeFailedError: (error: unknown) => Error;
   /** optional per-frame serializer (mirror: none = verbatim passthrough;
    * domain: re-key upstream names into our frame) */
   mapFrame?: (value: unknown) => unknown;
@@ -52,86 +52,123 @@ export type SseRelayParams = {
   filterFrame?: (frame: unknown) => boolean;
 };
 
+/** Terminal frame written when the upstream stream breaks mid-flight. */
+type StreamErrorFrame = {
+  id: string;
+  type: string;
+  data: { message: string };
+};
+
 /** Interval between SSE heartbeat comments (transport-level, not a frame). */
-export const HEARTBEAT_MS = 15_000;
+export const HEARTBEAT_MS: number = 15_000;
 
 /** True for AbortError shapes (name/code/20, incl. wrapped in cause). */
-export function isAbortError(err: unknown): boolean {
-  if (!err || typeof err !== 'object') return false;
-  const e = err as { name?: unknown; code?: unknown; cause?: unknown };
-  if (e.name === 'AbortError') return true;
-  if (e.code === 20) return true;
+export function isAbortError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const errorLike: { name?: unknown; code?: unknown; cause?: unknown } =
+    error as { name?: unknown; code?: unknown; cause?: unknown };
+  if (errorLike.name === 'AbortError') return true;
+  if (errorLike.code === 20) return true;
   // DOMException AbortError may be wrapped (e.g. in cause)
-  if (e.cause && typeof e.cause === 'object') {
-    const c = e.cause as { name?: unknown; code?: unknown };
-    if (c.name === 'AbortError' || c.code === 20) return true;
+  if (errorLike.cause && typeof errorLike.cause === 'object') {
+    const causeLike: { name?: unknown; code?: unknown } = errorLike.cause as {
+      name?: unknown;
+      code?: unknown;
+    };
+    if (causeLike.name === 'AbortError' || causeLike.code === 20) return true;
   }
   return false;
 }
 
-export async function relaySse(p: SseRelayParams): Promise<void> {
-  const { operation, cid, req, res, subscribe, logger, prefix, mapFrame, filterFrame } = p;
-  if ((await p.probe()) === 'down') {
-    logger.warn(`${prefix} ${operation} upstream failed`, cid);
-    throw p.unreachableError();
+/**
+ * Safe one-line error text for logs and the terminal frame: only a real
+ * Error message is used, everything else (null/undefined/string/number/
+ * message-less Error) falls back to the neutral text. Never stack, never
+ * multi-line, never a raw throwable.
+ */
+function errorMessage(error: unknown): string {
+  return error instanceof Error && error.message
+    ? error.message
+    : 'stream interrupted';
+}
+
+export async function relaySse(params: SseRelayParams): Promise<void> {
+  const {
+    operation,
+    correlationId,
+    request,
+    response,
+    subscribe,
+    logger,
+    prefix,
+    mapFrame,
+    filterFrame,
+  }: SseRelayParams = params;
+  if ((await params.probe()) === 'down') {
+    logger.warn(`${prefix} ${operation} upstream failed`, correlationId);
+    throw params.unreachableError();
   }
   // AbortSignal reaches the sdk generator (options.signal) so a downstream
   // disconnect stops the upstream fetch; backoff is capped so cleanup never
   // hangs the handler. Retries stay unbounded while live (re-stream
   // semantics across transient drops).
-  const upstream = new AbortController();
-  let sub: SseSubscription;
+  const upstream: AbortController = new AbortController();
+  let subscription: SseSubscription;
   try {
-    sub = await subscribe(upstream.signal);
-  } catch (err) {
+    subscription = await subscribe(upstream.signal);
+  } catch (error) {
     // Client went away before subscribe resolved: upstream.abort()
     // surfaces here as AbortError — штатный disconnect, не 503.
-    if (isAbortError(err)) {
-      logger.debug(`${prefix} client disconnected before subscribe`, cid);
+    if (isAbortError(error)) {
+      logger.debug(`${prefix} client disconnected before subscribe`, correlationId);
       return;
     }
-    logger.warn(`${prefix} ${operation} upstream failed`, cid);
-    logger.debug((err as Error).message, cid);
-    throw p.subscribeFailedError(err);
+    logger.warn(`${prefix} ${operation} upstream failed`, correlationId);
+    logger.debug((error as Error).message, correlationId);
+    throw params.subscribeFailedError(error);
   }
-  res.setHeader('content-type', 'text/event-stream');
-  res.setHeader('cache-control', 'no-cache, no-transform');
-  res.setHeader('connection', 'keep-alive');
-  res.setHeader('x-accel-buffering', 'no');
-  res.setHeader('x-correlation-id', cid || 'none');
-  res.flushHeaders();
+  response.setHeader('content-type', 'text/event-stream');
+  response.setHeader('cache-control', 'no-cache, no-transform');
+  response.setHeader('connection', 'keep-alive');
+  response.setHeader('x-accel-buffering', 'no');
+  response.setHeader('x-correlation-id', correlationId || 'none');
+  response.flushHeaders();
 
-  let closed = false;
+  let closed: boolean = false;
   /** Count of frames rejected by filterFrame (metadata only — never content). */
-  let droppedByFilter = 0;
+  let droppedByFilter: number = 0;
   // Heartbeat (C0): SSE comment `: ping` on idle so proxies with an
   // idle-timeout keep the socket; transport-level, never a data frame, so
   // frame parsers and the filter predicate never see it.
   let heartbeat: ReturnType<typeof setInterval> | null = null;
-  const startHeartbeat = (): void => {
+  const startHeartbeat: () => void = (): void => {
     stopHeartbeat();
     heartbeat = setInterval(() => {
-      if (closed || req.destroyed || res.writableEnded || res.destroyed) return;
+      if (closed || request.destroyed || response.writableEnded || response.destroyed) {
+        return;
+      }
       try {
-        res.write(': ping\n\n');
+        response.write(': ping\n\n');
       } catch {
         /* write after close — the loop teardown handles it */
       }
     }, HEARTBEAT_MS);
     // A pending heartbeat must never pin the process open.
-    const t = heartbeat as unknown as { unref?: () => void };
-    if (typeof t.unref === 'function') t.unref();
+    const intervalHandle: { unref?: () => void } = heartbeat as unknown as {
+      unref?: () => void;
+    };
+    if (typeof intervalHandle.unref === 'function') intervalHandle.unref();
   };
-  const stopHeartbeat = (): void => {
+  const stopHeartbeat: () => void = (): void => {
     if (heartbeat !== null) {
       clearInterval(heartbeat);
       heartbeat = null;
     }
   };
   startHeartbeat();
-  logger.debug(`${prefix} ${operation} heartbeat on`, cid);
+  logger.debug(`${prefix} ${operation} heartbeat on`, correlationId);
 
-  const onClose = (): void => {
+  const onClose: () => void = (): void => {
     if (closed) return;
     closed = true;
     try {
@@ -143,95 +180,104 @@ export async function relaySse(p: SseRelayParams): Promise<void> {
   // upstream.abort() may throw DOMException AbortError synchronously
   // inside EventEmitter emit — swallow it here so it never escapes as
   // unhandledRejection (Bun prints it as line:127 onClose→emitCloseNT).
-  const onCloseSafe = (): void => {
+  const onCloseSafe: () => void = (): void => {
     try {
       onClose();
     } catch {
       /* disconnect — noop */
     }
   };
-  req.on('close', onCloseSafe);
+  request.on('close', onCloseSafe);
   // Socket errors after disconnect would otherwise bubble as unhandled
   // 'error' events on the request — swallow, close handler does cleanup.
-  req.on('error', () => {
+  request.on('error', () => {
     /* downstream socket error — noop, handled via close */
   });
 
   // SSE `id:` for Last-Event-ID redial (C0/C1): the envelope carries the
   // authoritative id; the transport line mirrors it so native clients and
   // the browser EventSource can resume without parsing bodies.
-  const frameIdOf = (frame: unknown): string | undefined => {
+  const frameIdOf: (frame: unknown) => string | undefined = (
+    frame: unknown,
+  ): string | undefined => {
     if (frame && typeof frame === 'object') {
-      const id = (frame as { id?: unknown }).id;
+      const id: unknown = (frame as { id?: unknown }).id;
       if (typeof id === 'string' && id.length > 0) return id;
     }
     return undefined;
   };
-  const writeFrame = (frame: unknown): void => {
-    const payload = JSON.stringify(frame);
-    const id = frameIdOf(frame);
-    res.write(id ? `id: ${id}\nevent: message\ndata: ${payload}\n\n` : `data: ${payload}\n\n`);
+  const writeFrame: (frame: unknown) => void = (frame: unknown): void => {
+    const payload: string = JSON.stringify(frame);
+    const id: string | undefined = frameIdOf(frame);
+    response.write(
+      id
+        ? `id: ${id}\nevent: message\ndata: ${payload}\n\n`
+        : `data: ${payload}\n\n`,
+    );
   };
   // Terminal error frame (C0): mid-stream failure is NOT silent — the client
   // distinguishes terminal (ErrorState + retry) from transient (quiet redial).
   // AbortError/disconnect stays quiet (debug only, no frame).
-  const writeStreamError = (err: unknown): void => {
-    if (closed || req.destroyed || res.writableEnded || res.destroyed) return;
-    const message = err instanceof Error && err.message ? err.message : 'stream interrupted';
-    const terminal = {
+  const writeStreamError: (error: unknown) => void = (error: unknown): void => {
+    if (closed || request.destroyed || response.writableEnded || response.destroyed) {
+      return;
+    }
+    const message: string = errorMessage(error);
+    const terminal: StreamErrorFrame = {
       id: `stream-error-${Date.now()}`,
       type: 'stream.error',
       data: { message },
     };
     try {
-      const payload = JSON.stringify(terminal);
-      res.write(`id: ${terminal.id}\nevent: message\ndata: ${payload}\n\n`);
+      const payload: string = JSON.stringify(terminal);
+      response.write(`id: ${terminal.id}\nevent: message\ndata: ${payload}\n\n`);
     } catch {
       /* best-effort — the end() below still closes the stream */
     }
   };
 
   try {
-    const it = sub.stream[Symbol.asyncIterator]();
-    while (!closed && !req.destroyed) {
+    const iterator: AsyncIterator<unknown> =
+      subscription.stream[Symbol.asyncIterator]();
+    while (!closed && !request.destroyed) {
       let next: IteratorResult<unknown>;
       try {
-        next = await it.next();
-      } catch (err) {
+        next = await iterator.next();
+      } catch (error) {
         // AbortError from the sdk generator on downstream disconnect —
         // штатный disconnect, выходим молча без stack.
-        if (isAbortError(err) || closed) {
-          logger.debug(`${prefix} client disconnected`, cid);
+        if (isAbortError(error) || closed) {
+          logger.debug(`${prefix} client disconnected`, correlationId);
           break;
         }
-        throw err;
+        throw error;
       }
-      if (next.done || closed || req.destroyed) break;
+      if (next.done || closed || request.destroyed) break;
       try {
-        const frame = mapFrame ? mapFrame(next.value) : next.value;
+        const frame: unknown = mapFrame ? mapFrame(next.value) : next.value;
         if (filterFrame && !filterFrame(frame)) {
           droppedByFilter += 1;
           continue;
         }
         writeFrame(frame);
-      } catch (err) {
+      } catch (error) {
         // Write after downstream close — то же, что disconnect.
-        if (isAbortError(err) || closed || req.destroyed) {
-          logger.debug(`${prefix} client disconnected`, cid);
+        if (isAbortError(error) || closed || request.destroyed) {
+          logger.debug(`${prefix} client disconnected`, correlationId);
           break;
         }
-        throw err;
+        throw error;
       }
     }
-  } catch (err) {
+  } catch (error) {
     // Mid-stream failure: status is already 200, so the terminal error frame
     // + end() is the only signal (message only, never secrets). AbortError —
     // штатный disconnect (debug, no frame).
-    if (isAbortError(err)) {
-      logger.debug(`${prefix} client disconnected`, cid);
+    if (isAbortError(error)) {
+      logger.debug(`${prefix} client disconnected`, correlationId);
     } else {
-      logger.debug(`${prefix} stream.error ${(err as Error).message}`, cid);
-      writeStreamError(err);
+      logger.debug(`${prefix} stream.error ${errorMessage(error)}`, correlationId);
+      writeStreamError(error);
     }
   } finally {
     stopHeartbeat();
@@ -240,10 +286,10 @@ export async function relaySse(p: SseRelayParams): Promise<void> {
     if (droppedByFilter > 0) {
       logger.debug(
         `${prefix} ${operation} dropped ${droppedByFilter} frame(s) by filter`,
-        cid,
+        correlationId,
       );
     }
-    req.removeListener('close', onCloseSafe);
+    request.removeListener('close', onCloseSafe);
     if (!closed) {
       closed = true;
       try {
@@ -258,22 +304,25 @@ export async function relaySse(p: SseRelayParams): Promise<void> {
     await Promise.race([
       (async (): Promise<void> => {
         try {
-          await sub.stream.return?.(undefined);
-        } catch (err) {
-          if (!isAbortError(err)) {
+          await subscription.stream.return?.(undefined);
+        } catch (error) {
+          if (!isAbortError(error)) {
             /* non-abort cleanup errors are also best-effort — noop */
           }
         }
       })(),
-      new Promise((resolve) => setTimeout(resolve, 1500)),
+      new Promise<void>((resolve: () => void) => setTimeout(resolve, 1500)),
     ]);
   }
-  if (!req.destroyed && !res.writableEnded && !res.destroyed) {
+  if (!request.destroyed && !response.writableEnded && !response.destroyed) {
     try {
-      res.end();
-    } catch (err) {
-      if (!isAbortError(err)) {
-        logger.debug(`${prefix} event stream end failed: ${(err as Error).message}`, cid);
+      response.end();
+    } catch (error) {
+      if (!isAbortError(error)) {
+        logger.debug(
+          `${prefix} event stream end failed: ${(error as Error).message}`,
+          correlationId,
+        );
       }
     }
   }

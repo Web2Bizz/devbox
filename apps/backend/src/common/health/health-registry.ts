@@ -6,6 +6,9 @@ export type HealthFlag = 'up' | 'down' | 'skipped';
 /** Probe keys exposed by GET /health (and /api/v1/health). */
 export type HealthProbeKey = 'opencode' | 'registry' | 'npmRegistry';
 
+/** Zero-arg probe returning the current reachability flag. */
+export type HealthProbe = () => Promise<HealthFlag>;
+
 /**
  * HealthRegistry — dependency-free probe registry for HealthController.
  *
@@ -21,9 +24,12 @@ export type HealthProbeKey = 'opencode' | 'registry' | 'npmRegistry';
  */
 @Injectable()
 export class HealthRegistry {
-  private readonly probes = new Map<HealthProbeKey, () => Promise<HealthFlag>>();
+  private readonly probes: Map<HealthProbeKey, HealthProbe> = new Map<
+    HealthProbeKey,
+    HealthProbe
+  >();
 
-  register(key: HealthProbeKey, probe: () => Promise<HealthFlag>): void {
+  register(key: HealthProbeKey, probe: HealthProbe): void {
     if (this.probes.has(key)) {
       throw new Error(`Health probe already registered: ${key}`);
     }
@@ -31,8 +37,8 @@ export class HealthRegistry {
   }
 
   async probe(key: HealthProbeKey): Promise<HealthFlag | undefined> {
-    const probe = this.probes.get(key);
-    if (!probe) return undefined;
-    return probe();
+    const registered: HealthProbe | undefined = this.probes.get(key);
+    if (!registered) return undefined;
+    return registered();
   }
 }

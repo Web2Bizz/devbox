@@ -11,7 +11,7 @@ const RANK: Record<AppLogLevel, number> = {
 };
 
 /** Object keys whose values must never reach the logs. */
-const SECRET_KEYS = new Set([
+const SECRET_KEYS: ReadonlySet<string> = new Set([
   'password',
   'passwd',
   'secret',
@@ -56,9 +56,9 @@ const SECRET_KEYS = new Set([
   'jwtttl',
   'passwordhash',
   'password_hash',
-  // Per-user OpenCode keys: the server-side encryption secret (+ the previous
-  // KEK while a rotation window is open) plus the per-user API key field
-  // (PUT /api/v1/key body) must never reach logs (values scrubbed, keys
+  // Per-consumer vault secrets: the server-side encryption secret (+ the
+  // previous KEK while a rotation window is open) plus the plaintext API key
+  // field of a vault write body must never reach logs (values scrubbed, keys
   // redacted). KEK version ids (key_id) are plaintext by design — not secrets.
   'opencodekeysencryptionkey',
   'opencode_keys_encryption_key',
@@ -69,7 +69,7 @@ const SECRET_KEYS = new Set([
 ]);
 
 /** Matches `scheme://user:pass@host` credentials inside URL strings. */
-const CREDENTIALS_IN_URL = /:\/\/([^/\s:@]+)(:[^/\s@]*)?@/g;
+const CREDENTIALS_IN_URL: RegExp = /:\/\/([^/\s:@]+)(:[^/\s@]*)?@/g;
 
 function currentLevel(): AppLogLevel {
   try {
@@ -85,8 +85,8 @@ function isEnabled(level: AppLogLevel): boolean {
 
 /** Collects live secret values (never logged, only used for redaction). */
 function liveSecrets(): Array<string> {
-  const out: Array<string> = [];
-  for (const v of [
+  const secrets: Array<string> = [];
+  for (const secretValue of [
     process.env.DATABASE_URL,
     process.env.POSTGRES_PASSWORD,
     process.env.DOCKER_REGISTRY_USER,
@@ -101,9 +101,9 @@ function liveSecrets(): Array<string> {
     process.env.OPENCODE_KEYS_ENCRYPTION_KEY,
     process.env.OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS,
   ]) {
-    if (v && v.length >= 4) out.push(v);
+    if (secretValue && secretValue.length >= 4) secrets.push(secretValue);
   }
-  return out;
+  return secrets;
 }
 
 function maskUrlCredentials(text: string): string {
@@ -128,7 +128,7 @@ export function serializeCause(cause: unknown): string {
   if (typeof cause !== 'object') return String(cause);
   try {
     return (
-      JSON.stringify(cause, (key, value) =>
+      JSON.stringify(cause, (key: string, value: unknown) =>
         SECRET_KEYS.has(key.toLowerCase()) ? '[redacted]' : value,
       ) ?? '[unserializable]'
     );
@@ -139,14 +139,18 @@ export function serializeCause(cause: unknown): string {
 }
 
 function sanitizeString(text: string): string {
-  let out = maskUrlCredentials(text);
+  let output: string = maskUrlCredentials(text);
   for (const secret of liveSecrets()) {
-    if (out.includes(secret)) out = out.split(secret).join('[redacted]');
+    if (output.includes(secret)) output = output.split(secret).join('[redacted]');
   }
-  return out;
+  return output;
 }
 
-function sanitizeValue(value: unknown, depth = 0, seen = new WeakSet<object>()): unknown {
+function sanitizeValue(
+  value: unknown,
+  depth: number = 0,
+  seen: WeakSet<object> = new WeakSet<object>(),
+): unknown {
   if (typeof value === 'string') return sanitizeString(value);
   if (value === null || value === undefined) return value;
   if (typeof value !== 'object') return value;
@@ -158,20 +162,20 @@ function sanitizeValue(value: unknown, depth = 0, seen = new WeakSet<object>()):
   if (seen.has(value)) return '[circular]';
   seen.add(value);
   if (Array.isArray(value)) {
-    return value.map((v) => sanitizeValue(v, depth + 1, seen));
+    return value.map((item: unknown) => sanitizeValue(item, depth + 1, seen));
   }
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    out[k] = SECRET_KEYS.has(k.toLowerCase())
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, entryValue] of Object.entries(value as Record<string, unknown>)) {
+    sanitized[key] = SECRET_KEYS.has(key.toLowerCase())
       ? '[redacted]'
-      : sanitizeValue(v, depth + 1, seen);
+      : sanitizeValue(entryValue, depth + 1, seen);
   }
-  return out;
+  return sanitized;
 }
 
 function formatMessage(message: unknown, correlationId?: string): string {
-  const clean = sanitizeValue(message);
-  const text = typeof clean === 'string' ? clean : JSON.stringify(clean);
+  const clean: unknown = sanitizeValue(message);
+  const text: string = typeof clean === 'string' ? clean : JSON.stringify(clean);
   return correlationId ? `[${correlationId}] ${text}` : text;
 }
 
@@ -211,8 +215,8 @@ export function nestLogLevels(level: AppLogLevel = currentLevel()): Array<LogLev
  *   is passed it is sanitized (URL credentials masked, live secrets
  *   scrubbed, truncated) and emitted at debug only, so diagnostics stay
  *   available without spamming normal logs.
- * - requests: pass `correlationId` (or `withCorrelationId(cid)` for a bound
- *   logger) so every line of one request shares `[cid]`.
+ * - requests: pass `correlationId` (or `withCorrelationId(correlationId)` for a bound
+ *   logger) so every line of one request shares `[correlationId]`.
  * - secrets: known secret keys redacted, URL credentials masked,
  *   live DATABASE_URL / POSTGRES_PASSWORD values scrubbed, Error → message
  *   only by default. Never log tokens, passwords, connection strings, or PII
@@ -251,12 +255,17 @@ export class AppLogger extends Logger {
     // Nest-compatible: error(message, stack?, context?). Our second arg
     // historically carried the correlationId, so disambiguate by shape:
     // a multiline value is a stack (stacks always contain '\n'); a single
-    // line is a correlationId. Three-arg calls are always (msg, stack, cid).
-    const secondLooksLikeStack =
+    // line is a correlationId. Three-arg calls are always
+    // (message, stack, correlationId).
+    const secondLooksLikeStack: boolean =
       correlationId !== undefined || (stackOrCorrelationId?.includes('\n') ?? false);
-    const stack = secondLooksLikeStack ? stackOrCorrelationId : undefined;
-    const cid = secondLooksLikeStack ? correlationId : stackOrCorrelationId;
-    const base = formatMessage(message, cid);
+    const stack: string | undefined = secondLooksLikeStack
+      ? stackOrCorrelationId
+      : undefined;
+    const effectiveCorrelationId: string | undefined = secondLooksLikeStack
+      ? correlationId
+      : stackOrCorrelationId;
+    const base: string = formatMessage(message, effectiveCorrelationId);
     if (stack !== undefined) {
       // Normal path stays a one-liner without `\n at `: the stack is
       // sanitized + truncated and emitted at debug only (never at error,
@@ -287,13 +296,13 @@ export class AppLogger extends Logger {
   /** Returns a bound logger that always prefixes the given correlation id. */
   withCorrelationId(correlationId: string): Pick<AppLogger, 'debug' | 'verbose' | 'info' | 'log' | 'warn' | 'error' | 'fatal'> {
     return {
-      debug: (m: unknown) => this.debug(m, correlationId),
-      verbose: (m: unknown) => this.verbose(m, correlationId),
-      info: (m: unknown) => this.info(m, correlationId),
-      log: (m: unknown) => this.log(m, correlationId),
-      warn: (m: unknown) => this.warn(m, correlationId),
-      error: (m: unknown, stack?: string) => this.error(m, stack, correlationId),
-      fatal: (m: unknown) => this.fatal(m, correlationId),
+      debug: (message: unknown) => this.debug(message, correlationId),
+      verbose: (message: unknown) => this.verbose(message, correlationId),
+      info: (message: unknown) => this.info(message, correlationId),
+      log: (message: unknown) => this.log(message, correlationId),
+      warn: (message: unknown) => this.warn(message, correlationId),
+      error: (message: unknown, stack?: string) => this.error(message, stack, correlationId),
+      fatal: (message: unknown) => this.fatal(message, correlationId),
     };
   }
 }

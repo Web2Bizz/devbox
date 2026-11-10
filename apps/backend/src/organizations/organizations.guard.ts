@@ -7,14 +7,15 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { and, eq, isNull } from "drizzle-orm";
-import { readIdentity } from "../auth/identity.service";
-import { AppLogger } from "../common/logger";
-import { DbService, dbUnavailable, type DbClient } from "../common/db/db.service";
+import { readIdentity, type RequestIdentity } from "../auth/identity.service";
+import { AppLogger } from "@common/logger";
+import { DbService, dbUnavailable, type DbClient } from "@common/db/db.service";
 import {
   organizationMembers,
   organizations,
+  type OrganizationMemberRow,
   type OrganizationRow,
-} from "../common/db/schema";
+} from "@common/db/schema";
 import type { OrgRole } from "./organizations.types";
 
 /**
@@ -54,25 +55,29 @@ export class OrganizationsGuard implements CanActivate {
    * fail-closed 401 `unauthorized` — no pass-through, no DB lookups.
    */
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const req = context.switchToHttp().getRequest<{
+    const request: {
+      params?: { id?: string };
+      method?: string;
+      correlationId?: string;
+    } = context.switchToHttp().getRequest<{
       params?: { id?: string };
       method?: string;
       correlationId?: string;
     }>();
-    const orgId = req.params?.id;
+    const orgId: string | undefined = request.params?.id;
     if (!orgId) return true;
-    const identity = readIdentity(req);
+    const identity: RequestIdentity | null = readIdentity(request);
     if (!identity) {
       throw new UnauthorizedException({
         code: "unauthorized",
         message: "Authentication required",
       });
     }
-    if (req.method === "GET") {
-      await this.memberRowOrThrow(orgId, identity.id, req.correlationId);
+    if (request.method === "GET") {
+      await this.memberRowOrThrow(orgId, identity.id, request.correlationId);
       return true;
     }
-    await this.maintainerOrThrow(orgId, identity.id, req.correlationId);
+    await this.maintainerOrThrow(orgId, identity.id, request.correlationId);
     return true;
   }
 
@@ -87,7 +92,7 @@ export class OrganizationsGuard implements CanActivate {
     correlationId?: string,
   ): Promise<OrganizationRow> {
     try {
-      const rows = await this.client()
+      const rows: Array<OrganizationRow> = await this.client()
         .select()
         .from(organizations)
         .where(and(eq(organizations.id, orgId), isNull(organizations.deletedAt)))
@@ -95,9 +100,9 @@ export class OrganizationsGuard implements CanActivate {
       if (rows.length === 0)
         throw new NotFoundException(`Organization ${orgId} not found`);
       return rows[0];
-    } catch (err) {
-      if (err instanceof NotFoundException) throw err;
-      dbUnavailable("organizations.get", err, this.logger, correlationId);
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      dbUnavailable("organizations.get", error, this.logger, correlationId);
     }
   }
 
@@ -110,7 +115,7 @@ export class OrganizationsGuard implements CanActivate {
       // Join the org row: a member row alone must not authorize an org that
       // was soft-deleted (its projects are cascaded at removal, but a direct
       // getRole/repos lookup must fail closed too).
-      const rows = await this.client()
+      const rows: Array<{ role: string }> = await this.client()
         .select({ role: organizationMembers.role })
         .from(organizationMembers)
         .innerJoin(
@@ -126,8 +131,8 @@ export class OrganizationsGuard implements CanActivate {
         )
         .limit(1);
       return rows.length > 0 ? (rows[0].role as OrgRole) : null;
-    } catch (err) {
-      dbUnavailable("organizations.roleOf", err, this.logger, correlationId);
+    } catch (error) {
+      dbUnavailable("organizations.roleOf", error, this.logger, correlationId);
     }
   }
 
@@ -137,8 +142,8 @@ export class OrganizationsGuard implements CanActivate {
     requesterId: string,
     correlationId?: string,
   ): Promise<{ org: OrganizationRow; role: OrgRole }> {
-    const org = await this.orgRowOrThrow(orgId, correlationId);
-    const role = await this.roleOf(orgId, requesterId, correlationId);
+    const org: OrganizationRow = await this.orgRowOrThrow(orgId, correlationId);
+    const role: OrgRole | null = await this.roleOf(orgId, requesterId, correlationId);
     if (!role) throw new NotFoundException(`Organization ${orgId} not found`);
     return { org, role };
   }
@@ -149,7 +154,11 @@ export class OrganizationsGuard implements CanActivate {
     requesterId: string,
     correlationId?: string,
   ): Promise<{ org: OrganizationRow; role: OrgRole }> {
-    const found = await this.memberRowOrThrow(orgId, requesterId, correlationId);
+    const found: { org: OrganizationRow; role: OrgRole } = await this.memberRowOrThrow(
+      orgId,
+      requesterId,
+      correlationId,
+    );
     if (found.role !== "maintainer") {
       throw new ForbiddenException("Only organization maintainers can do this");
     }
@@ -161,7 +170,7 @@ export class OrganizationsGuard implements CanActivate {
     correlationId?: string,
   ): Promise<number> {
     try {
-      const rows = await this.client()
+      const rows: Array<OrganizationMemberRow> = await this.client()
         .select()
         .from(organizationMembers)
         .where(
@@ -171,10 +180,10 @@ export class OrganizationsGuard implements CanActivate {
           ),
         );
       return rows.length;
-    } catch (err) {
+    } catch (error) {
       dbUnavailable(
         "organizations.maintainerCount",
-        err,
+        error,
         this.logger,
         correlationId,
       );

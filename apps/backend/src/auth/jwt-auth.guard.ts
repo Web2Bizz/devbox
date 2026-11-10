@@ -4,33 +4,43 @@ import {
   Injectable,
   UnauthorizedException,
 } from "@nestjs/common";
-import { AppLogger } from "../common/logger";
-import { validateEnv } from "../common/env/env";
-import { resolveIdentityUserId } from "./identity.service";
-import { TokenService } from "./token.service";
-import { UsersService } from "../users/users.service";
+import { AppLogger } from "@common/logger";
+import { validateEnv, type AppEnv } from "@common/env/env";
+import { resolveIdentityUserId, type RequestIdentity } from "./identity.service";
+import { TokenService, type AccessClaims } from "./token.service";
+import { UsersService } from "@users/users.service";
+import type { StoredUser } from "@users/users.types";
 
-function bearerToken(req: unknown): string | null {
-  if (typeof req !== "object" || req === null) return null;
-  const headers = (req as { headers?: Record<string, unknown> }).headers;
-  const raw = headers?.["authorization"];
+/** Request slice the guard reads/writes (headers, query, identity, correlation id). */
+type GuardedRequest = {
+  headers?: Record<string, unknown>;
+  query?: Record<string, unknown>;
+  user?: unknown;
+  correlationId?: string;
+};
+
+function bearerToken(request: unknown): string | null {
+  if (typeof request !== "object" || request === null) return null;
+  const headers: Record<string, unknown> | undefined = (
+    request as { headers?: Record<string, unknown> }
+  ).headers;
+  const raw: unknown = headers?.["authorization"];
   if (typeof raw !== "string") return null;
-  const m = /^Bearer\s+(\S+)$/i.exec(raw.trim());
-  return m ? m[1] : null;
+  const match: RegExpExecArray | null = /^Bearer\s+(\S+)$/i.exec(raw.trim());
+  return match ? match[1] : null;
 }
 
-function queryUserIdOf(req: unknown): string | undefined {
-  if (typeof req !== "object" || req === null) return undefined;
-  const query = (req as { query?: Record<string, unknown> }).query;
-  const v = query?.["userId"];
-  return typeof v === "string" ? v : undefined;
+function queryUserIdOf(request: unknown): string | undefined {
+  if (typeof request !== "object" || request === null) return undefined;
+  const query: Record<string, unknown> | undefined = (
+    request as { query?: Record<string, unknown> }
+  ).query;
+  const value: unknown = query?.["userId"];
+  return typeof value === "string" ? value : undefined;
 }
 
-function attach(
-  req: object,
-  identity: { id: string; email: string | null; mock: boolean },
-): void {
-  (req as { user?: unknown }).user = identity;
+function attach(request: object, identity: RequestIdentity): void {
+  (request as { user?: unknown }).user = identity;
 }
 
 /**
@@ -53,9 +63,9 @@ export class JwtAuthGuard implements CanActivate {
     private readonly logger: AppLogger = new AppLogger(JwtAuthGuard.name),
   ) {}
 
-  async canActivate(ctx: ExecutionContext): Promise<boolean> {
-    const req = ctx.switchToHttp().getRequest();
-    let env;
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const request: GuardedRequest = context.switchToHttp().getRequest<GuardedRequest>();
+    let env: AppEnv;
     try {
       env = validateEnv(process.env);
     } catch {
@@ -65,12 +75,15 @@ export class JwtAuthGuard implements CanActivate {
       });
     }
 
-    const token = bearerToken(req);
-    const correlationId = (req as { correlationId?: string }).correlationId;
+    const token: string | null = bearerToken(request);
+    const correlationId: string | undefined = request.correlationId;
     if (token) {
-      const claims = this.tokens.verifyAccess(token, env.jwtAccessSecret);
+      const claims: AccessClaims | null = this.tokens.verifyAccess(
+        token,
+        env.jwtAccessSecret,
+      );
       if (claims) {
-        attach(req, { id: claims.sub, email: claims.email, mock: false });
+        attach(request, { id: claims.sub, email: claims.email, mock: false });
         return true;
       }
       // Fixed event only — never the token value.
@@ -78,10 +91,10 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     if (env.authLegacyMockFallback) {
-      const mockId = resolveIdentityUserId(req, queryUserIdOf(req));
-      const known = await this.users.findById(mockId, correlationId);
+      const mockId: string = resolveIdentityUserId(request, queryUserIdOf(request));
+      const known: StoredUser | null = await this.users.findById(mockId, correlationId);
       attach(
-        req,
+        request,
         known
           ? { id: known.id, email: known.email, mock: false }
           : { id: mockId, email: null, mock: true },

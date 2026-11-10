@@ -1,5 +1,5 @@
 import { Module } from "@nestjs/common";
-import { WorkspacePathService } from "../../../../../common/storage/workspace-path.service";
+import { WorkspacePathService } from "@common/storage/workspace-path.service";
 import { OrganizationsGuard } from "../../../../organizations.guard";
 import { ProjectAccessService } from "./project-access.service";
 

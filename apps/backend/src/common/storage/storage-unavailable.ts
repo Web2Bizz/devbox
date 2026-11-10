@@ -2,7 +2,7 @@ import { AppLogger } from "../logger";
 import { ExternalServiceError } from "../external/external-error";
 
 /** Fixed 503 message for unconfigured storage (mirrors dbUnavailable). */
-export const STORAGE_UNAVAILABLE_MESSAGE =
+export const STORAGE_UNAVAILABLE_MESSAGE: string =
   "сервис временно недоступен, повторите позже";
 
 /**

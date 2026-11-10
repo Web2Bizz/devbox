@@ -1,4 +1,4 @@
-import type { OrganizationMemberRow } from "../../../common/db/schema";
+import type { OrganizationMemberRow } from "@common/db/schema";
 import type { OrganizationMember, OrgRole } from "../../organizations.types";
 
 /**

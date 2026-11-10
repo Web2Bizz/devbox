@@ -1,14 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import { execFile } from 'node:child_process';
 import { mkdir, readdir, stat } from 'node:fs/promises';
+import type { Stats } from 'node:fs';
 import { promisify } from 'node:util';
-import { AppLogger } from '../../../../../../../../../common/logger';
-import { validateEnv } from '../../../../../../../../../common/env/env';
-import { ExternalServiceError } from '../../../../../../../../../common/external/external-error';
-import { storageUnavailable } from '../../../../../../../../../common/storage/storage-unavailable';
-import { isValidGitRepo } from '../../../../utils/repos-git';
+import { AppLogger } from '@common/logger';
+import { validateEnv } from '@common/env/env';
+import { ExternalServiceError } from '@common/external/external-error';
+import { storageUnavailable } from '@common/storage/storage-unavailable';
+import type { ProjectResolved } from '@common/storage/workspace-path.service';
+import { isValidGitRepo, type GitCheck } from '../../../../utils/repos-git';
 import { CloneJobsRepository, type CloneJob } from './clone-jobs.repository';
-import { WorkspacePathService } from '../../../../../../../../../common/storage/workspace-path.service';
+import { WorkspacePathService } from '@common/storage/workspace-path.service';
 import { readSubmodules } from '../../../../utils/submodules';
 import {
   buildGitCloneArgs,
@@ -16,10 +18,16 @@ import {
   normalizeRepoUrl,
 } from './utils/repo-url';
 
-const execFileAsync = promisify(execFile);
+type ExecFileAsync = (
+  file: string,
+  args: Array<string>,
+  options?: { cwd?: string; timeout?: number },
+) => Promise<{ stdout: string; stderr: string }>;
+
+const execFileAsync: ExecFileAsync = promisify(execFile);
 
 /** Per-attempt budget for clone + submodule init (no shell, no secrets in logs). */
-export const CLONE_TIMEOUT_MS = 120000;
+export const CLONE_TIMEOUT_MS: number = 120000;
 
 function sanitizeForLog(value: string): string {
   return value.replace(/:\/\/([^/\s:@]+)(:[^/\s@]*)?@/g, '://***:***@');
@@ -39,9 +47,9 @@ function allowedCloneHosts(): Set<string> {
   return allowedCloneHostsCache;
 }
 
-async function dirIsEmpty(abs: string): Promise<boolean> {
+async function dirIsEmpty(absolutePath: string): Promise<boolean> {
   try {
-    const entries = await readdir(abs);
+    const entries: Array<string> = await readdir(absolutePath);
     return entries.length === 0;
   } catch {
     return true; // missing → treated as empty (clone will create it)
@@ -94,33 +102,34 @@ export class WorkspaceCloneService {
     repoName: string,
     correlationId?: string,
   ): Promise<CloneJob> {
-    let resolved: Awaited<ReturnType<typeof this.paths.resolveOrg>>;
+    let resolved: ProjectResolved;
     try {
       // uuid-validated org scope + project-bound dest (400 on garbage);
       // empty REPOS_ROOT denies with 503 before any mkdir/clone.
       resolved = await this.paths.resolveOrg(userId, repoName);
-    } catch (err) {
-      if (err instanceof ExternalServiceError && err.code === 'EXTERNAL_UNAVAILABLE') {
-        storageUnavailable('workspaces.clone', this.logger, correlationId, err);
+    } catch (error) {
+      if (error instanceof ExternalServiceError && error.code === 'EXTERNAL_UNAVAILABLE') {
+        storageUnavailable('workspaces.clone', this.logger, correlationId, error);
       }
-      throw err;
+      throw error;
     }
-    const uid = resolved.scopeId;
-    const pid = resolved.projectId;
-    await this.paths.assertInsideJail(resolved.absRepo, await this.paths.realStrictRoot());
+    const scopeId: string = resolved.scopeId;
+    const projectId: string = resolved.projectId;
+    await this.paths.assertInsideJail(resolved.absoluteRepo, await this.paths.realStrictRoot());
     // Storage/jail gates precede the URL allow-list (an unconfigured REPOS_ROOT
     // stays an honest 503), and only the normalized value travels to git.
-    const url = normalizeRepoUrl(repoUrl, allowedCloneHosts());
-    return this.jobs.withLock(uid, pid, async () => {
+    const url: string = normalizeRepoUrl(repoUrl, allowedCloneHosts());
+    return this.jobs.withLock(scopeId, projectId, async () => {
+      // Destructuring the enqueue result — explicit annotation cannot be expressed here.
       const { job, created } = this.jobs.enqueue({
-        userId: uid,
-        userSpace: uid,
-        repoName: pid,
+        userId: scopeId,
+        userSpace: scopeId,
+        repoName: projectId,
         repoUrl: url,
       });
       // NOTE: enqueue keyed on the normalized (orgUuid, projectUuid) pair.
-      void this.runClone(uid, job.repoName, url, resolved.absRepo, created);
-      return this.jobs.get(uid, job.repoName) ?? job;
+      void this.runClone(scopeId, job.repoName, url, resolved.absoluteRepo, created);
+      return this.jobs.get(scopeId, job.repoName) ?? job;
     });
   }
 
@@ -128,10 +137,10 @@ export class WorkspaceCloneService {
     userId: string,
     repoName: string,
     repoUrl: string,
-    absDest: string,
+    absoluteDestination: string,
     created: boolean,
   ): Promise<void> {
-    const current = this.jobs.get(userId, repoName);
+    const current: CloneJob | null = this.jobs.get(userId, repoName);
     if (!current) return;
     if (!created && current.status === 'ready') return; // idempotent: keep ready
     if (!created && (current.status === 'queued' || current.status === 'cloning')) {
@@ -143,38 +152,38 @@ export class WorkspaceCloneService {
     );
     try {
       // Fast path: dest already holds a valid repo (manual drop or retry) → ready.
-      const existing = await isValidGitRepo(absDest);
+      const existing: GitCheck = await isValidGitRepo(absoluteDestination);
       if (existing.ok) {
         this.jobs.markReady(userId, repoName);
         this.logger.info(`[workspaces] clone ready (exists) orgs/${userId}/projects/${repoName}`);
         return;
       }
-      const empty = await dirIsEmpty(absDest);
+      const empty: boolean = await dirIsEmpty(absoluteDestination);
       if (!empty && !existing.ok) {
         throw new Error('destination exists and is not an empty directory');
       }
-      await mkdir(absDest, { recursive: true });
+      await mkdir(absoluteDestination, { recursive: true });
       this.jobs.markProgress(userId, repoName, 30);
-      await execFileAsync('git', buildGitCloneArgs(repoUrl, absDest), {
+      await execFileAsync('git', buildGitCloneArgs(repoUrl, absoluteDestination), {
         timeout: CLONE_TIMEOUT_MS,
       });
       this.jobs.markProgress(userId, repoName, 80);
       try {
         await execFileAsync('git', ['submodule', 'update', '--init', '--recursive'], {
-          cwd: absDest,
+          cwd: absoluteDestination,
           timeout: CLONE_TIMEOUT_MS,
         });
-      } catch (subErr) {
+      } catch (submoduleError) {
         // Submodule init is best-effort: the clone itself succeeded.
         this.logger.warn(
-          `[workspaces] submodule init skipped for orgs/${userId}/projects/${repoName}: ${(subErr as Error).message}`,
+          `[workspaces] submodule init skipped for orgs/${userId}/projects/${repoName}: ${(submoduleError as Error).message}`,
         );
       }
-      await readSubmodules(absDest, this.logger).catch(() => []);
+      await readSubmodules(absoluteDestination, this.logger).catch(() => []);
       this.jobs.markReady(userId, repoName);
       this.logger.info(`[workspaces] clone ready orgs/${userId}/projects/${repoName}`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+    } catch (error) {
+      const message: string = error instanceof Error ? error.message : String(error);
       this.jobs.markFailed(userId, repoName, message.slice(0, 500));
       // Terminal failure of the clone operation → error (not warn):
       // the job settled on 'failed' and the caller must retry.
@@ -183,11 +192,11 @@ export class WorkspaceCloneService {
       );
       try {
         // Best-effort cleanup of half-cloned dest (never outside the jail —
-        // absDest came from WorkspacePathService.resolveOrg).
-        const st = await stat(absDest).catch(() => null);
-        if (st && !(await isValidGitRepo(absDest)).ok) {
+        // absoluteDestination came from WorkspacePathService.resolveOrg).
+        const stats: Stats | null = await stat(absoluteDestination).catch(() => null);
+        if (stats && !(await isValidGitRepo(absoluteDestination)).ok) {
           const { rm } = await import('node:fs/promises');
-          await rm(absDest, { recursive: true, force: true });
+          await rm(absoluteDestination, { recursive: true, force: true });
         }
       } catch {
         // Cleanup failure must not mask the failed status.

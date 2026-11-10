@@ -3,22 +3,25 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { AppLogger } from "../../../../../common/logger";
+import { AppLogger } from "@common/logger";
+import { uuidSchema } from "@common/validation";
 import {
   DbService,
   dbUnavailable,
   type DbClient,
-} from "../../../../../common/db/db.service";
-import { WorkspacePathService } from "../../../../../common/storage/workspace-path.service";
+} from "@common/db/db.service";
+import {
+  WorkspacePathService,
+  type ProjectResolved,
+} from "@common/storage/workspace-path.service";
 import { OrganizationsGuard } from "../../../../organizations.guard";
 import type { OrgRole } from "../../../../organizations.types";
 
-/** uuid shape check (mirrors UsersService.isUserId — non-uuid keys never match a row). */
-function isUuidKey(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-    value,
-  );
-}
+/** The org/owner projection of a `projects` row used by the access gate. */
+export type ProjectAccessRow = {
+  orgId: string | null;
+  ownerId: string | null;
+};
 
 /**
  * ProjectAccessService — the C4 project-access gate, owned by the projects
@@ -60,16 +63,16 @@ export class ProjectAccessService {
     try {
       const { projects } = await import("../../../../../common/db/schema");
       const { eq: eqOp } = await import("drizzle-orm");
-      const rows = await this.client()
+      const rows: Array<{ orgId: string | null }> = await this.client()
         .select({ orgId: projects.orgId })
         .from(projects)
         .where(eqOp(projects.id, projectId));
-      const orgId = rows[0]?.orgId;
+      const orgId: string | null | undefined = rows[0]?.orgId;
       return orgId ? [orgId] : [];
-    } catch (err) {
+    } catch (error) {
       dbUnavailable(
         "organizations.orgIdsForProject",
-        err,
+        error,
         this.logger,
         correlationId,
       );
@@ -96,11 +99,11 @@ export class ProjectAccessService {
   async projectAccessRow(
     projectId: string,
     correlationId?: string,
-  ): Promise<{ orgId: string | null; ownerId: string | null }> {
+  ): Promise<ProjectAccessRow> {
     try {
       const { projects } = await import("../../../../../common/db/schema");
       const { and: andOp, eq: eqOp, isNull: isNullOp } = await import("drizzle-orm");
-      const rows = await this.client()
+      const rows: Array<ProjectAccessRow> = await this.client()
         .select({ orgId: projects.orgId, ownerId: projects.ownerId })
         .from(projects)
         .where(
@@ -112,11 +115,11 @@ export class ProjectAccessService {
         orgId: rows[0].orgId ?? null,
         ownerId: (rows[0].ownerId as string | null) ?? null,
       };
-    } catch (err) {
-      if (err instanceof NotFoundException) throw err;
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
       dbUnavailable(
         "organizations.projectAccessRow",
-        err,
+        error,
         this.logger,
         correlationId,
       );
@@ -137,7 +140,7 @@ export class ProjectAccessService {
     userId: string,
     correlationId?: string,
   ): Promise<{ ownerId: string | null; orgIds: Array<string> }> {
-    const row = await this.projectAccessRow(projectId, correlationId);
+    const row: ProjectAccessRow = await this.projectAccessRow(projectId, correlationId);
     await this.assertProjectAccess(
       projectId,
       row.ownerId,
@@ -174,24 +177,25 @@ export class ProjectAccessService {
         message: "projectId is required — session routes are project-scoped",
       });
     }
+    // Destructuring the gate result — explicit annotation cannot be expressed here.
     const { orgIds } = await this.assertProjectAccessById(
       projectId,
       userId,
       correlationId,
     );
-    const orgId = orgIds[0];
+    const orgId: string | undefined = orgIds[0];
     if (!orgId) {
       throw new NotFoundException(`Project ${projectId} not found`);
     }
-    const resolved = await this.paths.resolveOrgStrict(
+    const resolved: ProjectResolved = await this.paths.resolveOrgStrict(
       orgId,
       projectId,
     );
     await this.paths.assertInsideJail(
-      resolved.absRepo,
+      resolved.absoluteRepo,
       await this.paths.realStrictRoot(),
     );
-    return { projectId, directory: resolved.absRepo };
+    return { projectId, directory: resolved.absoluteRepo };
   }
 
   /**
@@ -224,20 +228,20 @@ export class ProjectAccessService {
     correlationId?: string,
   ): Promise<void> {
     void _ownerId;
-    const orgIds = await this.orgIdsForProject(projectId, correlationId);
+    const orgIds: Array<string> = await this.orgIdsForProject(projectId, correlationId);
     if (orgIds.length === 0) {
       throw new NotFoundException(`Project ${projectId} not found`);
     }
     for (const orgId of orgIds) {
       try {
         await this.guard.orgRowOrThrow(orgId, correlationId);
-      } catch (err) {
-        if (err instanceof NotFoundException)
+      } catch (error) {
+        if (error instanceof NotFoundException)
           throw new NotFoundException(`Project ${projectId} not found`);
-        throw err;
+        throw error;
       }
-      if (isUuidKey(userId)) {
-        const role = await this.getRole(orgId, userId, correlationId);
+      if (uuidSchema.safeParse(userId).success) {
+        const role: OrgRole | null = await this.getRole(orgId, userId, correlationId);
         if (role) return;
       }
     }

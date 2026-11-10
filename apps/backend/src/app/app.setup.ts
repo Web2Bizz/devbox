@@ -3,12 +3,12 @@ import {
   VersioningType,
   type INestApplication,
 } from '@nestjs/common';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from '@nestjs/swagger';
 import { json } from 'express';
-import { ApiErrorFilter } from '../common/http/api-error.filter';
-import { CorrelationInterceptor } from '../common/http/correlation.interceptor';
-import { validateEnv } from '../common/env/env';
-import { DEFAULT_API_VERSION } from '../common/http/api/version';
+import { ApiErrorFilter } from '@common/http/api-error.filter';
+import { CorrelationInterceptor } from '@common/http/correlation.interceptor';
+import { validateEnv } from '@common/env/env';
+import { DEFAULT_API_VERSION } from '@common/http/api/version';
 
 /**
  * Shared Nest application wiring — used by main.ts AND the versioning e2e
@@ -25,15 +25,15 @@ import { DEFAULT_API_VERSION } from '../common/http/api/version';
  */
 export function configureApp(app: INestApplication): void {
   // validateEnv() never logs secrets; CORS origins come from the same source.
-  const CORS_ORIGINS = validateEnv(process.env).corsOrigins;
+  const CORS_ORIGINS: Array<string> = validateEnv(process.env).corsOrigins;
 
   app.use(json({
     limit: '1mb',
     // Captures exact raw bytes for HMAC verification of the GitHub webhook
     // (X-Hub-Signature-256). Never logged; only the webhook route reads it.
-    verify: (req: unknown, _res: unknown, buf: Buffer) => {
-      if (typeof req === 'object' && req !== null) {
-        (req as { rawBody?: Buffer }).rawBody = buf;
+    verify: (request: unknown, _response: unknown, buffer: Buffer) => {
+      if (typeof request === 'object' && request !== null) {
+        (request as { rawBody?: Buffer }).rawBody = buffer;
       }
     },
   }));
@@ -55,7 +55,7 @@ export function configureApp(app: INestApplication): void {
   app.enableCors({
     origin: (
       origin: string | undefined,
-      callback: (err: Error | null, allow?: boolean | string) => void,
+      callback: (error: Error | null, allow?: boolean | string) => void,
     ) => {
       if (!origin) {
         callback(null, true);
@@ -100,7 +100,7 @@ type SwaggerSetupOptions = Parameters<typeof SwaggerModule.setup>[3];
  * (useGlobalPrefix opt-in), so these paths stay exactly as documented.
  */
 export function setupSwagger(app: INestApplication): void {
-  const v1Config = new DocumentBuilder()
+  const v1Config: Omit<OpenAPIObject, 'paths'> = new DocumentBuilder()
     .setTitle('Rush Code domain API')
     .setDescription(
       'Product contract between frontend clients and the backend (NestJS 12). ' +
@@ -118,7 +118,7 @@ export function setupSwagger(app: INestApplication): void {
     .addServer('http://localhost:3000', 'backend local')
     .addServer('http://localhost:8080', 'frontend via compose (proxied browser → backend)')
     .build();
-  const v1Document = SwaggerModule.createDocument(app, v1Config);
+  const v1Document: OpenAPIObject = SwaggerModule.createDocument(app, v1Config);
 
   const v1Ui: SwaggerSetupOptions = {
     jsonDocumentUrl: '/swagger/v1.json',
@@ -136,7 +136,7 @@ export function setupSwagger(app: INestApplication): void {
   } as SwaggerSetupOptions;
   SwaggerModule.setup('/swagger', app, v1Document, legacyUi);
 
-  const v2Config = new DocumentBuilder()
+  const v2Config: Omit<OpenAPIObject, 'paths'> = new DocumentBuilder()
     .setTitle('Rush Code domain API (v2 — reserved)')
     .setDescription(
       'v2 is reserved for future use and intentionally exposes NO endpoints yet. ' +
@@ -146,7 +146,7 @@ export function setupSwagger(app: INestApplication): void {
     .setVersion('2.0.0-stub')
     .addServer('http://localhost:3000', 'backend local')
     .build();
-  const v2Document = SwaggerModule.createDocument(app, v2Config);
+  const v2Document: OpenAPIObject = SwaggerModule.createDocument(app, v2Config);
   // Stub: drop the auto-scanned v1/legacy routes — v2 binds nothing.
   (v2Document as unknown as { paths: Record<string, unknown> }).paths = {};
   const v2Ui: SwaggerSetupOptions = {

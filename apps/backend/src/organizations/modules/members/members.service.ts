@@ -5,14 +5,15 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
-import { AppLogger } from "../../../common/logger";
-import { DbService, dbUnavailable, type DbClient } from "../../../common/db/db.service";
+import { AppLogger } from "@common/logger";
+import { DbService, dbUnavailable, type DbClient } from "@common/db/db.service";
 import {
   organizationMembers,
   type OrganizationMemberRow,
-} from "../../../common/db/schema";
-import { WorkspacePathService } from "../../../common/storage/workspace-path.service";
-import { UsersService } from "../../../users/users.service";
+} from "@common/db/schema";
+import { WorkspacePathService } from "@common/storage/workspace-path.service";
+import { UsersService } from "@users/users.service";
+import type { StoredUser } from "@users/users.types";
 import type { AddMemberInput, UpdateMemberRoleInput } from "../../organizations.dto";
 import type { OrganizationMember, OrgRole } from "../../organizations.types";
 import { OrganizationsGuard } from "../../organizations.guard";
@@ -58,15 +59,15 @@ export class MembersService {
   ): Promise<Array<OrganizationMember>> {
     await this.guard.memberRowOrThrow(orgId, requesterId, correlationId);
     try {
-      const rows = await this.client()
+      const rows: Array<OrganizationMemberRow> = await this.client()
         .select()
         .from(organizationMembers)
         .where(eq(organizationMembers.orgId, orgId));
       return rows
         .map(toMember)
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    } catch (err) {
-      dbUnavailable("organizations.members", err, this.logger, correlationId);
+    } catch (error) {
+      dbUnavailable("organizations.members", error, this.logger, correlationId);
     }
   }
 
@@ -77,22 +78,22 @@ export class MembersService {
     correlationId?: string,
   ): Promise<OrganizationMember> {
     await this.guard.maintainerOrThrow(orgId, requesterId, correlationId);
-    const target = this.paths.checkUuid(input.userId, "userId");
-    const role = (input.role ?? "user") as OrgRole;
+    const target: string = this.paths.checkUuid(input.userId, "userId");
+    const role: OrgRole = (input.role ?? "user") as OrgRole;
     // Strict-503 (see OrganizationsService.create()): DB outage propagates,
     // live null → 404.
-    let known: Awaited<ReturnType<UsersService["findById"]>>;
+    let known: StoredUser | null;
     try {
       known = await this.users.findById(target, correlationId);
-    } catch (err) {
-      dbUnavailable("organizations.addMember.userLookup", err, this.logger, correlationId);
+    } catch (error) {
+      dbUnavailable("organizations.addMember.userLookup", error, this.logger, correlationId);
     }
     if (!known) throw new NotFoundException(`User ${target} not found`);
     if (role === "maintainer" && (await this.guard.maintainerCount(orgId, correlationId)) > 0) {
       throw new ConflictException("Organization already has a maintainer");
     }
     try {
-      const rows = await this.client()
+      const rows: Array<OrganizationMemberRow> = await this.client()
         .insert(organizationMembers)
         .values({ orgId, userId: target, role })
         .returning();
@@ -101,8 +102,8 @@ export class MembersService {
         correlationId,
       );
       return toMember(rows[0]);
-    } catch (err) {
-      if (isPgUniqueViolation(err)) {
+    } catch (error) {
+      if (isPgUniqueViolation(error)) {
         // Duplicate (org,user) or a raced second maintainer → 409.
         throw new ConflictException(
           role === "maintainer"
@@ -110,10 +111,10 @@ export class MembersService {
             : "User is already a member",
         );
       }
-      if (isPgForeignKeyViolation(err)) {
+      if (isPgForeignKeyViolation(error)) {
         throw new NotFoundException(`User ${target} not found`);
       }
-      dbUnavailable("organizations.addMember", err, this.logger, correlationId);
+      dbUnavailable("organizations.addMember", error, this.logger, correlationId);
     }
   }
 
@@ -124,10 +125,10 @@ export class MembersService {
     correlationId?: string,
   ): Promise<void> {
     await this.guard.maintainerOrThrow(orgId, requesterId, correlationId);
-    const target = this.paths.checkUuid(targetUserId, "userId");
+    const target: string = this.paths.checkUuid(targetUserId, "userId");
     let row: OrganizationMemberRow | null = null;
     try {
-      const rows = await this.client()
+      const rows: Array<OrganizationMemberRow> = await this.client()
         .select()
         .from(organizationMembers)
         .where(
@@ -138,10 +139,10 @@ export class MembersService {
         )
         .limit(1);
       row = rows[0] ?? null;
-    } catch (err) {
+    } catch (error) {
       dbUnavailable(
         "organizations.removeMember.lookup",
-        err,
+        error,
         this.logger,
         correlationId,
       );
@@ -163,10 +164,10 @@ export class MembersService {
           ),
         );
       this.logger.info(`[organizations] member removed org=${orgId}`, correlationId);
-    } catch (err) {
+    } catch (error) {
       dbUnavailable(
         "organizations.removeMember",
-        err,
+        error,
         this.logger,
         correlationId,
       );
@@ -181,11 +182,11 @@ export class MembersService {
     correlationId?: string,
   ): Promise<OrganizationMember> {
     await this.guard.maintainerOrThrow(orgId, requesterId, correlationId);
-    const target = this.paths.checkUuid(targetUserId, "userId");
-    const next = input.role as OrgRole;
+    const target: string = this.paths.checkUuid(targetUserId, "userId");
+    const next: OrgRole = input.role as OrgRole;
     let row: OrganizationMemberRow | null = null;
     try {
-      const rows = await this.client()
+      const rows: Array<OrganizationMemberRow> = await this.client()
         .select()
         .from(organizationMembers)
         .where(
@@ -196,16 +197,16 @@ export class MembersService {
         )
         .limit(1);
       row = rows[0] ?? null;
-    } catch (err) {
+    } catch (error) {
       dbUnavailable(
         "organizations.changeRole.lookup",
-        err,
+        error,
         this.logger,
         correlationId,
       );
     }
     if (!row) throw new NotFoundException(`Member ${target} not found`);
-    const current = row.role as OrgRole;
+    const current: OrgRole = row.role as OrgRole;
     if (current === next) return toMember(row);
     if (
       current === "maintainer" &&
@@ -222,7 +223,7 @@ export class MembersService {
       throw new ConflictException("Organization already has a maintainer");
     }
     try {
-      const rows = await this.client()
+      const rows: Array<OrganizationMemberRow> = await this.client()
         .update(organizationMembers)
         .set({ role: next, updatedAt: new Date() })
         .where(
@@ -237,11 +238,11 @@ export class MembersService {
         correlationId,
       );
       return toMember(rows[0]);
-    } catch (err) {
-      if (isPgUniqueViolation(err)) {
+    } catch (error) {
+      if (isPgUniqueViolation(error)) {
         throw new ConflictException("Organization already has a maintainer");
       }
-      dbUnavailable("organizations.changeRole", err, this.logger, correlationId);
+      dbUnavailable("organizations.changeRole", error, this.logger, correlationId);
     }
   }
 }

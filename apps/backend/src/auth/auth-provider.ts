@@ -1,8 +1,8 @@
 import { Injectable, UnauthorizedException } from "@nestjs/common";
-import { AppLogger } from "../common/logger";
-import { verifyPassword } from "../users/utils/password";
-import { UsersService } from "../users/users.service";
-import type { AuthProviderId, StoredUser } from "../users/users.types";
+import { AppLogger } from "@common/logger";
+import { verifyPassword } from "@users/utils/password";
+import { UsersService } from "@users/users.service";
+import type { AuthProviderId, StoredUser } from "@users/users.types";
 
 /** Strategy seam for external identity providers (local + future stubs). */
 export type AuthProvider = {
@@ -32,10 +32,10 @@ export class LocalAuthProvider implements AuthProvider {
     password: string,
     correlationId?: string,
   ): Promise<StoredUser | null> {
-    const user = await this.users.findByEmail(email, correlationId);
+    const user: StoredUser | null = await this.users.findByEmail(email, correlationId);
     // Same code path for unknown emails (timing-neutral, no enumeration).
-    const hash = user?.passwordHash ?? "";
-    const ok =
+    const hash: string = user?.passwordHash ?? "";
+    const ok: boolean =
       hash !== "" &&
       (await verifyPassword(password, hash, this.logger, correlationId));
     if (!ok || !user) {

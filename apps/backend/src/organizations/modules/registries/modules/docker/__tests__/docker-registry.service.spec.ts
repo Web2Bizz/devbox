@@ -13,17 +13,17 @@
  * Also executes under `bun test dist` (top-level run, throws on failure).
  */
 import assert from 'node:assert/strict';
-import { AppLogger } from '../../../../../../common/logger';
-import { ApiErrorFilter } from '../../../../../../common/http/api-error.filter';
-import { ExternalClient } from '../../../../../../common/external/external-client';
-import { ExternalServiceError } from '../../../../../../common/external/external-error';
-import { computeBackoffDelay, withRetry } from '../../../../../../common/external/retry';
+import { AppLogger } from '@common/logger';
+import { ApiErrorFilter } from '@common/http/api-error.filter';
+import { ExternalClient } from '@common/external/external-client';
+import { ExternalServiceError } from '@common/external/external-error';
+import { computeBackoffDelay, withRetry } from '@common/external/retry';
 import {
   dockerRegistryAuthHeaders,
   resolveDockerRegistryConfig,
 } from '../docker.config';
 import { DockerRegistryService } from '../docker-registry.service';
-import { validateEnv } from '../../../../../../common/env/env';
+import { validateEnv } from '@common/env/env';
 
 const SECRET_TOKEN = 'super-secret-token-xyz-never-log';
 const SECRET_PASS = 'super-secret-pass-xyz-never-log';

@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { z } from 'zod';
 
-export const createChatSchema = z.object({
+export const createChatSchema: z.ZodObject<{ title: z.ZodString }> = z.object({
   title: z.string({ error: 'Field "title" is required' }).min(1).max(200),
 });
 

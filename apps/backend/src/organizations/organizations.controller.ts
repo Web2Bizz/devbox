@@ -16,8 +16,8 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagg
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { ReqUser } from "../auth/req-user.decorator";
 import type { RequestIdentity } from "../auth/identity.service";
-import { NoIndexInterceptor } from "../common/http/noindex.interceptor";
-import { ZodValidationPipe } from "../common/validation";
+import { NoIndexInterceptor } from "@common/http/noindex.interceptor";
+import { ZodValidationPipe } from "@common/validation";
 import {
   OrganizationDto,
   createOrganizationSchema,
@@ -50,7 +50,7 @@ import { OrganizationsService } from "./organizations.service";
 @ApiBearerAuth()
 @UseInterceptors(NoIndexInterceptor)
 export class OrganizationsController {
-  constructor(private readonly orgs: OrganizationsService) {}
+  constructor(private readonly organizations: OrganizationsService) {}
 
   @Post()
   @ApiOperation({ summary: "Create organization (caller becomes maintainer)" })
@@ -63,9 +63,9 @@ export class OrganizationsController {
   async create(
     @Body(new ZodValidationPipe(createOrganizationSchema)) body: CreateOrganizationInput,
     @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
+    @Req() request?: { correlationId?: string },
   ): Promise<OrganizationDto> {
-    return (await this.orgs.create(body, identity.id, req?.correlationId)) as OrganizationDto;
+    return (await this.organizations.create(body, identity.id, request?.correlationId)) as OrganizationDto;
   }
 
   @Get()
@@ -75,9 +75,9 @@ export class OrganizationsController {
   @ApiResponse({ status: 503, description: "postgres unreachable (EXTERNAL_UNAVAILABLE, Retry-After)" })
   async list(
     @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
+    @Req() request?: { correlationId?: string },
   ): Promise<Array<OrganizationDto>> {
-    return (await this.orgs.listForUser(identity.id, req?.correlationId)) as Array<OrganizationDto>;
+    return (await this.organizations.listForUser(identity.id, request?.correlationId)) as Array<OrganizationDto>;
   }
 
   @Get(":id")
@@ -90,9 +90,9 @@ export class OrganizationsController {
   async get(
     @Param("id") id: string,
     @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
+    @Req() request?: { correlationId?: string },
   ): Promise<OrganizationDto> {
-    return (await this.orgs.get(id, identity.id, req?.correlationId)) as OrganizationDto;
+    return (await this.organizations.get(id, identity.id, request?.correlationId)) as OrganizationDto;
   }
 
   @Patch(":id")
@@ -107,9 +107,9 @@ export class OrganizationsController {
     @Param("id") id: string,
     @Body(new ZodValidationPipe(updateOrganizationSchema)) body: UpdateOrganizationInput,
     @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
+    @Req() request?: { correlationId?: string },
   ): Promise<OrganizationDto> {
-    return (await this.orgs.update(id, identity.id, body, req?.correlationId)) as OrganizationDto;
+    return (await this.organizations.update(id, identity.id, body, request?.correlationId)) as OrganizationDto;
   }
 
   @Delete(":id")
@@ -125,8 +125,8 @@ export class OrganizationsController {
   async remove(
     @Param("id") id: string,
     @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
+    @Req() request?: { correlationId?: string },
   ): Promise<void> {
-    await this.orgs.remove(id, identity.id, req?.correlationId);
+    await this.organizations.remove(id, identity.id, request?.correlationId);
   }
 }

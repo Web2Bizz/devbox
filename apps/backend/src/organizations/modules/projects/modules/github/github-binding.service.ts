@@ -4,20 +4,23 @@ import {
   Injectable,
   ServiceUnavailableException,
 } from "@nestjs/common";
-import { validateEnv } from "../../../../../common/env/env";
-import { GithubAppService } from "./github-app.service";
-import { GithubInstallationsService } from "./github-installations.service";
+import { validateEnv, type AppEnv } from "@common/env/env";
+import { GithubAppService, type GithubAppInstallation } from "./github-app.service";
+import {
+  GithubInstallationsService,
+  type GithubInstallation,
+} from "./github-installations.service";
 import type { InstallCallbackQueryInput } from "./github.dto";
-import { signAppState, verifyAppState } from "./utils/app-state";
+import { signAppState, verifyAppState, type AppStateVerification } from "./utils/app-state";
 
-const CLOCK_SKEW_MS = 5 * 60_000;
+const CLOCK_SKEW_MS: number = 5 * 60_000;
 
 function isFreshInstallation(
   createdAt: string | null,
   issuedAt: number,
 ): boolean {
   if (createdAt === null) return false;
-  const createdMs = Date.parse(createdAt);
+  const createdMs: number = Date.parse(createdAt);
   return Number.isFinite(createdMs) && createdMs >= issuedAt - CLOCK_SKEW_MS;
 }
 
@@ -29,8 +32,8 @@ export class GithubBindingService {
   ) {}
 
   private stateSecret(): string {
-    const env = validateEnv(process.env);
-    const secret = env.githubStateSecret || env.githubWebhookSecret;
+    const env: AppEnv = validateEnv(process.env);
+    const secret: string = env.githubStateSecret || env.githubWebhookSecret;
     if (!secret) {
       throw new ServiceUnavailableException(
         "GitHub install state is not configured",
@@ -40,13 +43,13 @@ export class GithubBindingService {
   }
 
   buildInstallUrl(userId: string): string {
-    const env = validateEnv(process.env);
+    const env: AppEnv = validateEnv(process.env);
     if (!env.githubAppId || !env.githubPrivateKey || !env.githubAppSlug) {
       throw new ServiceUnavailableException(
         "GitHub App install is not configured",
       );
     }
-    const state = signAppState(userId, this.stateSecret());
+    const state: string = signAppState(userId, this.stateSecret());
     return `https://github.com/apps/${env.githubAppSlug}/installations/new?state=${encodeURIComponent(state)}`;
   }
 
@@ -55,7 +58,7 @@ export class GithubBindingService {
     query: InstallCallbackQueryInput,
     correlationId?: string,
   ): Promise<number> {
-    const verified = verifyAppState(query.state, this.stateSecret());
+    const verified: AppStateVerification = verifyAppState(query.state, this.stateSecret());
     if (!verified.ok) {
       throw new BadRequestException({
         code: "GITHUB_STATE_INVALID",
@@ -69,11 +72,11 @@ export class GithubBindingService {
       });
     }
 
-    const known = await this.installations.findByInstallationId(
+    const known: GithubInstallation | null = await this.installations.findByInstallationId(
       query.installation_id,
       correlationId,
     );
-    const installation = await this.appAuth.getInstallation(
+    const installation: GithubAppInstallation = await this.appAuth.getInstallation(
       query.installation_id,
     );
     if (

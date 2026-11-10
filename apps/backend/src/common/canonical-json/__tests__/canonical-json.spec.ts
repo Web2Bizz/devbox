@@ -14,7 +14,7 @@
  * - primitives and bigint are encoded deterministically.
  */
 import assert from 'node:assert/strict';
-import { canonicalJson } from '..';
+import { canonicalJson } from '../canonical-json';
 
 const checks: Array<{ name: string; run: () => void }> = [
   {

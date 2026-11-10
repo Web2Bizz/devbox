@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { UnauthorizedException } from "@nestjs/common";
-import type { WorkspacePathService } from "../../../../../../common/storage/workspace-path.service";
+import type { WorkspacePathService } from "@common/storage/workspace-path.service";
 import type { ProjectAccessService } from "../../project-access/project-access.service";
 import type { ProjectsService } from "../../../projects.service";
 import { ProjectFilesService } from "../project-files.service";
@@ -62,14 +62,14 @@ function makeService(opts: { wired: boolean; orgLess?: boolean }) {
   const paths = {
     async resolveOrg(orgId: string, projectId: string, subPath: string) {
       fsCalls.push(`resolveOrg:${orgId}:${projectId}:${subPath}`);
-      return { abs: "/tmp/project-content", rel: "." };
+      return { absolutePath: "/tmp/project-content", relativePath: "." };
     },
-    async readDir(abs: string) {
-      fsCalls.push(`readDir:${abs}`);
+    async readDir(absolutePath: string) {
+      fsCalls.push(`readDir:${absolutePath}`);
       return [];
     },
-    async statPath(abs: string) {
-      fsCalls.push(`statPath:${abs}`);
+    async statPath(absolutePath: string) {
+      fsCalls.push(`statPath:${absolutePath}`);
       return null;
     },
   } as unknown as WorkspacePathService;

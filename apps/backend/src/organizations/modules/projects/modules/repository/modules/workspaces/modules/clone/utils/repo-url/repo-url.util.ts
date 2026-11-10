@@ -4,7 +4,7 @@ import { BadRequestException } from '@nestjs/common';
  * Exact message shared by the DTO (400 bad_request) and the clone service
  * (400 REPO_URL_NOT_ALLOWED) so both boundaries answer the same wording.
  */
-export const REPO_URL_ALLOWED_FORMS_MESSAGE =
+export const REPO_URL_ALLOWED_FORMS_MESSAGE: string =
   'repoUrl must be an allowed https://, ssh:// or git@ URL';
 
 /** Built-in exact-match clone hosts; CLONE_ALLOWED_HOSTS extends this list. */
@@ -15,25 +15,18 @@ export const BASE_CLONE_HOSTS: ReadonlyArray<string> = [
 ];
 
 /** Case-insensitive host portion of the scp-like form (`git@host:path`). */
-const SCP_URL = /^git@([A-Za-z0-9.-]+):([^\s]+)$/;
+const SCP_URL: RegExp = /^git@([A-Za-z0-9.-]+):([^\s]+)$/;
 
-const MAX_URL_LENGTH = 2048;
-const CONTROL_OR_BACKSLASH = /[\\\u0000-\u001f\u007f]/;
-const ENCODED_SEPARATOR = /%2e|%2f/i;
-const WHITESPACE = /\s/;
-
-export function rejectedRepoUrl(): BadRequestException {
-  return new BadRequestException({
-    code: 'REPO_URL_NOT_ALLOWED',
-    message: REPO_URL_ALLOWED_FORMS_MESSAGE,
-  });
-}
+const MAX_URL_LENGTH: number = 2048;
+const CONTROL_OR_BACKSLASH: RegExp = /[\\\u0000-\u001f\u007f]/;
+const ENCODED_SEPARATOR: RegExp = /%2e|%2f/i;
+const WHITESPACE: RegExp = /\s/;
 
 /** Built-in hosts + validated AppEnv extras, exact match, lowercased. */
 export function createAllowedCloneHosts(extra: ReadonlyArray<string>): Set<string> {
-  const hosts = new Set(BASE_CLONE_HOSTS);
+  const hosts: Set<string> = new Set(BASE_CLONE_HOSTS);
   for (const entry of extra) {
-    const host = String(entry ?? '').trim().toLowerCase();
+    const host: string = String(entry ?? '').trim().toLowerCase();
     if (host) hosts.add(host);
   }
   return hosts;
@@ -43,14 +36,14 @@ export function createAllowedCloneHosts(extra: ReadonlyArray<string>): Set<strin
  * `git clone` argv with an explicit `--` so a hostile URL can never be parsed
  * as a git option (e.g. `-u@host:path`).
  */
-export function buildGitCloneArgs(repoUrl: string, dest: string): Array<string> {
-  return ['clone', '--recurse-submodules', '--', repoUrl, dest];
+export function buildGitCloneArgs(repoUrl: string, destination: string): Array<string> {
+  return ['clone', '--recurse-submodules', '--', repoUrl, destination];
 }
 
 /** Canonical URL string: lowercase host/protocol, original (normalized) path. */
 function canonicalRemoteUrl(parsed: URL, host: string): string {
-  const userinfo = parsed.username ? `${parsed.username}@` : '';
-  const port = parsed.port ? `:${parsed.port}` : '';
+  const userinfo: string = parsed.username ? `${parsed.username}@` : '';
+  const port: string = parsed.port ? `:${parsed.port}` : '';
   return `${parsed.protocol}//${userinfo}${host}${port}${parsed.pathname}${parsed.search}${parsed.hash}`;
 }
 
@@ -59,18 +52,39 @@ function parseRemoteUrl(url: string): URL {
   try {
     parsed = new URL(url);
   } catch {
-    throw rejectedRepoUrl();
+    throw new BadRequestException({
+      code: 'REPO_URL_NOT_ALLOWED',
+      message: REPO_URL_ALLOWED_FORMS_MESSAGE,
+    });
   }
   if (parsed.protocol === 'https:') {
     // No userinfo on https: credentials belong in a credential helper, not a URL.
-    if (parsed.username || parsed.password) throw rejectedRepoUrl();
+    if (parsed.username || parsed.password) {
+      throw new BadRequestException({
+        code: 'REPO_URL_NOT_ALLOWED',
+        message: REPO_URL_ALLOWED_FORMS_MESSAGE,
+      });
+    }
   } else if (parsed.protocol === 'ssh:') {
     // Only the conventional `git` ssh user (and no password) is accepted.
-    if (parsed.username !== 'git' || parsed.password) throw rejectedRepoUrl();
+    if (parsed.username !== 'git' || parsed.password) {
+      throw new BadRequestException({
+        code: 'REPO_URL_NOT_ALLOWED',
+        message: REPO_URL_ALLOWED_FORMS_MESSAGE,
+      });
+    }
   } else {
-    throw rejectedRepoUrl();
+    throw new BadRequestException({
+      code: 'REPO_URL_NOT_ALLOWED',
+      message: REPO_URL_ALLOWED_FORMS_MESSAGE,
+    });
   }
-  if (!parsed.hostname) throw rejectedRepoUrl();
+  if (!parsed.hostname) {
+    throw new BadRequestException({
+      code: 'REPO_URL_NOT_ALLOWED',
+      message: REPO_URL_ALLOWED_FORMS_MESSAGE,
+    });
+  }
   return parsed;
 }
 
@@ -85,20 +99,38 @@ function parseRemoteUrl(url: string): URL {
  * hosts (exact match, no suffix/trailing-dot tricks).
  */
 export function normalizeRepoUrl(raw: unknown, allowedHosts: ReadonlySet<string>): string {
-  const url = String(raw ?? '').trim();
-  if (!url || url.length > MAX_URL_LENGTH) throw rejectedRepoUrl();
-  if (CONTROL_OR_BACKSLASH.test(url) || ENCODED_SEPARATOR.test(url) || WHITESPACE.test(url)) {
-    throw rejectedRepoUrl();
+  const url: string = String(raw ?? '').trim();
+  if (!url || url.length > MAX_URL_LENGTH) {
+    throw new BadRequestException({
+      code: 'REPO_URL_NOT_ALLOWED',
+      message: REPO_URL_ALLOWED_FORMS_MESSAGE,
+    });
   }
-  const scp = SCP_URL.exec(url);
+  if (CONTROL_OR_BACKSLASH.test(url) || ENCODED_SEPARATOR.test(url) || WHITESPACE.test(url)) {
+    throw new BadRequestException({
+      code: 'REPO_URL_NOT_ALLOWED',
+      message: REPO_URL_ALLOWED_FORMS_MESSAGE,
+    });
+  }
+  const scp: RegExpExecArray | null = SCP_URL.exec(url);
   if (scp) {
-    const host = scp[1].toLowerCase();
-    const repoPath = scp[2];
-    if (!allowedHosts.has(host) || repoPath.includes('..')) throw rejectedRepoUrl();
+    const host: string = scp[1].toLowerCase();
+    const repoPath: string = scp[2];
+    if (!allowedHosts.has(host) || repoPath.includes('..')) {
+      throw new BadRequestException({
+        code: 'REPO_URL_NOT_ALLOWED',
+        message: REPO_URL_ALLOWED_FORMS_MESSAGE,
+      });
+    }
     return `git@${host}:${repoPath}`;
   }
-  const parsed = parseRemoteUrl(url);
-  const host = parsed.hostname.toLowerCase();
-  if (!allowedHosts.has(host)) throw rejectedRepoUrl();
+  const parsed: URL = parseRemoteUrl(url);
+  const host: string = parsed.hostname.toLowerCase();
+  if (!allowedHosts.has(host)) {
+    throw new BadRequestException({
+      code: 'REPO_URL_NOT_ALLOWED',
+      message: REPO_URL_ALLOWED_FORMS_MESSAGE,
+    });
+  }
   return canonicalRemoteUrl(parsed, host);
 }

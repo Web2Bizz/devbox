@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { validateEnv } from "../../../../../../common/env/env";
+import { validateEnv } from "@common/env/env";
 import type { GithubAppService } from "../github-app.service";
 import type { GithubInstallation } from "../github-installations.service";
 import type { ListReposQueryInput } from "../github.dto";

@@ -126,12 +126,12 @@ describe("ApiErrorFilter", () => {
 
   it("generates a UUID correlation id when none is supplied", () => {
     const captured = run(new BadRequestException("bad"));
-    const cid = envelope(captured).correlationId;
+    const correlationId = envelope(captured).correlationId;
     assert.match(
-      cid ?? "",
+      correlationId ?? "",
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
     );
-    assert.equal(captured.headers["x-correlation-id"], cid);
+    assert.equal(captured.headers["x-correlation-id"], correlationId);
   });
 
   it("maps a 401 string response to the unauthorized code", () => {

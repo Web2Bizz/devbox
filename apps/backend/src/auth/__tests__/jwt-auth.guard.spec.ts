@@ -2,9 +2,9 @@ import "reflect-metadata";
 import assert from "node:assert/strict";
 import type { ExecutionContext } from "@nestjs/common";
 import { UnauthorizedException } from "@nestjs/common";
-import type { AppLogger } from "../../common/logger";
-import type { DbService } from "../../common/db/db.service";
-import type { UsersService } from "../../users/users.service";
+import type { AppLogger } from "@common/logger";
+import type { DbService } from "@common/db/db.service";
+import type { UsersService } from "@users/users.service";
 import { JwtAuthGuard } from "../jwt-auth.guard";
 import { TokenService } from "../token.service";
 

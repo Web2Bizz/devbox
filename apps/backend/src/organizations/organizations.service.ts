@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException } from "@nestjs/common";
 import { and, eq, isNull } from "drizzle-orm";
-import { AppLogger } from "../common/logger";
-import { DbService, dbUnavailable, type DbClient } from "../common/db/db.service";
+import { AppLogger } from "@common/logger";
+import { DbService, dbUnavailable, type DbClient } from "@common/db/db.service";
 import {
   organizationInvites,
   organizationMembers,
@@ -9,10 +9,12 @@ import {
   projectChats,
   projectSessions,
   projects,
+  type OrganizationMemberRow,
   type OrganizationRow,
-} from "../common/db/schema";
-import { UsersService } from "../users/users.service";
-import { WorkspacePathService } from "../common/storage/workspace-path.service";
+} from "@common/db/schema";
+import { UsersService } from "@users/users.service";
+import type { StoredUser } from "@users/users.types";
+import { WorkspacePathService } from "@common/storage/workspace-path.service";
 import type {
   AcceptInviteInput,
   AddMemberInput,
@@ -99,16 +101,16 @@ export class OrganizationsService {
 
   /** Test/e2e seam — DELETE FROM org tables (requires live Postgres). */
   async clearAllForTests(): Promise<void> {
-    const c = this.client();
+    const client: DbClient = this.client();
     // Dependent rows first: project_chats/project_sessions and projects.org_id
     // are ON DELETE RESTRICT (hard deletes must fail in production), so this
     // test-only cleanup removes them explicitly before the projects/orgs.
-    await c.delete(organizationInvites);
-    await c.delete(organizationMembers);
-    await c.delete(projectSessions);
-    await c.delete(projectChats);
-    await c.delete(projects);
-    await c.delete(organizations);
+    await client.delete(organizationInvites);
+    await client.delete(organizationMembers);
+    await client.delete(projectSessions);
+    await client.delete(projectChats);
+    await client.delete(projects);
+    await client.delete(organizations);
   }
 
   /**
@@ -123,36 +125,36 @@ export class OrganizationsService {
     ownerId: string,
     correlationId?: string,
   ): Promise<Organization> {
-    const owner = this.paths.checkUuid(ownerId, "ownerId");
+    const owner: string = this.paths.checkUuid(ownerId, "ownerId");
     // Strict-503: a user-lookup DB outage must propagate as 503 (never
     // masked as 404) — only a live null means "unknown owner".
-    let known: Awaited<ReturnType<UsersService["findById"]>>;
+    let known: StoredUser | null;
     try {
       known = await this.users.findById(owner, correlationId);
-    } catch (err) {
-      dbUnavailable("organizations.create.userLookup", err, this.logger, correlationId);
+    } catch (error) {
+      dbUnavailable("organizations.create.userLookup", error, this.logger, correlationId);
     }
     if (!known) throw new NotFoundException(`User ${owner} not found`);
     // Strict gate first: 500 before any INSERT/mkdir (no <cwd>/repos writes).
     try {
       this.paths.requireExplicitRoot();
-    } catch (err) {
-      if (err instanceof InternalServerErrorException) {
+    } catch (error) {
+      if (error instanceof InternalServerErrorException) {
         this.logger.error(
           `[organizations] storage unconfigured owner=${owner}`,
           undefined,
           correlationId,
         );
-        throw err;
+        throw error;
       }
-      throw err;
+      throw error;
     }
-    let orgId = "";
+    let orgId: string = "";
     try {
       // Org + owner-as-maintainer are one unit: the transaction rolls the
       // org back if the membership insert fails (no compensating DELETE).
       orgId = await this.client().transaction(async (tx) => {
-        const orgRows = await tx
+        const orgRows: Array<OrganizationRow> = await tx
           .insert(organizations)
           .values({
             name: input.name,
@@ -162,7 +164,7 @@ export class OrganizationsService {
             isPersonal: input.isPersonal ?? false,
           })
           .returning();
-        const id = orgRows[0].id;
+        const id: string = orgRows[0].id;
         await tx.insert(organizationMembers).values({
           orgId: id,
           userId: owner,
@@ -170,29 +172,29 @@ export class OrganizationsService {
         });
         return id;
       });
-    } catch (err) {
-      dbUnavailable("organizations.create", err, this.logger, correlationId);
+    } catch (error) {
+      dbUnavailable("organizations.create", error, this.logger, correlationId);
     }
     try {
       await this.paths.ensureOrgScope(orgId);
-    } catch (err) {
+    } catch (error) {
       this.logger.error(
         `[organizations] disk init failed org=${orgId}`,
-        (err as Error).stack,
+        (error as Error).stack,
         correlationId,
       );
       // No physical delete: hide the half-created row with a soft delete
       // (project rule — rows are never physically removed).
       try {
-        const now = new Date();
+        const now: Date = new Date();
         await this.client()
           .update(organizations)
           .set({ deletedAt: now, updatedAt: now })
           .where(eq(organizations.id, orgId));
-      } catch (rollbackErr) {
+      } catch (rollbackError) {
         dbUnavailable(
           "organizations.create.diskRollback",
-          rollbackErr,
+          rollbackError,
           this.logger,
           correlationId,
         );
@@ -202,7 +204,7 @@ export class OrganizationsService {
       );
     }
     this.logger.info(`[organizations] created org=${orgId}`, correlationId);
-    const row = await this.guard.orgRowOrThrow(orgId, correlationId);
+    const row: OrganizationRow = await this.guard.orgRowOrThrow(orgId, correlationId);
     return toOrganization(row);
   }
 
@@ -212,25 +214,28 @@ export class OrganizationsService {
     correlationId?: string,
   ): Promise<Array<Organization>> {
     try {
-      const links = await this.client()
+      const links: Array<OrganizationMemberRow> = await this.client()
         .select()
         .from(organizationMembers)
         .where(eq(organizationMembers.userId, requesterId));
       if (links.length === 0) return [];
-      const out: Array<Organization> = [];
+      const organizations: Array<Organization> = [];
       for (const link of links) {
         try {
-          const row = await this.guard.orgRowOrThrow(link.orgId, correlationId);
-          out.push(toOrganization(row));
-        } catch (err) {
-          if (err instanceof NotFoundException) continue;
-          throw err;
+          const row: OrganizationRow = await this.guard.orgRowOrThrow(
+            link.orgId,
+            correlationId,
+          );
+          organizations.push(toOrganization(row));
+        } catch (error) {
+          if (error instanceof NotFoundException) continue;
+          throw error;
         }
       }
-      return out.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    } catch (err) {
-      if (err instanceof NotFoundException) throw err;
-      dbUnavailable("organizations.list", err, this.logger, correlationId);
+      return organizations.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      dbUnavailable("organizations.list", error, this.logger, correlationId);
     }
   }
 
@@ -251,7 +256,7 @@ export class OrganizationsService {
   ): Promise<Organization> {
     await this.guard.maintainerOrThrow(orgId, requesterId, correlationId);
     try {
-      const rows = await this.client()
+      const rows: Array<OrganizationRow> = await this.client()
         .update(organizations)
         .set({
           ...(input.name !== undefined ? { name: input.name } : {}),
@@ -269,9 +274,9 @@ export class OrganizationsService {
         throw new NotFoundException(`Organization ${orgId} not found`);
       this.logger.info(`[organizations] updated org=${orgId}`, correlationId);
       return toOrganization(rows[0]);
-    } catch (err) {
-      if (err instanceof NotFoundException) throw err;
-      dbUnavailable("organizations.update", err, this.logger, correlationId);
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      dbUnavailable("organizations.update", error, this.logger, correlationId);
     }
   }
 
@@ -280,14 +285,18 @@ export class OrganizationsService {
     requesterId: string,
     correlationId?: string,
   ): Promise<void> {
-    const gate = await this.guard.maintainerOrThrow(orgId, requesterId, correlationId);
+    const gate: { org: OrganizationRow; role: OrgRole } = await this.guard.maintainerOrThrow(
+      orgId,
+      requesterId,
+      correlationId,
+    );
     if (gate.org.isPersonal) {
       throw new BadRequestException({
         code: "personal_org_immutable",
         message: "Personal organization cannot be deleted",
       });
     }
-    let cascadedProjects = 0;
+    let cascadedProjects: number = 0;
     try {
       // Soft org delete (project rule: DB rows are NEVER physically
       // removed). One transaction marks the org and its still-live projects
@@ -295,13 +304,13 @@ export class OrganizationsService {
       // they are part of the projects' history and hide together with the
       // project reads. No container stop happens on this path (the old
       // "stopping containers" log had no docker call behind it).
-      const now = new Date();
+      const now: Date = new Date();
       await this.client().transaction(async (tx) => {
         await tx
           .update(organizations)
           .set({ deletedAt: now, updatedAt: now })
           .where(eq(organizations.id, orgId));
-        const rows = await tx
+        const rows: Array<{ id: string }> = await tx
           .update(projects)
           .set({ status: "deleted", deletedAt: now, updatedAt: now })
           .where(and(eq(projects.orgId, orgId), isNull(projects.deletedAt)))
@@ -312,10 +321,12 @@ export class OrganizationsService {
         `[organizations] soft-removed org=${orgId} cascadeSoft=${cascadedProjects}`,
         correlationId,
       );
-    } catch (err) {
-      dbUnavailable("organizations.remove", err, this.logger, correlationId);
+    } catch (error) {
+      dbUnavailable("organizations.remove", error, this.logger, correlationId);
     }
     // The org home (orgs/<orgId>) is kept: restore promises live project data.
+    // Vault secrets are intentionally retained too (soft delete): they stay
+    // inaccessible via the API and a future hard delete must clean them up.
   }
 
   /**

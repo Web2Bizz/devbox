@@ -1,9 +1,12 @@
 import { HttpException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import type { ReadableStreamDefaultReader } from 'node:stream/web';
 import { AppLogger } from '../logger';
 import { ExternalClient } from '../external/external-client';
 import { ExternalServiceError, fromStatus, fromUnknown } from '../external/external-error';
-import { CryptoService } from '../crypto/crypto.service';
-import { OpencodeKeysService } from '../keys/opencode-keys.service';
+import { CryptoService, type EncryptedOpencodeKey } from '../crypto/crypto.service';
+import { OPENCODE_PROVIDER } from '../vault/vault.providers';
+import { VaultService } from '../vault/vault.service';
+import type { VaultSecret } from '../vault/vault.types';
 
 /**
  * Direct cloud chat endpoint (module constant, same precedent as
@@ -14,14 +17,14 @@ import { OpencodeKeysService } from '../keys/opencode-keys.service';
  * OpenAI-compatible POST {model, messages:[{role:'user', content}]} →
  * choices text, Bearer, timeout 30s (apps/cli/src/agents/opencode/cloud.ts).
  */
-export const ZEN_CHAT_URL = 'https://opencode.ai/inference/openai/v1/chat/completions';
+export const ZEN_CHAT_URL: string = 'https://opencode.ai/inference/openai/v1/chat/completions';
 
 /**
  * Default cloud model, plain id (provenance: apps/cli constants
  * OPENCODE_CLOUD_MODEL='deepseek-v4.1-flash'; CLI cloud sends the plain id
  * via resolveCloudModel). The endpoint requires `model` in every body.
  */
-export const CLOUD_DEFAULT_MODEL = 'deepseek-v4.1-flash';
+export const CLOUD_DEFAULT_MODEL: string = 'deepseek-v4.1-flash';
 
 export type ZenChatOptions = {
   /**
@@ -47,7 +50,7 @@ export type ZenChatOptions = {
 };
 
 /** Per-attempt budget for chat (the 10s default kills slow answers mid-stream). */
-const CHAT_TIMEOUT_MS = 90000;
+const CHAT_TIMEOUT_MS: number = 90000;
 
 /**
  * Local model guard (quota saver — same 400 envelope, the contract is
@@ -111,7 +114,7 @@ const KNOWN_FREE_CHAT_MODELS: ReadonlySet<string> = new Set([
 
 /** Guard reason for a normalized model id, null when the id may go upstream. */
 function chatModelGuard(model: string): 'deprecated' | 'incompatible' | 'free' | null {
-  const id = model.toLowerCase();
+  const id: string = model.toLowerCase();
   if (DEPRECATED_CHAT_MODELS.has(id)) return 'deprecated';
   if (INCOMPATIBLE_CHAT_EXACT.has(id)) return 'incompatible';
   for (const prefix of INCOMPATIBLE_CHAT_PREFIXES) {
@@ -127,19 +130,22 @@ function chatModelGuard(model: string): 'deprecated' | 'incompatible' | 'free' |
  */
 function extractStreamDelta(payload: unknown): string | null {
   if (typeof payload !== 'object' || payload === null) return null;
-  const choices = (payload as { choices?: unknown }).choices;
+  const choices: unknown = (payload as { choices?: unknown }).choices;
   if (!Array.isArray(choices) || choices.length === 0) return null;
-  const first = choices[0];
+  const first: unknown = choices[0];
   if (typeof first !== 'object' || first === null) return null;
-  const delta = (first as { delta?: unknown }).delta;
+  const delta: unknown = (first as { delta?: unknown }).delta;
   if (typeof delta !== 'object' || delta === null) return null;
-  const content = (delta as { content?: unknown }).content;
+  const content: unknown = (delta as { content?: unknown }).content;
   return typeof content === 'string' && content.length > 0 ? content : null;
 }
 
+/** One choice entry of an OpenAI-compatible chat payload (only what is read). */
+type ZenChatChoice = { message?: { content?: unknown }; text?: unknown };
+
 /** Narrowed OpenAI-compatible chat payload members (only what the projection reads). */
 type ZenChatResponse = {
-  choices?: Array<{ message?: { content?: unknown }; text?: unknown }>;
+  choices?: Array<ZenChatChoice>;
   text?: unknown;
   content?: unknown;
   answer?: unknown;
@@ -147,16 +153,16 @@ type ZenChatResponse = {
 
 function extractText(payload: unknown): string | null {
   if (typeof payload !== 'object' || payload === null) return null;
-  const rec = payload as ZenChatResponse;
-  const choices = rec.choices;
+  const record: ZenChatResponse = payload as ZenChatResponse;
+  const choices: Array<ZenChatChoice> | undefined = record.choices;
   if (Array.isArray(choices) && choices.length > 0) {
-    const first = choices[0];
-    const content = first?.message?.content;
+    const first: ZenChatChoice | undefined = choices[0];
+    const content: unknown = first?.message?.content;
     if (typeof content === 'string' && content.length > 0) return content;
     if (typeof first?.text === 'string' && first.text.length > 0) return first.text;
   }
   for (const key of ['text', 'content', 'answer'] as const) {
-    const value = rec[key];
+    const value: unknown = record[key];
     if (typeof value === 'string' && value.length > 0) return value;
   }
   return null;
@@ -168,9 +174,10 @@ function extractText(payload: unknown): string | null {
  * SessionRunnerService — direct per-user model calls (the harness-owned runner
  * transport; the `opencode serve` stand is no longer required on this path).
  *
- * - Key: the caller's row from OpencodeKeysService, decrypted in memory via
- *   CryptoService (existing keys-rotation: dual-read + lazy re-encrypt under the
- *   active KEK — same lines as BillingService.getUsage; billing is untouched).
+ * - Key: the caller's secret from VaultService (round-robin across the
+ *   caller's rows for the provider), decrypted in memory via CryptoService
+ *   (existing keys-rotation: dual-read + lazy re-encrypt under the active KEK
+ *   — same lines as BillingService.getUsage; billing is untouched).
  *   Missing row → 404 `opencode_key_missing` (same code the billing surface
  *   answers, so the key-setup UX stays one flow). The plaintext lives only in
  *   this request (upstream Bearer) and is never logged.
@@ -187,58 +194,67 @@ function extractText(payload: unknown): string | null {
 @Injectable()
 export class SessionRunnerService {
   constructor(
-    private readonly keys: OpencodeKeysService,
+    private readonly keys: VaultService,
     private readonly crypto: CryptoService,
     private readonly external: ExternalClient,
     private readonly logger: AppLogger = new AppLogger(SessionRunnerService.name),
   ) {}
 
   /** One assistant answer for the prompt (full text; the harness chunks it into SSE deltas). */
-  async chat(userId: string, prompt: string, opts: ZenChatOptions = {}): Promise<string> {
-    const cid = opts.correlationId;
-    const stored = await this.keys.findByUserId(userId, cid);
+  async chat(userId: string, prompt: string, options: ZenChatOptions = {}): Promise<string> {
+    const correlationId: string | undefined = options.correlationId;
+    const stored: VaultSecret | null = await this.keys.pickNext(
+      { kind: 'user', userId },
+      OPENCODE_PROVIDER,
+      correlationId,
+    );
     if (!stored || !stored.encryptedKey || !stored.iv) {
       throw new NotFoundException({
         code: 'opencode_key_missing',
         message: 'No OpenCode API key configured for this user',
       });
     }
-    const apiKey = this.crypto.decrypt({
+    const apiKey: string = this.crypto.decrypt({
       keyId: stored.keyId,
       iv: stored.iv,
       data: stored.encryptedKey,
     });
     if (!this.crypto.isActiveKeyId(stored.keyId)) {
       try {
-        const fresh = this.crypto.encrypt(apiKey);
-        await this.keys.save(
-          userId,
-          { encryptedKey: fresh.data, iv: fresh.iv, keyId: fresh.keyId },
-          cid,
+        const fresh: EncryptedOpencodeKey = this.crypto.encrypt(apiKey);
+        await this.keys.rewrap(
+          { kind: 'user', userId },
+          stored.id,
+          {
+            encryptedKey: fresh.data,
+            iv: fresh.iv,
+            keyId: fresh.keyId,
+          },
+          correlationId,
         );
-        this.logger.info('[zen] key re-encrypted', cid);
+        this.logger.info('[zen] key re-encrypted', correlationId);
       } catch {
-        this.logger.warn('[zen] lazy re-encrypt skipped', cid);
+        this.logger.warn('[zen] lazy re-encrypt skipped', correlationId);
       }
     }
 
-    let res: Response;
+    let response: Response;
     // Inference API requires the plain Model ID from the models table
     // (docs: https://opencode.ai/v2/docs/console/models); the
     // `opencode/<model-id>` form exists only for opencode.jsonc selection.
     // Normalize defensively: keep the part after the last '/' so a
     // `providerID/modelID` ref degrades to the plain id; plain ids pass
     // through unchanged. The fallback default stays CLOUD_DEFAULT_MODEL.
-    const rawModel =
-      opts.model && opts.model.length > 0 ? opts.model : CLOUD_DEFAULT_MODEL;
-    const slash = rawModel.lastIndexOf('/');
-    const model = slash >= 0 ? rawModel.slice(slash + 1) : rawModel;
+    const rawModel: string =
+      options.model && options.model.length > 0 ? options.model : CLOUD_DEFAULT_MODEL;
+    const slash: number = rawModel.lastIndexOf('/');
+    const model: string = slash >= 0 ? rawModel.slice(slash + 1) : rawModel;
     // Local model guard (quota saver, same 400 envelope — the contract is
     // untouched): these ids can only fail the same way upstream, so reject
     // before any fetch instead of burning key quota.
-    const guard = chatModelGuard(model);
+    const guard: ReturnType<typeof chatModelGuard> = chatModelGuard(model);
     if (guard) {
-      this.logger.warn(`[zen] chat model rejected model=${model} reason=${guard}`, cid);
+      this.logger.warn(`[zen] chat model rejected model=${model} reason=${guard}`, correlationId);
       throw fromStatus('zen', 'chat', 400);
     }
     // Progressive upstream first: stream:true SSE so the harness can tail
@@ -248,20 +264,26 @@ export class SessionRunnerService {
     // after the first token the accumulator is the answer.
     // OpenAI-compatible system role (optional): system-first messages in
     // both bodies; without `system` the payload stays user-only as before.
-    const messages =
-      opts.system && opts.system.length > 0
+    const messages: Array<{ role: string; content: string }> =
+      options.system && options.system.length > 0
         ? [
-            { role: 'system', content: opts.system },
+            { role: 'system', content: options.system },
             { role: 'user', content: prompt },
           ]
         : [{ role: 'user', content: prompt }];
-    const streamed = await this.chatStream(apiKey, model, messages, cid, opts.onDelta);
+    const streamed: string | null = await this.chatStream(
+      apiKey,
+      model,
+      messages,
+      correlationId,
+      options.onDelta,
+    );
     if (streamed !== null) {
-      this.logger.info('[zen] chat answered stream', cid);
+      this.logger.info('[zen] chat answered stream', correlationId);
       return streamed;
     }
     try {
-      res = await this.external.fetchWithRetry(
+      response = await this.external.fetchWithRetry(
         ZEN_CHAT_URL,
         {
           method: 'POST',
@@ -271,44 +293,44 @@ export class SessionRunnerService {
             messages,
           }),
         },
-        { service: 'zen', operation: 'chat', correlationId: cid, timeoutMs: CHAT_TIMEOUT_MS },
+        { service: 'zen', operation: 'chat', correlationId, timeoutMs: CHAT_TIMEOUT_MS },
       );
-    } catch (err) {
-      if (err instanceof ExternalServiceError || err instanceof HttpException) throw err;
-      throw fromUnknown('zen', 'chat', err);
+    } catch (error) {
+      if (error instanceof ExternalServiceError || error instanceof HttpException) throw error;
+      throw fromUnknown('zen', 'chat', error);
     }
 
-    if (res.status === 401 || res.status === 403) {
-      await res.arrayBuffer().catch(() => null);
-      this.logger.warn(`[zen] chat rejected status=${res.status} code=opencode_key_invalid`, cid);
+    if (response.status === 401 || response.status === 403) {
+      await response.arrayBuffer().catch(() => null);
+      this.logger.warn(`[zen] chat rejected status=${response.status} code=opencode_key_invalid`, correlationId);
       throw new UnauthorizedException({
         code: 'opencode_key_invalid',
         message: 'OpenCode API key was rejected',
       });
     }
-    if (!res.ok) {
-      await res.arrayBuffer().catch(() => null);
-      const mapped = fromStatus('zen', 'chat', res.status);
+    if (!response.ok) {
+      await response.arrayBuffer().catch(() => null);
+      const mapped: ExternalServiceError = fromStatus('zen', 'chat', response.status);
       this.logger.warn(
-        `[zen] chat upstream status=${res.status} code=${mapped.code} endpoint=/inference/openai/v1/chat/completions model=${model}`,
-        cid,
+        `[zen] chat upstream status=${response.status} code=${mapped.code} endpoint=/inference/openai/v1/chat/completions model=${model}`,
+        correlationId,
       );
       throw mapped;
     }
     let payload: unknown;
     try {
-      payload = await res.json();
+      payload = await response.json();
     } catch {
-      await res.arrayBuffer().catch(() => null);
-      this.logger.warn('[zen] chat bad json code=EXTERNAL_UNAVAILABLE', cid);
+      await response.arrayBuffer().catch(() => null);
+      this.logger.warn('[zen] chat bad json code=EXTERNAL_UNAVAILABLE', correlationId);
       throw fromUnknown('zen', 'chat', new Error('bad_chat_json'));
     }
-    const text = extractText(payload);
+    const text: string | null = extractText(payload);
     if (!text) {
-      this.logger.warn('[zen] chat shape mismatch code=EXTERNAL_UNAVAILABLE', cid);
+      this.logger.warn('[zen] chat shape mismatch code=EXTERNAL_UNAVAILABLE', correlationId);
       throw fromUnknown('zen', 'chat', new Error('bad_chat_shape'));
     }
-    this.logger.info('[zen] chat answered', cid);
+    this.logger.info('[zen] chat answered', correlationId);
     return text;
   }
 
@@ -325,12 +347,12 @@ export class SessionRunnerService {
     apiKey: string,
     model: string,
     messages: ReadonlyArray<{ role: string; content: string }>,
-    cid: string | undefined,
+    correlationId: string | undefined,
     onDelta?: (chunk: string) => void,
   ): Promise<string | null> {
-    let res: Response;
+    let response: Response;
     try {
-      res = await this.external.fetchWithRetry(
+      response = await this.external.fetchWithRetry(
         ZEN_CHAT_URL,
         {
           method: 'POST',
@@ -341,33 +363,34 @@ export class SessionRunnerService {
             stream: true,
           }),
         },
-        { service: 'zen', operation: 'chat', correlationId: cid, timeoutMs: CHAT_TIMEOUT_MS },
+        { service: 'zen', operation: 'chat', correlationId, timeoutMs: CHAT_TIMEOUT_MS },
       );
     } catch {
       // Pre-token transport failure (timeout/network/429/5xx) — the plain
       // POST below decides honestly (it owns the 429/5xx mapping).
       return null;
     }
-    if (res.status === 401 || res.status === 403) {
-      await res.arrayBuffer().catch(() => null);
-      this.logger.warn(`[zen] chat rejected status=${res.status} code=opencode_key_invalid`, cid);
+    if (response.status === 401 || response.status === 403) {
+      await response.arrayBuffer().catch(() => null);
+      this.logger.warn(`[zen] chat rejected status=${response.status} code=opencode_key_invalid`, correlationId);
       throw new UnauthorizedException({
         code: 'opencode_key_invalid',
         message: 'OpenCode API key was rejected',
       });
     }
-    if (!res.ok || !res.body) {
-      await res.arrayBuffer().catch(() => null);
+    if (!response.ok || !response.body) {
+      await response.arrayBuffer().catch(() => null);
       return null;
     }
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = '';
-    let acc = '';
-    const feed = (line: string): boolean => {
-      const trimmed = line.trim();
+    const reader: ReadableStreamDefaultReader<Uint8Array> =
+      response.body.getReader();
+    const decoder: InstanceType<typeof TextDecoder> = new TextDecoder();
+    let buffer: string = '';
+    let accumulator: string = '';
+    const feed: (line: string) => boolean = (line: string): boolean => {
+      const trimmed: string = line.trim();
       if (!trimmed.startsWith('data:')) return false;
-      const payload = trimmed.slice(5).trim();
+      const payload: string = trimmed.slice(5).trim();
       if (payload === '[DONE]') return true;
       let parsed: unknown;
       try {
@@ -375,9 +398,9 @@ export class SessionRunnerService {
       } catch {
         return false;
       }
-      const delta = extractStreamDelta(parsed);
+      const delta: string | null = extractStreamDelta(parsed);
       if (delta) {
-        acc += delta;
+        accumulator += delta;
         try {
           onDelta?.(delta);
         } catch {
@@ -390,26 +413,26 @@ export class SessionRunnerService {
       for (;;) {
         const { done, value } = await reader.read();
         if (value) {
-          buf += decoder.decode(value, { stream: true });
-          let idx = buf.indexOf('\n');
-          while (idx >= 0) {
-            if (feed(buf.slice(0, idx))) {
+          buffer += decoder.decode(value, { stream: true });
+          let index: number = buffer.indexOf('\n');
+          while (index >= 0) {
+            if (feed(buffer.slice(0, index))) {
               await reader.cancel().catch(() => null);
-              return acc.length > 0 ? acc : null;
+              return accumulator.length > 0 ? accumulator : null;
             }
-            buf = buf.slice(idx + 1);
-            idx = buf.indexOf('\n');
+            buffer = buffer.slice(index + 1);
+            index = buffer.indexOf('\n');
           }
         }
         if (done) break;
       }
-      buf += decoder.decode();
-      if (buf.trim().length > 0) feed(buf);
-      return acc.length > 0 ? acc : null;
+      buffer += decoder.decode();
+      if (buffer.trim().length > 0) feed(buffer);
+      return accumulator.length > 0 ? accumulator : null;
     } catch {
       // Timeout/abort mid-stream: keep whatever arrived (null → plain POST).
       await reader.cancel().catch(() => null);
-      return acc.length > 0 ? acc : null;
+      return accumulator.length > 0 ? accumulator : null;
     }
   }
 }

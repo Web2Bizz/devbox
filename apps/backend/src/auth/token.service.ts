@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { and, eq, gt, isNull, lt } from 'drizzle-orm';
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { DbService, dbUnavailable, type DbClient } from '../common/db/db.service';
-import { refreshTokens } from '../common/db/schema';
-import { AppLogger } from '../common/logger';
+import { DbService, dbUnavailable, type DbClient } from '@common/db/db.service';
+import { refreshTokens, type RefreshTokenRow } from '@common/db/schema';
+import { AppLogger } from '@common/logger';
 
 export type TokenType = 'access' | 'refresh';
 
@@ -25,16 +25,19 @@ export type RefreshClaims = {
 };
 
 /** Wire pair handed back to the auth layer. */
-type TokenPair = { accessToken: string; refreshToken: string; expiresIn: number };
+export type TokenPair = { accessToken: string; refreshToken: string; expiresIn: number };
+
+/** Signed JWT + the claims that back its rotation-store row. */
+type SignedToken = { token: string; jti: string; exp: number };
 
 /** The `refresh_tokens` row that backs a freshly signed refresh JWT. */
 type RefreshRowSeed = { id: string; userId: string; issuedAt: Date; expiresAt: Date };
 
 /** Ephemeral dev fallback secrets (unset JWT_*_SECRET → WARN + random per boot). Never logged. */
-const devSecrets = new Map<string, string>();
+const devSecrets: Map<string, string> = new Map<string, string>();
 
 export function devJwtSecret(kind: 'access' | 'refresh'): string {
-  let secret = devSecrets.get(kind);
+  let secret: string | undefined = devSecrets.get(kind);
   if (!secret) {
     secret = randomBytes(48).toString('base64url');
     devSecrets.set(kind, secret);
@@ -60,12 +63,12 @@ const TTL_UNIT_SECONDS: Record<'s' | 'm' | 'h' | 'd', number> = { s: 1, m: 60, h
 
 /** Parses '15m' | '1h' | '7d' | '3600' (seconds) → seconds. NaN when invalid. */
 export function parseTtlToSeconds(raw: string): number {
-  const value = raw.trim();
+  const value: string = raw.trim();
   if (/^\d+$/.test(value)) return Number(value);
-  const match = /^(\d+)\s*([smhd])$/i.exec(value);
+  const match: RegExpExecArray | null = /^(\d+)\s*([smhd])$/i.exec(value);
   if (!match) return NaN;
-  const amount = Number(match[1]);
-  const unit = match[2].toLowerCase() as 's' | 'm' | 'h' | 'd';
+  const amount: number = Number(match[1]);
+  const unit: 's' | 'm' | 'h' | 'd' = match[2].toLowerCase() as 's' | 'm' | 'h' | 'd';
   return amount * TTL_UNIT_SECONDS[unit];
 }
 
@@ -73,7 +76,7 @@ function signHs256(headerB64: string, payloadB64: string, secret: string): strin
   return createHmac('sha256', secret).update(`${headerB64}.${payloadB64}`, 'utf8').digest('base64url');
 }
 
-const JWT_HEADER_B64 = b64urlEncode(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+const JWT_HEADER_B64: string = b64urlEncode(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
 
 /**
  * TokenService — hand-rolled HS256 JWT (node:crypto, zero npm deps; see
@@ -100,17 +103,17 @@ export class TokenService {
     claims: Record<string, unknown>,
     secret: string,
     ttlSec: number,
-  ): { token: string; jti: string; exp: number } {
-    const now = Math.floor(Date.now() / 1000);
-    const jti = randomUUID();
-    const payload = { ...claims, jti, iat: now, exp: now + ttlSec };
-    const payloadB64 = b64urlEncode(JSON.stringify(payload));
-    const sig = signHs256(JWT_HEADER_B64, payloadB64, secret);
-    return { token: `${JWT_HEADER_B64}.${payloadB64}.${sig}`, jti, exp: now + ttlSec };
+  ): SignedToken {
+    const now: number = Math.floor(Date.now() / 1000);
+    const jti: string = randomUUID();
+    const payload: Record<string, unknown> = { ...claims, jti, iat: now, exp: now + ttlSec };
+    const payloadB64: string = b64urlEncode(JSON.stringify(payload));
+    const signature: string = signHs256(JWT_HEADER_B64, payloadB64, secret);
+    return { token: `${JWT_HEADER_B64}.${payloadB64}.${signature}`, jti, exp: now + ttlSec };
   }
 
   private verify(token: string, secret: string): Record<string, unknown> | null {
-    const parts = token.split('.');
+    const parts: Array<string> = token.split('.');
     if (parts.length !== 3) return null;
     const [headerB64, payloadB64, signatureB64] = parts;
     if (headerB64 !== JWT_HEADER_B64) return null;
@@ -133,13 +136,13 @@ export class TokenService {
     } catch {
       return null;
     }
-    const now = Math.floor(Date.now() / 1000);
+    const now: number = Math.floor(Date.now() / 1000);
     if (typeof payload['exp'] !== 'number' || (payload['exp'] as number) <= now) return null;
     return payload;
   }
 
   verifyAccess(token: string, secret: string): AccessClaims | null {
-    const payload = this.verify(token, secret);
+    const payload: Record<string, unknown> | null = this.verify(token, secret);
     if (!payload || payload['typ'] !== 'access') return null;
     if (typeof payload['sub'] !== 'string' || typeof payload['email'] !== 'string') return null;
     return payload as unknown as AccessClaims;
@@ -153,8 +156,8 @@ export class TokenService {
   ): Promise<T> {
     try {
       return await run(this.db.client);
-    } catch (err) {
-      dbUnavailable(`token.${operation}`, err, this.logger, correlationId);
+    } catch (error) {
+      dbUnavailable(`token.${operation}`, error, this.logger, correlationId);
     }
   }
 
@@ -166,12 +169,16 @@ export class TokenService {
     accessTtlSec: number,
     refreshTtlSec: number,
   ): { pair: TokenPair; refreshRow: RefreshRowSeed } {
-    const access = this.sign(
+    const access: SignedToken = this.sign(
       { sub: user.id, email: user.email, typ: 'access' },
       accessSecret,
       accessTtlSec,
     );
-    const refresh = this.sign({ sub: user.id, typ: 'refresh' }, refreshSecret, refreshTtlSec);
+    const refresh: SignedToken = this.sign(
+      { sub: user.id, typ: 'refresh' },
+      refreshSecret,
+      refreshTtlSec,
+    );
     return {
       pair: {
         accessToken: access.token,
@@ -205,12 +212,12 @@ export class TokenService {
     );
     await this.dbCall(
       'issuePair',
-      async (db) => {
+      async (db: DbClient) => {
         await db.insert(refreshTokens).values(refreshRow);
       },
       correlationId,
     );
-    // Hot path (every login/register/refresh) → debug, cid-bound, no tokens.
+    // Hot path (every login/register/refresh) → debug, correlationId-bound, no tokens.
     this.logger.debug('[auth] token pair issued', correlationId);
     return pair;
   }
@@ -229,15 +236,15 @@ export class TokenService {
     refreshTtlSec: number,
     correlationId?: string,
   ): Promise<TokenPair | null> {
-    const payload = this.verify(token, refreshSecret);
+    const payload: Record<string, unknown> | null = this.verify(token, refreshSecret);
     if (!payload || payload['typ'] !== 'refresh') return null;
-    const jti = payload['jti'];
-    const sub = payload['sub'];
+    const jti: unknown = payload['jti'];
+    const sub: unknown = payload['sub'];
     if (typeof jti !== 'string' || typeof sub !== 'string') return null;
 
     // Read-only projection first: the rotation transaction below stays free of
     // external awaits, and a missing user never burns a still-valid jti.
-    const email = await emailForSub(sub);
+    const email: string | null = await emailForSub(sub);
     if (!email) {
       await this.revokeJti(jti, correlationId);
       return null;
@@ -247,11 +254,11 @@ export class TokenService {
     // all run it, but only the one that flips revoked_at away from NULL matches
     // a row. The new jti is inserted in the same transaction, so a failed insert
     // rolls the claim back instead of burning a live refresh token.
-    const rotated = await this.dbCall(
+    const rotated: TokenPair | null = await this.dbCall(
       'consumeRefresh',
-      async (db) =>
+      async (db: DbClient) =>
         db.transaction(async (transaction) => {
-          const claimed = await transaction
+          const claimed: Array<{ id: string }> = await transaction
             .update(refreshTokens)
             .set({ revokedAt: new Date() })
             .where(
@@ -283,10 +290,10 @@ export class TokenService {
     }
 
     // Lost the claim: one diagnostic read tells reuse apart from a dead row.
-    const row = await this.dbCall(
+    const row: RefreshTokenRow | null = await this.dbCall(
       'consumeRefresh.select',
-      async (db) => {
-        const found = await db
+      async (db: DbClient) => {
+        const found: Array<RefreshTokenRow> = await db
           .select()
           .from(refreshTokens)
           .where(eq(refreshTokens.id, jti))
@@ -307,11 +314,11 @@ export class TokenService {
 
   /** Idempotent logout — marks the presented refresh jti revoked. */
   async revokeRefresh(token: string, refreshSecret: string): Promise<boolean> {
-    const payload = this.verify(token, refreshSecret);
+    const payload: Record<string, unknown> | null = this.verify(token, refreshSecret);
     if (!payload || payload['typ'] !== 'refresh') return false;
-    const jti = payload['jti'];
+    const jti: unknown = payload['jti'];
     if (typeof jti !== 'string') return false;
-    const updated = await this.dbCall('revokeRefresh', (db) =>
+    const updated: Array<RefreshTokenRow> = await this.dbCall('revokeRefresh', (db: DbClient) =>
       db
         .update(refreshTokens)
         .set({ revokedAt: new Date() })
@@ -325,7 +332,7 @@ export class TokenService {
   async revokeAll(userId: string, correlationId?: string): Promise<void> {
     await this.dbCall(
       'revokeAll',
-      async (db) => {
+      async (db: DbClient) => {
         await db
           .update(refreshTokens)
           .set({ revokedAt: new Date() })
@@ -343,7 +350,7 @@ export class TokenService {
 
   /** Soft-prune — marks `deleted_at` on expired rows that are still live. */
   async pruneExpired(): Promise<void> {
-    await this.dbCall('pruneExpired', async (db) => {
+    await this.dbCall('pruneExpired', async (db: DbClient) => {
       await db
         .update(refreshTokens)
         .set({ deletedAt: new Date() })
@@ -354,7 +361,7 @@ export class TokenService {
   private async revokeJti(jti: string, correlationId?: string): Promise<void> {
     await this.dbCall(
       'revokeRefresh',
-      async (db) => {
+      async (db: DbClient) => {
         await db
           .update(refreshTokens)
           .set({ revokedAt: new Date() })
@@ -367,8 +374,8 @@ export class TokenService {
 
   /** Test/e2e seam — soft-deletes every refresh row (never a physical DELETE). */
   async clearAllForTests(): Promise<void> {
-    await this.dbCall('clearAllForTests', async (db) => {
-      const now = new Date();
+    await this.dbCall('clearAllForTests', async (db: DbClient) => {
+      const now: Date = new Date();
       await db
         .update(refreshTokens)
         .set({ revokedAt: now, deletedAt: now })

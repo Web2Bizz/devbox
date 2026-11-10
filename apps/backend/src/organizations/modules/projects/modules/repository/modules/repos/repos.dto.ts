@@ -2,7 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { z } from 'zod';
 
 /** Scope owner id segment: orgs/<uuid> (no slashes, no traversal). */
-export const userSpaceSchema = z
+export const userSpaceSchema: z.ZodString = z
   .string()
   .min(1, { error: 'userSpace must be a non-empty [a-zA-Z0-9_-] segment' })
   .max(64, { error: 'userSpace must be at most 64 chars' })
@@ -10,24 +10,28 @@ export const userSpaceSchema = z
     error: 'userSpace must match /^[a-zA-Z0-9_-]+$/',
   });
 
-const numericQuery = (def: number) =>
+const numericQuery: (defaultValue: number) => z.ZodType<number> = (defaultValue: number) =>
   z
     .union([z.string(), z.number()])
     .optional()
-    .default(def)
-    .transform((v) => Number(v));
+    .default(defaultValue)
+    .transform((value) => Number(value));
 
-export const reposQuerySchema = z.object({
-  limit: numericQuery(50).refine((n) => Number.isInteger(n) && n >= 1 && n <= 100, {
+export type ReposQuery = {
+  limit: number;
+  offset: number;
+  q: string;
+};
+
+export const reposQuerySchema: z.ZodType<ReposQuery> = z.object({
+  limit: numericQuery(50).refine((value) => Number.isInteger(value) && value >= 1 && value <= 100, {
     error: 'limit must be an integer 1-100',
   }),
-  offset: numericQuery(0).refine((n) => Number.isInteger(n) && n >= 0, {
+  offset: numericQuery(0).refine((value) => Number.isInteger(value) && value >= 0, {
     error: 'offset must be a non-negative integer',
   }),
   q: z.string().max(100).optional().default(''),
 });
-
-export type ReposQuery = z.infer<typeof reposQuerySchema>;
 
 export class RepoDto {
   @ApiProperty({ example: '123e4567-e89b-12d3-a456-426614174000' })

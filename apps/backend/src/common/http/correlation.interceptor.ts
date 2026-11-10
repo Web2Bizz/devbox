@@ -7,21 +7,30 @@ import {
 import { randomUUID } from 'node:crypto';
 import type { Observable } from 'rxjs';
 
+/** Minimal request surface the interceptor annotates with the correlation id. */
+type CorrelationRequest = {
+  headers: Record<string, string | Array<string> | undefined>;
+  correlationId?: string;
+};
+
+/** Minimal response surface the interceptor stamps the correlation id on. */
+type CorrelationResponse = {
+  setHeader: (name: string, value: string) => void;
+};
+
 @Injectable()
 export class CorrelationInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
-    const req = context.switchToHttp().getRequest<{
-      headers: Record<string, string | Array<string> | undefined>;
-      correlationId?: string;
-    }>();
-    const res = context.switchToHttp().getResponse<{
-      setHeader: (name: string, value: string) => void;
-    }>();
-    const incoming = req.headers['x-correlation-id'];
-    const correlationId =
-      (Array.isArray(incoming) ? incoming[0] : incoming) ?? randomUUID();
-    req.correlationId = correlationId;
-    res.setHeader('x-correlation-id', correlationId);
+    const request: CorrelationRequest =
+      context.switchToHttp().getRequest<CorrelationRequest>();
+    const response: CorrelationResponse =
+      context.switchToHttp().getResponse<CorrelationResponse>();
+    const incomingHeader: string | Array<string> | undefined =
+      request.headers['x-correlation-id'];
+    const correlationId: string =
+      (Array.isArray(incomingHeader) ? incomingHeader[0] : incomingHeader) ?? randomUUID();
+    request.correlationId = correlationId;
+    response.setHeader('x-correlation-id', correlationId);
     return next.handle();
   }
 }

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { AppLogger } from '../../../../../../../../../common/logger';
+import { AppLogger } from '@common/logger';
 
 export type CloneStatus = 'queued' | 'cloning' | 'ready' | 'failed';
 
@@ -14,6 +14,9 @@ export type CloneJob = {
   error: string | null;
   updatedAt: string;
 };
+
+/** Fields required to enqueue a job (derived from the stored job shape). */
+export type EnqueueCloneJobInput = Pick<CloneJob, 'userId' | 'userSpace' | 'repoName' | 'repoUrl'>;
 
 const TERMINAL_READY: CloneStatus = 'ready';
 
@@ -32,8 +35,8 @@ const TERMINAL_READY: CloneStatus = 'ready';
  */
 @Injectable()
 export class CloneJobsRepository {
-  private readonly jobs = new Map<string, CloneJob>();
-  private readonly locks = new Map<string, Promise<void>>();
+  private readonly jobs: Map<string, CloneJob> = new Map<string, CloneJob>();
+  private readonly locks: Map<string, Promise<void>> = new Map<string, Promise<void>>();
 
   constructor(private readonly logger: AppLogger = new AppLogger(CloneJobsRepository.name)) {}
 
@@ -46,18 +49,13 @@ export class CloneJobsRepository {
   }
 
   /** Idempotent enqueue: queued/cloning/ready jobs are returned as-is (never reset). */
-  enqueue(input: {
-    userId: string;
-    userSpace: string;
-    repoName: string;
-    repoUrl: string;
-  }): { job: CloneJob; created: boolean } {
-    const key = this.key(input.userId, input.repoName);
-    const prev = this.jobs.get(key);
-    if (prev && prev.status !== 'failed') {
-      return { job: prev, created: false };
+  enqueue(input: EnqueueCloneJobInput): { job: CloneJob; created: boolean } {
+    const key: string = this.key(input.userId, input.repoName);
+    const previous: CloneJob | undefined = this.jobs.get(key);
+    if (previous && previous.status !== 'failed') {
+      return { job: previous, created: false };
     }
-    const now = new Date().toISOString();
+    const now: string = new Date().toISOString();
     const job: CloneJob = {
       userId: input.userId,
       userSpace: input.userSpace,
@@ -74,11 +72,11 @@ export class CloneJobsRepository {
   }
 
   transition(userId: string, repoName: string, status: CloneStatus, patch?: Partial<CloneJob>): CloneJob | null {
-    const key = this.key(userId, repoName);
-    const prev = this.jobs.get(key);
-    if (!prev) return null;
+    const key: string = this.key(userId, repoName);
+    const previous: CloneJob | undefined = this.jobs.get(key);
+    if (!previous) return null;
     const next: CloneJob = {
-      ...prev,
+      ...previous,
       ...patch,
       status,
       updatedAt: new Date().toISOString(),
@@ -107,15 +105,15 @@ export class CloneJobsRepository {
 
   /** Runs `task` serialized per (userId, repoName) — concurrent clones of the same repo collapse. */
   async withLock<T>(userId: string, repoName: string, task: () => Promise<T>): Promise<T> {
-    const key = this.key(userId, repoName);
-    const prev = this.locks.get(key) ?? Promise.resolve();
+    const key: string = this.key(userId, repoName);
+    const previous: Promise<void> = this.locks.get(key) ?? Promise.resolve();
     let release!: () => void;
-    const current = new Promise<void>((resolveLock) => {
+    const current: Promise<void> = new Promise<void>((resolveLock) => {
       release = resolveLock;
     });
-    const own = prev.then(() => current);
+    const own: Promise<void> = previous.then(() => current);
     this.locks.set(key, own);
-    await prev;
+    await previous;
     try {
       return await task();
     } finally {

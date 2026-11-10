@@ -6,9 +6,9 @@ import {
 } from '@nestjs/common';
 import { createAppAuth } from '@octokit/auth-app';
 import { request as octokitRequest } from '@octokit/request';
-import { AppLogger } from '../../../../../common/logger';
-import { fromUnknown } from '../../../../../common/external/external-error';
-import { isGithubConfigured, validateEnv } from '../../../../../common/env/env';
+import { AppLogger } from '@common/logger';
+import { ExternalServiceError, fromUnknown } from '@common/external/external-error';
+import { isGithubConfigured, validateEnv, type AppEnv } from '@common/env/env';
 
 type CachedToken = {
   token: string;
@@ -21,7 +21,7 @@ type CachedToken = {
  * hung call (→ EXTERNAL_TIMEOUT). Nested `request` defaults are deep-merged
  * by @octokit/request, so every downstream call (auth-app included) keeps it.
  */
-function githubRequest(timeoutMs: number, baseUrl: string) {
+function githubRequest(timeoutMs: number, baseUrl: string): typeof octokitRequest {
   return octokitRequest.defaults({
     baseUrl,
     request: { signal: AbortSignal.timeout(timeoutMs) },
@@ -34,8 +34,15 @@ export type GithubAppInstallation = {
   createdAt: string | null;
 };
 
+/** Minimal subset of GET /app/installations/{id} consumed here. */
+type InstallationApiResponse = {
+  id?: number;
+  account?: { login?: string; type?: string } | null;
+  created_at?: string;
+};
+
 /** Refresh skew — never hand out a token expiring within the next minute. */
-const EXPIRY_SKEW_MS = 60_000;
+const EXPIRY_SKEW_MS: number = 60_000;
 
 /**
  * GithubAppService — mints GitHub App installation tokens (multi-tenant).
@@ -60,7 +67,7 @@ const EXPIRY_SKEW_MS = 60_000;
  */
 @Injectable()
 export class GithubAppService {
-  private readonly cache = new Map<number, CachedToken>();
+  private readonly cache: Map<number, CachedToken> = new Map<number, CachedToken>();
 
   constructor(private readonly logger: AppLogger = new AppLogger(GithubAppService.name)) {}
 
@@ -81,36 +88,38 @@ export class GithubAppService {
    * on bad installation/permissions, ServiceUnavailable on transport failures.
    */
   async getInstallationToken(installationId?: number): Promise<string> {
-    const env = validateEnv(process.env);
+    const env: AppEnv = validateEnv(process.env);
     if (!isGithubConfigured(env)) {
       throw new UnauthorizedException('GitHub App is not configured');
     }
-    const id =
+    const id: number =
       installationId ?? (env.githubInstallationId ? Number(env.githubInstallationId) : NaN);
     if (!Number.isInteger(id) || id <= 0) {
       throw new UnauthorizedException('GitHub App installation is missing');
     }
 
-    const live = this.cache.get(id);
+    const live: CachedToken | undefined = this.cache.get(id);
     if (live && live.expiresAtMs - EXPIRY_SKEW_MS > Date.now()) return live.token;
 
     // Values stay local — never logged, never persisted.
+    // Destructuring env secrets — explicit annotation cannot be expressed here.
     const { githubAppId: appId, githubPrivateKey: privateKey } = env;
 
     try {
-      const request = githubRequest(
+      const request: typeof octokitRequest = githubRequest(
         env.githubRequestTimeoutMs,
         env.githubApiUrl,
       );
-      const auth = createAppAuth({
+      const auth: ReturnType<typeof createAppAuth> = createAppAuth({
         appId: Number(appId),
         privateKey,
         // Respect GHE overrides — default stays https://api.github.com.
         // The request defaults also carry the per-operation abort signal.
         request,
       });
+      // Destructuring the auth result — explicit annotation cannot be expressed here.
       const { token, expiresAt } = await auth({ type: 'installation', installationId: id });
-      const expiresAtMs = Date.parse(expiresAt);
+      const expiresAtMs: number = Date.parse(expiresAt);
       this.cache.set(id, {
         token,
         expiresAtMs: Number.isFinite(expiresAtMs) ? expiresAtMs : Date.now() + 50 * 60_000,
@@ -119,9 +128,9 @@ export class GithubAppService {
       // only the presence fact is logged, never the value.
       this.logger.debug('[github] installation token minted');
       return token;
-    } catch (err) {
+    } catch (error) {
       this.cache.delete(id);
-      throw this.toHttpError(err);
+      throw this.toHttpError(error);
     }
   }
 
@@ -132,7 +141,7 @@ export class GithubAppService {
    * Returns only the id/account facts (no tokens leave this method).
    */
   async getInstallation(installationId: number): Promise<GithubAppInstallation> {
-    const env = validateEnv(process.env);
+    const env: AppEnv = validateEnv(process.env);
     if (!isGithubConfigured(env)) {
       throw new UnauthorizedException('GitHub App is not configured');
     }
@@ -140,28 +149,26 @@ export class GithubAppService {
       throw new UnauthorizedException('GitHub App installation is missing');
     }
 
+    // Destructuring env secrets — explicit annotation cannot be expressed here.
     const { githubAppId: appId, githubPrivateKey: privateKey } = env;
 
     try {
-      const request = githubRequest(
+      const request: typeof octokitRequest = githubRequest(
         env.githubRequestTimeoutMs,
         env.githubApiUrl,
       );
-      const auth = createAppAuth({
+      const auth: ReturnType<typeof createAppAuth> = createAppAuth({
         appId: Number(appId),
         privateKey,
         request,
       });
+      // Destructuring the app-JWT result — explicit annotation cannot be expressed here.
       const { token } = await auth({ type: 'app' });
-      const response = await request('GET /app/installations/{installation_id}', {
+      const response: { data: unknown } = await request('GET /app/installations/{installation_id}', {
         headers: { authorization: `Bearer ${token}` },
         installation_id: installationId,
       });
-      const data = response.data as {
-        id?: number;
-        account?: { login?: string; type?: string } | null;
-        created_at?: string;
-      };
+      const data: InstallationApiResponse = response.data as InstallationApiResponse;
       return {
         id: typeof data.id === 'number' ? data.id : installationId,
         account:
@@ -175,9 +182,9 @@ export class GithubAppService {
         createdAt:
           typeof data.created_at === 'string' ? data.created_at : null,
       };
-    } catch (err) {
+    } catch (error) {
       this.logger.warn('[github] app installation lookup failed');
-      throw this.toHttpError(err);
+      throw this.toHttpError(error);
     }
   }
 
@@ -193,7 +200,7 @@ export class GithubAppService {
    * listRepos runs without contacting GitHub's token endpoint.
    */
   __setCachedTokenForTests(token: string, expiresAtMs: number, installationId?: number): void {
-    const id =
+    const id: number =
       installationId ??
       (process.env.GITHUB_APP_INSTALLATION_ID
         ? Number(process.env.GITHUB_APP_INSTALLATION_ID)
@@ -201,10 +208,10 @@ export class GithubAppService {
     this.cache.set(id, { token, expiresAtMs });
   }
 
-  private toHttpError(err: unknown): Error {
-    const status =
-      typeof err === 'object' && err !== null && 'status' in err
-        ? Number((err as { status?: unknown }).status)
+  private toHttpError(error: unknown): Error {
+    const status: number =
+      typeof error === 'object' && error !== null && 'status' in error
+        ? Number((error as { status?: unknown }).status)
         : NaN;
     // Status only — message may embed ids, never the key/token (AppLogger
     // redacts secret keys anyway; we keep logs to fixed prefixes + status).
@@ -222,7 +229,7 @@ export class GithubAppService {
     }
     // Transport failures (429/5xx/timeout/network) surface typed with fixed
     // messages; api-error.filter maps them (same envelope, 429/503/504).
-    const external = fromUnknown('github', 'mintInstallationToken', err, 1);
+    const external: ExternalServiceError = fromUnknown('github', 'mintInstallationToken', error, 1);
     this.logger.warn(`[github] app auth transport failure code=${external.code}`);
     return external;
   }

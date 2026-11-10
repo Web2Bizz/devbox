@@ -29,8 +29,8 @@ import {
   ForbiddenException,
   NotFoundException,
 } from "@nestjs/common";
-import type { DbService } from "../../../../../../common/db/db.service";
-import { WorkspacePathService } from "../../../../../../common/storage/workspace-path.service";
+import type { DbService } from "@common/db/db.service";
+import { WorkspacePathService } from "@common/storage/workspace-path.service";
 import type { OrganizationsGuard } from "../../../../../organizations.guard";
 import { ProjectAccessService } from "../project-access.service";
 
@@ -298,11 +298,11 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
         const realPaths = new WorkspacePathService();
         const escaping = {
           async resolveOrgStrict() {
-            return { absRepo: path.resolve(root, "..", "escaped", "content") };
+            return { absoluteRepo: path.resolve(root, "..", "escaped", "content") };
           },
           realStrictRoot: async () => root,
-          assertInsideJail: (abs: string, jail: string) =>
-            realPaths.assertInsideJail(abs, jail),
+          assertInsideJail: (absolutePath: string, jail: string) =>
+            realPaths.assertInsideJail(absolutePath, jail),
         } as unknown as WorkspacePathService;
         const memberRoles = { [`${ORG_ID}:${MEMBER_ID}`]: "user" };
         const { svc: escapingSvc } = service(

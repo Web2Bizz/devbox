@@ -118,12 +118,12 @@ async function main(): Promise<void> {
       await check(
         "POST /api/v1/organizations without PG → 503 EXTERNAL_UNAVAILABLE",
         async () => {
-          const cid = "e2e-orgs-503-0001";
+          const correlationId = "e2e-orgs-503-0001";
           const res = await fetch(`${base}/api/v1/organizations`, {
             method: "POST",
             headers: {
               "content-type": "application/json",
-              "x-correlation-id": cid,
+              "x-correlation-id": correlationId,
               authorization: `Bearer ${probe}`,
             },
             body: JSON.stringify({ name: "acme" }),
@@ -139,8 +139,8 @@ async function main(): Promise<void> {
             body.message,
             "сервис временно недоступен, повторите позже",
           );
-          assert.equal(body.correlationId, cid);
-          assert.equal(res.headers.get("x-correlation-id"), cid);
+          assert.equal(body.correlationId, correlationId);
+          assert.equal(res.headers.get("x-correlation-id"), correlationId);
           assert.equal(res.headers.get("retry-after"), "30");
         },
       );

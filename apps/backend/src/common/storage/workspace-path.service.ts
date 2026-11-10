@@ -8,9 +8,7 @@ import { throwStorageNotConfigured } from './storage-unavailable';
 import { mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import type { Stats } from 'node:fs';
 import path from 'node:path';
-
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { uuidSchema } from '../validation';
 
 /**
  * Minimal dirent shape for `readDir()` listings (structural subset of
@@ -29,9 +27,9 @@ export type OrgScopeResolved = {
   /** Org id (validated uuid). */
   orgId: string;
   /** Absolute org home: <root>/orgs/<orgId>. */
-  absHome: string;
+  absoluteHome: string;
   /** Absolute org-level reserved secrets dir (empty, never served). */
-  absSecrets: string;
+  absoluteSecrets: string;
 };
 
 export type ProjectResolved = {
@@ -42,17 +40,23 @@ export type ProjectResolved = {
   /** Project id (validated uuid). */
   projectId: string;
   /** Absolute project home: <root>/orgs/<scopeId>/projects/<projectId>. */
-  absBase: string;
-  /** Absolute content root: <absBase>/content (git repo lives here). */
-  absRepo: string;
-  /** Absolute reserved secrets dir: <absBase>/.secrets (empty, never served). */
-  absSecrets: string;
+  absoluteBase: string;
+  /** Absolute content root: <absoluteBase>/content (git repo lives here). */
+  absoluteRepo: string;
+  /** Absolute reserved secrets dir: <absoluteBase>/.secrets (empty, never served). */
+  absoluteSecrets: string;
   /** Absolute scope-level reserved secrets dir (empty, never served). */
   scopeSecrets: string;
   /** Absolute jailed target (content root or nested subPath inside it). */
-  abs: string;
+  absolutePath: string;
   /** Normalized posix-relative path inside content ('.' for root). */
-  rel: string;
+  relativePath: string;
+};
+
+/** Removal flags for `removeDir()` (both default to true). */
+export type RemoveDirOptions = {
+  recursive?: boolean;
+  force?: boolean;
 };
 
 /**
@@ -102,9 +106,9 @@ export class WorkspacePathService {
    * unconfigured root). Write paths keep the 500 via requireExplicitRoot().
    */
   resolveRoot(): string {
-    const repos = (process.env.REPOS_ROOT ?? '').trim();
-    if (!repos) throwStorageNotConfigured('workspaces.resolveRoot');
-    return path.resolve(repos);
+    const reposRoot: string = (process.env.REPOS_ROOT ?? '').trim();
+    if (!reposRoot) throwStorageNotConfigured('workspaces.resolveRoot');
+    return path.resolve(reposRoot);
   }
 
   /**
@@ -123,18 +127,18 @@ export class WorkspacePathService {
    * Explicit-but-missing root is OK (caller creates it recursive).
    */
   requireExplicitRoot(): string {
-    const repos = (process.env.REPOS_ROOT ?? '').trim();
-    if (!repos) {
+    const reposRoot: string = (process.env.REPOS_ROOT ?? '').trim();
+    if (!reposRoot) {
       throw new InternalServerErrorException(
         'Project storage is not configured (REPOS_ROOT is empty)',
       );
     }
-    return path.resolve(repos);
+    return path.resolve(reposRoot);
   }
 
   /** Realpath of the strict root (falls back to lexical when missing). */
   async realStrictRoot(): Promise<string> {
-    const root = this.requireExplicitRoot();
+    const root: string = this.requireExplicitRoot();
     try {
       return await realpath(root);
     } catch {
@@ -144,7 +148,7 @@ export class WorkspacePathService {
 
   /** Realpath of the jail root (falls back to the lexical root when missing). */
   async realRoot(): Promise<string> {
-    const root = this.resolveRoot();
+    const root: string = this.resolveRoot();
     try {
       return await realpath(root);
     } catch {
@@ -153,18 +157,20 @@ export class WorkspacePathService {
   }
 
   /**
-   * Throws 403 when `abs` escapes `jailReal` (symlink-aware when the path
+   * Throws 403 when `absolutePath` escapes `jailReal` (symlink-aware when the path
    * exists, lexical otherwise). Never throws for paths inside.
    */
-  async assertInsideJail(abs: string, jailReal: string): Promise<string> {
-    let real = abs;
+  async assertInsideJail(absolutePath: string, jailReal: string): Promise<string> {
+    let real: string = absolutePath;
     try {
-      real = await realpath(abs);
+      real = await realpath(absolutePath);
     } catch {
       // Missing target (e.g. fresh clone dest) — lexical check only.
     }
-    const withSep = jailReal.endsWith(path.sep) ? jailReal : jailReal + path.sep;
-    if (real !== jailReal && !real.startsWith(withSep)) {
+    const jailWithSeparator: string = jailReal.endsWith(path.sep)
+      ? jailReal
+      : jailReal + path.sep;
+    if (real !== jailReal && !real.startsWith(jailWithSeparator)) {
       throw new ForbiddenException('Path traversal is forbidden');
     }
     return real;
@@ -180,19 +186,22 @@ export class WorkspacePathService {
    */
 
   /** `mkdir -p` for a jailed path (recursive, idempotent). */
-  async ensureDir(abs: string): Promise<void> {
-    await mkdir(abs, { recursive: true });
+  async ensureDir(absolutePath: string): Promise<void> {
+    await mkdir(absolutePath, { recursive: true });
   }
 
   /**
    * Remove a jailed path. Defaults are `recursive: true, force: true` — the
-   * same semantics as the previous direct `rm(abs, { recursive, force })`
+   * same semantics as the previous direct `rm(absolutePath, { recursive, force })`
    * call sites (missing path is not an error).
    */
-  async removeDir(abs: string, opts?: { recursive?: boolean; force?: boolean }): Promise<void> {
-    await rm(abs, {
-      recursive: opts?.recursive ?? true,
-      force: opts?.force ?? true,
+  async removeDir(
+    absolutePath: string,
+    options?: RemoveDirOptions,
+  ): Promise<void> {
+    await rm(absolutePath, {
+      recursive: options?.recursive ?? true,
+      force: options?.force ?? true,
     });
   }
 
@@ -200,18 +209,18 @@ export class WorkspacePathService {
    * `stat` for a jailed path: missing target (`ENOENT`) → `null`, any other
    * error (EACCES, ENOTDIR parent, …) is rethrown as-is.
    */
-  async statPath(abs: string): Promise<Stats | null> {
+  async statPath(absolutePath: string): Promise<Stats | null> {
     try {
-      return await stat(abs);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
-      throw err;
+      return await stat(absolutePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw error;
     }
   }
 
   /** `readdir` with dirents (names + type predicates) for a jailed path. */
-  async readDir(abs: string): Promise<Array<DirEntry>> {
-    return readdir(abs, { withFileTypes: true });
+  async readDir(absolutePath: string): Promise<Array<DirEntry>> {
+    return readdir(absolutePath, { withFileTypes: true });
   }
 
   /**
@@ -220,16 +229,16 @@ export class WorkspacePathService {
    * against the project content dir), this helper does NO path validation
    * of its own — same contract as `ensureDir`/`statPath`/`readDir` above.
    */
-  async readFile(abs: string): Promise<string> {
-    return readFile(abs, 'utf8');
+  async readFile(absolutePath: string): Promise<string> {
+    return readFile(absolutePath, 'utf8');
   }
 
   /**
    * `writeFile` (utf8, overwrite) for a jailed path: same caller-validated
    * contract as `readFile` — no validation and no storage-config gate here.
    */
-  async writeFile(abs: string, content: string): Promise<void> {
-    await writeFile(abs, content, 'utf8');
+  async writeFile(absolutePath: string, content: string): Promise<void> {
+    await writeFile(absolutePath, content, 'utf8');
   }
 
   /** Decode once (`%2e%2e` → `..`) so encoded escapes are caught too. */
@@ -244,35 +253,41 @@ export class WorkspacePathService {
 
   /**
    * uuid shape check for the organizations layout (user/org/project ids).
-   * 400 on garbage (empty, too long, non-uuid) — never a jail escape via
-   * a crafted id segment.
+   * 400 on garbage (empty, non-uuid) — never a jail escape via a crafted id
+   * segment.
    */
   checkUuid(value: unknown, label: string): string {
-    const raw = String(value ?? '').trim();
-    if (!raw || raw.length > 36 || !UUID_RE.test(raw)) {
+    const rawValue: string = String(value ?? '').trim();
+    if (!rawValue || !uuidSchema.safeParse(rawValue).success) {
       throw new BadRequestException(`${label} must be a uuid`);
     }
-    return raw.toLowerCase();
+    return rawValue.toLowerCase();
   }
 
   /** Shared sub-path validation (same traversal rules as `resolve()`). */
   private checkSubRel(subPath?: string): string {
-    const rawSub = subPath ?? '.';
-    if (rawSub.includes('\0')) {
+    const rawSubPath: string = subPath ?? '.';
+    if (rawSubPath.includes('\0')) {
       throw new ForbiddenException('Path traversal is forbidden');
     }
-    const decoded = this.decodeOnce(String(rawSub));
+    const decoded: string = this.decodeOnce(String(rawSubPath));
     if (decoded.includes('\0')) {
       throw new ForbiddenException('Path traversal is forbidden');
     }
     if (path.isAbsolute(decoded)) {
       throw new ForbiddenException('Path traversal is forbidden');
     }
-    const rel = path.posix.normalize(decoded.replace(/\\/g, '/').replace(/^\/+/, '')) || '.';
-    if (rel === '..' || rel.startsWith('../') || rel.includes('/../') || rel.endsWith('/..')) {
+    const relative: string =
+      path.posix.normalize(decoded.replace(/\\/g, '/').replace(/^\/+/, '')) || '.';
+    if (
+      relative === '..' ||
+      relative.startsWith('../') ||
+      relative.includes('/../') ||
+      relative.endsWith('/..')
+    ) {
       throw new ForbiddenException('Path traversal is forbidden');
     }
-    return rel;
+    return relative;
   }
 
   private async resolveScoped(
@@ -283,40 +298,52 @@ export class WorkspacePathService {
     projectId: string,
     subPath?: string,
   ): Promise<ProjectResolved> {
-    const seg = scope === 'user' ? 'users' : 'orgs';
-    const absBase = path.resolve(root, seg, scopeId, 'projects', projectId);
+    const scopeSegment: string = scope === 'user' ? 'users' : 'orgs';
+    const absoluteBase: string = path.resolve(
+      root,
+      scopeSegment,
+      scopeId,
+      'projects',
+      projectId,
+    );
     // Project home itself must stay inside the jail (lexical + symlink-aware).
-    await this.assertInsideJail(absBase, rootReal);
-    const absRepo = path.join(absBase, 'content');
-    const absSecrets = path.join(absBase, '.secrets');
-    const scopeSecrets = path.resolve(root, seg, scopeId, '.secrets');
+    await this.assertInsideJail(absoluteBase, rootReal);
+    const absoluteRepo: string = path.join(absoluteBase, 'content');
+    const absoluteSecrets: string = path.join(absoluteBase, '.secrets');
+    const scopeSecrets: string = path.resolve(root, scopeSegment, scopeId, '.secrets');
     await this.assertInsideJail(scopeSecrets, rootReal);
 
-    const rel = this.checkSubRel(subPath);
-    const absLexical = rel === '.' ? absRepo : path.resolve(absRepo, rel);
-    let contentReal = absRepo;
+    const relativePath: string = this.checkSubRel(subPath);
+    const absoluteLexical: string =
+      relativePath === '.' ? absoluteRepo : path.resolve(absoluteRepo, relativePath);
+    let contentReal: string = absoluteRepo;
     try {
-      contentReal = await realpath(absRepo);
+      contentReal = await realpath(absoluteRepo);
     } catch {
       // Content missing yet (pre-create) — lexical content jail still applies.
     }
-    const abs = await this.assertInsideJail(absLexical, contentReal);
+    const absolutePath: string = await this.assertInsideJail(absoluteLexical, contentReal);
     // Belt-and-braces: lexical prefix against the content dir too (covers
     // not-yet-existing nested paths where realpath fell through).
-    const contentWithSep = absRepo.endsWith(path.sep) ? absRepo : absRepo + path.sep;
-    if (absLexical !== absRepo && !absLexical.startsWith(contentWithSep)) {
+    const contentWithSeparator: string = absoluteRepo.endsWith(path.sep)
+      ? absoluteRepo
+      : absoluteRepo + path.sep;
+    if (
+      absoluteLexical !== absoluteRepo &&
+      !absoluteLexical.startsWith(contentWithSeparator)
+    ) {
       throw new ForbiddenException('Path traversal is forbidden');
     }
     return {
       scope,
       scopeId,
       projectId,
-      absBase,
-      absRepo,
-      absSecrets,
+      absoluteBase,
+      absoluteRepo,
+      absoluteSecrets,
       scopeSecrets,
-      abs,
-      rel,
+      absolutePath,
+      relativePath,
     };
   }
 
@@ -334,11 +361,18 @@ export class WorkspacePathService {
     projectId: string,
     subPath?: string,
   ): Promise<ProjectResolved> {
-    const root = this.resolveRoot();
-    const rootReal = await this.realRoot();
-    const oid = this.checkUuid(orgId, 'orgId');
-    const pid = this.checkUuid(projectId, 'projectId');
-    return this.resolveScoped('org', root, rootReal, oid, pid, subPath);
+    const root: string = this.resolveRoot();
+    const rootReal: string = await this.realRoot();
+    const validatedOrgId: string = this.checkUuid(orgId, 'orgId');
+    const validatedProjectId: string = this.checkUuid(projectId, 'projectId');
+    return this.resolveScoped(
+      'org',
+      root,
+      rootReal,
+      validatedOrgId,
+      validatedProjectId,
+      subPath,
+    );
   }
 
   /**
@@ -353,11 +387,18 @@ export class WorkspacePathService {
     projectId: string,
     subPath?: string,
   ): Promise<ProjectResolved> {
-    const root = this.requireExplicitRoot();
-    const rootReal = await this.realStrictRoot();
-    const oid = this.checkUuid(orgId, 'orgId');
-    const pid = this.checkUuid(projectId, 'projectId');
-    return this.resolveScoped('org', root, rootReal, oid, pid, subPath);
+    const root: string = this.requireExplicitRoot();
+    const rootReal: string = await this.realStrictRoot();
+    const validatedOrgId: string = this.checkUuid(orgId, 'orgId');
+    const validatedProjectId: string = this.checkUuid(projectId, 'projectId');
+    return this.resolveScoped(
+      'org',
+      root,
+      rootReal,
+      validatedOrgId,
+      validatedProjectId,
+      subPath,
+    );
   }
 
   /**
@@ -369,13 +410,13 @@ export class WorkspacePathService {
    * callers must not write tracked files there).
    */
   async ensureProjectDirs(resolved: ProjectResolved): Promise<void> {
-    const jailReal = await this.realStrictRoot();
-    await this.assertInsideJail(resolved.absBase, jailReal);
-    await this.assertInsideJail(resolved.absRepo, jailReal);
-    await this.assertInsideJail(resolved.absSecrets, jailReal);
+    const jailReal: string = await this.realStrictRoot();
+    await this.assertInsideJail(resolved.absoluteBase, jailReal);
+    await this.assertInsideJail(resolved.absoluteRepo, jailReal);
+    await this.assertInsideJail(resolved.absoluteSecrets, jailReal);
     await this.assertInsideJail(resolved.scopeSecrets, jailReal);
-    await mkdir(resolved.absRepo, { recursive: true });
-    await mkdir(resolved.absSecrets, { recursive: true });
+    await mkdir(resolved.absoluteRepo, { recursive: true });
+    await mkdir(resolved.absoluteSecrets, { recursive: true });
     await mkdir(resolved.scopeSecrets, { recursive: true });
   }
 
@@ -384,14 +425,14 @@ export class WorkspacePathService {
    * Empty REPOS_ROOT → 500 before anything else; non-uuid orgId → 400.
    */
   async orgScopeStrict(orgId: string): Promise<OrgScopeResolved> {
-    const root = this.requireExplicitRoot();
-    const rootReal = await this.realStrictRoot();
-    const oid = this.checkUuid(orgId, 'orgId');
-    const absHome = path.resolve(root, 'orgs', oid);
-    const absSecrets = path.join(absHome, '.secrets');
-    await this.assertInsideJail(absHome, rootReal);
-    await this.assertInsideJail(absSecrets, rootReal);
-    return { orgId: oid, absHome, absSecrets };
+    const root: string = this.requireExplicitRoot();
+    const rootReal: string = await this.realStrictRoot();
+    const validatedOrgId: string = this.checkUuid(orgId, 'orgId');
+    const absoluteHome: string = path.resolve(root, 'orgs', validatedOrgId);
+    const absoluteSecrets: string = path.join(absoluteHome, '.secrets');
+    await this.assertInsideJail(absoluteHome, rootReal);
+    await this.assertInsideJail(absoluteSecrets, rootReal);
+    return { orgId: validatedOrgId, absoluteHome, absoluteSecrets };
   }
 
   /**
@@ -399,12 +440,12 @@ export class WorkspacePathService {
    * empty reserved `.secrets` dir. Re-asserts the strict jail first.
    */
   async ensureOrgScope(orgId: string): Promise<OrgScopeResolved> {
-    const scoped = await this.orgScopeStrict(orgId);
-    const jailReal = await this.realStrictRoot();
-    await this.assertInsideJail(scoped.absHome, jailReal);
-    await this.assertInsideJail(scoped.absSecrets, jailReal);
-    await mkdir(scoped.absHome, { recursive: true });
-    await mkdir(scoped.absSecrets, { recursive: true });
+    const scoped: OrgScopeResolved = await this.orgScopeStrict(orgId);
+    const jailReal: string = await this.realStrictRoot();
+    await this.assertInsideJail(scoped.absoluteHome, jailReal);
+    await this.assertInsideJail(scoped.absoluteSecrets, jailReal);
+    await mkdir(scoped.absoluteHome, { recursive: true });
+    await mkdir(scoped.absoluteSecrets, { recursive: true });
     return scoped;
   }
 }

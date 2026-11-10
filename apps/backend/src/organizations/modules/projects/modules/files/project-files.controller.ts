@@ -3,8 +3,8 @@ import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@ne
 import { JwtAuthGuard } from '../../../../../auth/jwt-auth.guard';
 import { ReqUser } from '../../../../../auth/req-user.decorator';
 import type { RequestIdentity } from '../../../../../auth/identity.service';
-import { NoIndexInterceptor } from '../../../../../common/http/noindex.interceptor';
-import { ZodValidationPipe } from '../../../../../common/validation';
+import { NoIndexInterceptor } from '@common/http/noindex.interceptor';
+import { ZodValidationPipe } from '@common/validation';
 import { FileNodeDto, filesQuerySchema, type FilesQuery } from './project-files.dto';
 import { ProjectFilesService, type FileNode } from './project-files.service';
 

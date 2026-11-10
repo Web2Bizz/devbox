@@ -2,8 +2,8 @@ import "reflect-metadata";
 import assert from "node:assert/strict";
 import { VERSION_NEUTRAL } from "@nestjs/common";
 import { PATH_METADATA, VERSION_METADATA } from "@nestjs/common/constants";
-import type { HealthRegistry, HealthFlag, HealthProbeKey } from "../../common/health/health-registry";
-import type { DbService } from "../../common/db/db.service";
+import type { HealthRegistry, HealthFlag, HealthProbeKey } from "@common/health/health-registry";
+import type { DbService } from "@common/db/db.service";
 import { HealthController } from "../health.controller";
 
 type Case = { name: string; run: () => Promise<void> | void };

@@ -1,5 +1,5 @@
 import { Module, forwardRef } from "@nestjs/common";
-import { WorkspacePathService } from "../../../common/storage/workspace-path.service";
+import { WorkspacePathService } from "@common/storage/workspace-path.service";
 import { OrgProjectsController } from "./org-projects.controller";
 import { ProjectsController } from "./projects.controller";
 import { ProjectsService } from "./projects.service";

@@ -5,7 +5,7 @@ import {
   projectChats,
   projectSessions,
   projects,
-} from "../../../../common/db/schema";
+} from "@common/db/schema";
 import { ProjectsService } from "../projects.service";
 
 type Case = { name: string; run: () => Promise<void> | void };

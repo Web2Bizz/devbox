@@ -89,12 +89,12 @@ async function main(): Promise<void> {
       await check(
         "POST register without PG → 503 EXTERNAL_UNAVAILABLE",
         async () => {
-          const cid = "e2e-auth-503-0001";
+          const correlationId = "e2e-auth-503-0001";
           const res = await fetch(`${base}/api/v1/auth/register`, {
             method: "POST",
             headers: {
               "content-type": "application/json",
-              "x-correlation-id": cid,
+              "x-correlation-id": correlationId,
             },
             body: JSON.stringify({
               firstName: "Ada",
@@ -114,8 +114,8 @@ async function main(): Promise<void> {
             body.message,
             "сервис временно недоступен, повторите позже",
           );
-          assert.equal(body.correlationId, cid);
-          assert.equal(res.headers.get("x-correlation-id"), cid);
+          assert.equal(body.correlationId, correlationId);
+          assert.equal(res.headers.get("x-correlation-id"), correlationId);
           assert.equal(res.headers.get("retry-after"), "30");
         },
       );
@@ -227,12 +227,12 @@ async function main(): Promise<void> {
     await check(
       "POST register duplicate carries correlationId (header == body)",
       async () => {
-        const cid = "e2e-corr-id-0001";
+        const correlationId = "e2e-corr-id-0001";
         const res = await fetch(`${base}/api/v1/auth/register`, {
           method: "POST",
           headers: {
             "content-type": "application/json",
-            "x-correlation-id": cid,
+            "x-correlation-id": correlationId,
           },
           body: JSON.stringify({
             firstName: "Ada",
@@ -247,8 +247,8 @@ async function main(): Promise<void> {
           correlationId?: string;
         };
         assert.equal(body.code, "email_taken");
-        assert.equal(body.correlationId, cid);
-        assert.equal(res.headers.get("x-correlation-id"), cid);
+        assert.equal(body.correlationId, correlationId);
+        assert.equal(res.headers.get("x-correlation-id"), correlationId);
       },
     );
 
@@ -256,23 +256,23 @@ async function main(): Promise<void> {
       "register duplicate logs warn with correlationId (no secrets)",
       async () => {
         const { AppLogger } = await import("../../common/logger");
-        const seen: Array<{ msg: unknown; cid?: string }> = [];
+        const seen: Array<{ msg: unknown; correlationId?: string }> = [];
         const origWarn = AppLogger.prototype.warn;
         (
           AppLogger.prototype as unknown as {
-            warn: (msg: unknown, cid?: string) => void;
+            warn: (msg: unknown, correlationId?: string) => void;
           }
-        ).warn = function (msg: unknown, cid?: string) {
-          seen.push({ msg, cid });
-          return origWarn.call(this, msg, cid);
+        ).warn = function (msg: unknown, correlationId?: string) {
+          seen.push({ msg, correlationId });
+          return origWarn.call(this, msg, correlationId);
         };
         try {
-          const cid = "e2e-corr-id-0002";
+          const correlationId = "e2e-corr-id-0002";
           await fetch(`${base}/api/v1/auth/register`, {
             method: "POST",
             headers: {
               "content-type": "application/json",
-              "x-correlation-id": cid,
+              "x-correlation-id": correlationId,
             },
             body: JSON.stringify({
               firstName: "Ada",
@@ -288,7 +288,7 @@ async function main(): Promise<void> {
           (s) => typeof s.msg === "string" && s.msg.includes("email_taken"),
         );
         assert.ok(hit, "expected warn with email_taken");
-        assert.equal(hit?.cid, "e2e-corr-id-0002");
+        assert.equal(hit?.correlationId, "e2e-corr-id-0002");
         assert.ok(
           !JSON.stringify(seen).includes("s3cret-p4ss"),
           "logs must not carry passwords",

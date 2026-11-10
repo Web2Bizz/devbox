@@ -96,12 +96,12 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
     run: async () => {
       const { root } = fixture();
       const { warns, logger } = makeLogger();
-      const abs = path.join(root, 'orgs', SPEC_OID, 'projects', SPEC_PID_BROKEN, 'content');
-      const check = await isValidGitRepo(abs, logger);
+      const absolutePath = path.join(root, 'orgs', SPEC_OID, 'projects', SPEC_PID_BROKEN, 'content');
+      const check = await isValidGitRepo(absolutePath, logger);
       assert.equal(check.ok, false);
       assert.ok(check.reason && check.reason !== 'no-git');
       assert.equal(warns.length, 1);
-      assert.equal(warns[0].path, abs);
+      assert.equal(warns[0].path, absolutePath);
       assert.ok(warns[0].reason);
     },
   },

@@ -10,14 +10,50 @@ import type { ApiError } from '@rush-code/contracts';
 import { AppLogger, serializeCause } from '../logger';
 import { ExternalServiceError } from '../external/external-error';
 
-function isAbortError(err: unknown): boolean {
-  if (!err || typeof err !== 'object') return false;
-  const e = err as { name?: unknown; code?: unknown; cause?: unknown };
-  if (e.name === 'AbortError') return true;
-  if (e.code === 20 || e.code === '20') return true;
-  if (e.cause && typeof e.cause === 'object') {
-    const c = e.cause as { name?: unknown; code?: unknown };
-    if (c.name === 'AbortError' || c.code === 20 || c.code === '20') return true;
+/** Minimal response surface the filter writes the envelope through. */
+type FilterResponse = {
+  status: (code: number) => {
+    json: (body: unknown) => void;
+    setHeader?: (name: string, value: string) => void;
+  };
+  setHeader: (name: string, value: string) => void;
+};
+
+/** Minimal request surface the filter reads (headers + correlation id). */
+type FilterRequest = {
+  headers: Record<string, string | Array<string> | undefined>;
+  correlationId?: string;
+  destroyed?: boolean;
+};
+
+/** Raw node response flags used to detect an already-closed downstream. */
+type RawResponseState = {
+  headersSent?: boolean;
+  destroyed?: boolean;
+  writableEnded?: boolean;
+};
+
+/** ArgumentsHost HTTP view (exported by the framework only via internal.d.ts). */
+type HttpContext = ReturnType<ArgumentsHost['switchToHttp']>;
+
+function isAbortError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const errorLike: { name?: unknown; code?: unknown; cause?: unknown } =
+    error as { name?: unknown; code?: unknown; cause?: unknown };
+  if (errorLike.name === 'AbortError') return true;
+  if (errorLike.code === 20 || errorLike.code === '20') return true;
+  if (errorLike.cause && typeof errorLike.cause === 'object') {
+    const causeLike: { name?: unknown; code?: unknown } = errorLike.cause as {
+      name?: unknown;
+      code?: unknown;
+    };
+    if (
+      causeLike.name === 'AbortError' ||
+      causeLike.code === 20 ||
+      causeLike.code === '20'
+    ) {
+      return true;
+    }
   }
   return false;
 }
@@ -34,46 +70,33 @@ function statusToCode(status: number): string {
 
 @Catch()
 export class ApiErrorFilter implements ExceptionFilter {
-  private readonly logger = new AppLogger(ApiErrorFilter.name);
+  private readonly logger: AppLogger = new AppLogger(ApiErrorFilter.name);
 
   catch(exception: unknown, host: ArgumentsHost): void {
-    const ctx = host.switchToHttp();
-    const res = ctx.getResponse<{
-      status: (code: number) => {
-        json: (body: unknown) => void;
-        setHeader?: (name: string, value: string) => void;
-      };
-      setHeader: (name: string, value: string) => void;
-    }>();
-    const req = ctx.getRequest<{
-      headers: Record<string, string | Array<string> | undefined>;
-      correlationId?: string;
-      destroyed?: boolean;
-    }>();
+    const context: HttpContext = host.switchToHttp();
+    const httpResponse: FilterResponse = context.getResponse<FilterResponse>();
+    const httpRequest: FilterRequest = context.getRequest<FilterRequest>();
 
-    const incoming = req.headers?.['x-correlation-id'];
-    const correlationId =
-      req.correlationId ??
-      (Array.isArray(incoming) ? incoming[0] : incoming) ??
+    const incomingHeader: string | Array<string> | undefined =
+      httpRequest.headers?.['x-correlation-id'];
+    const correlationId: string =
+      httpRequest.correlationId ??
+      (Array.isArray(incomingHeader) ? incomingHeader[0] : incomingHeader) ??
       randomUUID();
 
     // AbortError on an already-closed downstream (SSE disconnect after
-    // flushHeaders: req.destroyed / headersSent) — штатный обрыв, тихо
+    // flushHeaders: request.destroyed / headersSent) — штатный обрыв, тихо
     // выходим без stack и без записи в ответ. AbortError на живом
     // соединении (напр. fetch-таймаут opencode → EXTERNAL_TIMEOUT) —
     // НЕ глотаем: пропускаем дальше как internal_error/ExternalServiceError
     // чтобы фронт получил 503/504, а не зависший 200 undefined.
     if (isAbortError(exception)) {
-      const rawRes = res as unknown as {
-        headersSent?: boolean;
-        destroyed?: boolean;
-        writableEnded?: boolean;
-      };
-      const gone =
-        req.destroyed === true ||
-        rawRes.headersSent === true ||
-        rawRes.destroyed === true ||
-        rawRes.writableEnded === true;
+      const rawResponse: RawResponseState = httpResponse as unknown as RawResponseState;
+      const gone: boolean =
+        httpRequest.destroyed === true ||
+        rawResponse.headersSent === true ||
+        rawResponse.destroyed === true ||
+        rawResponse.writableEnded === true;
       if (gone) {
         try {
           this.logger.debug('[http] client aborted (SSE closed)', correlationId);
@@ -84,7 +107,7 @@ export class ApiErrorFilter implements ExceptionFilter {
       }
     }
     try {
-      res.setHeader('x-correlation-id', correlationId);
+      httpResponse.setHeader('x-correlation-id', correlationId);
     } catch {
       // headers already sent — ignore
     }
@@ -109,18 +132,18 @@ export class ApiErrorFilter implements ExceptionFilter {
       // Logging: normal-path one-liner with service/operation/status/code,
       // no stack, no URL/body/Bearer (AppLogger sanitizes); cause/stack (if
       // any) goes to debug only.
-      const retryableAnswer =
+      const retryableAnswer: boolean =
         exception.code !== 'EXTERNAL_UNAUTHORIZED' &&
         (exception.httpStatus === 429 || exception.httpStatus >= 500);
       if (retryableAnswer) {
         try {
-          res.setHeader('Retry-After', '30');
+          httpResponse.setHeader('Retry-After', '30');
         } catch {
           // headers already sent — ignore
         }
       }
       try {
-        const line =
+        const line: string =
           `[http] handled service=${exception.service} operation=${exception.operation} ` +
           `status=${exception.httpStatus} code=${exception.code}`;
         if (exception.httpStatus === 429 || exception.httpStatus >= 500) {
@@ -143,23 +166,28 @@ export class ApiErrorFilter implements ExceptionFilter {
         message: exception.message,
         correlationId,
       };
-      res.status(exception.httpStatus).json(body);
+      httpResponse.status(exception.httpStatus).json(body);
       return;
     }
 
     if (exception instanceof HttpException) {
-      const status = exception.getStatus();
-      const response = exception.getResponse() as
+      const status: number = exception.getStatus();
+      const exceptionResponse: string | {
+        code?: string;
+        message?: string | Array<string>;
+        error?: string;
+      } = exception.getResponse() as
         | string
         | { code?: string; message?: string | Array<string>; error?: string };
-      let code = statusToCode(status);
+      let code: string = statusToCode(status);
       let message: string;
-      if (typeof response === 'string') {
-        message = response;
-      } else if (response && typeof response === 'object') {
-        if (typeof response.code === 'string') code = response.code;
-        const raw = response.message ?? response.error ?? exception.message;
-        message = Array.isArray(raw) ? raw.join('; ') : String(raw);
+      if (typeof exceptionResponse === 'string') {
+        message = exceptionResponse;
+      } else if (exceptionResponse && typeof exceptionResponse === 'object') {
+        if (typeof exceptionResponse.code === 'string') code = exceptionResponse.code;
+        const rawMessage: string | Array<string> =
+          exceptionResponse.message ?? exceptionResponse.error ?? exception.message;
+        message = Array.isArray(rawMessage) ? rawMessage.join('; ') : String(rawMessage);
       } else {
         message = exception.message;
       }
@@ -167,7 +195,7 @@ export class ApiErrorFilter implements ExceptionFilter {
       if (status >= 500) message = 'Unexpected server error';
       // Normal path: one-liner with status/code, no stack, no body/headers.
       try {
-        const line = `[http] handled status=${status} code=${code}`;
+        const line: string = `[http] handled status=${status} code=${code}`;
         if (status >= 500) {
           this.logger.error(line, correlationId);
           this.logger.debug(
@@ -181,7 +209,7 @@ export class ApiErrorFilter implements ExceptionFilter {
         // ignore logging failures
       }
       const body: ApiError = { code, message, correlationId };
-      res.status(status).json(body);
+      httpResponse.status(status).json(body);
       return;
     }
 
@@ -201,6 +229,6 @@ export class ApiErrorFilter implements ExceptionFilter {
       message: 'Unexpected server error',
       correlationId,
     };
-    res.status(HttpStatus.INTERNAL_SERVER_ERROR).json(body);
+    httpResponse.status(HttpStatus.INTERNAL_SERVER_ERROR).json(body);
   }
 }

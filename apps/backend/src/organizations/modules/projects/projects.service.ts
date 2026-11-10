@@ -4,31 +4,38 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from "@nestjs/common";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, type SQL } from "drizzle-orm";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import type { Stats } from "node:fs";
 import { promisify } from "node:util";
-import { AppLogger } from "../../../common/logger";
-import { DbService, dbUnavailable, type DbClient } from "../../../common/db/db.service";
+import { AppLogger } from "@common/logger";
+import { uuidSchema } from "@common/validation";
+import { DbService, dbUnavailable, type DbClient } from "@common/db/db.service";
 import {
   organizations,
   projectChats,
   projectSessions,
   projects,
   type ProjectRow,
-} from "../../../common/db/schema";
-import { isValidGitRepo } from "./modules/repository/utils/repos-git";
-import { WorkspacePathService } from "../../../common/storage/workspace-path.service";
+} from "@common/db/schema";
+import { isValidGitRepo, type GitCheck } from "./modules/repository/utils/repos-git";
+import {
+  WorkspacePathService,
+  type ProjectResolved,
+} from "@common/storage/workspace-path.service";
 import type {
   CreateProjectInput,
   UpdateProjectInput,
 } from "./projects.dto";
 
-const execFileAsync = promisify(execFile);
+type ExecFileAsync = (
+  file: string,
+  args: Array<string>,
+  options?: { cwd?: string; timeout?: number },
+) => Promise<{ stdout: string; stderr: string }>;
 
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
-}
+const execFileAsync: ExecFileAsync = promisify(execFile);
 
 /** Effective config entry: project value overrides org value (masked secrets). */
 export type EffectiveConfigEntry = {
@@ -39,7 +46,7 @@ export type EffectiveConfigEntry = {
 };
 
 /** Per-command budget for `git init/config/commit` during disk-first create. */
-const PROJECT_GIT_TIMEOUT_MS = 15000;
+const PROJECT_GIT_TIMEOUT_MS: number = 15000;
 
 export type Project = {
   id: string;
@@ -185,12 +192,12 @@ export class ProjectsService {
         }, correlationId);
         return { ...project, corrupted: true, corruptedReason: "storage-unconfigured" };
       }
-      let absRepo: string;
+      let absoluteRepo: string;
       try {
         if (!project.orgId) {
           return { ...project, corrupted: true, corruptedReason: "missing-org" };
         }
-        absRepo = (await this.paths.resolveOrg(project.orgId, project.id)).absRepo;
+        absoluteRepo = (await this.paths.resolveOrg(project.orgId, project.id)).absoluteRepo;
       } catch {
         this.logger.warn({
           projectId: project.id,
@@ -200,20 +207,20 @@ export class ProjectsService {
         return { ...project, corrupted: true, corruptedReason: "resolve-failed" };
       }
       try {
-        const st = await this.paths.statPath(absRepo);
-        if (!st || !st.isDirectory()) throw new Error("not-a-directory");
+        const stats: Stats | null = await this.paths.statPath(absoluteRepo);
+        if (!stats || !stats.isDirectory()) throw new Error("not-a-directory");
       } catch {
         this.logger.warn({
           projectId: project.id,
-          path: absRepo,
+          path: absoluteRepo,
           reason: "missing-dir",
         }, correlationId);
         return { ...project, corrupted: true, corruptedReason: "missing-dir" };
       }
-      const check = await isValidGitRepo(absRepo);
+      const check: GitCheck = await isValidGitRepo(absoluteRepo);
       if (!check.ok) {
-        const reason = check.reason ?? "invalid-git";
-        this.logger.warn({ projectId: project.id, path: absRepo, reason }, correlationId);
+        const reason: string = check.reason ?? "invalid-git";
+        this.logger.warn({ projectId: project.id, path: absoluteRepo, reason }, correlationId);
         return { ...project, corrupted: true, corruptedReason: reason };
       }
       return project;
@@ -239,40 +246,42 @@ export class ProjectsService {
     correlationId?: string,
   ): Promise<void> {
     try {
-      const resolved = await this.paths.resolveOrgStrict(orgId, projectId);
-      const jailReal = await this.paths.realStrictRoot();
-      await this.paths.assertInsideJail(resolved.absBase, jailReal);
-      await this.paths.removeDir(resolved.absBase);
-    } catch (err) {
-      const reason =
-        err instanceof InternalServerErrorException
+      const resolved: ProjectResolved = await this.paths.resolveOrgStrict(orgId, projectId);
+      const jailReal: string = await this.paths.realStrictRoot();
+      await this.paths.assertInsideJail(resolved.absoluteBase, jailReal);
+      await this.paths.removeDir(resolved.absoluteBase);
+    } catch (error) {
+      const reason: string =
+        error instanceof InternalServerErrorException
           ? "storage-unconfigured"
-          : `rm-failed: ${(err as Error).message}`.slice(0, 120);
+          : `rm-failed: ${(error as Error).message}`.slice(0, 120);
       this.logger.warn({ projectId, path: "", reason }, correlationId);
     }
   }
 
   async list(
     correlationId?: string,
-    opts?: { orgId?: string; includeDeleted?: boolean },
+    options?: { orgId?: string; includeDeleted?: boolean },
   ): Promise<Array<Project>> {
     try {
-      const conds = [];
-      if (opts?.orgId) conds.push(eq(projects.orgId, opts.orgId));
-      if (!opts?.includeDeleted) {
+      const conditions: Array<SQL<unknown>> = [];
+      if (options?.orgId) conditions.push(eq(projects.orgId, options.orgId));
+      if (!options?.includeDeleted) {
         // `deleted_at` is the source of truth; the legacy `status` predicate
         // stays for rows soft-deleted before the column existed.
-        conds.push(eq(projects.status, "active"));
-        conds.push(isNull(projects.deletedAt));
+        conditions.push(eq(projects.status, "active"));
+        conditions.push(isNull(projects.deletedAt));
       }
-      const rows =
-        conds.length > 0
-          ? await this.client().select().from(projects).where(and(...conds))
+      const rows: Array<ProjectRow> =
+        conditions.length > 0
+          ? await this.client().select().from(projects).where(and(...conditions))
           : await this.client().select().from(projects);
-      const enriched = await Promise.all(rows.map((r) => this.enrich(toProject(r), correlationId)));
-      return enriched.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    } catch (err) {
-      dbUnavailable("projects.list", err, this.logger, correlationId);
+      const enriched: Array<Project> = await Promise.all(
+        rows.map((row) => this.enrich(toProject(row), correlationId)),
+      );
+      return enriched.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    } catch (error) {
+      dbUnavailable("projects.list", error, this.logger, correlationId);
     }
   }
 
@@ -295,53 +304,56 @@ export class ProjectsService {
     input: CreateProjectInput,
     correlationId?: string,
   ): Promise<Project> {
-    const orgId = (input as { orgId?: string }).orgId;
-    if (!orgId || typeof orgId !== "string" || !isUuid(orgId)) {
+    const orgId: string | undefined = (input as { orgId?: string }).orgId;
+    if (!orgId || typeof orgId !== "string" || !uuidSchema.safeParse(orgId).success) {
       throw new BadRequestException('Field "orgId" is required');
     }
-    const githubUrl =
+    const githubUrl: string | null =
       input.githubUrl ??
       (input.githubOwner && input.githubRepo
         ? `https://github.com/${input.githubOwner}/${input.githubRepo}`
         : null);
     // Variant A: id is minted before any disk write so the repo dir is
     // derived deterministically (see layout spec above).
-    const id = randomUUID();
+    const id: string = randomUUID();
     // Strict root first: empty REPOS_ROOT → 500 before any mkdir/INSERT.
     // 400/403 on bad shape/traversal — propagate before touching disk or DB.
-    let absRepo: string;
-    let absBase: string;
+    let absoluteRepo: string;
+    let absoluteBase: string;
     try {
-      const resolved = await this.paths.resolveOrgStrict(orgId, id);
-      absRepo = resolved.absRepo;
-      absBase = resolved.absBase;
+      const resolved: ProjectResolved = await this.paths.resolveOrgStrict(orgId, id);
+      absoluteRepo = resolved.absoluteRepo;
+      absoluteBase = resolved.absoluteBase;
       // Belt-and-braces jail assertion before the first write.
-      await this.paths.assertInsideJail(absBase, await this.paths.realStrictRoot());
+      await this.paths.assertInsideJail(absoluteBase, await this.paths.realStrictRoot());
       await this.paths.ensureProjectDirs(resolved);
-    } catch (err) {
-      if (err instanceof InternalServerErrorException) {
+    } catch (error) {
+      if (error instanceof InternalServerErrorException) {
         this.logger.error(
           `[projects] storage unconfigured id=${id}`,
           undefined,
           correlationId,
         );
-        throw err;
+        throw error;
       }
-      throw err;
+      throw error;
     }
     try {
-      await this.paths.ensureDir(absRepo);
-      const opts = { cwd: absRepo, timeout: PROJECT_GIT_TIMEOUT_MS };
-      await execFileAsync("git", ["init", "-b", "main"], opts);
+      await this.paths.ensureDir(absoluteRepo);
+      const execOptions: { cwd: string; timeout: number } = {
+        cwd: absoluteRepo,
+        timeout: PROJECT_GIT_TIMEOUT_MS,
+      };
+      await execFileAsync("git", ["init", "-b", "main"], execOptions);
       // Local identity so the empty commit never fails on machines without
       // a global git identity (repo-scoped, does not touch global config).
-      await execFileAsync("git", ["config", "user.email", "rush-code@localhost"], opts);
-      await execFileAsync("git", ["config", "user.name", "rush-code"], opts);
-      await execFileAsync("git", ["commit", "--allow-empty", "-m", "init"], opts);
-    } catch (err) {
+      await execFileAsync("git", ["config", "user.email", "rush-code@localhost"], execOptions);
+      await execFileAsync("git", ["config", "user.name", "rush-code"], execOptions);
+      await execFileAsync("git", ["commit", "--allow-empty", "-m", "init"], execOptions);
+    } catch (error) {
       this.logger.error(
-        `[projects] disk init failed id=${id}: ${(err as Error).message}`,
-        (err as Error).stack,
+        `[projects] disk init failed id=${id}: ${(error as Error).message}`,
+        (error as Error).stack,
         correlationId,
       );
       throw new InternalServerErrorException(
@@ -349,7 +361,7 @@ export class ProjectsService {
       );
     }
     try {
-      const rows = await this.client()
+      const rows: Array<ProjectRow> = await this.client()
         .insert(projects)
         .values({
           id,
@@ -363,40 +375,40 @@ export class ProjectsService {
           ownerId: input.ownerId ?? null,
         })
         .returning();
-      const project = await this.enrich(toProject(rows[0]), correlationId);
-      // Lifecycle events (low frequency) stay at info; cid-bound.
+      const project: Project = await this.enrich(toProject(rows[0]), correlationId);
+      // Lifecycle events (low frequency) stay at info; correlationId-bound.
       this.logger.info(`[projects] created ${project.id}`, correlationId);
       return project;
-    } catch (err) {
+    } catch (error) {
       await this.removeRepoDirBestEffort(id, orgId, correlationId);
-      dbUnavailable("projects.create", err, this.logger, correlationId);
+      dbUnavailable("projects.create", error, this.logger, correlationId);
     }
   }
 
   async getOrThrow(
     id: string,
     correlationId?: string,
-    opts?: { includeDeleted?: boolean },
+    options?: { includeDeleted?: boolean },
   ): Promise<Project> {
     try {
       // Soft-deleted rows read as missing (404) unless history is requested;
       // `deleted_at` is authoritative, `status` is the legacy marker.
-      const conds = [eq(projects.id, id)];
-      if (!opts?.includeDeleted) conds.push(isNull(projects.deletedAt));
-      const rows = await this.client()
+      const conditions: Array<SQL<unknown>> = [eq(projects.id, id)];
+      if (!options?.includeDeleted) conditions.push(isNull(projects.deletedAt));
+      const rows: Array<ProjectRow> = await this.client()
         .select()
         .from(projects)
-        .where(and(...conds))
+        .where(and(...conditions))
         .limit(1);
       if (rows.length === 0)
         throw new NotFoundException(`Project ${id} not found`);
-      const p = toProject(rows[0]);
-      if (p.status === "deleted" && !opts?.includeDeleted)
+      const project: Project = toProject(rows[0]);
+      if (project.status === "deleted" && !options?.includeDeleted)
         throw new NotFoundException(`Project ${id} not found`);
-      return await this.enrich(p, correlationId);
-    } catch (err) {
-      if (err instanceof NotFoundException) throw err;
-      dbUnavailable("projects.getOrThrow", err, this.logger, correlationId);
+      return await this.enrich(project, correlationId);
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      dbUnavailable("projects.getOrThrow", error, this.logger, correlationId);
     }
   }
 
@@ -409,22 +421,22 @@ export class ProjectsService {
     orgId: string,
     projectId: string,
     correlationId?: string,
-    opts?: { includeDeleted?: boolean },
+    options?: { includeDeleted?: boolean },
   ): Promise<Project> {
-    const p = await this.getOrThrow(projectId, correlationId, opts);
-    if (!p.orgId || p.orgId.toLowerCase() !== orgId.toLowerCase())
+    const project: Project = await this.getOrThrow(projectId, correlationId, options);
+    if (!project.orgId || project.orgId.toLowerCase() !== orgId.toLowerCase())
       throw new NotFoundException(`Project ${projectId} not found`);
-    return p;
+    return project;
   }
 
   async update(
     id: string,
     input: UpdateProjectInput,
     correlationId?: string,
-    opts?: { orgId?: string },
+    options?: { orgId?: string },
   ): Promise<Project> {
-    const current = opts?.orgId
-      ? await this.assertProjectBelongsToOrg(opts.orgId, id, correlationId, { includeDeleted: true })
+    const current: Project = options?.orgId
+      ? await this.assertProjectBelongsToOrg(options.orgId, id, correlationId, { includeDeleted: true })
       : await this.getOrThrow(id, correlationId, { includeDeleted: true });
     if (current.status === "deleted" || current.deletedAt !== null)
       throw new NotFoundException(`Project ${id} not found`);
@@ -484,7 +496,7 @@ export class ProjectsService {
           : null;
     }
     try {
-      const rows = await this.client()
+      const rows: Array<ProjectRow> = await this.client()
         .update(projects)
         .set({
           name: next.name,
@@ -502,9 +514,9 @@ export class ProjectsService {
         throw new NotFoundException(`Project ${id} not found`);
       this.logger.info(`[projects] updated ${id}`, correlationId);
       return await this.enrich(toProject(rows[0]), correlationId);
-    } catch (err) {
-      if (err instanceof NotFoundException) throw err;
-      dbUnavailable("projects.update", err, this.logger, correlationId);
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      dbUnavailable("projects.update", error, this.logger, correlationId);
     }
   }
 
@@ -514,7 +526,7 @@ export class ProjectsService {
    * invisible by default (404) and member-visible via ?includeDeleted.
    */
   async remove(id: string, correlationId?: string): Promise<void> {
-    const current = await this.getOrThrow(id, correlationId, { includeDeleted: true });
+    const current: Project = await this.getOrThrow(id, correlationId, { includeDeleted: true });
     // Idempotent: a row already carrying deleted_at keeps its original
     // deletion timestamp (no re-stamping on repeated DELETE).
     if (current.status === "deleted" || current.deletedAt !== null) return;
@@ -525,8 +537,8 @@ export class ProjectsService {
         .set({ status: "deleted", deletedAt: new Date(), updatedAt: new Date() })
         .where(eq(projects.id, id));
       this.logger.info(`[projects] soft-deleted ${id}`, correlationId);
-    } catch (err) {
-      dbUnavailable("projects.remove", err, this.logger, correlationId);
+    } catch (error) {
+      dbUnavailable("projects.remove", error, this.logger, correlationId);
     }
   }
 
@@ -536,10 +548,10 @@ export class ProjectsService {
    * revive the org first (404 keeps the no-leak rule).
    */
   async restore(id: string, correlationId?: string): Promise<Project> {
-    const current = await this.getOrThrow(id, correlationId, { includeDeleted: true });
+    const current: Project = await this.getOrThrow(id, correlationId, { includeDeleted: true });
     if (current.orgId) {
       try {
-        const orgRows = await this.client()
+        const orgRows: Array<{ id: string }> = await this.client()
           .select({ id: organizations.id })
           .from(organizations)
           .where(
@@ -551,14 +563,14 @@ export class ProjectsService {
           .limit(1);
         if (orgRows.length === 0)
           throw new NotFoundException(`Project ${id} not found`);
-      } catch (err) {
-        if (err instanceof NotFoundException) throw err;
-        dbUnavailable("projects.restore.org", err, this.logger, correlationId);
+      } catch (error) {
+        if (error instanceof NotFoundException) throw error;
+        dbUnavailable("projects.restore.org", error, this.logger, correlationId);
       }
     }
     if (current.status === "active") return current;
     try {
-      const rows = await this.client()
+      const rows: Array<ProjectRow> = await this.client()
         .update(projects)
         .set({ status: "active", deletedAt: null, updatedAt: new Date() })
         .where(eq(projects.id, id))
@@ -566,9 +578,9 @@ export class ProjectsService {
       if (rows.length === 0) throw new NotFoundException(`Project ${id} not found`);
       this.logger.info(`[projects] restored ${id}`, correlationId);
       return await this.enrich(toProject(rows[0]), correlationId);
-    } catch (err) {
-      if (err instanceof NotFoundException) throw err;
-      dbUnavailable("projects.restore", err, this.logger, correlationId);
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      dbUnavailable("projects.restore", error, this.logger, correlationId);
     }
   }
 
@@ -578,12 +590,17 @@ export class ProjectsService {
    */
   private async stopRunningContainers(projectId: string, correlationId?: string): Promise<void> {
     try {
-      const opts = { timeout: 5000 };
-      await execFileAsync("docker", ["ps", "--filter", `label=project=${projectId}`, "--format", "{{.ID}}"], opts)
-        .then(async (out) => {
-          const ids = String((out as { stdout?: string }).stdout ?? out ?? "").split("\n").map((s) => s.trim()).filter(Boolean);
-          for (const cid of ids) {
-            await execFileAsync("docker", ["stop", cid], opts).catch(() => undefined);
+      const execOptions: { timeout: number } = { timeout: 5000 };
+      await execFileAsync("docker", ["ps", "--filter", `label=project=${projectId}`, "--format", "{{.ID}}"], execOptions)
+        .then(async (output) => {
+          const containerIds: Array<string> = String(
+            (output as { stdout?: string }).stdout ?? output ?? "",
+          )
+            .split("\n")
+            .map((line) => line.trim())
+            .filter(Boolean);
+          for (const containerId of containerIds) {
+            await execFileAsync("docker", ["stop", containerId], execOptions).catch(() => undefined);
           }
         })
         .catch(() => undefined);
@@ -613,11 +630,11 @@ export class ProjectsService {
 
   /** Test/e2e seam — DELETE FROM projects (children first; requires live Postgres). */
   async clearAllForTests(): Promise<void> {
-    const c = this.client();
+    const client: DbClient = this.client();
     // project_chats/project_sessions are ON DELETE RESTRICT (hard deletes must
     // fail in production), so the test-only cleanup removes them explicitly.
-    await c.delete(projectSessions);
-    await c.delete(projectChats);
-    await c.delete(projects);
+    await client.delete(projectSessions);
+    await client.delete(projectChats);
+    await client.delete(projects);
   }
 }

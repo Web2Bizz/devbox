@@ -36,11 +36,11 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
       const r = await paths.resolveOrg(OID, PID);
       const root = path.resolve(process.env.REPOS_ROOT as string);
       assert.equal(r.scope, 'org');
-      assert.equal(r.absBase, path.resolve(root, 'orgs', OID.toLowerCase(), 'projects', PID.toLowerCase()));
-      assert.equal(r.absRepo, path.join(r.absBase, 'content'));
+      assert.equal(r.absoluteBase, path.resolve(root, 'orgs', OID.toLowerCase(), 'projects', PID.toLowerCase()));
+      assert.equal(r.absoluteRepo, path.join(r.absoluteBase, 'content'));
       assert.equal(r.scopeSecrets, path.resolve(root, 'orgs', OID.toLowerCase(), '.secrets'));
-      assert.ok(!r.absRepo.includes('workspace'));
-      assert.ok(!r.absBase.includes(`${path.sep}users${path.sep}`));
+      assert.ok(!r.absoluteRepo.includes('workspace'));
+      assert.ok(!r.absoluteBase.includes(`${path.sep}users${path.sep}`));
     },
   },
   {
@@ -104,8 +104,8 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
     run: async () => {
       const paths = new WorkspacePathService();
       const r = await paths.resolveOrg(OID, PID, 'src/index.ts');
-      assert.equal(r.rel, 'src/index.ts');
-      assert.equal(r.abs, path.resolve(r.absRepo, 'src/index.ts'));
+      assert.equal(r.relativePath, 'src/index.ts');
+      assert.equal(r.absolutePath, path.resolve(r.absoluteRepo, 'src/index.ts'));
     },
   },
   {
@@ -132,8 +132,8 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
       const paths = new WorkspacePathService();
       const o = await paths.resolveOrgStrict(OID, PID);
       await paths.ensureProjectDirs(o);
-      assert.equal(statSync(o.absRepo).isDirectory(), true);
-      assert.equal(statSync(o.absSecrets).isDirectory(), true);
+      assert.equal(statSync(o.absoluteRepo).isDirectory(), true);
+      assert.equal(statSync(o.absoluteSecrets).isDirectory(), true);
       assert.equal(statSync(o.scopeSecrets).isDirectory(), true);
     },
   },

@@ -2,15 +2,15 @@ import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { sql } from "drizzle-orm";
-import { Pool } from "pg";
-import { validateEnv } from "../env/env";
+import { Pool, type PoolClient } from "pg";
+import { type AppEnv, validateEnv } from "../env/env";
 import { AppLogger } from "../logger";
 import { ExternalServiceError } from "../external/external-error";
 
 export type DbClient = ReturnType<typeof drizzle>;
 
 /** Fixed 503 message for Postgres outages (mirrors FIXED_MESSAGES.EXTERNAL_UNAVAILABLE). */
-const DB_UNAVAILABLE_MESSAGE = "сервис временно недоступен, повторите позже";
+const DB_UNAVAILABLE_MESSAGE: string = "сервис временно недоступен, повторите позже";
 
 /**
  * Already-logged marker — a Postgres failure must produce exactly one
@@ -20,7 +20,7 @@ const DB_UNAVAILABLE_MESSAGE = "сервис временно недоступе
  * driver throw, carrying the caller's correlationId) logs; outer ones
  * rethrow silently.
  */
-const loggedDbErrors = new WeakSet<object>();
+const loggedDbErrors: WeakSet<object> = new WeakSet<object>();
 
 /**
  * Normalizes any Postgres failure (unconfigured client, refused connection,
@@ -31,32 +31,32 @@ const loggedDbErrors = new WeakSet<object>();
  */
 export function dbUnavailable(
   operation: string,
-  err: unknown,
+  error: unknown,
   logger: Pick<AppLogger, "error">,
   correlationId?: string,
 ): never {
   if (
-    err instanceof ExternalServiceError &&
-    err.service === "db" &&
-    loggedDbErrors.has(err)
+    error instanceof ExternalServiceError &&
+    error.service === "db" &&
+    loggedDbErrors.has(error)
   ) {
-    throw err;
+    throw error;
   }
   logger.error(
     `[db] unavailable operation=${operation} code=EXTERNAL_UNAVAILABLE`,
     correlationId,
   );
-  if (err instanceof ExternalServiceError) {
-    loggedDbErrors.add(err);
-    throw err;
+  if (error instanceof ExternalServiceError) {
+    loggedDbErrors.add(error);
+    throw error;
   }
-  const wrapped = new ExternalServiceError({
+  const wrapped: ExternalServiceError = new ExternalServiceError({
     code: "EXTERNAL_UNAVAILABLE",
     service: "db",
     operation,
     message: DB_UNAVAILABLE_MESSAGE,
     isRetryable: true,
-    cause: err,
+    cause: error,
   });
   loggedDbErrors.add(wrapped);
   throw wrapped;
@@ -80,7 +80,7 @@ export class DbService {
     private readonly config: ConfigService,
     private readonly logger: AppLogger = new AppLogger(DbService.name),
   ) {
-    const databaseUrl = this.resolveDatabaseUrl();
+    const databaseUrl: string = this.resolveDatabaseUrl();
     if (!databaseUrl) {
       this.pool = null;
       this.db = null;
@@ -91,10 +91,10 @@ export class DbService {
       return;
     }
     this.pool = new Pool({ connectionString: databaseUrl });
-    this.pool.on("error", (err) => {
+    this.pool.on("error", (error: Error): void => {
       // Message + sanitized stack — connection string never logged
       // (AppLogger also scrubs live secrets).
-      this.logger.error(`[db] pool error: ${err.message}`, err.stack);
+      this.logger.error(`[db] pool error: ${error.message}`, error.stack);
     });
     this.db = drizzle(this.pool);
   }
@@ -102,14 +102,14 @@ export class DbService {
   private resolveDatabaseUrl(): string {
     // Prefer validated env (fail-fast semantics, no secret logging).
     try {
-      const env = validateEnv(process.env);
+      const env: AppEnv = validateEnv(process.env);
       if (env.databaseUrl) return env.databaseUrl;
     } catch {
       // readonly-исключение: fall through к сырому ConfigService-значению только
       // для чтения конфига (trimmed, never logged); пусто → pool=null + boot WARN
       // + 503 EXTERNAL_UNAVAILABLE на каждый Postgres-op (никакого тихого успеха).
     }
-    const raw =
+    const raw: string =
       this.config.get<string>("DATABASE_URL") ??
       (process.env.DATABASE_URL as string | undefined) ??
       "";
@@ -123,7 +123,7 @@ export class DbService {
    * logged once with the request correlationId.
    */
   get client(): DbClient {
-    const db = this.db;
+    const db: DbClient | null = this.db;
     if (!db) {
       throw new ExternalServiceError({
         code: "EXTERNAL_UNAVAILABLE",
@@ -150,7 +150,7 @@ export class DbService {
     if (!/^[a-z_][a-z0-9_]*$/i.test(channel)) {
       throw new Error("listen: channel must be an identifier");
     }
-    const pool = this.pool;
+    const pool: Pool | null = this.pool;
     if (!pool) {
       throw new ExternalServiceError({
         code: "EXTERNAL_UNAVAILABLE",
@@ -160,18 +160,20 @@ export class DbService {
         isRetryable: true,
       });
     }
-    const client = await pool.connect();
+    const client: PoolClient = await pool.connect();
     try {
       await client.query(`LISTEN "${channel}"`);
-    } catch (err) {
+    } catch (error) {
       client.release();
-      throw err;
+      throw error;
     }
-    const handler = (msg: { channel: string; payload?: string }): void => {
-      if (msg.channel === channel) onPayload(msg.payload ?? "");
+    const handler: (message: { channel: string; payload?: string }) => void = (
+      message: { channel: string; payload?: string },
+    ): void => {
+      if (message.channel === channel) onPayload(message.payload ?? "");
     };
     client.on("notification", handler);
-    let closed = false;
+    let closed: boolean = false;
     return {
       close: async (): Promise<void> => {
         if (closed) return;
@@ -198,7 +200,7 @@ export class DbService {
       );
       return "down";
     }
-    const startedAt = Date.now();
+    const startedAt: number = Date.now();
     this.logger.debug(
       "[external] start service=db operation=checkDb method=SELECT1",
     );
@@ -208,13 +210,13 @@ export class DbService {
         `[external] success service=db operation=checkDb attempt=1 latencyMs=${Date.now() - startedAt}`,
       );
       return "up";
-    } catch (err) {
+    } catch (error) {
       // Message + sanitized stack — connection string never logged
       // (AppLogger also scrubs live secrets).
       this.logger.error(
         `[external] failure service=db operation=checkDb code=EXTERNAL_UNAVAILABLE ` +
-          `latencyMs=${Date.now() - startedAt}: ${(err as Error).message}`,
-        (err as Error).stack,
+          `latencyMs=${Date.now() - startedAt}: ${(error as Error).message}`,
+        (error as Error).stack,
       );
       return "down";
     }

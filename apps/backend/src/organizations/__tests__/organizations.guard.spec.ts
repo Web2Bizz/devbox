@@ -19,7 +19,7 @@
 import assert from 'node:assert/strict';
 import type { ExecutionContext } from '@nestjs/common';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
-import { organizationMembers, organizations } from '../../common/db/schema';
+import { organizationMembers, organizations } from '@common/db/schema';
 import { OrganizationsGuard } from '../organizations.guard';
 
 const ORG_ID = '123e4567-e89b-12d3-a456-426614174005';

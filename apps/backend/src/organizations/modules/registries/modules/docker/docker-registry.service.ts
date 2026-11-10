@@ -1,14 +1,14 @@
 import { Injectable, OnModuleInit, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { validateEnv, type AppEnv } from '../../../../../common/env/env';
-import { AppLogger } from '../../../../../common/logger';
-import { ExternalClient } from '../../../../../common/external/external-client';
+import { validateEnv, type AppEnv } from '@common/env/env';
+import { AppLogger } from '@common/logger';
+import { ExternalClient } from '@common/external/external-client';
 import {
   ExternalServiceError,
   fromStatus,
   fromUnknown,
-} from '../../../../../common/external/external-error';
-import { withRetry } from '../../../../../common/external/retry';
+} from '@common/external/external-error';
+import { withRetry } from '@common/external/retry';
 import {
   dockerRegistryAuthHeaders,
   resolveDockerRegistryConfig,
@@ -18,9 +18,9 @@ import {
 export type DockerRegistryStatus = 'up' | 'down' | 'skipped';
 
 /** Short budget for the /health probe — liveness must not wait on upstream. */
-export const DOCKER_REGISTRY_HEALTH_TIMEOUT_MS = 2000;
+export const DOCKER_REGISTRY_HEALTH_TIMEOUT_MS: number = 2000;
 
-const FALLBACK_TIMEOUT_MS = 10000;
+const FALLBACK_TIMEOUT_MS: number = 10000;
 
 /**
  * DockerRegistryService — single owner of DOCKER_REGISTRY_* config + v2 fetch.
@@ -66,26 +66,29 @@ export class DockerRegistryService implements OnModuleInit {
   }
 
   private resolved(): DockerRegistryConfig {
-    const env = this.resolvedEnv();
+    const env: AppEnv | null = this.resolvedEnv();
     if (env) return resolveDockerRegistryConfig(env);
     // readonly-исключение: fail-open к сырым ConfigService-значениям только для
     // чтения observe-only конфига (trimmed, never logged); пустой URL → 'skipped'
     // + 503 на catalog (никакого тихого успеха); ретрай-тюнинг дефолтится к
     // EXTERNAL_*-зеркалам при непарсируемом значении.
-    const num = (raw: string | undefined, fallback: number): number => {
-      const n = Number(raw);
-      return Number.isInteger(n) && n >= 0 ? n : fallback;
+    const parseNonNegativeInt: (rawValue: string | undefined, fallback: number) => number = (
+      rawValue: string | undefined,
+      fallback: number,
+    ): number => {
+      const parsed: number = Number(rawValue);
+      return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
     };
     return {
       url: (this.config?.get<string>('DOCKER_REGISTRY_URL')?.trim() ?? '').replace(/\/+$/, ''),
       user: this.config?.get<string>('DOCKER_REGISTRY_USER')?.trim() ?? '',
       password: this.config?.get<string>('DOCKER_REGISTRY_PASSWORD')?.trim() ?? '',
       token: this.config?.get<string>('DOCKER_REGISTRY_TOKEN')?.trim() ?? '',
-      timeoutMs: num(this.config?.get<string>('DOCKER_REGISTRY_TIMEOUT_MS'), FALLBACK_TIMEOUT_MS),
+      timeoutMs: parseNonNegativeInt(this.config?.get<string>('DOCKER_REGISTRY_TIMEOUT_MS'), FALLBACK_TIMEOUT_MS),
       retry: {
-        maxAttempts: num(this.config?.get<string>('DOCKER_REGISTRY_RETRY_MAX_ATTEMPTS'), 3) || 3,
-        baseDelayMs: num(this.config?.get<string>('DOCKER_REGISTRY_RETRY_BASE_DELAY_MS'), 200),
-        maxDelayMs: num(this.config?.get<string>('DOCKER_REGISTRY_RETRY_MAX_DELAY_MS'), 2000),
+        maxAttempts: parseNonNegativeInt(this.config?.get<string>('DOCKER_REGISTRY_RETRY_MAX_ATTEMPTS'), 3) || 3,
+        baseDelayMs: parseNonNegativeInt(this.config?.get<string>('DOCKER_REGISTRY_RETRY_BASE_DELAY_MS'), 200),
+        maxDelayMs: parseNonNegativeInt(this.config?.get<string>('DOCKER_REGISTRY_RETRY_MAX_DELAY_MS'), 2000),
       },
     };
   }
@@ -104,11 +107,11 @@ export class DockerRegistryService implements OnModuleInit {
   }
 
   private markUp(): void {
-    const was = this.status;
+    const previousStatus: DockerRegistryStatus = this.status;
     this.status = 'up';
     this.lastCheckAt = new Date().toISOString();
     this.lastError = null;
-    if (was !== 'up') {
+    if (previousStatus !== 'up') {
       this.logger.log('[docker-registry] reachable (status up)');
     }
   }
@@ -126,27 +129,28 @@ export class DockerRegistryService implements OnModuleInit {
    * 'down' when exhausted — NEVER throws, so the app always boots.
    */
   async onModuleInit(): Promise<void> {
-    const cfg = this.resolved();
-    if (!cfg.url) {
+    const configuration: DockerRegistryConfig = this.resolved();
+    if (!configuration.url) {
       this.status = 'skipped';
       this.logger.debug('[docker-registry] unconfigured (DOCKER_REGISTRY_URL empty) — status skipped');
       return;
     }
     try {
       await withRetry(
-        async (attempt) => {
-          await this.pingOnce(cfg, attempt);
+        async (attempt: number) => {
+          await this.pingOnce(configuration, attempt);
         },
         {
-          maxAttempts: cfg.retry.maxAttempts,
-          baseDelayMs: cfg.retry.baseDelayMs,
-          maxDelayMs: cfg.retry.maxDelayMs,
+          maxAttempts: configuration.retry.maxAttempts,
+          baseDelayMs: configuration.retry.baseDelayMs,
+          maxDelayMs: configuration.retry.maxDelayMs,
           method: 'GET',
         },
       );
       this.markUp();
-    } catch (err) {
-      const code = err instanceof ExternalServiceError ? err.code : 'EXTERNAL_UNAVAILABLE';
+    } catch (error) {
+      const code: string =
+        error instanceof ExternalServiceError ? error.code : 'EXTERNAL_UNAVAILABLE';
       this.markDown(code);
       // Fixed fields only — no URL, no credentials, no upstream body.
       this.logger.error(`[docker-registry] unreachable at startup code=${code} status=down`);
@@ -157,13 +161,15 @@ export class DockerRegistryService implements OnModuleInit {
    * Liveness probe for GET /health. Single attempt on a short budget,
    * always resolves, never throws. Unconfigured → 'skipped'.
    */
-  async checkConnectivity(timeoutMs = DOCKER_REGISTRY_HEALTH_TIMEOUT_MS): Promise<DockerRegistryStatus> {
-    const cfg = this.resolved();
-    if (!cfg.url) return 'skipped';
+  async checkConnectivity(
+    timeoutMs: number = DOCKER_REGISTRY_HEALTH_TIMEOUT_MS,
+  ): Promise<DockerRegistryStatus> {
+    const configuration: DockerRegistryConfig = this.resolved();
+    if (!configuration.url) return 'skipped';
     try {
       await this.external.fetchWithRetry(
-        `${cfg.url}/v2/`,
-        { method: 'GET', headers: dockerRegistryAuthHeaders(cfg) },
+        `${configuration.url}/v2/`,
+        { method: 'GET', headers: dockerRegistryAuthHeaders(configuration) },
         {
           service: 'docker-registry',
           operation: 'checkConnectivity',
@@ -173,9 +179,9 @@ export class DockerRegistryService implements OnModuleInit {
       );
       // Any HTTP response (even 401/403/5xx — returned, not thrown) means up.
       return 'up';
-    } catch (err) {
+    } catch (error) {
       this.logger.debug(
-        `[docker-registry] probe failed: ${err instanceof Error ? err.message : String(err)}`,
+        `[docker-registry] probe failed: ${error instanceof Error ? error.message : String(error)}`,
       );
       return 'down';
     }
@@ -188,8 +194,8 @@ export class DockerRegistryService implements OnModuleInit {
    * period flips the status back to 'up' (reconnect log).
    */
   async listCatalog(correlationId?: string): Promise<Array<string>> {
-    const cfg = this.resolved();
-    if (!cfg.url) {
+    const configuration: DockerRegistryConfig = this.resolved();
+    if (!configuration.url) {
       this.logger.warn(
         '[docker-registry] catalog requested while unconfigured (DOCKER_REGISTRY_URL empty) — answering 503',
         correlationId,
@@ -203,77 +209,80 @@ export class DockerRegistryService implements OnModuleInit {
         isRetryable: false,
       });
     }
-    let res: Response;
+    let response: Response;
     try {
-      res = await this.external.fetchWithRetry(
-        `${cfg.url}/v2/_catalog`,
-        { method: 'GET', headers: dockerRegistryAuthHeaders(cfg) },
+      response = await this.external.fetchWithRetry(
+        `${configuration.url}/v2/_catalog`,
+        { method: 'GET', headers: dockerRegistryAuthHeaders(configuration) },
         {
           service: 'docker-registry',
           operation: 'listCatalog',
-          timeoutMs: cfg.timeoutMs,
+          timeoutMs: configuration.timeoutMs,
           correlationId,
         },
       );
-    } catch (err) {
-      this.markDown(err instanceof ExternalServiceError ? err.code : 'EXTERNAL_UNAVAILABLE');
-      throw err instanceof ExternalServiceError
-        ? err
-        : fromUnknown('docker-registry', 'listCatalog', err, cfg.retry.maxAttempts);
+    } catch (error) {
+      this.markDown(error instanceof ExternalServiceError ? error.code : 'EXTERNAL_UNAVAILABLE');
+      throw error instanceof ExternalServiceError
+        ? error
+        : fromUnknown('docker-registry', 'listCatalog', error, configuration.retry.maxAttempts);
     }
-    if (!res.ok) {
-      this.markDown(`UPSTREAM_${res.status}`);
-      await res.arrayBuffer().catch(() => null);
-      throw fromStatus('docker-registry', 'listCatalog', res.status, cfg.retry.maxAttempts);
+    if (!response.ok) {
+      this.markDown(`UPSTREAM_${response.status}`);
+      await response.arrayBuffer().catch(() => null);
+      throw fromStatus('docker-registry', 'listCatalog', response.status, configuration.retry.maxAttempts);
     }
     let payload: unknown;
     try {
-      payload = (await res.json()) as unknown;
-    } catch (err) {
+      payload = (await response.json()) as unknown;
+    } catch (error) {
       this.markDown('EXTERNAL_UPSTREAM_5XX');
-      throw fromUnknown('docker-registry', 'listCatalog', err, cfg.retry.maxAttempts);
+      throw fromUnknown('docker-registry', 'listCatalog', error, configuration.retry.maxAttempts);
     }
-    const repos = (payload as { repositories?: unknown }).repositories;
-    if (!Array.isArray(repos) || !repos.every((r): r is string => typeof r === 'string')) {
+    const repositories: unknown = (payload as { repositories?: unknown }).repositories;
+    if (
+      !Array.isArray(repositories) ||
+      !repositories.every((repository): repository is string => typeof repository === 'string')
+    ) {
       this.markDown('EXTERNAL_UPSTREAM_5XX');
       throw new ExternalServiceError({
         code: 'EXTERNAL_UPSTREAM_5XX',
         service: 'docker-registry',
         operation: 'listCatalog',
         message: 'Upstream service returned a server error',
-        attempt: cfg.retry.maxAttempts,
+        attempt: configuration.retry.maxAttempts,
         isRetryable: true,
       });
     }
     this.markUp();
-    return repos;
+    return repositories;
   }
 
   /** Single ping attempt (throws ExternalServiceError on any failure). */
-  private async pingOnce(cfg: DockerRegistryConfig, attempt: number): Promise<void> {
-    let res: Response;
+  private async pingOnce(configuration: DockerRegistryConfig, attempt: number): Promise<void> {
+    let response: Response;
     try {
-      res = await this.external.fetchWithRetry(
-        `${cfg.url}/v2/`,
-        { method: 'GET', headers: dockerRegistryAuthHeaders(cfg) },
+      response = await this.external.fetchWithRetry(
+        `${configuration.url}/v2/`,
+        { method: 'GET', headers: dockerRegistryAuthHeaders(configuration) },
         {
           service: 'docker-registry',
           operation: 'ping',
-          timeoutMs: cfg.timeoutMs,
+          timeoutMs: configuration.timeoutMs,
           retry: { maxAttempts: 1 },
         },
       );
-    } catch (err) {
-      if (err instanceof ExternalServiceError) {
-        err.attempt = attempt;
-        throw err;
+    } catch (error) {
+      if (error instanceof ExternalServiceError) {
+        error.attempt = attempt;
+        throw error;
       }
-      throw fromUnknown('docker-registry', 'ping', err, attempt);
+      throw fromUnknown('docker-registry', 'ping', error, attempt);
     }
     // Any HTTP response counts as reachable (401/403 = auth required, still up).
-    await res.arrayBuffer().catch(() => null);
-    if (res.status === 429 || (res.status >= 500 && res.status <= 599)) {
-      throw fromStatus('docker-registry', 'ping', res.status, attempt);
+    await response.arrayBuffer().catch(() => null);
+    if (response.status === 429 || (response.status >= 500 && response.status <= 599)) {
+      throw fromStatus('docker-registry', 'ping', response.status, attempt);
     }
   }
 }

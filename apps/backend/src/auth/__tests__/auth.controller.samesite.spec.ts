@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import type { Response } from "express";
-import { validateEnv } from "../../common/env/env";
-import type { AppLogger } from "../../common/logger";
-import type { StoredUser } from "../../users/users.types";
+import { validateEnv } from "@common/env/env";
+import type { AppLogger } from "@common/logger";
+import type { StoredUser } from "@users/users.types";
 import { AUTH_MARKER_COOKIE, AuthController, REFRESH_COOKIE } from "../auth.controller";
 import type { LocalAuthProvider } from "../auth-provider";
 import type { LoginInput } from "../auth.dto";
 import type { TokenService } from "../token.service";
-import type { UsersService } from "../../users/users.service";
+import type { UsersService } from "@users/users.service";
 import type { OrganizationsService } from "../../organizations/organizations.service";
 
 type Case = { name: string; run: () => Promise<void> | void };

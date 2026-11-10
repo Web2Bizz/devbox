@@ -7,12 +7,17 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import path from 'node:path';
-import { AppLogger } from '../../../../../common/logger';
-import { ExternalServiceError } from '../../../../../common/external/external-error';
-import { storageUnavailable, throwStorageNotConfigured } from '../../../../../common/storage/storage-unavailable';
+import type { Stats } from 'node:fs';
+import { AppLogger } from '@common/logger';
+import { ExternalServiceError } from '@common/external/external-error';
+import { storageUnavailable, throwStorageNotConfigured } from '@common/storage/storage-unavailable';
 import { ProjectAccessService } from '../project-access/project-access.service';
-import { WorkspacePathService } from '../../../../../common/storage/workspace-path.service';
-import { ProjectsService } from '../../projects.service';
+import {
+  WorkspacePathService,
+  type DirEntry,
+  type ProjectResolved,
+} from '@common/storage/workspace-path.service';
+import { ProjectsService, type Project } from '../../projects.service';
 
 export type FileNode = {
   path: string;
@@ -20,7 +25,7 @@ export type FileNode = {
   children?: Array<FileNode>;
 };
 
-const MAX_DEPTH = 5;
+const MAX_DEPTH: number = 5;
 
 /**
  * Project file browser over the org layout
@@ -50,7 +55,7 @@ export class ProjectFilesService {
    * unconfigured root). Jail/traversal checks run after this gate.
    */
   resolveRoot(): string {
-    const repos = (process.env.REPOS_ROOT ?? '').trim();
+    const repos: string = (process.env.REPOS_ROOT ?? '').trim();
     if (!repos) throwStorageNotConfigured('project-files.resolveRoot');
     return path.resolve(repos);
   }
@@ -74,13 +79,13 @@ export class ProjectFilesService {
     // with the repos/workspaces/clone deny cases.
     try {
       this.resolveRoot();
-    } catch (err) {
-      if (err instanceof ExternalServiceError && err.code === 'EXTERNAL_UNAVAILABLE') {
-        storageUnavailable('project-files.tree', this.logger, correlationId, err);
+    } catch (error) {
+      if (error instanceof ExternalServiceError && error.code === 'EXTERNAL_UNAVAILABLE') {
+        storageUnavailable('project-files.tree', this.logger, correlationId, error);
       }
-      throw err;
+      throw error;
     }
-    const project = await this.projects.getOrThrow(projectId, correlationId);
+    const project: Project = await this.projects.getOrThrow(projectId, correlationId);
     // Card 5 access layer, always enforced: org members only (membership
     // via ProjectAccessService.assertProjectAccess); strangers → 404
     // (existence is not leaked). A missing requester is a fail-closed 401
@@ -91,72 +96,89 @@ export class ProjectFilesService {
       requesterId,
       correlationId,
     );
-    const clamped = Math.min(Math.max(depth, 0), MAX_DEPTH);
+    const clamped: number = Math.min(Math.max(depth, 0), MAX_DEPTH);
     // The org home determines the content jail (access already gated above).
-    let abs: string;
-    let rel: string;
+    let absolutePath: string;
+    let relativePath: string;
     try {
       if (!project.orgId) {
         throw new NotFoundException(`Path ${requestedPath} not found`);
       }
-      const resolved = await this.paths.resolveOrg(
+      const resolved: ProjectResolved = await this.paths.resolveOrg(
         project.orgId,
         project.id,
         requestedPath || '.',
       );
-      abs = resolved.abs;
-      rel = resolved.rel;
-    } catch (err) {
-      if (err instanceof ExternalServiceError && err.code === 'EXTERNAL_UNAVAILABLE') {
+      absolutePath = resolved.absolutePath;
+      relativePath = resolved.relativePath;
+    } catch (error) {
+      if (error instanceof ExternalServiceError && error.code === 'EXTERNAL_UNAVAILABLE') {
         // Unconfigured REPOS_ROOT → single deny log line, 503 propagates
         // (never a silent 404 over <cwd>/repos).
-        storageUnavailable('project-files.tree', this.logger, correlationId, err);
+        storageUnavailable('project-files.tree', this.logger, correlationId, error);
       }
-      if (err instanceof ForbiddenException) throw err;
+      if (error instanceof ForbiddenException) throw error;
       // BadRequest here means the stored row carries a non-uuid id
       // (hand-migration pending) — surface 404, never 400 for a stored row.
       throw new NotFoundException(`Path ${requestedPath} not found`);
     }
     try {
-      return await this.readNode(abs, rel === '.' ? '.' : rel, clamped);
-    } catch (err) {
-      if (err instanceof ForbiddenException) throw err;
+      return await this.readNode(
+        absolutePath,
+        relativePath === '.' ? '.' : relativePath,
+        clamped,
+      );
+    } catch (error) {
+      if (error instanceof ForbiddenException) throw error;
       throw new NotFoundException(`Path ${requestedPath} not found`);
     }
   }
 
-  private async readNode(abs: string, rel: string, depth: number): Promise<FileNode> {
-    let entries;
+  private async readNode(
+    absolutePath: string,
+    relativePath: string,
+    depth: number,
+  ): Promise<FileNode> {
+    let entries: Array<DirEntry>;
     try {
-      entries = await this.paths.readDir(abs);
+      entries = await this.paths.readDir(absolutePath);
     } catch {
       // Single file (or missing) — surface the file node; missing → caller 404.
       try {
-        const st = await this.paths.statPath(abs);
-        if (st?.isFile()) return { path: rel, type: 'file' };
+        const stats: Stats | null = await this.paths.statPath(absolutePath);
+        if (stats?.isFile()) return { path: relativePath, type: 'file' };
       } catch {
-        throw new NotFoundException(`Path ${rel} not found`);
+        throw new NotFoundException(`Path ${relativePath} not found`);
       }
-      return { path: rel, type: 'file' };
+      return { path: relativePath, type: 'file' };
     }
-    const node: FileNode = { path: rel, type: 'dir', children: [] };
+    const node: FileNode = { path: relativePath, type: 'dir', children: [] };
     if (depth <= 0) return node;
     // Deterministic order, bounded fan-out for depth-capped listings.
-    const sorted = entries.sort((a, b) => a.name.localeCompare(b.name)).slice(0, 200);
+    const sorted: Array<DirEntry> = entries
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .slice(0, 200);
     for (const entry of sorted) {
-      const childRel = rel === '.' ? entry.name : `${rel}/${entry.name}`;
+      const childRelativePath: string =
+        relativePath === '.' ? entry.name : `${relativePath}/${entry.name}`;
       if (entry.isDirectory()) {
         if (depth > 1) {
           try {
-            node.children!.push(await this.readNode(path.join(abs, entry.name), childRel, depth - 1));
+            node.children!.push(
+              await this.readNode(
+                path.join(absolutePath, entry.name),
+                childRelativePath,
+                depth - 1,
+              ),
+            );
           } catch {
-            node.children!.push({ path: childRel, type: 'dir' });
+            node.children!.push({ path: childRelativePath, type: 'dir' });
           }
         } else {
-          node.children!.push({ path: childRel, type: 'dir' });
+          node.children!.push({ path: childRelativePath, type: 'dir' });
         }
       } else {
-        node.children!.push({ path: childRel, type: 'file' });
+        node.children!.push({ path: childRelativePath, type: 'file' });
       }
     }
     return node;

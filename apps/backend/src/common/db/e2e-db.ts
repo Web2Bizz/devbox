@@ -30,7 +30,7 @@ export type TestDb = {
 };
 
 /** Dead-port URL for 503-surface assertions (refused fast, no secrets). */
-export const UNREACHABLE_TEST_DB_URL =
+export const UNREACHABLE_TEST_DB_URL: string =
   "postgres://e2e:e2e@127.0.0.1:9/e2e_test";
 
 /** True for explicit postgres://... URLs (shape check only, value never logged). */
@@ -38,13 +38,13 @@ export function isPostgresUrl(value: string): boolean {
   return /^postgres(ql)?:\/\/[^/\s]+/.test(value.trim());
 }
 
-async function canConnect(url: string, budgetMs = 4000): Promise<boolean> {
-  const pool = new Pool({
+async function canConnect(url: string, budgetMs: number = 4000): Promise<boolean> {
+  const pool: Pool = new Pool({
     connectionString: url,
     connectionTimeoutMillis: budgetMs,
   });
   try {
-    const raced = await Promise.race([
+    const raced: boolean = await Promise.race([
       pool.query("SELECT 1").then(() => true),
       new Promise<false>((resolve) =>
         setTimeout(() => resolve(false), budgetMs),
@@ -64,7 +64,7 @@ async function canConnect(url: string, budgetMs = 4000): Promise<boolean> {
  * connectivity — the mode carries the outcome.
  */
 export async function resolveTestDb(preferredUrl: string): Promise<TestDb> {
-  const url = preferredUrl.trim();
+  const url: string = preferredUrl.trim();
   if (url && isPostgresUrl(url) && (await canConnect(url))) {
     return { mode: "live", url };
   }
@@ -84,15 +84,15 @@ function drizzleDir(): string {
  * Applies the active drizzle migrations through Drizzle's migrator.
  */
 export async function applyTestMigrations(url: string): Promise<void> {
-  const dir = drizzleDir();
-  const pool = new Pool({
+  const directory: string = drizzleDir();
+  const pool: Pool = new Pool({
     connectionString: url,
     connectionTimeoutMillis: 8000,
   });
   try {
-    const db = drizzle(pool);
+    const db: ReturnType<typeof drizzle> = drizzle(pool);
     await migrate(db, {
-      migrationsFolder: dir,
+      migrationsFolder: directory,
       migrationsTable: "__drizzle_migrations_code_first",
       migrationsSchema: "drizzle",
     });

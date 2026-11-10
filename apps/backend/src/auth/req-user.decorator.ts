@@ -8,23 +8,21 @@ import type { RequestIdentity } from './identity.service';
 
 export type { RequestIdentity };
 
-function unauthorized(): UnauthorizedException {
-  return new UnauthorizedException({
-    code: 'unauthorized',
-    message: 'Authentication required',
-  });
-}
-
 /**
  * @ReqUser() — request identity attached by JwtAuthGuard.
  * Fail-closed: no attached identity (missing/malformed user) → 401
  * `unauthorized` — there is no mock/`default` fallback.
  */
-export const ReqUser = createParamDecorator(
-  (_data: unknown, ctx: ExecutionContext): RequestIdentity => {
-    const req = ctx.switchToHttp().getRequest();
-    const identity = readIdentity(req);
-    if (!identity) throw unauthorized();
+export const ReqUser: ReturnType<typeof createParamDecorator> = createParamDecorator(
+  (_data: unknown, context: ExecutionContext): RequestIdentity => {
+    const request: unknown = context.switchToHttp().getRequest();
+    const identity: RequestIdentity | null = readIdentity(request);
+    if (!identity) {
+      throw new UnauthorizedException({
+        code: 'unauthorized',
+        message: 'Authentication required',
+      });
+    }
     return identity;
   },
 );

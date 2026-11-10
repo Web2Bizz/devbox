@@ -24,15 +24,16 @@ import {
   applyTestMigrations,
   isPostgresUrl,
   resolveTestDb,
+  type TestDb,
   type TestDbMode,
 } from "./e2e-db";
 
-export const E2E_DB_IMAGE = "postgres:16-alpine";
+export const E2E_DB_IMAGE: string = "postgres:16-alpine";
 
-const E2E_DB_NAME = "rush_code_e2e";
-const E2E_DB_USER = "rush_code";
-const E2E_DB_PASSWORD = "rush_code";
-const STARTUP_TIMEOUT_MS = 120_000;
+const E2E_DB_NAME: string = "rush_code_e2e";
+const E2E_DB_USER: string = "rush_code";
+const E2E_DB_PASSWORD: string = "rush_code";
+const STARTUP_TIMEOUT_MS: number = 120_000;
 
 export type E2eTestDb = {
   mode: TestDbMode;
@@ -41,7 +42,7 @@ export type E2eTestDb = {
   stop: () => Promise<void>;
 };
 
-const noop = async (): Promise<void> => undefined;
+const noop: () => Promise<void> = async (): Promise<void> => undefined;
 
 async function startContainer(): Promise<StartedPostgreSqlContainer> {
   try {
@@ -51,8 +52,9 @@ async function startContainer(): Promise<StartedPostgreSqlContainer> {
       .withPassword(E2E_DB_PASSWORD)
       .withStartupTimeout(STARTUP_TIMEOUT_MS)
       .start();
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
+  } catch (error) {
+    const reason: string =
+      error instanceof Error ? error.message : String(error);
     throw new Error(
       `e2e: cannot start ${E2E_DB_IMAGE} via testcontainers — is Docker running? ` +
         `Set TEST_DATABASE_URL to reuse an existing Postgres. Cause: ${reason}`,
@@ -68,14 +70,14 @@ export async function startTestDb(): Promise<E2eTestDb> {
     return { mode: "unreachable", url: UNREACHABLE_TEST_DB_URL, stop: noop };
   }
 
-  const external = (process.env.TEST_DATABASE_URL ?? "").trim();
+  const external: string = (process.env.TEST_DATABASE_URL ?? "").trim();
   if (external) {
     if (!isPostgresUrl(external)) {
       throw new Error(
         "e2e: TEST_DATABASE_URL must be a postgres:// URL (value never logged)",
       );
     }
-    const resolved = await resolveTestDb(external);
+    const resolved: TestDb = await resolveTestDb(external);
     if (resolved.mode !== "live") {
       throw new Error(
         "e2e: TEST_DATABASE_URL is set but not reachable — start that database or unset the variable",
@@ -85,13 +87,13 @@ export async function startTestDb(): Promise<E2eTestDb> {
     return { mode: "live", url: resolved.url, stop: noop };
   }
 
-  const container = await startContainer();
-  const url = container.getConnectionUri();
+  const container: StartedPostgreSqlContainer = await startContainer();
+  const url: string = container.getConnectionUri();
   try {
     await applyTestMigrations(url);
-  } catch (err) {
+  } catch (error) {
     await container.stop().catch(() => undefined);
-    throw err;
+    throw error;
   }
   return {
     mode: "live",

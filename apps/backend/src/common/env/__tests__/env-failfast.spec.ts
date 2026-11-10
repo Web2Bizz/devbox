@@ -21,7 +21,7 @@
  */
 import assert from 'node:assert/strict';
 import { validateEnv } from '../env';
-import { WorkspacePathService } from '../../../common/storage/workspace-path.service';
+import { WorkspacePathService } from '@common/storage/workspace-path.service';
 
 type Source = NodeJS.ProcessEnv;
 
@@ -45,8 +45,8 @@ function baseEnv(): Source {
 
 function without(source: Source, ...keys: Array<string>): Source {
   const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(source)) {
-    if (!keys.includes(k) && typeof v === 'string') out[k] = v;
+  for (const [key, value] of Object.entries(source)) {
+    if (!keys.includes(key) && typeof value === 'string') out[key] = value;
   }
   return out as Source;
 }
@@ -55,81 +55,81 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
   {
     name: 'пустой APP_BACKEND_PORT (+ пустой PORT) → throw [env] APP_BACKEND_PORT is required',
     run: () => {
-      const src = without(baseEnv(), 'APP_BACKEND_PORT');
+      const source: Source = without(baseEnv(), 'APP_BACKEND_PORT');
       try {
-        validateEnv(src);
+        validateEnv(source);
         assert.fail('must throw on missing APP_BACKEND_PORT');
-      } catch (err) {
-        const msg = (err as Error).message;
-        assert.match(msg, /\[env\] APP_BACKEND_PORT is required/, msg);
-        assert.ok(msg.includes('.env.example'), `no .env.example pointer: ${msg}`);
+      } catch (error) {
+        const message: string = (error as Error).message;
+        assert.match(message, /\[env\] APP_BACKEND_PORT is required/, message);
+        assert.ok(message.includes('.env.example'), `no .env.example pointer: ${message}`);
       }
     },
   },
   {
     name: 'whitespace-only PORT при пустом APP_BACKEND_PORT → throw (trim-пустота = отсутствие)',
     run: () => {
-      const src = { ...without(baseEnv(), 'APP_BACKEND_PORT'), PORT: '   ' } as Source;
-      assert.throws(() => validateEnv(src), /\[env\] APP_BACKEND_PORT is required/);
+      const source: Source = { ...without(baseEnv(), 'APP_BACKEND_PORT'), PORT: '   ' } as Source;
+      assert.throws(() => validateEnv(source), /\[env\] APP_BACKEND_PORT is required/);
     },
   },
   {
     name: 'legacy PORT покрывает APP_BACKEND_PORT (явное значение — не фолбэк)',
     run: () => {
-      const src = { ...without(baseEnv(), 'APP_BACKEND_PORT'), PORT: '3100' } as Source;
-      assert.equal(validateEnv(src).backendPort, 3100);
+      const source: Source = { ...without(baseEnv(), 'APP_BACKEND_PORT'), PORT: '3100' } as Source;
+      assert.equal(validateEnv(source).backendPort, 3100);
     },
   },
   {
     name: 'malformed DATABASE_URL → throw без эха значения (секрет не в тексте)',
     run: () => {
-      const secret = 'postgres://admin:s3cr3t-not-real@localhost:5432/db';
-      const src = { ...baseEnv(), DATABASE_URL: 'not-a-db-url' } as Source;
+      const secret: string = 'postgres://admin:s3cr3t-not-real@localhost:5432/db';
+      const source: Source = { ...baseEnv(), DATABASE_URL: 'not-a-db-url' } as Source;
       void secret;
       try {
-        validateEnv(src);
+        validateEnv(source);
         assert.fail('must throw on malformed DATABASE_URL');
-      } catch (err) {
-        const msg = (err as Error).message;
-        assert.match(msg, /\[env\] DATABASE_URL/, msg);
-        assert.ok(!msg.includes('not-a-db-url') || msg.includes('unsupported shape'), msg);
-        assert.ok(msg.includes('.env.example'), `no .env.example pointer: ${msg}`);
+      } catch (error) {
+        const message: string = (error as Error).message;
+        assert.match(message, /\[env\] DATABASE_URL/, message);
+        assert.ok(!message.includes('not-a-db-url') || message.includes('unsupported shape'), message);
+        assert.ok(message.includes('.env.example'), `no .env.example pointer: ${message}`);
       }
     },
   },
   {
     name: 'пустой REPOS_ROOT → requireExplicitRoot throw 500 (путь записи, без <cwd>/repos)',
     run: () => {
-      const paths = new WorkspacePathService();
+      const paths: WorkspacePathService = new WorkspacePathService();
       assert.equal(paths.isExplicitRootConfigured(), false);
       try {
         paths.requireExplicitRoot();
         assert.fail('must throw');
-      } catch (err) {
-        assert.equal((err as { status?: number }).status, 500);
-        assert.match((err as Error).message, /REPOS_ROOT/, (err as Error).message);
+      } catch (error) {
+        assert.equal((error as { status?: number }).status, 500);
+        assert.match((error as Error).message, /REPOS_ROOT/, (error as Error).message);
       }
     },
   },
   {
     name: 'whitespace-only REPOS_ROOT → тоже throw (trim-пустота = отсутствие)',
     run: () => {
-      const prev = process.env.REPOS_ROOT;
+      const previousReposRoot: string | undefined = process.env.REPOS_ROOT;
       process.env.REPOS_ROOT = '   ';
       try {
-        const paths = new WorkspacePathService();
+        const paths: WorkspacePathService = new WorkspacePathService();
         assert.equal(paths.isExplicitRootConfigured(), false);
         assert.throws(() => paths.requireExplicitRoot(), /REPOS_ROOT/);
       } finally {
-        if (prev === undefined) delete process.env.REPOS_ROOT;
-        else process.env.REPOS_ROOT = prev;
+        if (previousReposRoot === undefined) delete process.env.REPOS_ROOT;
+        else process.env.REPOS_ROOT = previousReposRoot;
       }
     },
   },
   {
     name: 'resolveOrgStrict при пустом ROOT → rejects до любого touch диска/БД',
     run: async () => {
-      const paths = new WorkspacePathService();
+      const paths: WorkspacePathService = new WorkspacePathService();
       await assert.rejects(() =>
         paths.resolveOrgStrict(
           '123e4567-e89b-12d3-a456-426614174001',
@@ -141,15 +141,15 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
   {
     name: 'PROJECTS_ROOT с NUL-байтом → throw (невалидный путь записи)',
     run: () => {
-      const src = { ...baseEnv(), PROJECTS_ROOT: 'bad\0path' } as Source;
-      assert.throws(() => validateEnv(src), /\[env\] PROJECTS_ROOT/);
+      const source: Source = { ...baseEnv(), PROJECTS_ROOT: 'bad\0path' } as Source;
+      assert.throws(() => validateEnv(source), /\[env\] PROJECTS_ROOT/);
     },
   },
   {
     name: 'REPOS_ROOT с NUL-байтом → throw (невалидный путь записи)',
     run: () => {
-      const src = { ...baseEnv(), REPOS_ROOT: 'bad\0path' } as Source;
-      assert.throws(() => validateEnv(src), /\[env\] REPOS_ROOT/);
+      const source: Source = { ...baseEnv(), REPOS_ROOT: 'bad\0path' } as Source;
+      assert.throws(() => validateEnv(source), /\[env\] REPOS_ROOT/);
     },
   },
 ];
@@ -158,27 +158,30 @@ async function main(): Promise<void> {
   // NOTE (bun test shares one process across spec files): ROOT-негативные проверки
   // читают process.env.REPOS_ROOT — форсируем unconfigured-состояние ТОЛЬКО вокруг
   // таких checks и восстанавливаем сразу после (как в project-strict-root.spec.ts).
-  let failed = 0;
-  for (const c of checks) {
-    const prevRepos = process.env.REPOS_ROOT;
-    const prevProjects = process.env.PROJECTS_ROOT;
-    const needsClean =
-      c.name.startsWith('пустой REPOS_ROOT') || c.name.startsWith('resolveStrict');
+  let failed: number = 0;
+  for (const check of checks) {
+    const previousReposRoot: string | undefined = process.env.REPOS_ROOT;
+    const previousProjectsRoot: string | undefined =
+      process.env.PROJECTS_ROOT;
+    const needsClean: boolean =
+      check.name.startsWith('пустой REPOS_ROOT') ||
+      check.name.startsWith('resolveOrgStrict') ||
+      check.name.startsWith('resolveStrict');
     if (needsClean) {
       delete process.env.REPOS_ROOT;
       delete process.env.PROJECTS_ROOT;
     }
     try {
-      await c.run();
-      console.log(`ok - ${c.name}`);
-    } catch (err) {
+      await check.run();
+      console.log(`ok - ${check.name}`);
+    } catch (error) {
       failed += 1;
-      console.error(`FAIL - ${c.name}: ${(err as Error).message}`);
+      console.error(`FAIL - ${check.name}: ${(error as Error).message}`);
     } finally {
-      if (prevRepos === undefined) delete process.env.REPOS_ROOT;
-      else process.env.REPOS_ROOT = prevRepos;
-      if (prevProjects === undefined) delete process.env.PROJECTS_ROOT;
-      else process.env.PROJECTS_ROOT = prevProjects;
+      if (previousReposRoot === undefined) delete process.env.REPOS_ROOT;
+      else process.env.REPOS_ROOT = previousReposRoot;
+      if (previousProjectsRoot === undefined) delete process.env.PROJECTS_ROOT;
+      else process.env.PROJECTS_ROOT = previousProjectsRoot;
     }
   }
   if (failed > 0) {
@@ -190,7 +193,7 @@ async function main(): Promise<void> {
   }
 }
 
-void main().catch((err: unknown) => {
-  console.error(`env fail-fast checks failed to run: ${(err as Error).message}`);
+void main().catch((error: unknown) => {
+  console.error(`env fail-fast checks failed to run: ${(error as Error).message}`);
   process.exit(1);
 });

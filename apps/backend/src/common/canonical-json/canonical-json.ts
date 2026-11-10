@@ -18,11 +18,11 @@ export function canonicalJson(value: unknown): string {
     case 'bigint':
       return encode(value.toString());
     case 'object': {
-      const obj = value as Record<string, unknown>;
-      const entries = Object.keys(obj)
+      const objectValue: Record<string, unknown> = value as Record<string, unknown>;
+      const entries: Array<string> = Object.keys(objectValue)
         .sort()
-        .filter((key) => obj[key] !== undefined)
-        .map((key) => `${JSON.stringify(key)}:${canonicalJson(obj[key])}`);
+        .filter((key) => objectValue[key] !== undefined)
+        .map((key) => `${JSON.stringify(key)}:${canonicalJson(objectValue[key])}`);
       return `{${entries.join(',')}}`;
     }
     default:

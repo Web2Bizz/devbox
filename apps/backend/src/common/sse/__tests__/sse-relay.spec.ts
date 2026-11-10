@@ -95,8 +95,8 @@ function streamOf(frames: Array<unknown>, onReturn?: () => void): SseSubscriptio
 }
 
 function baseParams(over: {
-  req: FakeReq;
-  res: FakeRes;
+  request: FakeReq;
+  response: FakeRes;
   subscribe: (signal: AbortSignal) => Promise<SseSubscription>;
   filterFrame?: (frame: unknown) => boolean;
   mapFrame?: (value: unknown) => unknown;
@@ -104,9 +104,9 @@ function baseParams(over: {
 }): SseRelayParams {
   return {
     operation: 'GET /test-events',
-    cid: 'cid-test',
-    req: asRequest(over.req),
-    res: asResponse(over.res),
+    correlationId: 'cid-test',
+    request: asRequest(over.request),
+    response: asResponse(over.response),
     subscribe: over.subscribe,
     logger: over.logger ?? silentLogger(),
     prefix: '[test]',
@@ -172,8 +172,8 @@ describe('relaySse frame delivery', () => {
     const res = fakeRes();
     await relaySse(
       baseParams({
-        req,
-        res,
+        request: req,
+        response: res,
         subscribe: async () => streamOf(FRAMES),
       }),
     );
@@ -186,8 +186,8 @@ describe('relaySse frame delivery', () => {
     const res = fakeRes();
     await relaySse(
       baseParams({
-        req,
-        res,
+        request: req,
+        response: res,
         subscribe: async () => streamOf(FRAMES),
         filterFrame: (frame) =>
           (frame as { data?: { sessionID?: unknown } })?.data?.sessionID === 'ses_own',
@@ -209,8 +209,8 @@ describe('relaySse frame delivery', () => {
     const logs: Array<string> = [];
     await relaySse(
       baseParams({
-        req,
-        res,
+        request: req,
+        response: res,
         subscribe: async () => streamOf(FRAMES),
         logger: captureLogger(logs),
         filterFrame: (frame) =>
@@ -234,8 +234,8 @@ describe('relaySse frame delivery', () => {
     const res = fakeRes();
     await relaySse(
       baseParams({
-        req,
-        res,
+        request: req,
+        response: res,
         subscribe: async () => streamOf(FRAMES),
         filterFrame: () => false,
       }),
@@ -250,8 +250,8 @@ describe('relaySse frame delivery', () => {
     let filtered = 0;
     await relaySse(
       baseParams({
-        req,
-        res,
+        request: req,
+        response: res,
         subscribe: async () => streamOf([]),
         filterFrame: () => {
           filtered += 1;
@@ -268,8 +268,8 @@ describe('relaySse frame delivery', () => {
     const res = fakeRes();
     await relaySse(
       baseParams({
-        req,
-        res,
+        request: req,
+        response: res,
         subscribe: async () => streamOf(FRAMES),
       }),
     );
@@ -290,8 +290,8 @@ describe('relaySse frame delivery', () => {
     } satisfies SseSubscription;
     await relaySse(
       baseParams({
-        req,
-        res,
+        request: req,
+        response: res,
         subscribe: async () => failing,
       }),
     );
@@ -316,8 +316,8 @@ describe('relaySse frame delivery', () => {
     } satisfies SseSubscription;
     await relaySse(
       baseParams({
-        req,
-        res,
+        request: req,
+        response: res,
         subscribe: async () => aborting,
       }),
     );
@@ -350,8 +350,8 @@ describe('relaySse C0 wire contract (heartbeat/id/stream.error)', () => {
     try {
       await relaySse(
         baseParams({
-          req,
-          res,
+          request: req,
+          response: res,
           subscribe: async () => streamOf(FRAMES),
         }),
       );
@@ -389,8 +389,8 @@ describe('relaySse C0 wire contract (heartbeat/id/stream.error)', () => {
     try {
       const pending = relaySse(
         baseParams({
-          req,
-          res,
+          request: req,
+          response: res,
           subscribe: async () => hanging,
         }),
       );
@@ -418,8 +418,8 @@ describe('relaySse C0 wire contract (heartbeat/id/stream.error)', () => {
     const res = fakeRes();
     await relaySse(
       baseParams({
-        req,
-        res,
+        request: req,
+        response: res,
         subscribe: async () => streamOf(FRAMES),
       }),
     );
@@ -441,8 +441,8 @@ describe('relaySse C0 wire contract (heartbeat/id/stream.error)', () => {
     ];
     await relaySse(
       baseParams({
-        req,
-        res,
+        request: req,
+        response: res,
         subscribe: async () => streamOf(frames),
       }),
     );
@@ -466,8 +466,8 @@ describe('relaySse C0 wire contract (heartbeat/id/stream.error)', () => {
     } satisfies SseSubscription;
     await relaySse(
       baseParams({
-        req,
-        res,
+        request: req,
+        response: res,
         subscribe: async () => failing,
       }),
     );
@@ -502,8 +502,8 @@ describe('relaySse C0 wire contract (heartbeat/id/stream.error)', () => {
       } satisfies SseSubscription;
       await relaySse(
         baseParams({
-          req,
-          res,
+          request: req,
+          response: res,
           subscribe: async () => failing,
         }),
       );
@@ -524,8 +524,8 @@ describe('relaySse C0 wire contract (heartbeat/id/stream.error)', () => {
     const logs: Array<string> = [];
     await relaySse(
       baseParams({
-        req,
-        res,
+        request: req,
+        response: res,
         subscribe: async () => streamOf(FRAMES),
         logger: captureLogger(logs),
         mapFrame: () => {
@@ -544,8 +544,8 @@ describe('relaySse C0 wire contract (heartbeat/id/stream.error)', () => {
     const res = fakeRes();
     await relaySse(
       baseParams({
-        req,
-        res,
+        request: req,
+        response: res,
         subscribe: async () => streamOf(FRAMES),
         filterFrame: () => {
           throw new Error('predicate blew up');
@@ -561,8 +561,8 @@ describe('relaySse C0 wire contract (heartbeat/id/stream.error)', () => {
     const req = fakeReq();
     const res = fakeRes();
     const params = baseParams({
-      req,
-      res,
+      request: req,
+      response: res,
       subscribe: async () => streamOf(FRAMES),
     });
     params.probe = async () => 'down';
@@ -583,8 +583,8 @@ describe('relaySse C0 wire contract (heartbeat/id/stream.error)', () => {
     abort.name = 'AbortError';
     await relaySse(
       baseParams({
-        req,
-        res,
+        request: req,
+        response: res,
         subscribe: async () => {
           throw abort;
         },

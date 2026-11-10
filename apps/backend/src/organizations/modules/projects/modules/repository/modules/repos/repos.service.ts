@@ -1,13 +1,15 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { readdir, realpath, stat } from 'node:fs/promises';
+import type { Dirent, Stats } from 'node:fs';
 import path from 'node:path';
-import { AppLogger } from '../../../../../../../common/logger';
+import type { z } from 'zod';
+import { AppLogger } from '@common/logger';
 import {
   storageUnavailable,
   throwStorageNotConfigured,
-} from '../../../../../../../common/storage/storage-unavailable';
+} from '@common/storage/storage-unavailable';
 import { userSpaceSchema, type ReposQuery } from './repos.dto';
-import { isValidGitRepo } from '../../utils/repos-git';
+import { isValidGitRepo, type GitCheck } from '../../utils/repos-git';
 
 export type RepoEntry = {
   /** Scope owner id (org uuid under orgs/). */
@@ -23,11 +25,11 @@ type Candidate = {
   scope: 'orgs';
   userSpace: string;
   name: string;
-  absPath: string;
+  absolutePath: string;
   updatedAt: string;
 };
 
-const SCOPE_DIR_PATTERN = /^[a-zA-Z0-9_-]+$/;
+const SCOPE_DIR_PATTERN: RegExp = /^[a-zA-Z0-9_-]+$/;
 
 /**
  * Unified storage catalog over the org layout:
@@ -58,13 +60,13 @@ export class ReposService {
    * <cwd>/repos read). Jail/traversal checks run after this gate.
    */
   resolveRoot(): string {
-    const repos = (process.env.REPOS_ROOT ?? '').trim();
+    const repos: string = (process.env.REPOS_ROOT ?? '').trim();
     if (!repos) throwStorageNotConfigured('repos.resolveRoot');
     return path.resolve(repos);
   }
 
   private async realRoot(): Promise<string> {
-    const root = this.resolveRoot();
+    const root: string = this.resolveRoot();
     try {
       return await realpath(root);
     } catch {
@@ -73,16 +75,18 @@ export class ReposService {
   }
 
   /** Jailed absolute path for a repo candidate (throws 400 on traversal). */
-  private async jailCandidate(rootReal: string, rel: string): Promise<string> {
-    const abs = path.resolve(this.resolveRoot(), rel);
+  private async jailCandidate(rootReal: string, relativePath: string): Promise<string> {
+    const absolutePath: string = path.resolve(this.resolveRoot(), relativePath);
     let real: string;
     try {
-      real = await realpath(abs);
+      real = await realpath(absolutePath);
     } catch {
-      real = abs;
+      real = absolutePath;
     }
-    const withSep = rootReal.endsWith(path.sep) ? rootReal : rootReal + path.sep;
-    if (real !== rootReal && !real.startsWith(withSep)) {
+    const withSeparator: string = rootReal.endsWith(path.sep)
+      ? rootReal
+      : rootReal + path.sep;
+    if (real !== rootReal && !real.startsWith(withSeparator)) {
       throw new BadRequestException('Path traversal is forbidden');
     }
     return real;
@@ -96,14 +100,14 @@ export class ReposService {
     let root: string;
     try {
       root = this.resolveRoot();
-    } catch (err) {
+    } catch (error) {
       // Unconfigured storage → single deny log line, then the 503 propagates
       // (ApiErrorFilter → EXTERNAL_UNAVAILABLE + Retry-After 30). Never a
       // silent [] over <cwd>/repos.
-      storageUnavailable('repos.list', this.logger, correlationId, err);
+      storageUnavailable('repos.list', this.logger, correlationId, error);
     }
-    const rootReal = await this.realRoot();
-    let scopes;
+    const rootReal: string = await this.realRoot();
+    let scopes: Array<Dirent>;
     try {
       scopes = await readdir(root, { withFileTypes: true });
     } catch {
@@ -111,52 +115,63 @@ export class ReposService {
       // (Unconfigured REPOS_ROOT never reaches here — denied above with 503.)
       return [];
     }
-    const out: Array<Candidate> = [];
-    const wanted = userSpace?.trim();
-    for (const s of scopes.sort((a, b) => a.name.localeCompare(b.name))) {
-      if (!s.isDirectory()) continue;
-      if (s.name !== 'orgs') continue;
-      let owners;
+    const candidates: Array<Candidate> = [];
+    const wanted: string | undefined = userSpace?.trim();
+    for (const scopeEntry of scopes.sort((left, right) => left.name.localeCompare(right.name))) {
+      if (!scopeEntry.isDirectory()) continue;
+      if (scopeEntry.name !== 'orgs') continue;
+      let owners: Array<Dirent>;
       try {
-        owners = await readdir(path.join(root, s.name), { withFileTypes: true });
+        owners = await readdir(path.join(root, scopeEntry.name), { withFileTypes: true });
       } catch {
         continue; // no scope entries yet — skip (not an error)
       }
-      for (const o of owners.sort((a, b) => a.name.localeCompare(b.name))) {
-        if (!o.isDirectory() || o.name.startsWith('.')) continue;
-        if (!SCOPE_DIR_PATTERN.test(o.name)) continue;
-        if (wanted && o.name !== wanted) continue;
-        let projects;
+      for (const ownerEntry of owners.sort((left, right) => left.name.localeCompare(right.name))) {
+        if (!ownerEntry.isDirectory() || ownerEntry.name.startsWith('.')) continue;
+        if (!SCOPE_DIR_PATTERN.test(ownerEntry.name)) continue;
+        if (wanted && ownerEntry.name !== wanted) continue;
+        let projects: Array<Dirent>;
         try {
-          projects = await readdir(path.join(root, s.name, o.name, 'projects'), {
-            withFileTypes: true,
-          });
+          projects = await readdir(
+            path.join(root, scopeEntry.name, ownerEntry.name, 'projects'),
+            {
+              withFileTypes: true,
+            },
+          );
         } catch {
           continue; // scope without projects → skip (not an error)
         }
-        for (const p of projects.sort((a, b) => a.name.localeCompare(b.name))) {
-          if (!p.isDirectory() || p.name.startsWith('.')) continue;
-          const rel = path.join(s.name, o.name, 'projects', p.name, 'content');
-          const abs = await this.jailCandidate(rootReal, rel);
-          let mtime = new Date(0);
+        for (const projectEntry of projects.sort((left, right) =>
+          left.name.localeCompare(right.name),
+        )) {
+          if (!projectEntry.isDirectory() || projectEntry.name.startsWith('.')) continue;
+          const relativePath: string = path.join(
+            scopeEntry.name,
+            ownerEntry.name,
+            'projects',
+            projectEntry.name,
+            'content',
+          );
+          const absolutePath: string = await this.jailCandidate(rootReal, relativePath);
+          let modifiedAt: Date = new Date(0);
           try {
-            const st = await stat(abs);
-            if (!st.isDirectory()) continue;
-            mtime = st.mtime;
+            const stats: Stats = await stat(absolutePath);
+            if (!stats.isDirectory()) continue;
+            modifiedAt = stats.mtime;
           } catch {
             continue;
           }
-          out.push({
+          candidates.push({
             scope: 'orgs',
-            userSpace: o.name,
-            name: p.name,
-            absPath: abs,
-            updatedAt: mtime.toISOString(),
+            userSpace: ownerEntry.name,
+            name: projectEntry.name,
+            absolutePath,
+            updatedAt: modifiedAt.toISOString(),
           });
         }
       }
     }
-    return out;
+    return candidates;
   }
 
   async list(
@@ -165,34 +180,34 @@ export class ReposService {
     correlationId?: string,
   ): Promise<Array<RepoEntry>> {
     if (userSpace !== undefined) {
-      const parsed = userSpaceSchema.safeParse(userSpace);
+      const parsed: z.ZodSafeParseResult<string> = userSpaceSchema.safeParse(userSpace);
       if (!parsed.success) {
         throw new BadRequestException(
           parsed.error.issues[0]?.message ?? 'Invalid userSpace',
         );
       }
     }
-    const limit = query?.limit ?? 50;
-    const offset = query?.offset ?? 0;
-    const q = (query?.q ?? '').trim().toLowerCase();
+    const limit: number = query?.limit ?? 50;
+    const offset: number = query?.offset ?? 0;
+    const search: string = (query?.q ?? '').trim().toLowerCase();
 
-    const candidates = await this.scan(userSpace, correlationId);
+    const candidates: Array<Candidate> = await this.scan(userSpace, correlationId);
     const valid: Array<RepoEntry> = [];
-    for (const c of candidates) {
-      const check = await isValidGitRepo(c.absPath, this.logger);
+    for (const candidate of candidates) {
+      const check: GitCheck = await isValidGitRepo(candidate.absolutePath, this.logger);
       if (!check.ok) continue; // no-git/corrupted → skip, never 500
-      if (q && !c.name.toLowerCase().includes(q)) continue;
+      if (search && !candidate.name.toLowerCase().includes(search)) continue;
       valid.push({
-        userSpace: c.userSpace,
-        name: c.name,
-        path: `${c.scope}/${c.userSpace}/projects/${c.name}/content`,
-        updatedAt: c.updatedAt,
+        userSpace: candidate.userSpace,
+        name: candidate.name,
+        path: `${candidate.scope}/${candidate.userSpace}/projects/${candidate.name}/content`,
+        updatedAt: candidate.updatedAt,
       });
     }
-    valid.sort((a, b) =>
-      a.userSpace === b.userSpace
-        ? a.name.localeCompare(b.name)
-        : a.userSpace.localeCompare(b.userSpace),
+    valid.sort((left, right) =>
+      left.userSpace === right.userSpace
+        ? left.name.localeCompare(right.name)
+        : left.userSpace.localeCompare(right.userSpace),
     );
     return valid.slice(offset, offset + limit);
   }

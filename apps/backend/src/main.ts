@@ -2,35 +2,39 @@ import * as dotenv from 'dotenv';
 import { expand } from 'dotenv-expand';
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app/app.module';
-import { AppLogger, nestLogLevels } from './common/logger';
-import { configureApp, setupSwagger } from './app/app.setup';
-import { validateEnvWithWarnings } from './common/env/env';
+import { type INestApplication } from '@nestjs/common';
+import { AppModule } from '@app/app.module';
+import { AppLogger, nestLogLevels } from '@common/logger';
+import { configureApp, setupSwagger } from '@app/app.setup';
+import { validateEnvWithWarnings } from '@common/env/env';
 
 // Expand ${VAR} / ${VAR:-default} from the local .env (single source).
 // Never overrides existing process.env (shell/nx with-env wins); never logs secrets.
-const dotenvResult = dotenv.config();
+const dotenvResult: dotenv.DotenvConfigOutput = dotenv.config();
 expand(dotenvResult);
 
-function isAbortLike(e: unknown): boolean {
-  const v = e as {
-    name?: string;
-    code?: unknown;
-    cause?: { name?: string; code?: unknown };
-  } | null;
-  if (!v || typeof v !== 'object') return false;
+/** Shape probed for abort-like failures (DOMException / Node errno 20). */
+type AbortLike = {
+  name?: string;
+  code?: unknown;
+  cause?: { name?: string; code?: unknown };
+};
+
+function isAbortLike(error: unknown): boolean {
+  const value: AbortLike | null = error as AbortLike | null;
+  if (!value || typeof value !== 'object') return false;
   return (
-    v?.name === 'AbortError' ||
-    v?.code === 20 ||
-    v?.cause?.name === 'AbortError' ||
-    v?.cause?.code === 20
+    value?.name === 'AbortError' ||
+    value?.code === 20 ||
+    value?.cause?.name === 'AbortError' ||
+    value?.cause?.code === 20
   );
 }
 
 // Process-level logger: usable before DI exists; sanitizes + respects
 // LOG_LEVEL like every other AppLogger (never raw console.* in runtime code).
-const PROCESS_CONTEXT = 'Process';
-const processLogger = new AppLogger(PROCESS_CONTEXT);
+const PROCESS_CONTEXT: string = 'Process';
+const processLogger: AppLogger = new AppLogger(PROCESS_CONTEXT);
 
 // SSE downstream disconnect (GET /api/v1/sessions/events) surfaces as
 // DOMException AbortError outside Nest context (EventEmitter close →
@@ -49,31 +53,31 @@ process.on('unhandledRejection', (reason: unknown) => {
     reason instanceof Error ? (reason.stack ?? undefined) : undefined,
   );
 });
-process.on('uncaughtException', (err: unknown) => {
-  if (isAbortLike(err)) {
-    processLogger.debug(`[uncaughtException] AbortError ignored ${String(err).slice(0, 200)}`);
+process.on('uncaughtException', (error: unknown) => {
+  if (isAbortLike(error)) {
+    processLogger.debug(`[uncaughtException] AbortError ignored ${String(error).slice(0, 200)}`);
     return;
   }
-  throw err;
+  throw error;
 });
 
 async function bootstrap(): Promise<void> {
-  const BOOTSTRAP_CONTEXT = 'Bootstrap';
-  const logger = new AppLogger(BOOTSTRAP_CONTEXT);
+  const BOOTSTRAP_CONTEXT: string = 'Bootstrap';
+  const logger: AppLogger = new AppLogger(BOOTSTRAP_CONTEXT);
   try {
     // validateEnvWithWarnings() runs FIRST: fail-fast on bad ports/URLs (never logs secrets).
     // WARNs (fallbacks, deprecated/unknown keys) are scrubbed by AppLogger like everything else.
     const { env, warnings } = validateEnvWithWarnings();
-    const PORT = env.backendPort;
-    for (const w of warnings) {
+    const PORT: number = env.backendPort;
+    for (const warning of warnings) {
       // ERROR-level notices (e.g. unconfigured REPOS_ROOT storage outage) must
       // surface at error level even though boot continues (health unchanged);
       // plain WARN fallbacks stay at warn. Never carries secrets.
-      if (w.includes("[env] ERROR")) logger.error(w);
-      else logger.warn(w);
+      if (warning.includes("[env] ERROR")) logger.error(warning);
+      else logger.warn(warning);
     }
 
-    const app = await NestFactory.create(AppModule, {
+    const app: INestApplication = await NestFactory.create(AppModule, {
       cors: false,
       // Framework logs respect LOG_LEVEL too.
       logger: nestLogLevels(env.logLevel),
@@ -89,13 +93,13 @@ async function bootstrap(): Promise<void> {
     await app.listen(PORT);
     // Port only — no secrets, no URLs with credentials.
     logger.log(`listening on :${PORT}`);
-  } catch (err: unknown) {
+  } catch (error: unknown) {
     // Single-line boot failure: AppLogger.fatal() sanitizes (URL credentials
     // masked, live secrets scrubbed) like every other log; stack is dropped
     // (message only, truncated) so [env]-errors don't double-spam via
     // process.on('unhandledRejection'). exit(1) lets the supervisor (nx/compose
     // restart policy) restart cleanly instead of hanging with no open port.
-    const text = err instanceof Error ? err.message : String(err);
+    const text: string = error instanceof Error ? error.message : String(error);
     logger.fatal(String(text).slice(0, 500));
     process.exit(1);
   }

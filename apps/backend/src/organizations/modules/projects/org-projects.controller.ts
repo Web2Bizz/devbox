@@ -15,11 +15,12 @@ import {
   UseInterceptors,
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagger";
-import { NoIndexInterceptor } from "../../../common/http/noindex.interceptor";
-import { ZodValidationPipe } from "../../../common/validation";
+import { NoIndexInterceptor } from "@common/http/noindex.interceptor";
+import { ZodValidationPipe } from "@common/validation";
 import { JwtAuthGuard } from "../../../auth/jwt-auth.guard";
 import { ReqUser } from "../../../auth/req-user.decorator";
 import type { RequestIdentity } from "../../../auth/identity.service";
+import type { OrgRole } from "../../organizations.types";
 import { ProjectAccessService } from "./modules/project-access/project-access.service";
 import {
   EffectiveConfigDto,
@@ -63,7 +64,7 @@ export class OrgProjectsController {
   ) {}
 
   private async memberOrThrow(orgId: string, userId: string, correlationId?: string): Promise<void> {
-    const role = await this.access.getRole(orgId, userId, correlationId);
+    const role: OrgRole | null = await this.access.getRole(orgId, userId, correlationId);
     if (!role) {
       throw new NotFoundException(`Organization ${orgId} not found`);
     }
@@ -80,7 +81,7 @@ export class OrgProjectsController {
     @Query("includeDeleted") includeDeleted?: string,
   ): Promise<Array<ProjectDto>> {
     await this.memberOrThrow(id, identity.id, correlationId);
-    const flag = includeDeleted === "true" || includeDeleted === "1";
+    const flag: boolean = includeDeleted === "true" || includeDeleted === "1";
     return this.projects.list(correlationId, {
       orgId: id,
       includeDeleted: flag,
@@ -118,7 +119,7 @@ export class OrgProjectsController {
     @Query("includeDeleted") includeDeleted?: string,
   ): Promise<ProjectDto> {
     await this.memberOrThrow(id, identity.id, correlationId);
-    const flag = includeDeleted === "true" || includeDeleted === "1";
+    const flag: boolean = includeDeleted === "true" || includeDeleted === "1";
     return this.projects.assertProjectBelongsToOrg(id, projectId, correlationId, {
       includeDeleted: flag,
     });

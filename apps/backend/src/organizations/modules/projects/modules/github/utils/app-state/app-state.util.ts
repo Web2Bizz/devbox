@@ -11,7 +11,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
  */
 
 /** Default lifetime of an install state (10 minutes). */
-export const APP_STATE_TTL_MS = 10 * 60_000;
+export const APP_STATE_TTL_MS: number = 10 * 60_000;
 
 export type AppStatePayload = {
   userId: string;
@@ -32,7 +32,7 @@ export type AppStateVerifyOptions = {
   nowMs?: number;
 };
 
-const STATE_DOMAIN = 'github-install-state.';
+const STATE_DOMAIN: string = 'github-install-state.';
 
 function encodePayload(payload: AppStatePayload): string {
   return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
@@ -50,10 +50,10 @@ export function signAppState(
   secret: string,
   options: AppStateSignOptions = {},
 ): string {
-  const nowMs = options.nowMs ?? Date.now();
-  const ttlMs = options.ttlMs ?? APP_STATE_TTL_MS;
+  const nowMs: number = options.nowMs ?? Date.now();
+  const ttlMs: number = options.ttlMs ?? APP_STATE_TTL_MS;
   const payload: AppStatePayload = { userId, iat: nowMs, exp: nowMs + ttlMs };
-  const encoded = encodePayload(payload);
+  const encoded: string = encodePayload(payload);
   return `${encoded}.${signSegment(encoded, secret)}`;
 }
 
@@ -72,13 +72,14 @@ export function verifyAppState(
   }
   if (secret.length === 0) return { ok: false, reason: 'invalid' };
 
-  const parts = state.split('.');
+  const parts: Array<string> = state.split('.');
   if (parts.length !== 2 || parts[0].length === 0 || parts[1].length === 0) {
     return { ok: false, reason: 'invalid' };
   }
+  // Tuple destructuring of the split parts — explicit annotation cannot be expressed here.
   const [encoded, signature] = parts;
-  const expected = Buffer.from(signSegment(encoded, secret), 'utf8');
-  const actual = Buffer.from(signature, 'utf8');
+  const expected: Buffer = Buffer.from(signSegment(encoded, secret), 'utf8');
+  const actual: Buffer = Buffer.from(signature, 'utf8');
   if (expected.length !== actual.length) return { ok: false, reason: 'invalid' };
   if (!timingSafeEqual(expected, actual)) return { ok: false, reason: 'invalid' };
 
@@ -91,7 +92,11 @@ export function verifyAppState(
   if (typeof parsed !== 'object' || parsed === null) {
     return { ok: false, reason: 'invalid' };
   }
-  const candidate = parsed as {
+  const candidate: {
+    userId?: unknown;
+    iat?: unknown;
+    exp?: unknown;
+  } = parsed as {
     userId?: unknown;
     iat?: unknown;
     exp?: unknown;
@@ -105,7 +110,7 @@ export function verifyAppState(
   if (typeof candidate.exp !== 'number' || !Number.isInteger(candidate.exp)) {
     return { ok: false, reason: 'invalid' };
   }
-  const nowMs = options.nowMs ?? Date.now();
+  const nowMs: number = options.nowMs ?? Date.now();
   if (candidate.exp <= nowMs) return { ok: false, reason: 'expired' };
   return {
     ok: true,

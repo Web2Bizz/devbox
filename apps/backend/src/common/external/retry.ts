@@ -19,11 +19,11 @@ import {
   isTimeoutError,
 } from './external-error';
 
-export const DEFAULT_MAX_ATTEMPTS = 3;
-export const DEFAULT_BASE_DELAY_MS = 200;
-export const DEFAULT_MAX_DELAY_MS = 2000;
+export const DEFAULT_MAX_ATTEMPTS: number = 3;
+export const DEFAULT_BASE_DELAY_MS: number = 200;
+export const DEFAULT_MAX_DELAY_MS: number = 2000;
 /** Hard ceiling — never more attempts than this, even when misconfigured. */
-export const HARD_MAX_ATTEMPTS = 10;
+export const HARD_MAX_ATTEMPTS: number = 10;
 
 /** Methods that must not be retried without an explicit opt-in flag. */
 export const NON_IDEMPOTENT_METHODS: ReadonlySet<string> = new Set([
@@ -50,9 +50,9 @@ export type RetryOptions = {
    */
   allowNonIdempotentRetry?: boolean;
   /** Injected clock for tests (default: setTimeout-based). */
-  sleep?: (ms: number) => Promise<void>;
+  sleep?: (milliseconds: number) => Promise<void>;
   /** Custom retry predicate (default: isRetryableError). */
-  shouldRetry?: (err: unknown, attempt: number) => boolean;
+  shouldRetry?: (error: unknown, attempt: number) => boolean;
 };
 
 export type ResolvedRetryOptions = {
@@ -67,8 +67,8 @@ export function isIdempotentMethod(method?: string): boolean {
   return !NON_IDEMPOTENT_METHODS.has((method ?? 'GET').toUpperCase());
 }
 
-function defaultSleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function defaultSleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve: () => void) => setTimeout(resolve, milliseconds));
 }
 
 /**
@@ -82,22 +82,35 @@ export function computeBackoffDelay(
   maxDelayMs: number,
   jitter: boolean,
 ): number {
-  const exponential = Math.min(baseDelayMs * 2 ** (attempt - 1), maxDelayMs);
+  const exponential: number = Math.min(
+    baseDelayMs * 2 ** (attempt - 1),
+    maxDelayMs,
+  );
   if (!jitter) return exponential;
   return exponential / 2 + Math.random() * (exponential / 2);
 }
 
-export function resolveRetryOptions(opts: RetryOptions = {}): ResolvedRetryOptions {
-  const maxAttempts = Math.min(
-    Math.max(Math.floor(opts.maxAttempts ?? DEFAULT_MAX_ATTEMPTS), 1),
+export function resolveRetryOptions(
+  options: RetryOptions = {},
+): ResolvedRetryOptions {
+  const maxAttempts: number = Math.min(
+    Math.max(Math.floor(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS), 1),
     HARD_MAX_ATTEMPTS,
   );
-  const baseDelayMs = Math.max(Math.floor(opts.baseDelayMs ?? DEFAULT_BASE_DELAY_MS), 0);
-  const maxDelayMs = Math.max(
-    Math.floor(opts.maxDelayMs ?? DEFAULT_MAX_DELAY_MS),
+  const baseDelayMs: number = Math.max(
+    Math.floor(options.baseDelayMs ?? DEFAULT_BASE_DELAY_MS),
+    0,
+  );
+  const maxDelayMs: number = Math.max(
+    Math.floor(options.maxDelayMs ?? DEFAULT_MAX_DELAY_MS),
     baseDelayMs,
   );
-  return { maxAttempts, baseDelayMs, maxDelayMs, jitter: opts.jitter ?? true };
+  return {
+    maxAttempts,
+    baseDelayMs,
+    maxDelayMs,
+    jitter: options.jitter ?? true,
+  };
 }
 
 /**
@@ -106,26 +119,26 @@ export function resolveRetryOptions(opts: RetryOptions = {}): ResolvedRetryOptio
  * `{ status }` (Octokit-style), or network-ish messages (fetch failed,
  * ECONNREFUSED, ENOTFOUND, socket hang up …). 4xx (except 429) → false.
  */
-export function isRetryableError(err: unknown): boolean {
-  if (err instanceof ExternalServiceError) return err.isRetryable;
-  if (isTimeoutError(err)) return true;
-  if (typeof err === 'object' && err !== null && 'status' in err) {
-    const status = Number((err as { status?: unknown }).status);
+export function isRetryableError(error: unknown): boolean {
+  if (error instanceof ExternalServiceError) return error.isRetryable;
+  if (isTimeoutError(error)) return true;
+  if (typeof error === 'object' && error !== null && 'status' in error) {
+    const status: number = Number((error as { status?: unknown }).status);
     if (Number.isInteger(status)) {
       if (isRetryableStatus(status)) return true;
       if (status >= 400 && status <= 499) return false;
     }
   }
-  if (err instanceof Error) {
-    const msg = err.message.toLowerCase();
+  if (error instanceof Error) {
+    const message: string = error.message.toLowerCase();
     if (
-      msg.includes('fetch failed') ||
-      msg.includes('econnrefused') ||
-      msg.includes('enotfound') ||
-      msg.includes('eai_again') ||
-      msg.includes('etimedout') ||
-      msg.includes('socket hang up') ||
-      msg.includes('network')
+      message.includes('fetch failed') ||
+      message.includes('econnrefused') ||
+      message.includes('enotfound') ||
+      message.includes('eai_again') ||
+      message.includes('etimedout') ||
+      message.includes('socket hang up') ||
+      message.includes('network')
     ) {
       return true;
     }
@@ -134,29 +147,36 @@ export function isRetryableError(err: unknown): boolean {
 }
 
 /**
- * Runs `fn(attempt)` with the retry policy. Non-idempotent methods without
- * `allowNonIdempotentRetry` invoke `fn(1)` exactly once (no sleep, no loop).
+ * Runs `operation(attempt)` with the retry policy. Non-idempotent methods without
+ * `allowNonIdempotentRetry` invoke `operation(1)` exactly once (no sleep, no loop).
  * Rejects with the last error (its `attempt` is NOT rewritten — factories
  * already stamp it; ExternalClient stamps per-attempt errors itself).
  */
 export async function withRetry<T>(
-  fn: (attempt: number) => Promise<T>,
-  opts: RetryOptions = {},
+  operation: (attempt: number) => Promise<T>,
+  options: RetryOptions = {},
 ): Promise<T> {
-  const { maxAttempts, baseDelayMs, maxDelayMs, jitter } = resolveRetryOptions(opts);
-  const sleep = opts.sleep ?? defaultSleep;
-  const shouldRetry = opts.shouldRetry ?? isRetryableError;
+  const {
+    maxAttempts,
+    baseDelayMs,
+    maxDelayMs,
+    jitter,
+  }: ResolvedRetryOptions = resolveRetryOptions(options);
+  const sleep: (milliseconds: number) => Promise<void> =
+    options.sleep ?? defaultSleep;
+  const shouldRetry: (error: unknown, attempt: number) => boolean =
+    options.shouldRetry ?? isRetryableError;
 
-  if (!isIdempotentMethod(opts.method) && !opts.allowNonIdempotentRetry) {
-    return fn(1);
+  if (!isIdempotentMethod(options.method) && !options.allowNonIdempotentRetry) {
+    return operation(1);
   }
 
-  let attempt = 1;
+  let attempt: number = 1;
   for (;;) {
     try {
-      return await fn(attempt);
-    } catch (err) {
-      if (attempt >= maxAttempts || !shouldRetry(err, attempt)) throw err;
+      return await operation(attempt);
+    } catch (error) {
+      if (attempt >= maxAttempts || !shouldRetry(error, attempt)) throw error;
       await sleep(computeBackoffDelay(attempt, baseDelayMs, maxDelayMs, jitter));
       attempt += 1;
     }

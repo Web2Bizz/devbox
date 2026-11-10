@@ -1,12 +1,19 @@
 import { execFile } from 'node:child_process';
 import { stat } from 'node:fs/promises';
+import type { Stats } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-const execFileAsync = promisify(execFile);
+type ExecFileAsync = (
+  file: string,
+  args: Array<string>,
+  options?: { cwd?: string; timeout?: number },
+) => Promise<{ stdout: string; stderr: string }>;
+
+const execFileAsync: ExecFileAsync = promisify(execFile);
 
 /** Timeout for each git probe (no shell, no network, readonly). */
-export const GIT_PROBE_TIMEOUT_MS = 5000;
+export const GIT_PROBE_TIMEOUT_MS: number = 5000;
 
 export type GitInvalidReason = 'no-git' | 'rev-parse-failed' | 'fsck-failed' | 'timeout';
 
@@ -19,13 +26,14 @@ type WarnLogger = {
   warn(message: unknown): void;
 };
 
-function isTimeout(err: unknown): boolean {
-  const e = err as { killed?: boolean; signal?: string; code?: string | number };
+function isTimeout(error: unknown): boolean {
+  const errorShape: { killed?: boolean; signal?: string; code?: string | number } =
+    error as { killed?: boolean; signal?: string; code?: string | number };
   return (
-    e?.killed === true ||
-    e?.signal === 'SIGTERM' ||
-    (typeof e?.code === 'string' && e.code.includes('TIMEOUT')) ||
-    (err instanceof Error && /timed out/i.test(err.message))
+    errorShape?.killed === true ||
+    errorShape?.signal === 'SIGTERM' ||
+    (typeof errorShape?.code === 'string' && errorShape.code.includes('TIMEOUT')) ||
+    (error instanceof Error && /timed out/i.test(error.message))
   );
 }
 
@@ -40,12 +48,12 @@ function isTimeout(err: unknown): boolean {
  *   propagate as-is); never logs secrets (path + reason only).
  */
 export async function isValidGitRepo(
-  absRepoPath: string,
+  absoluteRepoPath: string,
   logger?: WarnLogger,
 ): Promise<GitCheck> {
-  let gitStat;
+  let gitStat: Stats;
   try {
-    gitStat = await stat(path.join(absRepoPath, '.git'));
+    gitStat = await stat(path.join(absoluteRepoPath, '.git'));
   } catch {
     return { ok: false, reason: 'no-git' };
   }
@@ -53,23 +61,29 @@ export async function isValidGitRepo(
     return { ok: false, reason: 'no-git' };
   }
 
-  const run = async (args: Array<string>, reason: GitInvalidReason): Promise<GitCheck | null> => {
+  const run: (
+    args: Array<string>,
+    reason: GitInvalidReason,
+  ) => Promise<GitCheck | null> = async (args: Array<string>, reason: GitInvalidReason) => {
     try {
       await execFileAsync('git', args, {
-        cwd: absRepoPath,
+        cwd: absoluteRepoPath,
         timeout: GIT_PROBE_TIMEOUT_MS,
       });
       return null;
-    } catch (err) {
-      const r: GitInvalidReason = isTimeout(err) ? 'timeout' : reason;
-      logger?.warn({ path: absRepoPath, reason: r });
-      return { ok: false, reason: r };
+    } catch (error) {
+      const invalidReason: GitInvalidReason = isTimeout(error) ? 'timeout' : reason;
+      logger?.warn({ path: absoluteRepoPath, reason: invalidReason });
+      return { ok: false, reason: invalidReason };
     }
   };
 
-  const rev = await run(['rev-parse', '--git-dir', '--show-toplevel'], 'rev-parse-failed');
+  const rev: GitCheck | null = await run(
+    ['rev-parse', '--git-dir', '--show-toplevel'],
+    'rev-parse-failed',
+  );
   if (rev) return rev;
-  const fsck = await run(['fsck', '--no-dangling'], 'fsck-failed');
+  const fsck: GitCheck | null = await run(['fsck', '--no-dangling'], 'fsck-failed');
   if (fsck) return fsck;
   return { ok: true };
 }
@@ -80,13 +94,14 @@ export async function isValidGitRepo(
  * isValidGitRepo. Callers map null to an honest 400 (a run needs a baseCommit
  * for Forward-Only); never invent a sha.
  */
-export async function resolveHeadOrNull(absRepoPath: string): Promise<string | null> {
+export async function resolveHeadOrNull(absoluteRepoPath: string): Promise<string | null> {
   try {
+    // Destructuring an upstream exec result — explicit annotation cannot be expressed here.
     const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
-      cwd: absRepoPath,
+      cwd: absoluteRepoPath,
       timeout: GIT_PROBE_TIMEOUT_MS,
     });
-    const sha = stdout.trim();
+    const sha: string = stdout.trim();
     return /^[0-9a-f]{40}$/i.test(sha) ? sha : null;
   } catch {
     return null;

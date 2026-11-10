@@ -1,7 +1,8 @@
 import { Injectable } from "@nestjs/common";
-import { eq, sql } from "drizzle-orm";
-import { DbService, type DbClient } from "../common/db/db.service";
-import { users, type UserRow } from "../common/db/schema";
+import { and, eq, sql } from "drizzle-orm";
+import { DbService, type DbClient } from "@common/db/db.service";
+import { users, vaultSecrets, type UserRow } from "@common/db/schema";
+import { uuidSchema } from "@common/validation";
 import type { AuthProviderId, StoredUser } from "./users.types";
 
 /** Drizzle row → domain shape (Date → ISO-8601 at the DB boundary, CoC §2). */
@@ -18,22 +19,12 @@ function toStoredUser(row: UserRow): StoredUser {
   };
 }
 
-/**
- * User ids are uuids (randomUUID at createLocal, uuid PK in Postgres).
- * A non-uuid key can never match a row — return null without querying so
- * mock identities (e.g. 'alice' via AUTH_LEGACY_MOCK_FALLBACK) keep the
- * designed null → 401/mock mapping on Postgres instead of a 22P02 500.
- */
-function isUserId(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
-}
-
 /** Postgres unique-violation (email) → caller answers 409. */
 function isUniqueViolation(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
   // node-postgres surfaces `code` directly; drizzle-orm wraps it as `cause`.
-  const code = (error as { code?: unknown }).code;
-  const causeCode = (error as { cause?: { code?: unknown } }).cause?.code;
+  const code: unknown = (error as { code?: unknown }).code;
+  const causeCode: unknown = (error as { cause?: { code?: unknown } }).cause?.code;
   return code === "23505" || causeCode === "23505";
 }
 
@@ -43,6 +34,11 @@ function isUniqueViolation(error: unknown): boolean {
  * failures bubble up as raw errors and are mapped to 503 EXTERNAL_UNAVAILABLE
  * by the service (`dbUnavailable`). The 409 detection (SQLSTATE 23505) and the
  * uuid guard stay private here (decision recorded in the plan, § Решения).
+ *
+ * User ids are uuids (randomUUID at createLocal, uuid PK in Postgres); a
+ * non-uuid key can never match a row, so callers return null without querying
+ * — mock identities (e.g. 'alice' via AUTH_LEGACY_MOCK_FALLBACK) keep the
+ * designed null → 401/mock mapping on Postgres instead of a 22P02 500.
  */
 @Injectable()
 export class UsersRepository {
@@ -61,7 +57,7 @@ export class UsersRepository {
     passwordHash: string;
   }): Promise<StoredUser | null> {
     try {
-      const rows = await this.client()
+      const rows: Array<UserRow> = await this.client()
         .insert(users)
         .values({
           firstName: user.firstName,
@@ -79,7 +75,7 @@ export class UsersRepository {
   }
 
   async findByEmail(email: string): Promise<StoredUser | null> {
-    const rows = await this.client()
+    const rows: Array<UserRow> = await this.client()
       .select()
       .from(users)
       .where(sql`lower(${users.email}) = lower(${email})`)
@@ -88,8 +84,8 @@ export class UsersRepository {
   }
 
   async findById(id: string): Promise<StoredUser | null> {
-    if (!isUserId(id)) return null;
-    const rows = await this.client()
+    if (!uuidSchema.safeParse(id).success) return null;
+    const rows: Array<UserRow> = await this.client()
       .select()
       .from(users)
       .where(eq(users.id, id))
@@ -101,8 +97,8 @@ export class UsersRepository {
     id: string,
     patch: { firstName?: string; lastName?: string },
   ): Promise<StoredUser | null> {
-    if (!isUserId(id)) return null;
-    const rows = await this.client()
+    if (!uuidSchema.safeParse(id).success) return null;
+    const rows: Array<UserRow> = await this.client()
       .update(users)
       .set({
         ...(patch.firstName !== undefined ? { firstName: patch.firstName } : {}),
@@ -116,11 +112,30 @@ export class UsersRepository {
 
   /** Test/e2e seam — DELETE FROM users (requires live Postgres). */
   async deleteAll(): Promise<void> {
-    await this.client().delete(users);
+    await this.client().transaction(async (transaction) => {
+      // Vault rows have no FK on the polymorphic consumer_id — clear them
+      // explicitly before the users they belong to disappear.
+      await transaction.delete(vaultSecrets);
+      await transaction.delete(users);
+    });
   }
 
-  /** Compensating rollback for register: remove a just-created user. */
+  /**
+   * Compensating rollback for register: remove a just-created user together
+   * with their vault secrets (no FK on the polymorphic consumer_id, so the
+   * cleanup is compensated here in the same transaction).
+   */
   async deleteById(id: string): Promise<void> {
-    await this.client().delete(users).where(eq(users.id, id));
+    await this.client().transaction(async (transaction) => {
+      await transaction
+        .delete(vaultSecrets)
+        .where(
+          and(
+            eq(vaultSecrets.consumerType, "user"),
+            eq(vaultSecrets.consumerId, id),
+          ),
+        );
+      await transaction.delete(users).where(eq(users.id, id));
+    });
   }
 }

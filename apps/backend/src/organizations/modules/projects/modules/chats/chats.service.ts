@@ -6,15 +6,15 @@ import {
   Inject,
 } from "@nestjs/common";
 import { and, eq, isNull } from "drizzle-orm";
-import { AppLogger } from "../../../../../common/logger";
+import { AppLogger } from "@common/logger";
 import {
   DbService,
   dbUnavailable,
   type DbClient,
-} from "../../../../../common/db/db.service";
-import { projectChats, type ProjectChatRow } from "../../../../../common/db/schema";
+} from "@common/db/db.service";
+import { projectChats, type ProjectChatRow } from "@common/db/schema";
 import { ProjectAccessService } from "../project-access/project-access.service";
-import { ProjectsService } from "../../projects.service";
+import { ProjectsService, type Project } from "../../projects.service";
 import type { CreateChatInput } from "./chats.dto";
 
 export type ProjectChat = {
@@ -90,10 +90,10 @@ export class ChatsService {
     correlationId?: string,
     requesterId?: string,
   ): Promise<Array<ProjectChat>> {
-    const project = await this.projects.getOrThrow(projectId, correlationId);
+    const project: Project = await this.projects.getOrThrow(projectId, correlationId);
     await this.checkAccess(project.id, project.ownerId, requesterId, correlationId);
     try {
-      const rows = await this.client()
+      const rows: Array<ProjectChatRow> = await this.client()
         .select()
         .from(projectChats)
         .where(
@@ -104,10 +104,10 @@ export class ChatsService {
         );
       return rows
         .map(toChat)
-        .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    } catch (err) {
-      if (err instanceof NotFoundException) throw err;
-      dbUnavailable("chats.list", err, this.logger, correlationId);
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      dbUnavailable("chats.list", error, this.logger, correlationId);
     }
   }
 
@@ -117,19 +117,19 @@ export class ChatsService {
     correlationId?: string,
     requesterId?: string,
   ): Promise<ProjectChat> {
-    const project = await this.projects.getOrThrow(projectId, correlationId);
+    const project: Project = await this.projects.getOrThrow(projectId, correlationId);
     await this.checkAccess(project.id, project.ownerId, requesterId, correlationId);
     try {
-      const rows = await this.client()
+      const rows: Array<ProjectChatRow> = await this.client()
         .insert(projectChats)
         .values({ projectId, title: input.title })
         .returning();
-      // Per-request success on a hot path → debug (not info); cid-bound.
+      // Per-request success on a hot path → debug (not info); correlationId-bound.
       this.logger.debug(`[projects] chat created`, correlationId);
       return toChat(rows[0]);
-    } catch (err) {
-      if (err instanceof NotFoundException) throw err;
-      dbUnavailable("chats.create", err, this.logger, correlationId);
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      dbUnavailable("chats.create", error, this.logger, correlationId);
     }
   }
 
@@ -139,12 +139,12 @@ export class ChatsService {
     correlationId?: string,
     requesterId?: string,
   ): Promise<void> {
-    const project = await this.projects.getOrThrow(projectId, correlationId);
+    const project: Project = await this.projects.getOrThrow(projectId, correlationId);
     await this.checkAccess(project.id, project.ownerId, requesterId, correlationId);
     try {
       // Soft delete (project rule): the row keeps its history; sessions are
       // detached by the caller (sessions.detachChat) and the FK stays intact.
-      const rows = await this.client()
+      const rows: Array<ProjectChatRow> = await this.client()
         .select()
         .from(projectChats)
         .where(
@@ -164,11 +164,11 @@ export class ChatsService {
         .update(projectChats)
         .set({ deletedAt: new Date() })
         .where(eq(projectChats.id, chatId));
-      // Per-request success on a hot path → debug (not info); cid-bound.
+      // Per-request success on a hot path → debug (not info); correlationId-bound.
       this.logger.debug(`[projects] chat removed`, correlationId);
-    } catch (err) {
-      if (err instanceof NotFoundException) throw err;
-      dbUnavailable("chats.remove", err, this.logger, correlationId);
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      dbUnavailable("chats.remove", error, this.logger, correlationId);
     }
   }
 
@@ -187,8 +187,8 @@ export class ChatsService {
             isNull(projectChats.deletedAt),
           ),
         );
-    } catch (err) {
-      dbUnavailable("chats.removeByProject", err, this.logger, correlationId);
+    } catch (error) {
+      dbUnavailable("chats.removeByProject", error, this.logger, correlationId);
     }
   }
 
@@ -198,7 +198,7 @@ export class ChatsService {
     correlationId?: string,
   ): Promise<ProjectChat | null> {
     try {
-      const rows = await this.client()
+      const rows: Array<ProjectChatRow> = await this.client()
         .select()
         .from(projectChats)
         .where(
@@ -210,8 +210,8 @@ export class ChatsService {
         )
         .limit(1);
       return rows.length > 0 ? toChat(rows[0]) : null;
-    } catch (err) {
-      dbUnavailable("chats.getInProject", err, this.logger, correlationId);
+    } catch (error) {
+      dbUnavailable("chats.getInProject", error, this.logger, correlationId);
     }
   }
 

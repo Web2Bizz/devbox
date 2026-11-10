@@ -5,15 +5,18 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { eq } from "drizzle-orm";
-import { AppLogger } from "../../../common/logger";
-import { DbService, dbUnavailable, type DbClient } from "../../../common/db/db.service";
+import { AppLogger } from "@common/logger";
+import { DbService, dbUnavailable, type DbClient } from "@common/db/db.service";
 import {
   organizationInvites,
   organizationMembers,
   type OrganizationInviteRow,
-} from "../../../common/db/schema";
-import { WorkspacePathService } from "../../../common/storage/workspace-path.service";
-import { UsersService } from "../../../users/users.service";
+  type OrganizationMemberRow,
+} from "@common/db/schema";
+import { WorkspacePathService } from "@common/storage/workspace-path.service";
+import { uuidV7Schema } from "@common/validation";
+import { UsersService } from "@users/users.service";
+import type { StoredUser } from "@users/users.types";
 import type { AcceptInviteInput, CreateInviteInput } from "../../organizations.dto";
 import type {
   OrganizationInvite,
@@ -23,14 +26,6 @@ import type {
 import { OrganizationsGuard } from "../../organizations.guard";
 import { toMember } from "../../utils/organization-member";
 import { isPgForeignKeyViolation, isPgUniqueViolation } from "../../utils/pg-error";
-
-/**
- * uuidv7 shape (version 7 + RFC 4122 variant) — a non-v7 token can never
- * match a row, so it is rejected before any Postgres access.
- */
-function isUuidV7(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
 
 /**
  * InvitesService — persistent single-use uuidv7 invite links backed by
@@ -114,35 +109,37 @@ export class InvitesService {
     correlationId?: string,
   ): Promise<OrganizationInvite> {
     await this.guard.maintainerOrThrow(orgId, requesterId, correlationId);
-    const role = (input.role ?? "user") as OrgRole;
+    const role: OrgRole = (input.role ?? "user") as OrgRole;
     if (role === "maintainer" && (await this.guard.maintainerCount(orgId, correlationId)) > 0) {
       throw new ConflictException("Organization already has a maintainer");
     }
-    const rawEmail =
+    const rawEmail: string =
       typeof input.email === "string" ? input.email.trim().toLowerCase() : "";
-    const email = rawEmail ? rawEmail : null;
+    const email: string | null = rawEmail ? rawEmail : null;
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       throw new BadRequestException("email must be a valid email");
     }
-    const token = Bun.randomUUIDv7();
+    const token: string = Bun.randomUUIDv7();
     try {
-      const rows = await this.client()
+      const rows: Array<OrganizationInviteRow> = await this.client()
         .insert(organizationInvites)
         .values({ token, orgId, email, role })
         .returning();
       this.logger.info(`[organizations] invite created org=${orgId} role=${role}`, correlationId);
       return this.toInvite(rows[0]);
-    } catch (err) {
-      if (isPgForeignKeyViolation(err)) {
+    } catch (error) {
+      if (isPgForeignKeyViolation(error)) {
         throw new NotFoundException(`Organization ${orgId} not found`);
       }
-      dbUnavailable("organizations.createInvite", err, this.logger, correlationId);
+      dbUnavailable("organizations.createInvite", error, this.logger, correlationId);
     }
   }
 
   /**
    * Accept a persistent single-use invite. Missing/consumed → 404 (no
-   * enumeration, no expiry — links never expire). The row is DELETED
+   * enumeration, no expiry — links never expire). A non-v7 token can never
+   * match a row, so it is rejected before any Postgres access. The row is
+   * DELETED
    * before the membership insert result returns, so replay → 404 and a
    * raced accept can never grant membership twice.
    */
@@ -151,21 +148,21 @@ export class InvitesService {
     userId: string,
     correlationId?: string,
   ): Promise<OrganizationMember> {
-    const me = this.paths.checkUuid(userId, "userId");
-    const token = String(input.token ?? "").trim().toLowerCase();
-    if (!isUuidV7(token)) {
+    const acceptingUserId: string = this.paths.checkUuid(userId, "userId");
+    const token: string = String(input.token ?? "").trim().toLowerCase();
+    if (!uuidV7Schema.safeParse(token).success) {
       throw new NotFoundException("Invite not found or already used");
     }
     let stored: OrganizationInviteRow | null = null;
     try {
-      const rows = await this.client()
+      const rows: Array<OrganizationInviteRow> = await this.client()
         .select()
         .from(organizationInvites)
         .where(eq(organizationInvites.token, token))
         .limit(1);
       stored = rows[0] ?? null;
-    } catch (err) {
-      dbUnavailable("organizations.acceptInvite.lookup", err, this.logger, correlationId);
+    } catch (error) {
+      dbUnavailable("organizations.acceptInvite.lookup", error, this.logger, correlationId);
     }
     if (!stored) {
       throw new NotFoundException("Invite not found or already used");
@@ -176,13 +173,13 @@ export class InvitesService {
     await this.guard.orgRowOrThrow(stored.orgId, correlationId);
     // Strict-503 (see OrganizationsService.create()): DB outage propagates,
     // live null → 404.
-    let known: Awaited<ReturnType<UsersService["findById"]>>;
+    let known: StoredUser | null;
     try {
-      known = await this.users.findById(me, correlationId);
-    } catch (err) {
-      dbUnavailable("organizations.acceptInvite.userLookup", err, this.logger, correlationId);
+      known = await this.users.findById(acceptingUserId, correlationId);
+    } catch (error) {
+      dbUnavailable("organizations.acceptInvite.userLookup", error, this.logger, correlationId);
     }
-    if (!known) throw new NotFoundException(`User ${me} not found`);
+    if (!known) throw new NotFoundException(`User ${acceptingUserId} not found`);
     if (stored.email && known.email.trim().toLowerCase() !== stored.email) {
       throw new NotFoundException("Invite not found or already used");
     }
@@ -193,9 +190,9 @@ export class InvitesService {
       throw new ConflictException("Organization already has a maintainer");
     }
     try {
-      const rows = await this.client()
+      const rows: Array<OrganizationMemberRow> = await this.client()
         .insert(organizationMembers)
-        .values({ orgId: stored.orgId, userId: me, role: stored.role as OrgRole })
+        .values({ orgId: stored.orgId, userId: acceptingUserId, role: stored.role as OrgRole })
         .returning();
       await this.client()
         .delete(organizationInvites)
@@ -206,18 +203,18 @@ export class InvitesService {
         correlationId,
       );
       return toMember(rows[0]);
-    } catch (err) {
-      if (isPgUniqueViolation(err)) {
+    } catch (error) {
+      if (isPgUniqueViolation(error)) {
         throw new ConflictException(
           stored.role === "maintainer"
             ? "Organization already has a maintainer"
             : "User is already a member",
         );
       }
-      if (isPgForeignKeyViolation(err)) {
+      if (isPgForeignKeyViolation(error)) {
         throw new NotFoundException("Organization or user not found");
       }
-      dbUnavailable("organizations.acceptInvite", err, this.logger, correlationId);
+      dbUnavailable("organizations.acceptInvite", error, this.logger, correlationId);
     }
   }
 }

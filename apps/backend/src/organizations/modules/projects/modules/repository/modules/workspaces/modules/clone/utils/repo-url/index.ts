@@ -4,5 +4,4 @@ export {
   buildGitCloneArgs,
   createAllowedCloneHosts,
   normalizeRepoUrl,
-  rejectedRepoUrl,
 } from './repo-url.util';

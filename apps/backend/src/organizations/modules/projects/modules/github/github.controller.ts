@@ -23,8 +23,8 @@ import {
 import { JwtAuthGuard } from "../../../../../auth/jwt-auth.guard";
 import { ReqUser } from "../../../../../auth/req-user.decorator";
 import type { RequestIdentity } from "../../../../../auth/identity.service";
-import { ZodValidationPipe } from "../../../../../common/validation";
-import { validateEnv } from "../../../../../common/env/env";
+import { ZodValidationPipe } from "@common/validation";
+import { validateEnv, type AppEnv } from "@common/env/env";
 import {
   GithubCallbackResultDto,
   GithubInstallUrlDto,
@@ -39,7 +39,10 @@ import {
   type ListReposQueryInput,
 } from "./github.dto";
 import { GithubBindingService } from "./github-binding.service";
-import { GithubInstallationsService } from "./github-installations.service";
+import {
+  GithubInstallationsService,
+  type GithubInstallation,
+} from "./github-installations.service";
 import {
   INSTALLATION_ACTIONS,
   getRawBody,
@@ -54,7 +57,7 @@ import { GithubService } from "./github.service";
  * raw-bytes signature check MUST stay the first gate: unverified payloads
  * never reach validation.
  */
-const installationWebhookPipe = new ZodValidationPipe(installationWebhookSchema);
+const installationWebhookPipe: ZodValidationPipe = new ZodValidationPipe(installationWebhookSchema);
 
 /**
  * GithubController — multi-tenant GitHub App surface.
@@ -134,7 +137,7 @@ export class GithubController {
     @ReqUser() identity: RequestIdentity,
     @Headers("x-correlation-id") correlationId?: string,
   ): Promise<GithubCallbackResultDto> {
-    const installationId = await this.binding.bindInstallation(
+    const installationId: number = await this.binding.bindInstallation(
       identity.id,
       query,
       correlationId,
@@ -150,19 +153,19 @@ export class GithubController {
   @ApiResponse({ status: 503, description: "Webhook secret is not configured" })
   async webhook(
     @Body() body: InstallationWebhookPayload,
-    @Req() req: unknown,
+    @Req() request: unknown,
     @Headers("x-hub-signature-256") signature?: string,
     @Headers("x-github-event") event?: string,
     @Headers("x-correlation-id") correlationId?: string,
   ): Promise<GithubWebhookAckDto> {
-    const env = validateEnv(process.env);
+    const env: AppEnv = validateEnv(process.env);
     if (!env.githubWebhookSecret) {
       throw new ServiceUnavailableException("GitHub webhook is not configured");
     }
     // Signature verification MUST run over the exact raw bytes captured by
     // the express json verify hook. Re-serializing `body` would accept a
     // signature that GitHub never produced — refuse instead.
-    const raw = getRawBody(req);
+    const raw: Buffer | null = getRawBody(request);
     if (raw === null) {
       throw new BadRequestException({
         code: "WEBHOOK_RAW_BODY_REQUIRED",
@@ -176,24 +179,24 @@ export class GithubController {
     // type). Unknown keys are preserved, so installation.account.* stays
     // readable below. Non-installation events are acked before this point.
     if (event !== undefined && event !== "installation") return { ok: true };
-    const payload = (await installationWebhookPipe.transform(
+    const payload: InstallationWebhookPayload = (await installationWebhookPipe.transform(
       body ?? {},
     )) as InstallationWebhookPayload;
     // Only `installation` events mutate the registry; everything else
     // (ping, installation_repositories, …) is acked without side effects.
-    const action = typeof payload.action === "string" ? payload.action : "";
+    const action: string = typeof payload.action === "string" ? payload.action : "";
     if (action !== "" && !INSTALLATION_ACTIONS.has(action)) return { ok: true };
     // Unknown-event shape without an action (e.g. ping) → ack.
     if (action === "") return { ok: true };
 
-    const inst = payload.installation;
-    const installationId = typeof inst?.id === "number" ? inst.id : NaN;
+    const installation: InstallationWebhookPayload["installation"] = payload.installation;
+    const installationId: number = typeof installation?.id === "number" ? installation.id : NaN;
     if (!Number.isInteger(installationId) || installationId <= 0)
       return { ok: true };
-    const accountLogin =
-      typeof inst?.account?.login === "string" ? inst.account.login : null;
-    const accountType =
-      typeof inst?.account?.type === "string" ? inst.account.type : null;
+    const accountLogin: string | null =
+      typeof installation?.account?.login === "string" ? installation.account.login : null;
+    const accountType: string | null =
+      typeof installation?.account?.type === "string" ? installation.account.type : null;
 
     if (action === "deleted") {
       await this.installations.removeByInstallationId(
@@ -252,8 +255,11 @@ export class GithubController {
     if (!this.appAuth.isConfigured()) {
       throw new UnauthorizedException("GitHub App is not configured");
     }
-    const userId = identity.id;
-    const stored = await this.installations.findByUserId(userId, correlationId);
+    const userId: string = identity.id;
+    const stored: GithubInstallation | null = await this.installations.findByUserId(
+      userId,
+      correlationId,
+    );
     if (stored === null) {
       throw new NotFoundException({
         code: "GITHUB_NOT_INSTALLED",

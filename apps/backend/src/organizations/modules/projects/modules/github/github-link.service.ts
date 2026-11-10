@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
-import { ProjectsService } from "../../projects.service";
+import type { GithubLinkStatusDto } from "../../projects.dto";
+import { ProjectsService, type Project } from "../../projects.service";
 
 /**
  * GithubLinkService — read-only GitHub link status, lives inside
@@ -15,15 +16,15 @@ import { ProjectsService } from "../../projects.service";
 export class GithubLinkService {
   constructor(private readonly projects: ProjectsService) {}
 
-  async status(projectId: string, correlationId?: string) {
-    const p = await this.projects.getOrThrow(projectId, correlationId);
-    const linked = Boolean(p.githubOwner && p.githubRepo);
+  async status(projectId: string, correlationId?: string): Promise<GithubLinkStatusDto> {
+    const project: Project = await this.projects.getOrThrow(projectId, correlationId);
+    const linked: boolean = Boolean(project.githubOwner && project.githubRepo);
     return {
       linked,
-      owner: p.githubOwner,
-      repo: p.githubRepo,
-      branch: p.githubBranch,
-      url: p.githubUrl,
+      owner: project.githubOwner,
+      repo: project.githubRepo,
+      branch: project.githubBranch,
+      url: project.githubUrl,
     };
   }
 }

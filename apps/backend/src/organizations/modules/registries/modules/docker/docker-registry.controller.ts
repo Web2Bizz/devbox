@@ -1,6 +1,6 @@
 import { Controller, Get, Headers, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { ApiErrorDto } from '../../../../../common/http/api/api.dto';
+import { ApiErrorDto } from '@common/http/api/api.dto';
 import { JwtAuthGuard } from '../../../../../auth/jwt-auth.guard';
 import { DockerRegistryService } from './docker-registry.service';
 import { RegistryCatalogDto } from './docker.dto';
@@ -31,7 +31,7 @@ export class DockerRegistryController {
   async getDocker(
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<RegistryCatalogDto> {
-    const repositories = await this.registry.listCatalog(correlationId ?? '');
+    const repositories: Array<string> = await this.registry.listCatalog(correlationId ?? '');
     return { repositories };
   }
 
@@ -42,7 +42,7 @@ export class DockerRegistryController {
   async catalog(
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<RegistryCatalogDto> {
-    const repositories = await this.registry.listCatalog(correlationId ?? '');
+    const repositories: Array<string> = await this.registry.listCatalog(correlationId ?? '');
     return { repositories };
   }
 }

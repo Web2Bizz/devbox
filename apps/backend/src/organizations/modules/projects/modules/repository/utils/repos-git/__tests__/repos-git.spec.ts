@@ -33,15 +33,15 @@ function makeLogger() {
 }
 
 /** Local-only git fixture: repo-scoped identity, one empty commit, no network. */
-function initRepo(abs: string): void {
-  mkdirSync(abs, { recursive: true });
-  execFileSync('git', ['init', '-b', 'main'], { cwd: abs, stdio: 'ignore' });
+function initRepo(absolutePath: string): void {
+  mkdirSync(absolutePath, { recursive: true });
+  execFileSync('git', ['init', '-b', 'main'], { cwd: absolutePath, stdio: 'ignore' });
   execFileSync('git', ['config', 'user.email', 'repos-git-spec@localhost'], {
-    cwd: abs,
+    cwd: absolutePath,
     stdio: 'ignore',
   });
-  execFileSync('git', ['config', 'user.name', 'repos-git-spec'], { cwd: abs, stdio: 'ignore' });
-  execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: abs, stdio: 'ignore' });
+  execFileSync('git', ['config', 'user.name', 'repos-git-spec'], { cwd: absolutePath, stdio: 'ignore' });
+  execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: absolutePath, stdio: 'ignore' });
 }
 
 const checks: Array<{ name: string; run: () => Promise<void> | void }> = [

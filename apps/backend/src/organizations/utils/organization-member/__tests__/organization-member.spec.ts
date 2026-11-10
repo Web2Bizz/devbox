@@ -10,7 +10,7 @@
  * `createdAt` Date becomes an ISO-8601 string (no live Postgres).
  */
 import assert from "node:assert/strict";
-import type { OrganizationMemberRow } from "../../../../common/db/schema";
+import type { OrganizationMemberRow } from "@common/db/schema";
 import { toMember } from "../organization-member.util";
 
 const createdAt = new Date("2026-10-20T00:00:00.000Z");

@@ -6,7 +6,7 @@ import {
   projectChats,
   projectSessions,
   projects,
-} from "../../common/db/schema";
+} from "@common/db/schema";
 import { OrganizationsGuard } from "../organizations.guard";
 import { OrganizationsService } from "../organizations.service";
 
@@ -82,7 +82,7 @@ const silentLogger = {
 
 const pathsStub = {
   async orgScopeStrict() {
-    return { absHome: "/tmp/soft-delete-unused" };
+    return { absoluteHome: "/tmp/soft-delete-unused" };
   },
   async realStrictRoot() {
     return "/tmp";
@@ -342,7 +342,7 @@ function trackingPaths() {
   const removeDirCalls: Array<string> = [];
   const paths = {
     async orgScopeStrict() {
-      return { absHome: "/tmp/soft-delete-org" };
+      return { absoluteHome: "/tmp/soft-delete-org" };
     },
     async realStrictRoot() {
       return "/tmp";

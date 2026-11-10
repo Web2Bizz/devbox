@@ -1,4 +1,4 @@
-import { serializeCause, type AppLogger } from "../../../common/logger";
+import { serializeCause, type AppLogger } from "@common/logger";
 
 /** Minimal Bun.password shape (bun-native argon2id; no npm dependency). */
 type BunPassword = {
@@ -11,9 +11,10 @@ export type PasswordLogger = Pick<AppLogger, "debug" | "error">;
 
 /** bun runtime global — the only argon2id source (no npm fallback by design). */
 function passwordApi(): BunPassword {
-  const runtime = (globalThis as unknown as { Bun?: { password?: BunPassword } })
-    .Bun;
-  const api = runtime?.password;
+  const runtime: { password?: BunPassword } | undefined = (
+    globalThis as unknown as { Bun?: { password?: BunPassword } }
+  ).Bun;
+  const api: BunPassword | undefined = runtime?.password;
   if (!api) {
     throw new Error(
       "[auth] Bun.password is unavailable — run the backend on bun >= 1.4 (see docs/auth-decision.md).",
@@ -27,7 +28,7 @@ export async function hashPassword(
   password: string,
   logger?: PasswordLogger,
 ): Promise<string> {
-  const passwordHash = await passwordApi().hash(password, {
+  const passwordHash: string = await passwordApi().hash(password, {
     algorithm: "argon2id",
   });
   logger?.debug("[auth] password hashed");

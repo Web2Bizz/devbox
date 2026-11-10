@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import type { ExecutionContext } from "@nestjs/common";
 import { ForbiddenException, UnauthorizedException } from "@nestjs/common";
-import { organizationMembers, organizations } from "../../common/db/schema";
+import { organizationMembers, organizations } from "@common/db/schema";
 import { OrganizationsGuard } from "../organizations.guard";
 
 type Case = { name: string; run: () => Promise<void> | void };

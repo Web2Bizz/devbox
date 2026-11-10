@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { UnauthorizedException } from "@nestjs/common";
-import type { DbService } from "../../../../../../common/db/db.service";
+import type { DbService } from "@common/db/db.service";
 import type { ProjectAccessService } from "../../project-access/project-access.service";
 import type { ChatsService } from "../../chats/chats.service";
 import type { ProjectsService } from "../../../projects.service";

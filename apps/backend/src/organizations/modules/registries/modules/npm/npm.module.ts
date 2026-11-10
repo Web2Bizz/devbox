@@ -1,5 +1,5 @@
 import { Global, Module, type OnModuleInit } from '@nestjs/common';
-import { HealthRegistry } from '../../../../../common/health/health-registry';
+import { HealthRegistry } from '@common/health/health-registry';
 import { NpmRegistryService } from './npm-registry.service';
 import { NpmRegistryController } from './npm-registry.controller';
 

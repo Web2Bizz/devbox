@@ -14,9 +14,9 @@
  * URI version. There is no per-endpoint `Api-Version` request or response
  * header — the version is encoded in the URI alone.
  */
-export const DEFAULT_API_VERSION = '1';
+export const DEFAULT_API_VERSION: string = '1';
 
 export const SUPPORTED_API_VERSIONS: ReadonlyArray<string> = ['1'] as const;
 
 /** Canonical v1 prefix (for docs, frontend client, openapi.yaml). */
-export const API_V1_PREFIX = '/api/v1';
+export const API_V1_PREFIX: string = '/api/v1';

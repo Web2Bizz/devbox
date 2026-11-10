@@ -141,12 +141,12 @@ async function main(): Promise<void> {
       await check(
         "POST /api/v1/projects without PG → 503 EXTERNAL_UNAVAILABLE",
         async () => {
-          const cid = "e2e-projects-503-0001";
+          const correlationId = "e2e-projects-503-0001";
           const res = await fetch(`${base}/api/v1/projects`, {
             method: "POST",
             headers: {
               "content-type": "application/json",
-              "x-correlation-id": cid,
+              "x-correlation-id": correlationId,
               authorization: `Bearer ${probe}`,
             },
             body: JSON.stringify({
@@ -165,8 +165,8 @@ async function main(): Promise<void> {
             body.message,
             "сервис временно недоступен, повторите позже",
           );
-          assert.equal(body.correlationId, cid);
-          assert.equal(res.headers.get("x-correlation-id"), cid);
+          assert.equal(body.correlationId, correlationId);
+          assert.equal(res.headers.get("x-correlation-id"), correlationId);
           assert.equal(res.headers.get("retry-after"), "30");
         },
       );
@@ -328,9 +328,9 @@ async function main(): Promise<void> {
         const paths = new WorkspacePathService();
         // Org-scoped row → org home (org-only model, no user homes).
         const resolved = await paths.resolveOrg(orgId, projectId);
-        const gitDir = await stat(path.join(resolved.absRepo, ".git"));
+        const gitDir = await stat(path.join(resolved.absoluteRepo, ".git"));
         assert.equal(gitDir.isDirectory(), true);
-        const checkGit = await isValidGitRepo(resolved.absRepo);
+        const checkGit = await isValidGitRepo(resolved.absoluteRepo);
         assert.equal(checkGit.ok, true);
       });
 
@@ -369,7 +369,7 @@ async function main(): Promise<void> {
           await import("../../../../common/storage/workspace-path.service");
         const paths = new WorkspacePathService();
         const resolved = await paths.resolveOrg(orgId, projectId);
-        await rm(resolved.absRepo, { recursive: true, force: true });
+        await rm(resolved.absoluteRepo, { recursive: true, force: true });
 
         const single = await fetch(
           `${base}/api/v1/projects/${projectId}`,
@@ -564,7 +564,7 @@ async function main(): Promise<void> {
           await import("../../../../common/storage/workspace-path.service");
         const paths = new WorkspacePathService();
         const resolved = await paths.resolveOrg(orgId, probeId);
-        assert.equal((await stat(resolved.absRepo)).isDirectory(), true);
+        assert.equal((await stat(resolved.absoluteRepo)).isDirectory(), true);
         const del = await fetch(`${base}/api/v1/projects/${probeId}`, {
           method: "DELETE",
           ...auth(owner.token),
@@ -581,7 +581,7 @@ async function main(): Promise<void> {
           auth(owner.token),
         );
         assert.equal(visible.status, 200);
-        assert.equal((await stat(resolved.absRepo)).isDirectory(), true);
+        assert.equal((await stat(resolved.absoluteRepo)).isDirectory(), true);
         // …until restore brings it back (API only, no UI).
         const restored = await fetch(
           `${base}/api/v1/organizations/${orgId}/projects/${probeId}/restore`,

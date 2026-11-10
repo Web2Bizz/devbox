@@ -15,6 +15,8 @@ import {
   corsOriginsSchema,
   databaseUrlSchema,
   findSuspiciousUnknownKeys,
+  type AppEnv,
+  type EnvValidation,
   urlSchema,
   validateEnv,
   validateEnvWithWarnings,
@@ -62,19 +64,19 @@ function baseEnv(): Source {
 
 function without(source: Source, ...keys: Array<string>): Source {
   const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(source)) {
-    if (!keys.includes(k) && typeof v === 'string') out[k] = v;
+  for (const [key, value] of Object.entries(source)) {
+    if (!keys.includes(key) && typeof value === 'string') out[key] = value;
   }
   return out as Source;
 }
 
-function expectThrow(fn: () => unknown, re: RegExp, label: string): string {
+function expectThrow(callback: () => unknown, pattern: RegExp, label: string): string {
   try {
-    fn();
-  } catch (err) {
-    const msg = (err as Error).message;
-    assert.match(msg, re, `${label}: ${msg}`);
-    return msg;
+    callback();
+  } catch (error) {
+    const message: string = (error as Error).message;
+    assert.match(message, pattern, `${label}: ${message}`);
+    return message;
   }
   assert.fail(`${label}: expected throw`);
 }
@@ -118,12 +120,12 @@ const checks: Array<{ name: string; run: () => void }> = [
   {
     name: 'invalid port is ERROR fail-fast',
     run: () => {
-      const msg = expectThrow(
+      const message: string = expectThrow(
         () => validateEnv({ ...baseEnv(), APP_BACKEND_PORT: 'abc' } as Source),
         /\[env\] APP_BACKEND_PORT/,
         'invalid port',
       );
-      assert.ok(msg.includes('.env.example'));
+      assert.ok(message.includes('.env.example'));
     },
   },
   {
@@ -136,7 +138,7 @@ const checks: Array<{ name: string; run: () => void }> = [
       } as Source);
       assert.equal(env.backendSocket, 'http://localhost:3000');
       assert.ok(
-        warnings.some((w) => w.includes('APP_BACKEND_SOCKET') && w.includes('WARN')),
+        warnings.some((warning: string) => warning.includes('APP_BACKEND_SOCKET') && warning.includes('WARN')),
         `expected socket WARN, got: ${JSON.stringify(warnings)}`,
       );
     },
@@ -144,25 +146,25 @@ const checks: Array<{ name: string; run: () => void }> = [
   {
     name: 'CORS garbage is ERROR with entry index',
     run: () => {
-      const msg = expectThrow(
+      const message: string = expectThrow(
         () => validateEnv({ ...baseEnv(), CORS_ORIGINS: 'not-a-url,http://localhost:3001' } as Source),
         /\[env\] CORS_ORIGINS entry #1/,
         'cors garbage',
       );
-      assert.ok(msg.includes('.env.example'));
+      assert.ok(message.includes('.env.example'));
     },
   },
   {
     name: 'DATABASE_URL bad shape is ERROR without echoing the value',
     run: () => {
-      const secretish = 'nonsense-scheme://user:hunter2@example.com/db';
-      const msg = expectThrow(
-        () => validateEnv({ ...baseEnv(), DATABASE_URL: secretish } as Source),
+      const secretLikeValue: string = 'nonsense-scheme://user:hunter2@example.com/db';
+      const message: string = expectThrow(
+        () => validateEnv({ ...baseEnv(), DATABASE_URL: secretLikeValue } as Source),
         /\[env\] DATABASE_URL/,
         'database url shape',
       );
-      assert.ok(!msg.includes('nonsense-scheme'), 'secret-bearing value leaked into the error');
-      assert.ok(!msg.includes('hunter2'), 'credential leaked into the error');
+      assert.ok(!message.includes('nonsense-scheme'), 'secret-bearing value leaked into the error');
+      assert.ok(!message.includes('hunter2'), 'credential leaked into the error');
     },
   },
   {
@@ -184,11 +186,11 @@ const checks: Array<{ name: string; run: () => void }> = [
         SOME_RANDOM_VAR: '1',
       } as Source);
       assert.ok(
-        warnings.some((w) => w.includes('APP_BACKEND_PORTT')),
+        warnings.some((warning: string) => warning.includes('APP_BACKEND_PORTT')),
         `expected typo WARN, got: ${JSON.stringify(warnings)}`,
       );
       assert.ok(
-        !warnings.some((w) => w.includes('SOME_RANDOM_VAR')),
+        !warnings.some((warning: string) => warning.includes('SOME_RANDOM_VAR')),
         'unrelated vars must stay silent',
       );
       assert.deepEqual(findSuspiciousUnknownKeys({ HOME: '/root', PATH: '/bin' } as Source), []);
@@ -203,7 +205,7 @@ const checks: Array<{ name: string; run: () => void }> = [
       } as Source);
       assert.equal(env.logLevel, 'info');
       assert.ok(
-        warnings.some((w) => w.includes('WARN') && w.includes('LOG_LEVEL')),
+        warnings.some((warning: string) => warning.includes('WARN') && warning.includes('LOG_LEVEL')),
         `expected LOG_LEVEL WARN, got: ${JSON.stringify(warnings)}`,
       );
     },
@@ -217,7 +219,7 @@ const checks: Array<{ name: string; run: () => void }> = [
       } as Source);
       assert.equal(env.githubInstallationId, '789012');
       assert.ok(
-        warnings.some((w) => w.includes('deprecated') && w.includes('GITHUB_APP_INSTALLATION_ID')),
+        warnings.some((warning: string) => warning.includes('deprecated') && warning.includes('GITHUB_APP_INSTALLATION_ID')),
         `expected deprecation WARN, got: ${JSON.stringify(warnings)}`,
       );
       expectThrow(
@@ -236,7 +238,7 @@ const checks: Array<{ name: string; run: () => void }> = [
       );
       assert.equal(env.githubAppId, '');
       assert.ok(
-        warnings.some((w) => w.includes('GITHUB_APP_* is not configured')),
+        warnings.some((warning: string) => warning.includes('GITHUB_APP_* is not configured')),
         `expected github WARN, got: ${JSON.stringify(warnings)}`,
       );
     },
@@ -254,12 +256,12 @@ const checks: Array<{ name: string; run: () => void }> = [
   {
     name: 'explicit REPOS_ROOT on a missing dir is ERROR fail-fast',
     run: () => {
-      const msg = expectThrow(
+      const message: string = expectThrow(
         () => validateEnv({ ...baseEnv(), REPOS_ROOT: './definitely-missing-repos-xyz' } as Source),
         /\[env\] REPOS_ROOT/,
         'missing repos root',
       );
-      assert.ok(msg.includes('.env.example'));
+      assert.ok(message.includes('.env.example'));
       expectThrow(
         () => validateEnv({ ...baseEnv(), REPOS_ROOT: 'bad\0path' } as Source),
         /\[env\] REPOS_ROOT/,
@@ -275,7 +277,7 @@ const checks: Array<{ name: string; run: () => void }> = [
         PROJECTS_ROOT: tmpdir(),
       } as Source);
       assert.equal(env.reposRoot, '');
-      const boot = warnings.find((w) => w.includes('REPOS_ROOT'));
+      const boot: string | undefined = warnings.find((warning: string) => warning.includes('REPOS_ROOT'));
       assert.ok(boot, `expected REPOS_ROOT boot message, got: ${JSON.stringify(warnings)}`);
       assert.ok(boot.includes('ERROR'), `boot message must be ERROR-level, got: ${boot}`);
       assert.ok(boot.includes('not configured'), `boot message must state outage, got: ${boot}`);
@@ -296,7 +298,7 @@ const checks: Array<{ name: string; run: () => void }> = [
         without(baseEnv(), 'REPOS_ROOT'),
       );
       assert.equal(env.reposRoot, '');
-      const boot = warnings.find((w) => w.includes('REPOS_ROOT'));
+      const boot: string | undefined = warnings.find((warning: string) => warning.includes('REPOS_ROOT'));
       assert.ok(boot && boot.includes('ERROR'), `expected ERROR deny, got: ${JSON.stringify(warnings)}`);
     },
   },
@@ -309,7 +311,7 @@ const checks: Array<{ name: string; run: () => void }> = [
       } as Source);
       assert.equal(env.projectsRoot, './definitely-missing-dir-xyz');
       assert.ok(
-        warnings.some((w) => w.includes('PROJECTS_ROOT')),
+        warnings.some((warning: string) => warning.includes('PROJECTS_ROOT')),
         `expected PROJECTS_ROOT WARN, got: ${JSON.stringify(warnings)}`,
       );
     },
@@ -333,13 +335,13 @@ const checks: Array<{ name: string; run: () => void }> = [
   {
     name: 'invalid DOCKER_REGISTRY_URL is ERROR fail-fast without echoing the value',
     run: () => {
-      const msg = expectThrow(
+      const message: string = expectThrow(
         () => validateEnv({ ...baseEnv(), DOCKER_REGISTRY_URL: '::bad::' } as Source),
         /\[env\] DOCKER_REGISTRY_URL/,
         'registry url',
       );
-      assert.ok(msg.includes('.env.example'));
-      assert.ok(!msg.includes('hunter2'), 'credential leaked into the error');
+      assert.ok(message.includes('.env.example'));
+      assert.ok(!message.includes('hunter2'), 'credential leaked into the error');
     },
   },
   {
@@ -350,7 +352,7 @@ const checks: Array<{ name: string; run: () => void }> = [
       );
       assert.equal(env.dockerRegistryUrl, '');
       assert.ok(
-        warnings.some((w) => w.includes('DOCKER_REGISTRY_URL') && w.includes('WARN')),
+        warnings.some((warning: string) => warning.includes('DOCKER_REGISTRY_URL') && warning.includes('WARN')),
         `expected registry WARN, got: ${JSON.stringify(warnings)}`,
       );
     },
@@ -365,11 +367,11 @@ const checks: Array<{ name: string; run: () => void }> = [
       } as Source);
       assert.equal(env.dockerRegistryUser, 'some-user');
       assert.ok(
-        warnings.some((w) => w.includes('partially configured')),
+        warnings.some((warning: string) => warning.includes('partially configured')),
         `expected partial-pair WARN, got: ${JSON.stringify(warnings)}`,
       );
       assert.ok(
-        !warnings.some((w) => w.includes('some-user')),
+        !warnings.some((warning: string) => warning.includes('some-user')),
         'credential leaked into warnings',
       );
     },
@@ -383,11 +385,11 @@ const checks: Array<{ name: string; run: () => void }> = [
         DOCKER_REGISTRY_PASSWORD: 'some-pass',
       } as Source);
       assert.ok(
-        warnings.some((w) => w.includes('DOCKER_REGISTRY_TOKEN') && w.includes('ignored')),
+        warnings.some((warning: string) => warning.includes('DOCKER_REGISTRY_TOKEN') && warning.includes('ignored')),
         `expected token-priority WARN, got: ${JSON.stringify(warnings)}`,
       );
       assert.ok(
-        !warnings.some((w) => w.includes('some-pass')),
+        !warnings.some((warning: string) => warning.includes('some-pass')),
         'credential leaked into warnings',
       );
     },
@@ -395,7 +397,7 @@ const checks: Array<{ name: string; run: () => void }> = [
   {
     name: 'registry retry garbage is ERROR without echoing the value',
     run: () => {
-      const msg = expectThrow(
+      const message: string = expectThrow(
         () =>
           validateEnv({
             ...baseEnv(),
@@ -404,7 +406,7 @@ const checks: Array<{ name: string; run: () => void }> = [
         /\[env\] DOCKER_REGISTRY_RETRY_MAX_ATTEMPTS/,
         'registry retry attempts',
       );
-      assert.ok(msg.includes('.env.example'));
+      assert.ok(message.includes('.env.example'));
     },
   },
   {
@@ -424,7 +426,7 @@ const checks: Array<{ name: string; run: () => void }> = [
       assert.equal(env.dockerRegistryRetryMaxDelayMs, 2000);
       assert.equal(env.dockerRegistryTimeoutMs, 10000);
       assert.ok(
-        warnings.some((w) => w.includes('DOCKER_REGISTRY_RETRY_MAX_ATTEMPTS')),
+        warnings.some((warning: string) => warning.includes('DOCKER_REGISTRY_RETRY_MAX_ATTEMPTS')),
         `expected retry WARN, got: ${JSON.stringify(warnings)}`,
       );
     },
@@ -437,20 +439,20 @@ const checks: Array<{ name: string; run: () => void }> = [
         /\[env\] APP_BACKEND_PORT is required/,
         'missing port',
       );
-      const env = validateEnv({ ...without(baseEnv(), 'APP_BACKEND_PORT'), PORT: '3000' } as Source);
+      const env: AppEnv = validateEnv({ ...without(baseEnv(), 'APP_BACKEND_PORT'), PORT: '3000' } as Source);
       assert.equal(env.backendPort, 3000);
     },
   },
   {
     name: 'invalid NPM_REGISTRY_URL is ERROR fail-fast without echoing the value',
     run: () => {
-      const msg = expectThrow(
+      const message: string = expectThrow(
         () => validateEnv({ ...baseEnv(), NPM_REGISTRY_URL: '::bad::' } as Source),
         /\[env\] NPM_REGISTRY_URL/,
         'npm registry url',
       );
-      assert.ok(msg.includes('.env.example'));
-      assert.ok(!msg.includes('hunter2'), 'credential leaked into the error');
+      assert.ok(message.includes('.env.example'));
+      assert.ok(!message.includes('hunter2'), 'credential leaked into the error');
     },
   },
   {
@@ -461,7 +463,7 @@ const checks: Array<{ name: string; run: () => void }> = [
       );
       assert.equal(env.npmRegistryUrl, '');
       assert.ok(
-        warnings.some((w) => w.includes('NPM_REGISTRY_URL') && w.includes('WARN')),
+        warnings.some((warning: string) => warning.includes('NPM_REGISTRY_URL') && warning.includes('WARN')),
         `expected npm registry WARN, got: ${JSON.stringify(warnings)}`,
       );
     },
@@ -469,31 +471,31 @@ const checks: Array<{ name: string; run: () => void }> = [
   {
     name: 'NPM_REGISTRY_TOKEN wins over legacy NPM_TOKEN with WARN (fallback WARN when only legacy)',
     run: () => {
-      const secret = 'legacy-npm-token-not-real-never-logged';
-      const both = validateEnvWithWarnings({
+      const secret: string = 'legacy-npm-token-not-real-never-logged';
+      const both: EnvValidation = validateEnvWithWarnings({
         ...baseEnv(),
         NPM_TOKEN: secret,
       } as Source);
       assert.equal(both.env.npmRegistryToken, 'test-npm-token-not-real-never-logged');
       assert.ok(
-        both.warnings.some((w) => w.includes('NPM_REGISTRY_TOKEN') && w.includes('ignored')),
+        both.warnings.some((warning: string) => warning.includes('NPM_REGISTRY_TOKEN') && warning.includes('ignored')),
         `expected token-priority WARN, got: ${JSON.stringify(both.warnings)}`,
       );
       assert.ok(
-        !both.warnings.some((w) => w.includes(secret)),
+        !both.warnings.some((warning: string) => warning.includes(secret)),
         'credential leaked into warnings',
       );
-      const fallback = validateEnvWithWarnings({
+      const fallback: EnvValidation = validateEnvWithWarnings({
         ...without(baseEnv(), 'NPM_REGISTRY_TOKEN'),
         NPM_TOKEN: secret,
       } as Source);
       assert.equal(fallback.env.npmRegistryToken, secret);
       assert.ok(
-        fallback.warnings.some((w) => w.includes('NPM_TOKEN') && w.includes('falling back')),
+        fallback.warnings.some((warning: string) => warning.includes('NPM_TOKEN') && warning.includes('falling back')),
         `expected legacy-fallback WARN, got: ${JSON.stringify(fallback.warnings)}`,
       );
       assert.ok(
-        !fallback.warnings.some((w) => w.includes(secret)),
+        !fallback.warnings.some((warning: string) => warning.includes(secret)),
         'credential leaked into warnings',
       );
     },
@@ -507,7 +509,7 @@ const checks: Array<{ name: string; run: () => void }> = [
       } as Source);
       assert.equal(env.npmRegistryScope, '@web2bizz');
       assert.ok(
-        warnings.some((w) => w.includes('NPM_REGISTRY_SCOPE') && w.includes('WARN')),
+        warnings.some((warning: string) => warning.includes('NPM_REGISTRY_SCOPE') && warning.includes('WARN')),
         `expected scope WARN, got: ${JSON.stringify(warnings)}`,
       );
     },
@@ -515,7 +517,7 @@ const checks: Array<{ name: string; run: () => void }> = [
   {
     name: 'npm registry retry garbage is ERROR without echoing the value',
     run: () => {
-      const msg = expectThrow(
+      const message: string = expectThrow(
         () =>
           validateEnv({
             ...baseEnv(),
@@ -524,7 +526,7 @@ const checks: Array<{ name: string; run: () => void }> = [
         /\[env\] NPM_REGISTRY_RETRY_MAX_ATTEMPTS/,
         'npm registry retry attempts',
       );
-      assert.ok(msg.includes('.env.example'));
+      assert.ok(message.includes('.env.example'));
     },
   },
   {
@@ -544,7 +546,7 @@ const checks: Array<{ name: string; run: () => void }> = [
       assert.equal(env.npmRegistryRetryMaxDelayMs, 2000);
       assert.equal(env.npmRegistryTimeoutMs, 10000);
       assert.ok(
-        warnings.some((w) => w.includes('NPM_REGISTRY_RETRY_MAX_ATTEMPTS')),
+        warnings.some((warning: string) => warning.includes('NPM_REGISTRY_RETRY_MAX_ATTEMPTS')),
         `expected retry WARN, got: ${JSON.stringify(warnings)}`,
       );
     },
@@ -560,23 +562,23 @@ const checks: Array<{ name: string; run: () => void }> = [
       assert.equal(env.npmRegistryUser, 'npm-user');
       assert.equal(env.npmRegistryPassword, 'npm-pass');
       assert.deepEqual(
-        warnings.filter((w) => w.includes('NPM_REGISTRY_USER')),
+        warnings.filter((warning: string) => warning.includes('NPM_REGISTRY_USER')),
         [],
         `complete basic pair must not warn, got: ${JSON.stringify(warnings)}`,
       );
-      const clash = validateEnvWithWarnings({
+      const clash: EnvValidation = validateEnvWithWarnings({
         ...baseEnv(),
         NPM_REGISTRY_USER: 'some-user',
         NPM_REGISTRY_PASSWORD: 'some-pass',
       } as Source);
       assert.ok(
         clash.warnings.some(
-          (w) => w.includes('NPM_REGISTRY_TOKEN') && w.includes('NPM_REGISTRY_USER/PASSWORD'),
+          (warning: string) => warning.includes('NPM_REGISTRY_TOKEN') && warning.includes('NPM_REGISTRY_USER/PASSWORD'),
         ),
         `expected token-over-basic WARN, got: ${JSON.stringify(clash.warnings)}`,
       );
       assert.ok(
-        !clash.warnings.some((w) => w.includes('some-pass') || w.includes('some-user')),
+        !clash.warnings.some((warning: string) => warning.includes('some-pass') || warning.includes('some-user')),
         'credential leaked into warnings',
       );
     },
@@ -591,11 +593,11 @@ const checks: Array<{ name: string; run: () => void }> = [
       } as Source);
       assert.equal(env.npmRegistryUser, 'some-user');
       assert.ok(
-        warnings.some((w) => w.includes('partially configured')),
+        warnings.some((warning: string) => warning.includes('partially configured')),
         `expected partial-pair WARN, got: ${JSON.stringify(warnings)}`,
       );
       assert.ok(
-        !warnings.some((w) => w.includes('some-user')),
+        !warnings.some((warning: string) => warning.includes('some-user')),
         'credential leaked into warnings',
       );
     },
@@ -610,15 +612,15 @@ const checks: Array<{ name: string; run: () => void }> = [
       assert.ok(env.jwtRefreshSecret.length >= 32);
       assert.notEqual(env.jwtAccessSecret, env.jwtRefreshSecret);
       assert.ok(
-        warnings.some((w) => w.includes('JWT_ACCESS_SECRET') && w.includes('WARN')),
+        warnings.some((warning: string) => warning.includes('JWT_ACCESS_SECRET') && warning.includes('WARN')),
         `expected access WARN, got: ${JSON.stringify(warnings)}`,
       );
       assert.ok(
-        warnings.some((w) => w.includes('JWT_REFRESH_SECRET') && w.includes('WARN')),
+        warnings.some((warning: string) => warning.includes('JWT_REFRESH_SECRET') && warning.includes('WARN')),
         `expected refresh WARN, got: ${JSON.stringify(warnings)}`,
       );
       assert.ok(
-        !warnings.some((w) => w.includes(env.jwtAccessSecret) || w.includes(env.jwtRefreshSecret)),
+        !warnings.some((warning: string) => warning.includes(env.jwtAccessSecret) || warning.includes(env.jwtRefreshSecret)),
         'secret leaked into warnings',
       );
     },
@@ -626,13 +628,13 @@ const checks: Array<{ name: string; run: () => void }> = [
   {
     name: 'short JWT secret is ERROR without echoing the value',
     run: () => {
-      const msg = expectThrow(
+      const message: string = expectThrow(
         () => validateEnv({ ...baseEnv(), JWT_ACCESS_SECRET: 'short-secret' } as Source),
         /\[env\] JWT_ACCESS_SECRET/,
         'short jwt secret',
       );
-      assert.ok(msg.includes('.env.example'));
-      assert.ok(!msg.includes('short-secret'), 'secret leaked into the error');
+      assert.ok(message.includes('.env.example'));
+      assert.ok(!message.includes('short-secret'), 'secret leaked into the error');
     },
   },
   {
@@ -660,18 +662,18 @@ const checks: Array<{ name: string; run: () => void }> = [
   {
     name: 'AUTH_LEGACY_MOCK_FALLBACK unset → false + WARN; explicit true enables + WARN (dev only); garbage ERRORs',
     run: () => {
-      const unset = validateEnvWithWarnings(without(baseEnv(), 'AUTH_LEGACY_MOCK_FALLBACK'));
+      const unset: EnvValidation = validateEnvWithWarnings(without(baseEnv(), 'AUTH_LEGACY_MOCK_FALLBACK'));
       assert.equal(unset.env.authLegacyMockFallback, false);
       assert.ok(
-        unset.warnings.some((w) => w.includes('AUTH_LEGACY_MOCK_FALLBACK')),
+        unset.warnings.some((warning: string) => warning.includes('AUTH_LEGACY_MOCK_FALLBACK')),
         `expected fallback WARN, got: ${JSON.stringify(unset.warnings)}`,
       );
-      const off = validateEnv({ ...baseEnv(), AUTH_LEGACY_MOCK_FALLBACK: 'false' } as Source);
+      const off: AppEnv = validateEnv({ ...baseEnv(), AUTH_LEGACY_MOCK_FALLBACK: 'false' } as Source);
       assert.equal(off.authLegacyMockFallback, false);
-      const on = validateEnvWithWarnings({ ...baseEnv(), AUTH_LEGACY_MOCK_FALLBACK: 'true' } as Source);
+      const on: EnvValidation = validateEnvWithWarnings({ ...baseEnv(), AUTH_LEGACY_MOCK_FALLBACK: 'true' } as Source);
       assert.equal(on.env.authLegacyMockFallback, true);
       assert.ok(
-        on.warnings.some((w) => w.includes('AUTH_LEGACY_MOCK_FALLBACK')),
+        on.warnings.some((warning: string) => warning.includes('AUTH_LEGACY_MOCK_FALLBACK')),
         `expected explicit-enable WARN, got: ${JSON.stringify(on.warnings)}`,
       );
       expectThrow(
@@ -684,12 +686,12 @@ const checks: Array<{ name: string; run: () => void }> = [
   {
     name: 'legacy ORG_INVITE_TTL_SEC is unknown (invites never expire, no TTL tuning)',
     run: () => {
-      const withLegacy = validateEnvWithWarnings({
+      const withLegacy: EnvValidation = validateEnvWithWarnings({
         ...baseEnv(),
         ORG_INVITE_TTL_SEC: '3600',
       } as Source);
       assert.ok(
-        withLegacy.warnings.some((w) => w.includes('ORG_INVITE_TTL_SEC')),
+        withLegacy.warnings.some((warning: string) => warning.includes('ORG_INVITE_TTL_SEC')),
         `expected legacy invite TTL WARN, got: ${JSON.stringify(withLegacy.warnings)}`,
       );
       assert.equal(
@@ -701,25 +703,25 @@ const checks: Array<{ name: string; run: () => void }> = [
   {
     name: 'OPENCODE_KEYS_ENCRYPTION_KEY unset → empty + WARN; short is ERROR without echo',
     run: () => {
-      const unset = validateEnvWithWarnings(without(baseEnv(), 'OPENCODE_KEYS_ENCRYPTION_KEY'));
+      const unset: EnvValidation = validateEnvWithWarnings(without(baseEnv(), 'OPENCODE_KEYS_ENCRYPTION_KEY'));
       assert.equal(unset.env.opencodeKeysEncryptionKey, '');
       assert.ok(
-        unset.warnings.some((w) => w.includes('OPENCODE_KEYS_ENCRYPTION_KEY') && w.includes('WARN')),
+        unset.warnings.some((warning: string) => warning.includes('OPENCODE_KEYS_ENCRYPTION_KEY') && warning.includes('WARN')),
         `expected encryption-key WARN, got: ${JSON.stringify(unset.warnings)}`,
       );
-      const msg = expectThrow(
+      const message: string = expectThrow(
         () => validateEnv({ ...baseEnv(), OPENCODE_KEYS_ENCRYPTION_KEY: 'too-short' } as Source),
         /\[env\] OPENCODE_KEYS_ENCRYPTION_KEY/,
         'short encryption key',
       );
-      assert.ok(msg.includes('.env.example'));
-      assert.ok(!msg.includes('too-short'), 'secret leaked into the error');
+      assert.ok(message.includes('.env.example'));
+      assert.ok(!message.includes('too-short'), 'secret leaked into the error');
     },
   },
   {
     name: 'OPENCODE_KEYS rotation vars: defaults v1/v0 + empty previous; explicit ok; short previous ERROR; bad id ERROR',
     run: () => {
-      const unset = validateEnvWithWarnings(
+      const unset: EnvValidation = validateEnvWithWarnings(
         without(
           baseEnv(),
           'OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS',
@@ -730,7 +732,7 @@ const checks: Array<{ name: string; run: () => void }> = [
       assert.equal(unset.env.opencodeKeysEncryptionKeyPrevious, '');
       assert.equal(unset.env.opencodeKeysActiveKeyId, 'v1');
       assert.equal(unset.env.opencodeKeysPreviousKeyId, 'v0');
-      const explicit = validateEnv({
+      const explicit: AppEnv = validateEnv({
         ...baseEnv(),
         OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS:
           'test-opencode-keys-previous-key-not-real-0123456789',
@@ -743,18 +745,18 @@ const checks: Array<{ name: string; run: () => void }> = [
       );
       assert.equal(explicit.opencodeKeysActiveKeyId, 'v2');
       assert.equal(explicit.opencodeKeysPreviousKeyId, 'v1');
-      const prevWarn = validateEnvWithWarnings({
+      const prevWarn: EnvValidation = validateEnvWithWarnings({
         ...baseEnv(),
         OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS:
           'test-opencode-keys-previous-key-not-real-0123456789',
       } as Source);
       assert.ok(
         prevWarn.warnings.some(
-          (w) => w.includes('OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS') && w.includes('WARN'),
+          (warning: string) => warning.includes('OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS') && warning.includes('WARN'),
         ),
         `expected previous-key rotation WARN, got: ${JSON.stringify(prevWarn.warnings)}`,
       );
-      const shortMsg = expectThrow(
+      const shortMsg: string = expectThrow(
         () =>
           validateEnv({
             ...baseEnv(),
@@ -770,20 +772,20 @@ const checks: Array<{ name: string; run: () => void }> = [
         'bad active key id',
       );
       // Empty id falls back to the default (never throws — ids are non-secret).
-      const emptyId = validateEnv({ ...baseEnv(), OPENCODE_KEYS_PREVIOUS_KEY_ID: '' } as Source);
+      const emptyId: AppEnv = validateEnv({ ...baseEnv(), OPENCODE_KEYS_PREVIOUS_KEY_ID: '' } as Source);
       assert.equal(emptyId.opencodeKeysPreviousKeyId, 'v0');
     },
   },
 ];
 
-let failed = 0;
-for (const c of checks) {
+let failed: number = 0;
+for (const check of checks) {
   try {
-    c.run();
-    console.log(`ok - ${c.name}`);
-  } catch (err) {
+    check.run();
+    console.log(`ok - ${check.name}`);
+  } catch (error) {
     failed += 1;
-    console.error(`FAIL - ${c.name}: ${(err as Error).message}`);
+    console.error(`FAIL - ${check.name}: ${(error as Error).message}`);
   }
 }
 if (failed > 0) {

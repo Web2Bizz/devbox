@@ -13,13 +13,17 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Inject, Optional, forwardRef } from '@nestjs/common';
+import type { z } from 'zod';
 import { DEFAULT_MOCK_USER_ID as DEFAULT_WORKSPACE_USER_ID } from '../../../../../../../auth/identity.service';
 import { JwtAuthGuard } from '../../../../../../../auth/jwt-auth.guard';
 import { ReqUser } from '../../../../../../../auth/req-user.decorator';
 import type { RequestIdentity } from '../../../../../../../auth/identity.service';
-import { ZodValidationPipe } from '../../../../../../../common/validation';
-import { GithubInstallationsService } from '../../../github/github-installations.service';
-import { CloneJobsRepository } from './modules/clone/clone-jobs.repository';
+import { ZodValidationPipe } from '@common/validation';
+import {
+  GithubInstallationsService,
+  type GithubInstallation,
+} from '../../../github/github-installations.service';
+import { CloneJobsRepository, type CloneJob } from './modules/clone/clone-jobs.repository';
 import {
   CloneWorkspaceDto,
   WorkspaceCloneJobDto,
@@ -44,14 +48,13 @@ export { DEFAULT_WORKSPACE_USER_ID };
  */
 export { resolveIdentityUserId as resolveUserId } from '../../../../../../../auth/identity.service';
 
-function toJobDto(job: {
-  userSpace: string;
-  repoName: string;
-  status: string;
-  progress: number;
-  error: string | null;
-  updatedAt: string;
-}): WorkspaceCloneJobDto {
+/** Projection of a clone job onto the wire DTO (derived from the stored job). */
+type CloneJobDtoSource = Pick<
+  CloneJob,
+  'userSpace' | 'repoName' | 'status' | 'progress' | 'error' | 'updatedAt'
+>;
+
+function toJobDto(job: CloneJobDtoSource): WorkspaceCloneJobDto {
   return {
     userSpace: job.userSpace,
     repoName: job.repoName,
@@ -96,7 +99,8 @@ export class WorkspacesController {
 
   private async assertInstallationOwner(userId: string, installationId?: number): Promise<void> {
     if (installationId === undefined) return;
-    const stored = (await this.installations?.findByInstallationId(installationId)) ?? null;
+    const stored: GithubInstallation | null =
+      (await this.installations?.findByInstallationId(installationId)) ?? null;
     // Unknown installation → treat as foreign (never leak which ids exist
     // beyond the 403; the callback is the only way to bind one).
     if (!stored || stored.userId !== userId) {
@@ -118,9 +122,9 @@ export class WorkspacesController {
     @ReqUser() identity: RequestIdentity,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<WorkspaceCloneJobDto> {
-    const userId = identity.id;
+    const userId: string = identity.id;
     await this.assertInstallationOwner(userId, body.installationId);
-    const job = await this.clones.clone(userId, body.repoUrl, body.repoName, correlationId);
+    const job: CloneJob = await this.clones.clone(userId, body.repoUrl, body.repoName, correlationId);
     return toJobDto(job);
   }
 
@@ -135,11 +139,11 @@ export class WorkspacesController {
     @Param('repo') repo: string,
     @ReqUser() identity: RequestIdentity,
   ): WorkspaceCloneJobDto {
-    const parsed = workspaceRepoSchema.safeParse(repo);
+    const parsed: z.ZodSafeParseResult<string> = workspaceRepoSchema.safeParse(repo);
     if (!parsed.success) {
       throw new NotFoundException(`No clone job for repo ${repo}`);
     }
-    const job = this.jobs.get(identity.id, parsed.data);
+    const job: CloneJob | null = this.jobs.get(identity.id, parsed.data);
     if (!job) throw new NotFoundException(`No clone job for repo ${parsed.data}`);
     return toJobDto(job);
   }
@@ -160,7 +164,7 @@ export class WorkspacesController {
     @ReqUser() identity: RequestIdentity,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<WorkspaceTreeNodeDto> {
-    const parsed = workspaceRepoSchema.safeParse(repo);
+    const parsed: z.ZodSafeParseResult<string> = workspaceRepoSchema.safeParse(repo);
     if (!parsed.success) {
       throw new NotFoundException(`Repo ${repo} not found`);
     }
@@ -186,7 +190,7 @@ export class WorkspacesController {
     @ReqUser() identity: RequestIdentity,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<Array<WorkspaceSubmoduleDto>> {
-    const parsed = workspaceRepoSchema.safeParse(repo);
+    const parsed: z.ZodSafeParseResult<string> = workspaceRepoSchema.safeParse(repo);
     if (!parsed.success) {
       throw new NotFoundException(`Repo ${repo} not found`);
     }

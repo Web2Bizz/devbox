@@ -1,5 +1,5 @@
 import { Global, Module } from '@nestjs/common';
-import { UsersModule } from '../users/users.module';
+import { UsersModule } from '@users/users.module';
 import { OrganizationsModule } from '../organizations/organizations.module';
 import { AuthController } from './auth.controller';
 import {

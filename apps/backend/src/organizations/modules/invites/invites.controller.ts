@@ -13,8 +13,8 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagg
 import { JwtAuthGuard } from "../../../auth/jwt-auth.guard";
 import { ReqUser } from "../../../auth/req-user.decorator";
 import type { RequestIdentity } from "../../../auth/identity.service";
-import { NoIndexInterceptor } from "../../../common/http/noindex.interceptor";
-import { ZodValidationPipe } from "../../../common/validation";
+import { NoIndexInterceptor } from "@common/http/noindex.interceptor";
+import { ZodValidationPipe } from "@common/validation";
 import {
   OrganizationInviteDto,
   OrganizationMemberDto,
@@ -61,13 +61,13 @@ export class InvitesController {
     @Param("id") id: string,
     @Body(new ZodValidationPipe(createInviteSchema)) body: CreateInviteInput,
     @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
+    @Req() request?: { correlationId?: string },
   ): Promise<OrganizationInviteDto> {
     return (await this.invites.createInvite(
       id,
       identity.id,
       body,
-      req?.correlationId,
+      request?.correlationId,
     )) as OrganizationInviteDto;
   }
 
@@ -82,12 +82,12 @@ export class InvitesController {
   async acceptInvite(
     @Body(new ZodValidationPipe(acceptInviteSchema)) body: AcceptInviteInput,
     @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
+    @Req() request?: { correlationId?: string },
   ): Promise<OrganizationMemberDto> {
     return (await this.invites.acceptInvite(
       body,
       identity.id,
-      req?.correlationId,
+      request?.correlationId,
     )) as OrganizationMemberDto;
   }
 
@@ -99,6 +99,6 @@ export class InvitesController {
   @ApiResponse({ status: 503, description: "postgres unreachable (EXTERNAL_UNAVAILABLE, Retry-After)" })
   @HttpCode(HttpStatus.OK)
   async denyInvite(): Promise<object | null> {
-    return null
+    return null;
   }
 }

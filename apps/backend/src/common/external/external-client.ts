@@ -19,7 +19,7 @@
  */
 import { Injectable } from '@nestjs/common';
 import { AppLogger, serializeCause } from '../logger';
-import { validateEnv } from '../../common/env/env';
+import { validateEnv, type AppEnv } from '@common/env/env';
 import {
   ExternalServiceError,
   fromStatus,
@@ -29,7 +29,14 @@ import {
 } from './external-error';
 import { DEFAULT_MAX_DELAY_MS, withRetry, type RetryOptions } from './retry';
 
-export const FALLBACK_REQUEST_TIMEOUT_MS = 10000;
+export const FALLBACK_REQUEST_TIMEOUT_MS: number = 10000;
+
+/** Retry defaults resolved from env (read-side tuning only). */
+type RetryDefaults = {
+  maxAttempts: number;
+  baseDelayMs: number;
+  maxDelayMs: number;
+};
 
 export type ExternalFetchOptions = {
   /** Logical upstream, e.g. 'opencode' | 'github'. */
@@ -60,13 +67,13 @@ function resolveTimeoutMs(explicit?: number): number {
   }
 }
 
-function resolveRetryDefaults(): { maxAttempts: number; baseDelayMs: number; maxDelayMs: number } {
+function resolveRetryDefaults(): RetryDefaults {
   try {
-    const env = validateEnv(process.env);
+    const environment: AppEnv = validateEnv(process.env);
     return {
-      maxAttempts: env.externalRetryMaxAttempts,
-      baseDelayMs: env.externalRetryBaseDelayMs,
-      maxDelayMs: env.externalRetryMaxDelayMs,
+      maxAttempts: environment.externalRetryMaxAttempts,
+      baseDelayMs: environment.externalRetryBaseDelayMs,
+      maxDelayMs: environment.externalRetryMaxDelayMs,
     };
   } catch {
     // readonly-исключение: см. resolveTimeoutMs — дефолты ретрая чтения.
@@ -91,23 +98,29 @@ export class ExternalClient {
   async fetchWithRetry(
     url: string,
     init: RequestInit = {},
-    opts: ExternalFetchOptions,
+    options: ExternalFetchOptions,
   ): Promise<Response> {
-    const { service, operation, correlationId } = opts;
-    const timeoutMs = resolveTimeoutMs(opts.timeoutMs);
-    const defaults = resolveRetryDefaults();
-    const method = (init.method ?? 'GET').toUpperCase();
-    const retryOpts: RetryOptions = {
+    const {
+      service,
+      operation,
+      correlationId,
+    }: ExternalFetchOptions = options;
+    const timeoutMs: number = resolveTimeoutMs(options.timeoutMs);
+    const defaults: RetryDefaults = resolveRetryDefaults();
+    const method: string = (init.method ?? 'GET').toUpperCase();
+    const retryOptions: RetryOptions = {
       maxAttempts: defaults.maxAttempts,
       baseDelayMs: defaults.baseDelayMs,
       maxDelayMs: defaults.maxDelayMs,
-      ...opts.retry,
-      method: opts.retry?.method ?? method,
+      ...options.retry,
+      method: options.retry?.method ?? method,
       allowNonIdempotentRetry:
-        opts.retry?.allowNonIdempotentRetry ?? opts.allowNonIdempotentRetry ?? false,
+        options.retry?.allowNonIdempotentRetry ??
+        options.allowNonIdempotentRetry ??
+        false,
     };
 
-    const startedAt = Date.now();
+    const startedAt: number = Date.now();
     this.logger.debug(
       `[external] start service=${service} operation=${operation} method=${method}`,
       correlationId,
@@ -115,59 +128,69 @@ export class ExternalClient {
 
     try {
       return await withRetry(
-        async (attempt) => {
-          const attemptStartedAt = Date.now();
-          let res: Response;
+        async (attempt: number) => {
+          const attemptStartedAt: number = Date.now();
+          let response: Response;
           try {
-            res = await this.doFetch(url, init, timeoutMs);
-          } catch (err) {
-            throw this.classifyTransportError(service, operation, attempt, err);
+            response = await this.doFetch(url, init, timeoutMs);
+          } catch (error) {
+            throw this.classifyTransportError(service, operation, attempt, error);
           }
-          const latencyMs = Date.now() - attemptStartedAt;
-          if (isRetryableStatus(res.status)) {
+          const latencyMs: number = Date.now() - attemptStartedAt;
+          if (isRetryableStatus(response.status)) {
             // Drain before retry so the socket can be reused; the body is
             // intentionally discarded (fixed messages only, never logged).
-            await res.arrayBuffer().catch(() => null);
-            const retryable = fromStatus(service, operation, res.status, attempt);
+            await response.arrayBuffer().catch(() => null);
+            const retryable: ExternalServiceError = fromStatus(
+              service,
+              operation,
+              response.status,
+              attempt,
+            );
             this.logger.warn(
               `[external] retry service=${service} operation=${operation} ` +
-                `attempt=${attempt} status=${res.status} code=${retryable.code} latencyMs=${latencyMs}`,
+                `attempt=${attempt} status=${response.status} code=${retryable.code} latencyMs=${latencyMs}`,
               correlationId,
             );
             throw retryable;
           }
           this.logger.debug(
             `[external] success service=${service} operation=${operation} ` +
-              `attempt=${attempt} status=${res.status} latencyMs=${latencyMs}`,
+              `attempt=${attempt} status=${response.status} latencyMs=${latencyMs}`,
             correlationId,
           );
-          return res;
+          return response;
         },
-        retryOpts,
+        retryOptions,
       );
-    } catch (err) {
-      const latencyMs = Date.now() - startedAt;
-      if (err instanceof ExternalServiceError) {
+    } catch (error) {
+      const latencyMs: number = Date.now() - startedAt;
+      if (error instanceof ExternalServiceError) {
         // One-liner without stack: [module operation status code].
         // Cause/stack (if any) goes to debug only — AppLogger sanitizes it
         // (URL credentials masked, live secrets scrubbed), never to error.
         this.logger.error(
           `[external] failure service=${service} operation=${operation} ` +
-            `status=${err.status ?? '-'} code=${err.code} attempt=${err.attempt} latencyMs=${latencyMs}`,
+            `status=${error.status ?? '-'} code=${error.code} attempt=${error.attempt} latencyMs=${latencyMs}`,
           correlationId,
         );
-        if (err.cause !== undefined) {
+        if (error.cause !== undefined) {
           this.logger.debug(
-            `[external] cause service=${service} operation=${operation} code=${err.code} ` +
-              `detail=${serializeCause(err.cause).slice(0, 2000)}`,
+            `[external] cause service=${service} operation=${operation} code=${error.code} ` +
+              `detail=${serializeCause(error.cause).slice(0, 2000)}`,
             correlationId,
           );
         }
-        throw err;
+        throw error;
       }
       // Non-retryable 4xx normalization (fromStatus) or unexpected throw —
       // still logged with fixed fields only.
-      const normalized = fromUnknown(service, operation, err, retryOpts.maxAttempts ?? 1);
+      const normalized: ExternalServiceError = fromUnknown(
+        service,
+        operation,
+        error,
+        retryOptions.maxAttempts ?? 1,
+      );
       this.logger.error(
         `[external] failure service=${service} operation=${operation} ` +
           `status=${normalized.status ?? '-'} code=${normalized.code} latencyMs=${latencyMs}`,
@@ -175,7 +198,7 @@ export class ExternalClient {
       );
       this.logger.debug(
         `[external] cause service=${service} operation=${operation} code=${normalized.code} ` +
-          `detail=${serializeCause(normalized.cause ?? err).slice(0, 2000)}`,
+          `detail=${serializeCause(normalized.cause ?? error).slice(0, 2000)}`,
         correlationId,
       );
       throw normalized;
@@ -188,11 +211,14 @@ export class ExternalClient {
     init: RequestInit = {},
     timeoutMs?: number,
   ): Promise<Response> {
-    const budget = resolveTimeoutMs(timeoutMs);
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), budget);
+    const budget: number = resolveTimeoutMs(timeoutMs);
+    const controller: AbortController = new AbortController();
+    const timer: ReturnType<typeof setTimeout> = setTimeout(
+      () => controller.abort(),
+      budget,
+    );
     try {
-      return await fetch(url, { ...init, signal: ctrl.signal });
+      return await fetch(url, { ...init, signal: controller.signal });
     } finally {
       clearTimeout(timer);
     }
@@ -206,20 +232,20 @@ export class ExternalClient {
     service: string,
     operation: string,
     attempt: number,
-    err: unknown,
+    error: unknown,
   ): ExternalServiceError {
-    if (err instanceof ExternalServiceError) {
-      err.attempt = attempt;
-      return err;
+    if (error instanceof ExternalServiceError) {
+      error.attempt = attempt;
+      return error;
     }
     if (
-      typeof err === 'object' &&
-      err !== null &&
-      ((err as { name?: unknown }).name === 'AbortError' ||
-        (err as { code?: unknown }).code === 'AbortError')
+      typeof error === 'object' &&
+      error !== null &&
+      ((error as { name?: unknown }).name === 'AbortError' ||
+        (error as { code?: unknown }).code === 'AbortError')
     ) {
-      return timeoutError(service, operation, attempt, err);
+      return timeoutError(service, operation, attempt, error);
     }
-    return fromUnknown(service, operation, err, attempt);
+    return fromUnknown(service, operation, error, attempt);
   }
 }

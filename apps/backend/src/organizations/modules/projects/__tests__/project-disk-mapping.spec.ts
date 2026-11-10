@@ -17,7 +17,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { WorkspacePathService } from '../../../../common/storage/workspace-path.service';
+import { WorkspacePathService } from '@common/storage/workspace-path.service';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -31,9 +31,9 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
       const id = randomUUID();
       const a = await paths.resolveOrg(orgId, id);
       const b = await paths.resolveOrg(orgId, id);
-      assert.equal(a.absRepo, b.absRepo);
+      assert.equal(a.absoluteRepo, b.absoluteRepo);
       const other = await paths.resolveOrg(randomUUID(), id);
-      assert.notEqual(a.absRepo, other.absRepo);
+      assert.notEqual(a.absoluteRepo, other.absoluteRepo);
     },
   },
   {
@@ -60,11 +60,11 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
       assert.match(id, UUID_RE);
       const resolved = await paths.resolveOrg(orgId, id);
       assert.equal(
-        resolved.absRepo,
+        resolved.absoluteRepo,
         path.resolve(root, 'orgs', orgId, 'projects', id, 'content'),
       );
-      assert.ok(!resolved.absRepo.includes('workspace'));
-      assert.ok(!resolved.absBase.includes(`${path.sep}users${path.sep}`));
+      assert.ok(!resolved.absoluteRepo.includes('workspace'));
+      assert.ok(!resolved.absoluteBase.includes(`${path.sep}users${path.sep}`));
     },
   },
   {
@@ -75,7 +75,7 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
       const id = randomUUID();
       const before = await paths.resolveOrg(orgId, id);
       const after = await paths.resolveOrg(orgId, id);
-      assert.equal(before.absRepo, after.absRepo);
+      assert.equal(before.absoluteRepo, after.absoluteRepo);
     },
   },
   {

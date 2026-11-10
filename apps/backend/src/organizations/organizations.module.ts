@@ -1,5 +1,5 @@
 import { Module } from "@nestjs/common";
-import { WorkspacePathService } from "../common/storage/workspace-path.service";
+import { WorkspacePathService } from "@common/storage/workspace-path.service";
 import { InvitesModule } from "./modules/invites/invites.module";
 import { MembersModule } from "./modules/members/members.module";
 import { ProjectsModule } from "./modules/projects/projects.module";
@@ -29,7 +29,8 @@ import { OrganizationsService } from "./organizations.service";
  *
  * UsersService comes from the global UsersModule — no import needed, no
  * cycle; DbService is a provider of the global CommonModule. CryptoService
- * and OpencodeKeysService are global too (their HTTP surface lives in ai).
+ * and VaultService are global too (their HTTP surface lives in the top-level
+ * vault domain (src/vault/), the shared mechanism in common/vault).
  * WorkspacePathService is provided directly (stateless, common/storage).
  * Re-exports ProjectsModule + RegistriesModule so existing consumers keep
  * working.

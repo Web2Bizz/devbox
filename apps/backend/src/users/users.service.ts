@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
-import { AppLogger } from "../common/logger";
-import { dbUnavailable } from "../common/db/db.service";
+import { AppLogger } from "@common/logger";
+import { dbUnavailable } from "@common/db/db.service";
 import { hashPassword } from "./utils/password";
 import type {
   CreateLocalInput,
@@ -47,12 +47,12 @@ export class UsersService {
     input: CreateLocalInput,
     correlationId?: string,
   ): Promise<StoredUser | null> {
-    const firstName = input.firstName.trim();
-    const lastName = input.lastName.trim();
-    const email = input.email.trim().toLowerCase();
-    const passwordHash = await hashPassword(input.password, this.logger);
+    const firstName: string = input.firstName.trim();
+    const lastName: string = input.lastName.trim();
+    const email: string = input.email.trim().toLowerCase();
+    const passwordHash: string = await hashPassword(input.password, this.logger);
     try {
-      const user = await this.usersRepository.insertLocal({
+      const user: StoredUser | null = await this.usersRepository.insertLocal({
         firstName,
         lastName,
         email,
@@ -101,10 +101,12 @@ export class UsersService {
     patch: UpdateProfilePatch,
     correlationId?: string,
   ): Promise<StoredUser | null> {
-    const firstName = patch.firstName?.trim()
+    const firstName: string | undefined = patch.firstName?.trim()
       ? patch.firstName.trim()
       : undefined;
-    const lastName = patch.lastName?.trim() ? patch.lastName.trim() : undefined;
+    const lastName: string | undefined = patch.lastName?.trim()
+      ? patch.lastName.trim()
+      : undefined;
     try {
       return await this.usersRepository.updateProfile(id, {
         firstName,

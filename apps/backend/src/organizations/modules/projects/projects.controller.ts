@@ -15,11 +15,12 @@ import {
   UseInterceptors,
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagger";
-import { NoIndexInterceptor } from "../../../common/http/noindex.interceptor";
-import { ZodValidationPipe } from "../../../common/validation";
+import { NoIndexInterceptor } from "@common/http/noindex.interceptor";
+import { ZodValidationPipe } from "@common/validation";
 import { JwtAuthGuard } from "../../../auth/jwt-auth.guard";
 import { ReqUser } from "../../../auth/req-user.decorator";
 import type { RequestIdentity } from "../../../auth/identity.service";
+import type { OrgRole } from "../../organizations.types";
 import { ProjectAccessService } from "./modules/project-access/project-access.service";
 import {
   GithubLinkStatusDto,
@@ -30,7 +31,7 @@ import {
   type UpdateProjectInput,
 } from "./projects.dto";
 import { GithubLinkService } from "./modules/github/github-link.service";
-import { ProjectsService } from "./projects.service";
+import { ProjectsService, type Project } from "./projects.service";
 
 /**
  * Top-level project surface — /projects* only (CoC §1.1: the canonical
@@ -78,9 +79,9 @@ export class ProjectsController {
     projectId: string,
     userId: string,
     correlationId?: string,
-    opts?: { includeDeleted?: boolean },
-  ) {
-    const project = await this.projects.getOrThrow(projectId, correlationId, opts);
+    options?: { includeDeleted?: boolean },
+  ): Promise<Project> {
+    const project: Project = await this.projects.getOrThrow(projectId, correlationId, options);
     await this.access.assertProjectAccess(
       project.id,
       project.ownerId,
@@ -91,7 +92,7 @@ export class ProjectsController {
   }
 
   private async memberOrThrow(orgId: string, userId: string, correlationId?: string): Promise<void> {
-    const role = await this.access.getRole(orgId, userId, correlationId);
+    const role: OrgRole | null = await this.access.getRole(orgId, userId, correlationId);
     if (!role) {
       throw new NotFoundException(`Organization ${orgId} not found`);
     }
@@ -124,7 +125,7 @@ export class ProjectsController {
     @ReqUser() identity: RequestIdentity,
     @Headers("x-correlation-id") correlationId?: string,
   ): Promise<ProjectDto> {
-    const project = await this.assertAccess(id, identity.id, correlationId);
+    const project: Project = await this.assertAccess(id, identity.id, correlationId);
     return project;
   }
 

@@ -22,7 +22,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { WorkspacePathService } from '../../../../common/storage/workspace-path.service';
+import { WorkspacePathService } from '@common/storage/workspace-path.service';
 import { ProjectsService } from '../projects.service';
 
 const silentLogger = {
@@ -138,7 +138,7 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
         corrupted: false,
         corruptedReason: null,
       };
-      const out = await (svc as unknown as { enrich: (p: typeof raw, cid?: string) => Promise<typeof raw> }).enrich(raw, 'cid-strict-2');
+      const out = await (svc as unknown as { enrich: (p: typeof raw, correlationId?: string) => Promise<typeof raw> }).enrich(raw, 'cid-strict-2');
       assert.equal(out.corrupted, true);
       assert.equal(out.corruptedReason, 'storage-unconfigured');
     },
@@ -205,11 +205,11 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
         const id = '123e4567-e89b-12d3-a456-426614174000';
         const resolved = await paths.resolveOrgStrict(org, id);
         assert.equal(
-          resolved.absRepo,
+          resolved.absoluteRepo,
           path.resolve(root, 'orgs', org, 'projects', id, 'content'),
         );
         const jailReal = await paths.realStrictRoot();
-        await paths.assertInsideJail(resolved.absRepo, jailReal);
+        await paths.assertInsideJail(resolved.absoluteRepo, jailReal);
         await paths.ensureProjectDirs(resolved);
       } finally {
         if (prev === undefined) delete process.env.REPOS_ROOT;

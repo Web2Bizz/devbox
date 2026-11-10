@@ -200,11 +200,11 @@ async function main(): Promise<void> {
       await check(
         "callback without PG → 503 EXTERNAL_UNAVAILABLE",
         async () => {
-          const cid = "e2e-github-503-0001";
+          const correlationId = "e2e-github-503-0001";
           const state = signAppState("alice", STATE_SECRET);
           const res = await fetch(
             `${base}/api/v1/projects/github/callback?installation_id=111&setup_action=install&state=${encodeURIComponent(state)}`,
-            { headers: { "x-correlation-id": cid, ...alice } },
+            { headers: { "x-correlation-id": correlationId, ...alice } },
           );
           assert.equal(res.status, 503);
           const body = (await readJson(res)) as {
@@ -217,8 +217,8 @@ async function main(): Promise<void> {
             body.message,
             "сервис временно недоступен, повторите позже",
           );
-          assert.equal(body.correlationId, cid);
-          assert.equal(res.headers.get("x-correlation-id"), cid);
+          assert.equal(body.correlationId, correlationId);
+          assert.equal(res.headers.get("x-correlation-id"), correlationId);
           assert.equal(res.headers.get("retry-after"), "30");
         },
       );

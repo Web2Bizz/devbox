@@ -1,6 +1,6 @@
 import { Controller, Get, Headers, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { ApiErrorDto } from '../../../../../common/http/api/api.dto';
+import { ApiErrorDto } from '@common/http/api/api.dto';
 import { JwtAuthGuard } from '../../../../../auth/jwt-auth.guard';
 import { NpmRegistryService } from './npm-registry.service';
 import { NpmRegistryStatusDto } from './npm.dto';

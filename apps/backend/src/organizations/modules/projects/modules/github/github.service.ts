@@ -5,15 +5,18 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Octokit } from 'octokit';
-import { AppLogger } from '../../../../../common/logger';
-import { validateEnv } from '../../../../../common/env/env';
+import { AppLogger } from '@common/logger';
+import { validateEnv, type AppEnv } from '@common/env/env';
 import {
   ExternalServiceError,
   fromUnknown,
-} from '../../../../../common/external/external-error';
-import { withRetry } from '../../../../../common/external/retry';
+} from '@common/external/external-error';
+import { withRetry } from '@common/external/retry';
 import { GithubAppService } from './github-app.service';
-import { GithubInstallationsService } from './github-installations.service';
+import {
+  GithubInstallationsService,
+  type GithubInstallation,
+} from './github-installations.service';
 import type { ListReposQueryInput } from './github.dto';
 
 export type GithubRepo = {
@@ -33,8 +36,10 @@ export type GithubRepo = {
 let fetchImplForTests: typeof fetch | null = null;
 
 /** Set a stub fetch for Octokit (compiled e2e); pass null to restore. */
-export function __setGithubFetchForTests(fn: typeof fetch | null): void {
-  fetchImplForTests = fn;
+export function __setGithubFetchForTests(
+  fetchImplementation: typeof fetch | null,
+): void {
+  fetchImplForTests = fetchImplementation;
 }
 
 type InstallationReposResponse = {
@@ -48,6 +53,16 @@ type InstallationReposResponse = {
     html_url?: string;
     owner?: { login?: string };
   }>;
+};
+
+/** One entry of GET /installation/repositories (derived from the payload type). */
+type InstallationRepo = NonNullable<InstallationReposResponse['repositories']>[number];
+
+/** Retry tuning consumed by `withRetry`. */
+type RetryDefaults = {
+  maxAttempts: number;
+  baseDelayMs: number;
+  maxDelayMs: number;
 };
 
 /**
@@ -74,27 +89,29 @@ export class GithubService {
     installationId: number,
     userId: string,
   ): Promise<Array<GithubRepo>> {
-    const stored = await this.installations.findByInstallationId(installationId);
+    const stored: GithubInstallation | null =
+      await this.installations.findByInstallationId(installationId);
     if (stored === null || stored.userId === null || stored.userId !== userId) {
       throw new NotFoundException({
         code: 'GITHUB_NOT_INSTALLED',
         message: 'GitHub App is not installed for this user',
       });
     }
-    const token = await this.appAuth.getInstallationToken(installationId);
-    const env = validateEnv(process.env);
+    const token: string = await this.appAuth.getInstallationToken(installationId);
+    const env: AppEnv = validateEnv(process.env);
+    // Destructuring the validated query — explicit annotation cannot be expressed here.
     const { page, per_page } = query;
 
-    const octokit = new Octokit({
+    const octokit: Octokit = new Octokit({
       auth: token,
       baseUrl: env.githubApiUrl,
       ...(fetchImplForTests ? { request: { fetch: fetchImplForTests } } : {}),
     });
 
-    let lastAttempt = 1;
+    let lastAttempt: number = 1;
     try {
-      const res = await withRetry(
-        async (attempt) => {
+      const response: { data: unknown } = await withRetry(
+        async (attempt: number) => {
           lastAttempt = attempt;
           if (attempt > 1) {
             this.logger.warn(
@@ -113,20 +130,22 @@ export class GithubService {
         },
         { method: 'GET', ...this.retryDefaults() },
       );
-      const data = res.data as InstallationReposResponse;
-      const repos = Array.isArray(data.repositories) ? data.repositories : [];
+      const data: InstallationReposResponse = response.data as InstallationReposResponse;
+      const repos: Array<InstallationRepo> = Array.isArray(data.repositories)
+        ? data.repositories
+        : [];
       // Per-request listing on a hot path → debug (not info).
       this.logger.debug('[github] repos listed');
-      return repos.map((r) => this.normalize(r));
-    } catch (err) {
-      throw this.toHttpError(err, lastAttempt);
+      return repos.map((repo) => this.normalize(repo));
+    } catch (error) {
+      throw this.toHttpError(error, lastAttempt);
     }
   }
 
   /** EXTERNAL_RETRY_* tuning (silent env defaults, fail-open to 3/200/2000). */
-  private retryDefaults(): { maxAttempts: number; baseDelayMs: number; maxDelayMs: number } {
+  private retryDefaults(): RetryDefaults {
     try {
-      const env = validateEnv(process.env);
+      const env: AppEnv = validateEnv(process.env);
       return {
         maxAttempts: env.externalRetryMaxAttempts,
         baseDelayMs: env.externalRetryBaseDelayMs,
@@ -137,20 +156,21 @@ export class GithubService {
     }
   }
 
-  private normalize(r: NonNullable<InstallationReposResponse['repositories']>[number]): GithubRepo {
-    const fullName = typeof r.full_name === 'string' ? r.full_name : '';
+  private normalize(repo: InstallationRepo): GithubRepo {
+    const fullName: string = typeof repo.full_name === 'string' ? repo.full_name : '';
+    // Array destructuring of the first path segment — explicit annotation cannot be expressed here.
     const [ownerFromFull] = fullName.split('/');
-    const owner = r.owner?.login ?? ownerFromFull ?? '';
-    const name = r.name ?? fullName.split('/')[1] ?? '';
+    const owner: string = repo.owner?.login ?? ownerFromFull ?? '';
+    const name: string = repo.name ?? fullName.split('/')[1] ?? '';
     return {
-      id: typeof r.id === 'number' ? r.id : 0,
+      id: typeof repo.id === 'number' ? repo.id : 0,
       owner,
       name,
       fullName,
-      private: Boolean(r.private),
-      defaultBranch: r.default_branch ?? 'main',
+      private: Boolean(repo.private),
+      defaultBranch: repo.default_branch ?? 'main',
       url:
-        r.html_url ??
+        repo.html_url ??
         (owner && name ? `https://github.com/${owner}/${name}` : ''),
     };
   }
@@ -162,15 +182,15 @@ export class GithubService {
    * retries) surface as ExternalServiceError with EXTERNAL_* codes and the
    * final attempt number (api-error.filter keeps the same envelope shape).
    */
-  private toHttpError(err: unknown, attempt = 1): Error {
-    const status =
-      err instanceof ExternalServiceError && err.status !== undefined
-        ? err.status
-        : typeof err === 'object' && err !== null && 'status' in err
-          ? Number((err as { status?: unknown }).status)
+  private toHttpError(error: unknown, attempt: number = 1): Error {
+    const status: number =
+      error instanceof ExternalServiceError && error.status !== undefined
+        ? error.status
+        : typeof error === 'object' && error !== null && 'status' in error
+          ? Number((error as { status?: unknown }).status)
           : NaN;
     // Fixed messages + status in logs only; upstream bodies may embed
-    // ids/urls but never our key/token (we never log err content).
+    // ids/urls but never our key/token (we never log error content).
     if (status === 401) {
       this.logger.warn('[github] repos unauthorized (401)');
       return new UnauthorizedException('GitHub authorization failed');
@@ -183,7 +203,7 @@ export class GithubService {
       this.logger.warn('[github] repos not found (404)');
       return new NotFoundException('GitHub installation not found');
     }
-    const external = fromUnknown('github', 'listRepos', err, attempt);
+    const external: ExternalServiceError = fromUnknown('github', 'listRepos', error, attempt);
     this.logger.warn(
       `[github] repos transport failure code=${external.code} attempt=${external.attempt}`,
     );

@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { z } from 'zod';
+import type { InstallationWebhookPayload } from './utils/webhook';
 
 /**
  * Github (installation repos) DTO — zod@4 source of truth, swagger DTOs for
@@ -10,14 +11,17 @@ import { z } from 'zod';
  * Required App scopes: metadata:read + contents:read.
  */
 
-export const listReposQuerySchema = z.object({
+export type ListReposQueryInput = {
+  page: number;
+  per_page: number;
+};
+
+export const listReposQuerySchema: z.ZodType<ListReposQueryInput> = z.object({
   page: z.coerce.number().int().min(1).max(1000).default(1),
   per_page: z.coerce.number().int().min(1).max(100).default(30),
   // NOTE (C2): no userId — the caller is the Bearer identity (@ReqUser());
   // a ?userId query is stripped by validation and never trusted.
 });
-
-export type ListReposQueryInput = z.infer<typeof listReposQuerySchema>;
 
 export class ListReposQueryDto {
   @ApiProperty({ required: false, minimum: 1, default: 1, example: 1 })
@@ -57,15 +61,19 @@ export class GithubInstallUrlDto {
 }
 
 /** GET /projects/github/callback?installation_id=&setup_action=&state= */
-export const installCallbackQuerySchema = z.object({
+export type InstallCallbackQueryInput = {
+  installation_id: number;
+  setup_action: string;
+  state: string;
+};
+
+export const installCallbackQuerySchema: z.ZodType<InstallCallbackQueryInput> = z.object({
   installation_id: z.coerce.number().int().positive(),
   setup_action: z.string().trim().min(1).max(50).default('install'),
   state: z.string().trim().min(1),
   // NOTE (C2): no userId — the binding target is the Bearer identity
   // (@ReqUser()); a ?userId query is stripped by validation and never trusted.
 });
-
-export type InstallCallbackQueryInput = z.infer<typeof installCallbackQuerySchema>;
 
 export class InstallCallbackQueryDto {
   @ApiProperty({ description: 'GitHub installation id from the App setup flow', example: 789012 })
@@ -104,7 +112,7 @@ export class GithubWebhookAckDto {
  * validation runs in the controller AFTER signature verification — unverified
  * payloads never reach it.
  */
-export const installationWebhookSchema = z
+export const installationWebhookSchema: z.ZodType<InstallationWebhookPayload> = z
   .object({
     action: z.string().optional(),
     installation: z
@@ -115,4 +123,3 @@ export const installationWebhookSchema = z
       .optional(),
   })
   .loose();
-

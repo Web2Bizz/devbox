@@ -9,13 +9,13 @@ import {
   UseInterceptors,
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagger";
-import { NoIndexInterceptor } from "../common/http/noindex.interceptor";
+import { NoIndexInterceptor } from "@common/http/noindex.interceptor";
 import { ReqUser } from "../auth/req-user.decorator";
 import type { RequestIdentity } from "../auth/identity.service";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { UserDto } from "./users.dto";
 import { UsersService, toPublicUser } from "./users.service";
-import type { RequestCorrelation } from "./users.types";
+import type { RequestCorrelation, StoredUser } from "./users.types";
 
 /**
  * UsersController — minimal private profile read (Card 6 privacy).
@@ -51,8 +51,11 @@ export class UsersController {
       throw new ForbiddenException("Access denied");
     }
     // correlationId etalon: auth.controller.ts (`request?.correlationId`).
-    const correlationId = request?.correlationId;
-    const user = await this.usersService.findById(identity.id, correlationId);
+    const correlationId: string | undefined = request?.correlationId;
+    const user: StoredUser | null = await this.usersService.findById(
+      identity.id,
+      correlationId,
+    );
     if (!user) {
       throw new NotFoundException(`User ${identity.id} not found`);
     }

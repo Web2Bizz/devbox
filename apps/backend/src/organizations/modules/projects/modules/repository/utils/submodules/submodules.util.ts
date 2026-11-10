@@ -2,9 +2,15 @@ import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { AppLogger } from '../../../../../../../common/logger';
+import type { AppLogger } from '@common/logger';
 
-const execFileAsync = promisify(execFile);
+type ExecFileAsync = (
+  file: string,
+  args: Array<string>,
+  options?: { cwd?: string; timeout?: number },
+) => Promise<{ stdout: string; stderr: string }>;
+
+const execFileAsync: ExecFileAsync = promisify(execFile);
 
 export type SubmoduleEntry = {
   path: string;
@@ -14,28 +20,46 @@ export type SubmoduleEntry = {
   status: string;
 };
 
+/** One `[submodule "name"]` section of `.gitmodules` (name discarded). */
+export type GitmodulesEntry = {
+  path: string;
+  url: string | null;
+};
+
+/** One parsed `git submodule status` line. */
+export type SubmoduleStatusRow = {
+  sha: string | null;
+  path: string;
+  status: string;
+};
+
+type GitmodulesSection = {
+  path?: string;
+  url?: string | null;
+};
+
 type WarnLogger = {
   warn(message: unknown): void;
 };
 
-export const SUBMODULE_TIMEOUT_MS = 30000;
+export const SUBMODULE_TIMEOUT_MS: number = 30000;
 
 /**
  * Minimal .gitmodules parser (no new deps): `[submodule "name"]` sections
  * with `path = …` / `url = …` pairs. Comments (`#`/`;`) and blank lines
  * are ignored; section names are discarded (paths are the jail key).
  */
-export function parseGitmodules(content: string): Array<{ path: string; url: string | null }> {
-  const out: Array<{ path: string; url: string | null }> = [];
-  let current: { path?: string; url?: string | null } | null = null;
-  const flush = () => {
-    if (current?.path) out.push({ path: current.path, url: current.url ?? null });
+export function parseGitmodules(content: string): Array<GitmodulesEntry> {
+  const entries: Array<GitmodulesEntry> = [];
+  let current: GitmodulesSection | null = null;
+  const flush: () => void = () => {
+    if (current?.path) entries.push({ path: current.path, url: current.url ?? null });
     current = null;
   };
   for (const rawLine of content.split('\n')) {
-    const line = rawLine.trim();
+    const line: string = rawLine.trim();
     if (!line || line.startsWith('#') || line.startsWith(';')) continue;
-    const section = line.match(/^\[submodule\s+"[^"]*"\]\s*$/);
+    const section: RegExpMatchArray | null = line.match(/^\[submodule\s+"[^"]*"\]\s*$/);
     if (section) {
       flush();
       current = {};
@@ -45,29 +69,31 @@ export function parseGitmodules(content: string): Array<{ path: string; url: str
       flush();
       continue;
     }
-    const kv = line.match(/^([A-Za-z0-9_-]+)\s*=\s*(.+?)\s*$/);
-    if (!kv || !current) continue;
-    const [, key, value] = kv;
+    const keyValueMatch: RegExpMatchArray | null = line.match(/^([A-Za-z0-9_-]+)\s*=\s*(.+?)\s*$/);
+    if (!keyValueMatch || !current) continue;
+    // Tuple destructuring of a regex match — explicit annotation cannot be expressed here.
+    const [, key, value] = keyValueMatch;
     if (key === 'path') current.path = value;
     else if (key === 'url') current.url = value;
   }
   flush();
-  return out;
+  return entries;
 }
 
 /** `  abc1234 libs/shared (v1.0)` → { sha, path, status }. */
-export function parseSubmoduleStatus(
-  stdout: string,
-): Array<{ sha: string | null; path: string; status: string }> {
-  const out: Array<{ sha: string | null; path: string; status: string }> = [];
+export function parseSubmoduleStatus(stdout: string): Array<SubmoduleStatusRow> {
+  const entries: Array<SubmoduleStatusRow> = [];
   for (const rawLine of stdout.split('\n')) {
     if (!rawLine.trim()) continue;
-    const m = rawLine.match(/^(.)([0-9a-f]{4,64})\s+(\S+)(?:\s+\(.*\))?\s*$/);
-    if (!m) continue;
-    const [, status, sha, subPath] = m;
-    out.push({ sha, path: subPath, status });
+    const match: RegExpMatchArray | null = rawLine.match(
+      /^(.)([0-9a-f]{4,64})\s+(\S+)(?:\s+\(.*\))?\s*$/,
+    );
+    if (!match) continue;
+    // Tuple destructuring of a regex match — explicit annotation cannot be expressed here.
+    const [, status, sha, subPath] = match;
+    entries.push({ sha, path: subPath, status });
   }
-  return out;
+  return entries;
 }
 
 /**
@@ -76,7 +102,7 @@ export function parseSubmoduleStatus(
  */
 export function isSubmodulePathSafe(subPath: string): boolean {
   if (!subPath || subPath.includes('\0')) return false;
-  let decoded = subPath;
+  let decoded: string = subPath;
   if (decoded.includes('%')) {
     try {
       decoded = decodeURIComponent(decoded);
@@ -85,9 +111,12 @@ export function isSubmodulePathSafe(subPath: string): boolean {
     }
   }
   if (path.isAbsolute(decoded) || decoded.startsWith('\\')) return false;
-  const rel = path.posix.normalize(decoded.replace(/\\/g, '/').replace(/^\/+/, ''));
-  if (!rel || rel === '.' || rel === '..' || rel.startsWith('../')) return false;
-  if (rel.includes('/../') || rel.endsWith('/..')) return false;
+  const relativePath: string = path.posix.normalize(
+    decoded.replace(/\\/g, '/').replace(/^\/+/, ''),
+  );
+  if (!relativePath || relativePath === '.' || relativePath === '..') return false;
+  if (relativePath.startsWith('../') || relativePath.includes('/../')) return false;
+  if (relativePath.endsWith('/..')) return false;
   return true;
 }
 
@@ -98,51 +127,59 @@ export function isSubmodulePathSafe(subPath: string): boolean {
  * never surface in the response.
  */
 export async function readSubmodules(
-  absRepo: string,
+  absoluteRepo: string,
   logger?: WarnLogger | AppLogger,
 ): Promise<Array<SubmoduleEntry>> {
-  let statusOut = '';
+  let statusOut: string = '';
   try {
-    const res = await execFileAsync('git', ['submodule', 'status'], {
-      cwd: absRepo,
-      timeout: SUBMODULE_TIMEOUT_MS,
-    });
-    statusOut = res.stdout ?? '';
+    const response: { stdout: string; stderr: string } = await execFileAsync(
+      'git',
+      ['submodule', 'status'],
+      {
+        cwd: absoluteRepo,
+        timeout: SUBMODULE_TIMEOUT_MS,
+      },
+    );
+    statusOut = response.stdout ?? '';
   } catch {
     statusOut = '';
   }
-  const rows = parseSubmoduleStatus(statusOut);
+  const rows: Array<SubmoduleStatusRow> = parseSubmoduleStatus(statusOut);
 
-  let gitmodules: Array<{ path: string; url: string | null }> = [];
+  let gitmodules: Array<GitmodulesEntry> = [];
   try {
-    const raw = await readFile(path.join(absRepo, '.gitmodules'), 'utf8');
+    const raw: string = await readFile(path.join(absoluteRepo, '.gitmodules'), 'utf8');
     gitmodules = parseGitmodules(raw);
   } catch {
     gitmodules = [];
   }
-  const urlByPath = new Map(gitmodules.map((g) => [g.path, g.url]));
+  const urlByPath: Map<string, string | null> = new Map(
+    gitmodules.map((entry) => [entry.path, entry.url]),
+  );
 
-  const paths = new Set<string>([
-    ...rows.map((r) => r.path),
-    ...gitmodules.map((g) => g.path),
+  const paths: Set<string> = new Set<string>([
+    ...rows.map((row) => row.path),
+    ...gitmodules.map((entry) => entry.path),
   ]);
-  const shaByPath = new Map(rows.map((r) => [r.path, r]));
-  const out: Array<SubmoduleEntry> = [];
-  for (const p of [...paths].sort()) {
-    if (!isSubmodulePathSafe(p)) {
+  const shaByPath: Map<string, SubmoduleStatusRow> = new Map(
+    rows.map((submoduleRow) => [submoduleRow.path, submoduleRow]),
+  );
+  const entries: Array<SubmoduleEntry> = [];
+  for (const submodulePath of [...paths].sort()) {
+    if (!isSubmodulePathSafe(submodulePath)) {
       (logger as WarnLogger | undefined)?.warn?.({
-        path: p,
+        path: submodulePath,
         reason: 'submodule-path-outside-jail',
       });
       continue;
     }
-    const row = shaByPath.get(p);
-    out.push({
-      path: p,
-      url: urlByPath.get(p) ?? null,
+    const row: SubmoduleStatusRow | undefined = shaByPath.get(submodulePath);
+    entries.push({
+      path: submodulePath,
+      url: urlByPath.get(submodulePath) ?? null,
       sha: row?.sha ?? null,
       status: row?.status ?? ' ',
     });
   }
-  return out;
+  return entries;
 }

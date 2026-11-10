@@ -16,8 +16,8 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagg
 import { JwtAuthGuard } from "../../../auth/jwt-auth.guard";
 import { ReqUser } from "../../../auth/req-user.decorator";
 import type { RequestIdentity } from "../../../auth/identity.service";
-import { NoIndexInterceptor } from "../../../common/http/noindex.interceptor";
-import { ZodValidationPipe } from "../../../common/validation";
+import { NoIndexInterceptor } from "@common/http/noindex.interceptor";
+import { ZodValidationPipe } from "@common/validation";
 import {
   OrganizationMemberDto,
   addMemberSchema,
@@ -61,9 +61,9 @@ export class MembersController {
   async listMembers(
     @Param("id") id: string,
     @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
+    @Req() request?: { correlationId?: string },
   ): Promise<Array<OrganizationMemberDto>> {
-    return (await this.members.listMembers(id, identity.id, req?.correlationId)) as Array<OrganizationMemberDto>;
+    return (await this.members.listMembers(id, identity.id, request?.correlationId)) as Array<OrganizationMemberDto>;
   }
 
   @Post(":id/members")
@@ -80,9 +80,9 @@ export class MembersController {
     @Param("id") id: string,
     @Body(new ZodValidationPipe(addMemberSchema)) body: AddMemberInput,
     @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
+    @Req() request?: { correlationId?: string },
   ): Promise<OrganizationMemberDto> {
-    return (await this.members.addMember(id, identity.id, body, req?.correlationId)) as OrganizationMemberDto;
+    return (await this.members.addMember(id, identity.id, body, request?.correlationId)) as OrganizationMemberDto;
   }
 
   @Patch(":id/members/:userId")
@@ -100,14 +100,14 @@ export class MembersController {
     @Param("userId") userId: string,
     @Body(new ZodValidationPipe(updateMemberRoleSchema)) body: UpdateMemberRoleInput,
     @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
+    @Req() request?: { correlationId?: string },
   ): Promise<OrganizationMemberDto> {
     return (await this.members.changeRole(
       id,
       identity.id,
       userId,
       body,
-      req?.correlationId,
+      request?.correlationId,
     )) as OrganizationMemberDto;
   }
 
@@ -125,8 +125,8 @@ export class MembersController {
     @Param("id") id: string,
     @Param("userId") userId: string,
     @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
+    @Req() request?: { correlationId?: string },
   ): Promise<void> {
-    await this.members.removeMember(id, identity.id, userId, req?.correlationId);
+    await this.members.removeMember(id, identity.id, userId, request?.correlationId);
   }
 }

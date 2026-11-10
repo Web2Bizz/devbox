@@ -173,25 +173,32 @@ export type AppEnv = {
 
 // --- zod@4 primitive schemas (Standard Schema compatible) --------------------
 
-export const portSchema = z
+export const portSchema: z.ZodType<number, string> = z
   .string()
   .regex(/^\d+$/, { error: "must be a numeric port 1-65535" })
-  .transform((raw) => Number(raw))
-  .refine((n) => Number.isInteger(n) && n >= 1 && n <= 65535, {
-    error: "must be a numeric port 1-65535",
+  .transform((raw: string) => Number(raw))
+  .refine(
+    (value: number) => Number.isInteger(value) && value >= 1 && value <= 65535,
+    {
+      error: "must be a numeric port 1-65535",
+    },
+  );
+
+export const protocolSchema: z.ZodType<"http" | "https", "http" | "https"> =
+  z.enum(["http", "https"], {
+    error: 'must be "http" or "https"',
   });
 
-export const protocolSchema = z.enum(["http", "https"], {
-  error: 'must be "http" or "https"',
-});
+export const logLevelSchema: z.ZodType<
+  "debug" | "info" | "warn" | "error",
+  "debug" | "info" | "warn" | "error"
+> = z.enum(["debug", "info", "warn", "error"]);
 
-export const logLevelSchema = z.enum(["debug", "info", "warn", "error"]);
-
-export const timeoutSchema = z
+export const timeoutSchema: z.ZodType<number, string> = z
   .string()
   .regex(/^\d+$/, { error: "must be a non-negative integer ms" })
-  .transform((raw) => Number(raw))
-  .refine((n) => Number.isInteger(n) && n >= 0, {
+  .transform((raw: string) => Number(raw))
+  .refine((value: number) => Number.isInteger(value) && value >= 0, {
     error: "must be a non-negative integer ms",
   });
 
@@ -205,7 +212,7 @@ function parseUrlOrNull(value: string): URL | null {
 
 /** True for absolute http(s) URLs with a host (CORS origins are never secret-bearing). */
 export function isHttpUrl(value: string): boolean {
-  const parsed = parseUrlOrNull(value);
+  const parsed: URL | null = parseUrlOrNull(value);
   return (
     !!parsed &&
     (parsed.protocol === "http:" || parsed.protocol === "https:") &&
@@ -214,36 +221,43 @@ export function isHttpUrl(value: string): boolean {
 }
 
 /** Generic valid-URL-with-host check (assertValidUrl reports the [env] errors). */
-export const urlSchema = z.string().refine(
-  (v) => {
-    const parsed = parseUrlOrNull(v);
+export const urlSchema: z.ZodType<string, string> = z.string().refine(
+  (value: string) => {
+    const parsed: URL | null = parseUrlOrNull(value);
     return !!parsed && Boolean(parsed.hostname);
   },
   { error: "must be a valid URL with a host (see .env.example)" },
 );
 
 /** Explicit DATABASE_URL shape check (never echo the value — it carries credentials). */
-export const databaseUrlSchema = z
+export const databaseUrlSchema: z.ZodType<string, string> = z
   .string()
   .regex(/^postgres(ql)?:\/\/[^/\s]+/, {
     error: "must be a postgres://... URL (see .env.example)",
   });
 
 /** CORS_ORIGINS raw string → trimmed non-empty entries, each an http(s) URL. */
-export const corsOriginsSchema = z
+export const corsOriginsSchema: z.ZodType<Array<string>, string> = z
   .string()
-  .transform((raw) =>
+  .transform((raw: string) =>
     raw
       .split(",")
-      .map((s) => s.trim())
+      .map((segment: string) => segment.trim())
       .filter(Boolean),
   )
-  .refine((origins) => origins.length > 0 && origins.every(isHttpUrl), {
+  .refine((origins: Array<string>) => origins.length > 0 && origins.every(isHttpUrl), {
     error:
       "must be a comma-separated list of valid http(s) URLs (see .env.example)",
   });
 
-/** Raw process.env shape — every value is an optional string. */
+/**
+ * Raw process.env shape — every value is an optional string.
+ *
+ * type: inferred — `EnvRaw` is derived from this schema via `z.infer`;
+ * annotating the schema itself would either be circular or erase the raw-key
+ * shape (the single source for `KNOWN_ENV_KEYS`). Every consumer of
+ * `safeParse` output is explicitly typed.
+ */
 export const envRawSchema = z.object({
   APP_BACKEND_PORT: z.string().optional(),
   PORT: z.string().optional(),
@@ -310,64 +324,65 @@ export const envRawSchema = z.object({
 export type EnvRaw = z.infer<typeof envRawSchema>;
 
 /** Default GitHub REST base URL (GHE override via GITHUB_API_URL). */
-export const DEFAULT_GITHUB_API_URL = "https://api.github.com";
+export const DEFAULT_GITHUB_API_URL: string = "https://api.github.com";
 
 /** Default per-attempt GitHub API budget (ms) — enforced with AbortSignal.timeout. */
-export const DEFAULT_GITHUB_REQUEST_TIMEOUT_MS = 15000;
+export const DEFAULT_GITHUB_REQUEST_TIMEOUT_MS: number = 15000;
 
 /** Default session cookie SameSite policy. */
-export const DEFAULT_AUTH_COOKIE_SAMESITE = "lax" as const;
+export const DEFAULT_AUTH_COOKIE_SAMESITE: "lax" = "lax";
 
 /** Defaults for idempotent upstream retry (withRetry + ExternalClient). */
-export const DEFAULT_EXTERNAL_RETRY_MAX_ATTEMPTS = 3;
-export const DEFAULT_EXTERNAL_RETRY_BASE_DELAY_MS = 200;
-export const DEFAULT_EXTERNAL_RETRY_MAX_DELAY_MS = 2000;
+export const DEFAULT_EXTERNAL_RETRY_MAX_ATTEMPTS: number = 3;
+export const DEFAULT_EXTERNAL_RETRY_BASE_DELAY_MS: number = 200;
+export const DEFAULT_EXTERNAL_RETRY_MAX_DELAY_MS: number = 2000;
 
 /** Defaults for the docker-registry surface (mirrors EXTERNAL_RETRY_*). */
-export const DEFAULT_DOCKER_REGISTRY_TIMEOUT_MS = 10000;
-export const DEFAULT_DOCKER_REGISTRY_RETRY_MAX_ATTEMPTS = 3;
-export const DEFAULT_DOCKER_REGISTRY_RETRY_BASE_DELAY_MS = 200;
-export const DEFAULT_DOCKER_REGISTRY_RETRY_MAX_DELAY_MS = 2000;
+export const DEFAULT_DOCKER_REGISTRY_TIMEOUT_MS: number = 10000;
+export const DEFAULT_DOCKER_REGISTRY_RETRY_MAX_ATTEMPTS: number = 3;
+export const DEFAULT_DOCKER_REGISTRY_RETRY_BASE_DELAY_MS: number = 200;
+export const DEFAULT_DOCKER_REGISTRY_RETRY_MAX_DELAY_MS: number = 2000;
 
 /** Default npm scope observed by the npm-registry module. */
-export const DEFAULT_NPM_REGISTRY_SCOPE = "@web2bizz";
+export const DEFAULT_NPM_REGISTRY_SCOPE: string = "@web2bizz";
 
 /** Default JWT lifetimes (access 15m, refresh 7d, in seconds). */
-export const DEFAULT_JWT_ACCESS_TTL_SEC = 900;
-export const DEFAULT_JWT_REFRESH_TTL_SEC = 604800;
+export const DEFAULT_JWT_ACCESS_TTL_SEC: number = 900;
+export const DEFAULT_JWT_REFRESH_TTL_SEC: number = 604800;
 
 /** Minimum OPENCODE_KEYS_ENCRYPTION_KEY length (AES-256 key material, SHA-256 derived). */
-export const MIN_OPENCODE_KEYS_ENCRYPTION_KEY_LENGTH = 32;
+export const MIN_OPENCODE_KEYS_ENCRYPTION_KEY_LENGTH: number = 32;
 
 /** Default KEK version id for newly wrapped rows (stored plaintext, not a secret). */
-export const DEFAULT_OPENCODE_KEYS_ACTIVE_KEY_ID = "v1";
+export const DEFAULT_OPENCODE_KEYS_ACTIVE_KEY_ID: string = "v1";
 
 /** Default previous-KEK version id (rotation window only; not a secret). */
-export const DEFAULT_OPENCODE_KEYS_PREVIOUS_KEY_ID = "v0";
+export const DEFAULT_OPENCODE_KEYS_PREVIOUS_KEY_ID: string = "v0";
 
 /**
  * Allowed KEK version-id shape: leading alnum + up to 31 alnum/`_`/`-`
  * (e.g. "v1", "2026-10"). Ids travel in plaintext (`key_id` column), so the
  * rule only keeps them greppable and SQL-safe.
  */
-export const OPENCODE_KEYS_KEY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/;
+export const OPENCODE_KEYS_KEY_ID_PATTERN: RegExp =
+  /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/;
 
 /** Minimum explicit JWT secret length (dev ephemeral fallback bypasses this). */
-export const MIN_JWT_SECRET_LENGTH = 32;
+export const MIN_JWT_SECRET_LENGTH: number = 32;
 
 /**
  * Ephemeral dev JWT secrets (unset JWT_*_SECRET → random per boot, cached).
  * Values never leave this module except as signing keys — never logged.
  */
-const ephemeralSecrets = new Map<string, string>();
+const ephemeralSecrets: Map<string, string> = new Map<string, string>();
 
 export function ephemeralDevJwtSecret(kind: "access" | "refresh"): string {
-  let s = ephemeralSecrets.get(kind);
-  if (!s) {
-    s = randomBytes(48).toString("base64url");
-    ephemeralSecrets.set(kind, s);
+  let secret: string | undefined = ephemeralSecrets.get(kind);
+  if (!secret) {
+    secret = randomBytes(48).toString("base64url");
+    ephemeralSecrets.set(kind, secret);
   }
-  return s;
+  return secret;
 }
 
 /** Test seam — drops ephemeral dev secrets (fresh randomness next call). */
@@ -376,10 +391,10 @@ export function clearEphemeralDevJwtSecretsForTests(): void {
 }
 
 /** Defaults for the npm-registry surface (mirrors EXTERNAL_RETRY_*). */
-export const DEFAULT_NPM_REGISTRY_TIMEOUT_MS = 10000;
-export const DEFAULT_NPM_REGISTRY_RETRY_MAX_ATTEMPTS = 3;
-export const DEFAULT_NPM_REGISTRY_RETRY_BASE_DELAY_MS = 200;
-export const DEFAULT_NPM_REGISTRY_RETRY_MAX_DELAY_MS = 2000;
+export const DEFAULT_NPM_REGISTRY_TIMEOUT_MS: number = 10000;
+export const DEFAULT_NPM_REGISTRY_RETRY_MAX_ATTEMPTS: number = 3;
+export const DEFAULT_NPM_REGISTRY_RETRY_BASE_DELAY_MS: number = 200;
+export const DEFAULT_NPM_REGISTRY_RETRY_MAX_DELAY_MS: number = 2000;
 
 /**
  * Normalizes a GitHub App private key from env.
@@ -388,7 +403,7 @@ export const DEFAULT_NPM_REGISTRY_RETRY_MAX_DELAY_MS = 2000;
  * content — validation of the key shape happens at JWT-sign time.
  */
 export function normalizeGithubPrivateKey(raw: string): string {
-  let key = raw.trim();
+  let key: string = raw.trim();
   if (
     (key.startsWith('"') && key.endsWith('"')) ||
     (key.startsWith("'") && key.endsWith("'"))
@@ -397,10 +412,10 @@ export function normalizeGithubPrivateKey(raw: string): string {
   }
   if (key.includes("\\n")) key = key.replace(/\\n/g, "\n");
   if (!key.includes("BEGIN")) {
-    const compact = key.replace(/\s+/g, "");
+    const compact: string = key.replace(/\s+/g, "");
     if (compact.length >= 16) {
       try {
-        const decoded = Buffer.from(compact, "base64").toString("utf8");
+        const decoded: string = Buffer.from(compact, "base64").toString("utf8");
         if (decoded.includes("BEGIN")) return decoded.trim();
       } catch {
         // keep raw — sign step reports the failure without echoing content
@@ -443,60 +458,62 @@ export function resolveGithubPrivateKey(
   inlineRaw: string,
   pathRaw: string,
 ): string {
-  const p = pathRaw.trim();
-  if (p) {
+  const configuredPath: string = pathRaw.trim();
+  if (configuredPath) {
     // Absolute path: single candidate, no base probing.
-    if (isAbsolute(p)) {
+    if (isAbsolute(configuredPath)) {
       let content: string;
       try {
-        content = readFileSync(p, "utf8");
+        content = readFileSync(configuredPath, "utf8");
       } catch {
         throw new Error(
-          `[env] GITHUB_APP_PRIVATE_KEY_PATH points to an unreadable file: ${JSON.stringify(p)}. ` +
+          `[env] GITHUB_APP_PRIVATE_KEY_PATH points to an unreadable file: ${JSON.stringify(configuredPath)}. ` +
             `Check the path and file permissions (see .env.example).`,
         );
       }
       return normalizeGithubPrivateKey(content);
     }
     const bases: Array<string> = [];
-    const pushBase = (b: string) => {
-      if (b && !bases.includes(b)) bases.push(b);
+    const pushBase: (base: string) => void = (base: string) => {
+      if (base && !bases.includes(base)) bases.push(base);
     };
     // 1) launcher cwd + walk up (repo root is ≤2 levels above apps/backend).
-    let dir = resolvePath(process.cwd());
-    pushBase(dir);
+    let directoryPath: string = resolvePath(process.cwd());
+    pushBase(directoryPath);
     for (let i = 0; i < 4; i++) {
-      const parent = dirname(dir);
-      if (parent === dir) break;
-      dir = parent;
-      pushBase(dir);
+      const parent: string = dirname(directoryPath);
+      if (parent === directoryPath) break;
+      directoryPath = parent;
+      pushBase(directoryPath);
     }
     // 2) module-dir derived bases (compiled dist/: apps/backend/dist → root
     //    is 3 levels up; ts-node src/: apps/backend/src → root is 2 up).
     const moduleDir: string | undefined =
       typeof __dirname !== "undefined" ? __dirname : undefined;
     if (moduleDir) {
-      let m = resolvePath(moduleDir);
-      pushBase(m);
+      let modulePath: string = resolvePath(moduleDir);
+      pushBase(modulePath);
       for (let i = 0; i < 4; i++) {
-        const parent = dirname(m);
-        if (parent === m) break;
-        m = parent;
-        pushBase(m);
+        const parent: string = dirname(modulePath);
+        if (parent === modulePath) break;
+        modulePath = parent;
+        pushBase(modulePath);
       }
     }
-    const candidates = bases.map((b) => resolvePath(b, p));
+    const candidates: Array<string> = bases.map((base: string) =>
+      resolvePath(base, configuredPath),
+    );
     const tried: Array<string> = [];
-    for (const abs of candidates) {
-      if (tried.includes(abs)) continue;
-      tried.push(abs);
-      if (existsSync(abs)) {
-        return normalizeGithubPrivateKey(readFileSync(abs, "utf8"));
+    for (const absolutePath of candidates) {
+      if (tried.includes(absolutePath)) continue;
+      tried.push(absolutePath);
+      if (existsSync(absolutePath)) {
+        return normalizeGithubPrivateKey(readFileSync(absolutePath, "utf8"));
       }
     }
     throw new Error(
-      `[env] GITHUB_APP_PRIVATE_KEY_PATH points to an unreadable file: ${JSON.stringify(p)}. ` +
-        `Tried ${tried.length} location(s): ${tried.map((t) => JSON.stringify(t)).join(", ")}. ` +
+      `[env] GITHUB_APP_PRIVATE_KEY_PATH points to an unreadable file: ${JSON.stringify(configuredPath)}. ` +
+        `Tried ${tried.length} location(s): ${tried.map((triedPath: string) => JSON.stringify(triedPath)).join(", ")}. ` +
         `Check the path and file permissions (see .env.example).`,
     );
   }
@@ -506,8 +523,8 @@ export function resolveGithubPrivateKey(
 // --- helpers (no secrets in errors) ------------------------------------------
 
 function firstNonEmpty(...values: Array<string | undefined>): string {
-  for (const v of values) {
-    if (v !== undefined && v.trim() !== "") return v.trim();
+  for (const value of values) {
+    if (value !== undefined && value.trim() !== "") return value.trim();
   }
   return "";
 }
@@ -517,8 +534,8 @@ function stripSlash(url: string): string {
 }
 
 function assertValidUrl(value: string, name: string): string {
-  const clean = stripSlash(value);
-  const parsed = parseUrlOrNull(clean);
+  const clean: string = stripSlash(value);
+  const parsed: URL | null = parseUrlOrNull(clean);
   if (!parsed || !urlSchema.safeParse(clean).success) {
     if (parsed && !parsed.hostname) {
       throw new Error(
@@ -541,7 +558,7 @@ function looksBroken(url: string): boolean {
 }
 
 function parsePortWithZod(raw: string, name: string): number {
-  const parsed = portSchema.safeParse(raw);
+  const parsed: z.ZodSafeParseResult<number> = portSchema.safeParse(raw);
   if (!parsed.success) {
     throw new Error(
       `[env] ${name} must be a numeric port 1-65535, got ${JSON.stringify(raw)}. ` +
@@ -552,8 +569,9 @@ function parsePortWithZod(raw: string, name: string): number {
 }
 
 function parseProtocolWithZod(raw: string, name: string): "http" | "https" {
-  const v = raw.trim().toLowerCase();
-  const parsed = protocolSchema.safeParse(v);
+  const value: string = raw.trim().toLowerCase();
+  const parsed: z.ZodSafeParseResult<"http" | "https"> =
+    protocolSchema.safeParse(value);
   if (!parsed.success) {
     throw new Error(
       `[env] ${name} must be "http" or "https", got ${JSON.stringify(raw)}.`,
@@ -567,7 +585,7 @@ const KNOWN_ENV_KEYS: ReadonlySet<string> = new Set(
   Object.keys(envRawSchema.shape),
 );
 
-const APP_ENV_PREFIXES = [
+const APP_ENV_PREFIXES: ReadonlyArray<string> = [
   "APP_BACKEND_",
   "OPENCODE_",
   "POSTGRES_",
@@ -592,17 +610,21 @@ const APP_ENV_PREFIXES = [
   "REPOS_ROOT",
   "REPOS_",
   "CLONE_",
-] as const;
+];
 
 /** App-prefixed keys outside the known contract (probable typos) — unrelated OS vars ignored. */
 export function findSuspiciousUnknownKeys(source: NodeJS.ProcessEnv): Array<string> {
-  const out: Array<string> = [];
+  const unknownKeys: Array<string> = [];
   for (const key of Object.keys(source)) {
     if (KNOWN_ENV_KEYS.has(key)) continue;
-    if (APP_ENV_PREFIXES.some((p) => key === p || key.startsWith(p)))
-      out.push(key);
+    if (
+      APP_ENV_PREFIXES.some(
+        (prefix: string) => key === prefix || key.startsWith(prefix),
+      )
+    )
+      unknownKeys.push(key);
   }
-  return out.sort();
+  return unknownKeys.sort();
 }
 
 export type EnvValidation = {
@@ -621,11 +643,11 @@ export type EnvValidation = {
  * raw env string).
  */
 export function parseCloneAllowedHosts(raw: string | undefined): Array<string> {
-  const cloneHostsRaw = firstNonEmpty(raw);
+  const cloneHostsRaw: string = firstNonEmpty(raw);
   const cloneAllowedHosts: Array<string> = [];
   if (cloneHostsRaw) {
     for (const entry of cloneHostsRaw.split(",")) {
-      const host = entry.trim().toLowerCase();
+      const host: string = entry.trim().toLowerCase();
       if (!host) continue;
       if (!/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/.test(host)) {
         throw new Error(
@@ -643,41 +665,41 @@ export function validateEnvWithWarnings(
   source: NodeJS.ProcessEnv = process.env,
 ): EnvValidation {
   const warnings: Array<string> = [];
-  const warn = (msg: string): void => {
-    warnings.push(msg);
+  const warn: (message: string) => void = (message: string) => {
+    warnings.push(message);
   };
 
   // Structural check via zod@4 (Standard Schema) — rejects non-string values early.
-  const rawCheck = envRawSchema.safeParse(source);
+  const rawCheck: z.ZodSafeParseResult<EnvRaw> = envRawSchema.safeParse(source);
   if (!rawCheck.success) {
     throw new Error(
       `[env] invalid environment shape: ${rawCheck.error.issues[0]?.message}`,
     );
   }
-  const env = rawCheck.data;
+  const env: EnvRaw = rawCheck.data;
 
   // --- backend socket -------------------------------------------------------
-  const backendPortRaw = firstNonEmpty(env.APP_BACKEND_PORT, env.PORT);
+  const backendPortRaw: string = firstNonEmpty(env.APP_BACKEND_PORT, env.PORT);
   if (!backendPortRaw) {
     throw new Error(
       "[env] APP_BACKEND_PORT is required (legacy fallback: PORT). " +
         "Set APP_BACKEND_PORT=3000 in your .env (see .env.example).",
     );
   }
-  const backendPort = parsePortWithZod(backendPortRaw, "APP_BACKEND_PORT");
-  const backendHostRaw = firstNonEmpty(env.APP_BACKEND_HOST);
-  const backendHost = backendHostRaw || "localhost"; // readonly-исключение: dev-listen default + WARN ниже (громко, не тихо); прод задаёт явно
+  const backendPort: number = parsePortWithZod(backendPortRaw, "APP_BACKEND_PORT");
+  const backendHostRaw: string = firstNonEmpty(env.APP_BACKEND_HOST);
+  const backendHost: string = backendHostRaw || "localhost"; // readonly-исключение: dev-listen default + WARN ниже (громко, не тихо); прод задаёт явно
   if (!backendHostRaw) {
     warn(
       '[env] WARN APP_BACKEND_HOST is empty, falling back to "localhost" (dev default). ' +
         "Set it explicitly for production (see .env.example).",
     );
   }
-  const backendProtocol = parseProtocolWithZod(
+  const backendProtocol: "http" | "https" = parseProtocolWithZod(
     firstNonEmpty(env.APP_BACKEND_PROTOCOL) || "http",
     "APP_BACKEND_PROTOCOL",
   );
-  const socketRaw = firstNonEmpty(env.APP_BACKEND_SOCKET);
+  const socketRaw: string = firstNonEmpty(env.APP_BACKEND_SOCKET);
   let backendSocket: string;
   if (socketRaw && !looksBroken(socketRaw)) {
     backendSocket = assertValidUrl(socketRaw, "APP_BACKEND_SOCKET");
@@ -707,8 +729,12 @@ export function validateEnvWithWarnings(
   // OPENCODE_KEYS_PREVIOUS_KEY_ID) — dual-read keeps old rows decryptable
   // while the lazy + `keys:reencrypt` background pass re-wraps them under the
   // active KEK; drop the previous secret once no stale rows remain.
-  const keyIdOr = (raw: string | undefined, fallback: string, name: string): string => {
-    const id = (raw ?? "").trim() || fallback;
+  const resolveKeyId: (
+    raw: string | undefined,
+    fallback: string,
+    name: string,
+  ) => string = (raw: string | undefined, fallback: string, name: string) => {
+    const id: string = (raw ?? "").trim() || fallback;
     if (!OPENCODE_KEYS_KEY_ID_PATTERN.test(id)) {
       throw new Error(
         `[env] ${name} must match ${OPENCODE_KEYS_KEY_ID_PATTERN} (e.g. "v2"), got ${JSON.stringify(raw ?? "")}. ` +
@@ -717,20 +743,20 @@ export function validateEnvWithWarnings(
     }
     return id;
   };
-  const opencodeKeysActiveKeyId = keyIdOr(
+  const opencodeKeysActiveKeyId: string = resolveKeyId(
     firstNonEmpty(env.OPENCODE_KEYS_ACTIVE_KEY_ID),
     DEFAULT_OPENCODE_KEYS_ACTIVE_KEY_ID,
     "OPENCODE_KEYS_ACTIVE_KEY_ID",
   );
-  const opencodeKeysPreviousKeyId = keyIdOr(
+  const opencodeKeysPreviousKeyId: string = resolveKeyId(
     firstNonEmpty(env.OPENCODE_KEYS_PREVIOUS_KEY_ID),
     DEFAULT_OPENCODE_KEYS_PREVIOUS_KEY_ID,
     "OPENCODE_KEYS_PREVIOUS_KEY_ID",
   );
-  const opencodeKeysEncryptionKeyRaw = firstNonEmpty(
+  const opencodeKeysEncryptionKeyRaw: string = firstNonEmpty(
     env.OPENCODE_KEYS_ENCRYPTION_KEY,
   );
-  let opencodeKeysEncryptionKey = "";
+  let opencodeKeysEncryptionKey: string = "";
   if (opencodeKeysEncryptionKeyRaw) {
     if (
       opencodeKeysEncryptionKeyRaw.length <
@@ -750,10 +776,10 @@ export function validateEnvWithWarnings(
   }
   // Previous KEK (rotation window only): unset is the normal steady state
   // (no WARN); set-but-short is ERROR (fail-closed, value never echoed).
-  const opencodeKeysEncryptionKeyPreviousRaw = firstNonEmpty(
+  const opencodeKeysEncryptionKeyPreviousRaw: string = firstNonEmpty(
     env.OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS,
   );
-  let opencodeKeysEncryptionKeyPrevious = "";
+  let opencodeKeysEncryptionKeyPrevious: string = "";
   if (opencodeKeysEncryptionKeyPreviousRaw) {
     if (
       opencodeKeysEncryptionKeyPreviousRaw.length <
@@ -771,42 +797,42 @@ export function validateEnvWithWarnings(
   }
   // --- database --------------------------------------------------------------
   // NOTE: explicit value passes through untouched; never echoed in errors/logs.
-  const explicitDb = firstNonEmpty(env.DATABASE_URL);
-  let databaseUrl = "";
-  if (explicitDb) {
-    if (!databaseUrlSchema.safeParse(explicitDb).success) {
+  const explicitDatabaseUrl: string = firstNonEmpty(env.DATABASE_URL);
+  let databaseUrl: string = "";
+  if (explicitDatabaseUrl) {
+    if (!databaseUrlSchema.safeParse(explicitDatabaseUrl).success) {
       throw new Error(
         "[env] DATABASE_URL has an unsupported shape — must be a postgres://... URL. " +
           "Check your .env (see .env.example).",
       );
     }
-    databaseUrl = explicitDb;
+    databaseUrl = explicitDatabaseUrl;
   } else {
-    const user = firstNonEmpty(env.POSTGRES_USER);
-    const db = firstNonEmpty(env.POSTGRES_DB);
-    if (user && db) {
-      const pass = firstNonEmpty(env.POSTGRES_PASSWORD);
-      const hostRaw = firstNonEmpty(env.POSTGRES_HOST);
-      const host = hostRaw || "localhost"; // readonly-исключение: dev-dial default + WARN ниже; пустой DATABASE_URL+POSTGRES_* → databaseUrl="" + WARN + 503 (fail-fast на запросе, без тихого успеха)
+    const user: string = firstNonEmpty(env.POSTGRES_USER);
+    const databaseName: string = firstNonEmpty(env.POSTGRES_DB);
+    if (user && databaseName) {
+      const password: string = firstNonEmpty(env.POSTGRES_PASSWORD);
+      const hostRaw: string = firstNonEmpty(env.POSTGRES_HOST);
+      const host: string = hostRaw || "localhost"; // readonly-исключение: dev-dial default + WARN ниже; пустой DATABASE_URL+POSTGRES_* → databaseUrl="" + WARN + 503 (fail-fast на запросе, без тихого успеха)
       if (!hostRaw) {
         warn(
           '[env] WARN POSTGRES_HOST is empty, falling back to "localhost" (dev default). ' +
             "Set it explicitly for production (see .env.example).",
         );
       }
-      const portRawSrc = firstNonEmpty(env.POSTGRES_PORT);
-      const portRaw = portRawSrc || "5432";
-      if (!portRawSrc) {
+      const portRawSource: string = firstNonEmpty(env.POSTGRES_PORT);
+      const portRaw: string = portRawSource || "5432";
+      if (!portRawSource) {
         warn(
           "[env] WARN POSTGRES_PORT is unset, falling back to 5432 (dev default) " +
             "(see .env.example).",
         );
       }
-      const port = parsePortWithZod(portRaw, "POSTGRES_PORT");
-      const creds = pass
-        ? `${encodeURIComponent(user)}:${encodeURIComponent(pass)}@`
+      const port: number = parsePortWithZod(portRaw, "POSTGRES_PORT");
+      const credentials: string = password
+        ? `${encodeURIComponent(user)}:${encodeURIComponent(password)}@`
         : `${encodeURIComponent(user)}@`;
-      databaseUrl = `postgres://${creds}${host}:${port}/${encodeURIComponent(db)}`;
+      databaseUrl = `postgres://${credentials}${host}:${port}/${encodeURIComponent(databaseName)}`;
     }
     if (!databaseUrl) {
       warn(
@@ -820,22 +846,27 @@ export function validateEnvWithWarnings(
   // --- cors -------------------------------------------------------------------
   // readonly-исключение: NEXT_PUBLIC_PORT-дефолт 3001 и CORS-дефолт ниже — read-конфиг
   // (allowlist для чтения; неверный CORS не пишет данные — браузер блокирует ответ).
-  const nextPortRaw = firstNonEmpty(env.NEXT_PUBLIC_PORT) || "3001";
-  const nextPublicPort = parsePortWithZod(nextPortRaw, "NEXT_PUBLIC_PORT");
-  const corsRaw = firstNonEmpty(env.CORS_ORIGINS);
+  const nextPortRaw: string = firstNonEmpty(env.NEXT_PUBLIC_PORT) || "3001";
+  const nextPublicPort: number = parsePortWithZod(nextPortRaw, "NEXT_PUBLIC_PORT");
+  const corsRaw: string = firstNonEmpty(env.CORS_ORIGINS);
   let corsOrigins: Array<string>;
   if (corsRaw) {
-    const corsParsed = corsOriginsSchema.safeParse(corsRaw);
+    const corsParsed: z.ZodSafeParseResult<Array<string>> =
+      corsOriginsSchema.safeParse(corsRaw);
     if (!corsParsed.success) {
-      const entries = corsRaw
+      const entries: Array<string> = corsRaw
         .split(",")
-        .map((s) => s.trim())
+        .map((segment: string) => segment.trim())
         .filter(Boolean);
-      const badIdx = entries.findIndex((e) => !isHttpUrl(e));
-      const at = badIdx >= 0 ? ` entry #${badIdx + 1}` : "";
-      const shown = badIdx >= 0 ? `: ${JSON.stringify(entries[badIdx])}` : "";
+      const badEntryIndex: number = entries.findIndex(
+        (entry: string) => !isHttpUrl(entry),
+      );
+      const entryLocation: string =
+        badEntryIndex >= 0 ? ` entry #${badEntryIndex + 1}` : "";
+      const shownValue: string =
+        badEntryIndex >= 0 ? `: ${JSON.stringify(entries[badEntryIndex])}` : "";
       throw new Error(
-        `[env] CORS_ORIGINS${at} is not a valid http(s) URL${shown}. ` +
+        `[env] CORS_ORIGINS${entryLocation} is not a valid http(s) URL${shownValue}. ` +
           "Set CORS_ORIGINS as a comma-separated list of URLs (see .env.example).",
       );
     }
@@ -850,26 +881,33 @@ export function validateEnvWithWarnings(
   // --- misc ---------------------------------------------------------------------
   // readonly-исключение: REQUEST_TIMEOUT_MS-дефолт — тюнинг чтения upstream
   // (бюджет попытки; не путь записи на диск/БД).
-  const timeoutRaw = firstNonEmpty(env.REQUEST_TIMEOUT_MS) || "10000";
-  const timeoutParsed = timeoutSchema.safeParse(timeoutRaw);
+  const timeoutRaw: string = firstNonEmpty(env.REQUEST_TIMEOUT_MS) || "10000";
+  const timeoutParsed: z.ZodSafeParseResult<number> =
+    timeoutSchema.safeParse(timeoutRaw);
   if (!timeoutParsed.success) {
     throw new Error(
       `[env] REQUEST_TIMEOUT_MS must be a non-negative integer ms, got ${JSON.stringify(timeoutRaw)}.`,
     );
   }
-  const requestTimeoutMs = timeoutParsed.data;
+  const requestTimeoutMs: number = timeoutParsed.data;
 
   // --- external retry (silent dev defaults; ERROR only on explicit garbage) --
   // readonly-исключение: EXTERNAL_RETRY_*-дефолты — тюнинг чтения upstream GET
-  // (попытки/бэкофф; явный мусор → ERROR выше через retryInt, тишины нет).
-  const retryInt = (
+  // (попытки/бэкофф; явный мусор → ERROR выше через parseRetryInteger, тишины нет).
+  const parseRetryInteger: (
     raw: string,
     name: string,
     unit: string,
     min: number,
     max: number,
-  ): number => {
-    const parsed = timeoutSchema.safeParse(raw);
+  ) => number = (
+    raw: string,
+    name: string,
+    unit: string,
+    min: number,
+    max: number,
+  ) => {
+    const parsed: z.ZodSafeParseResult<number> = timeoutSchema.safeParse(raw);
     if (!parsed.success || parsed.data < min || parsed.data > max) {
       throw new Error(
         `[env] ${name} must be an integer ${min}-${max}${unit}, got ${JSON.stringify(raw)}. ` +
@@ -878,17 +916,31 @@ export function validateEnvWithWarnings(
     }
     return parsed.data;
   };
-  const retryMaxRaw = firstNonEmpty(env.EXTERNAL_RETRY_MAX_ATTEMPTS);
-  const externalRetryMaxAttempts = retryMaxRaw
-    ? retryInt(retryMaxRaw, "EXTERNAL_RETRY_MAX_ATTEMPTS", "", 1, 10)
+  const retryMaxRaw: string = firstNonEmpty(env.EXTERNAL_RETRY_MAX_ATTEMPTS);
+  const externalRetryMaxAttempts: number = retryMaxRaw
+    ? parseRetryInteger(retryMaxRaw, "EXTERNAL_RETRY_MAX_ATTEMPTS", "", 1, 10)
     : DEFAULT_EXTERNAL_RETRY_MAX_ATTEMPTS;
-  const retryBaseRaw = firstNonEmpty(env.EXTERNAL_RETRY_BASE_DELAY_MS);
-  const externalRetryBaseDelayMs = retryBaseRaw
-    ? retryInt(retryBaseRaw, "EXTERNAL_RETRY_BASE_DELAY_MS", " ms", 0, 60000)
+  const retryBaseRaw: string = firstNonEmpty(env.EXTERNAL_RETRY_BASE_DELAY_MS);
+  const externalRetryBaseDelayMs: number = retryBaseRaw
+    ? parseRetryInteger(
+        retryBaseRaw,
+        "EXTERNAL_RETRY_BASE_DELAY_MS",
+        " ms",
+        0,
+        60000,
+      )
     : DEFAULT_EXTERNAL_RETRY_BASE_DELAY_MS;
-  const retryMaxDelayRaw = firstNonEmpty(env.EXTERNAL_RETRY_MAX_DELAY_MS);
-  const externalRetryMaxDelayMs = retryMaxDelayRaw
-    ? retryInt(retryMaxDelayRaw, "EXTERNAL_RETRY_MAX_DELAY_MS", " ms", 0, 60000)
+  const retryMaxDelayRaw: string = firstNonEmpty(
+    env.EXTERNAL_RETRY_MAX_DELAY_MS,
+  );
+  const externalRetryMaxDelayMs: number = retryMaxDelayRaw
+    ? parseRetryInteger(
+        retryMaxDelayRaw,
+        "EXTERNAL_RETRY_MAX_DELAY_MS",
+        " ms",
+        0,
+        60000,
+      )
     : DEFAULT_EXTERNAL_RETRY_MAX_DELAY_MS;
   if (externalRetryMaxDelayMs < externalRetryBaseDelayMs) {
     warn(
@@ -896,18 +948,20 @@ export function validateEnvWithWarnings(
         "the backoff ceiling clamps to the base (see .env.example).",
     );
   }
-  const levelSrc = firstNonEmpty(env.LOG_LEVEL);
+  const levelSource: string = firstNonEmpty(env.LOG_LEVEL);
   let logLevel: "debug" | "info" | "warn" | "error" = "info";
-  if (!levelSrc) {
+  if (!levelSource) {
     warn(
       '[env] WARN LOG_LEVEL is unset, falling back to "info". ' +
         "Set it explicitly (see .env.example).",
     );
   } else {
-    const levelParsed = logLevelSchema.safeParse(levelSrc.toLowerCase());
+    const levelParsed: z.ZodSafeParseResult<
+      "debug" | "info" | "warn" | "error"
+    > = logLevelSchema.safeParse(levelSource.toLowerCase());
     if (!levelParsed.success) {
       warn(
-        `[env] WARN LOG_LEVEL=${JSON.stringify(levelSrc)} is unknown, falling back to "info". ` +
+        `[env] WARN LOG_LEVEL=${JSON.stringify(levelSource)} is unknown, falling back to "info". ` +
           "Expected one of debug|info|warn|error (see .env.example).",
       );
     } else {
@@ -924,13 +978,20 @@ export function validateEnvWithWarnings(
   // the backend only mints installation tokens via
   // POST /app/installations/{installation_id}/access_tokens and lists
   // GET /installation/repositories. Private key / tokens never leave env/memory.
-  const githubAppId = firstNonEmpty(env.GITHUB_APP_ID);
-  const githubPrivateKeyRaw = firstNonEmpty(env.GITHUB_APP_PRIVATE_KEY);
-  const githubPrivateKeyPath = firstNonEmpty(env.GITHUB_APP_PRIVATE_KEY_PATH);
-  const hasPrivateKey = Boolean(githubPrivateKeyRaw || githubPrivateKeyPath);
-  const githubPair = [githubAppId, hasPrivateKey ? "x" : ""].filter(Boolean);
+  const githubAppId: string = firstNonEmpty(env.GITHUB_APP_ID);
+  const githubPrivateKeyRaw: string = firstNonEmpty(env.GITHUB_APP_PRIVATE_KEY);
+  const githubPrivateKeyPath: string = firstNonEmpty(
+    env.GITHUB_APP_PRIVATE_KEY_PATH,
+  );
+  const hasPrivateKey: boolean = Boolean(
+    githubPrivateKeyRaw || githubPrivateKeyPath,
+  );
+  const githubPair: Array<string> = [
+    githubAppId,
+    hasPrivateKey ? "x" : "",
+  ].filter(Boolean);
   if (githubPair.length > 0 && githubPair.length < 2) {
-    const missing = [
+    const missing: Array<string> = [
       githubAppId ? null : "GITHUB_APP_ID",
       hasPrivateKey
         ? null
@@ -955,7 +1016,9 @@ export function validateEnvWithWarnings(
     );
   }
   // Legacy single-install fallback (optional, dev only).
-  const githubInstallationId = firstNonEmpty(env.GITHUB_APP_INSTALLATION_ID);
+  const githubInstallationId: string = firstNonEmpty(
+    env.GITHUB_APP_INSTALLATION_ID,
+  );
   if (githubInstallationId && !/^\d+$/.test(githubInstallationId)) {
     throw new Error(
       "[env] GITHUB_APP_INSTALLATION_ID must be a numeric installation id. Check your .env (see .env.example).",
@@ -967,29 +1030,32 @@ export function validateEnvWithWarnings(
         "prefer per-user installations via the install flow (see .env.example).",
     );
   }
-  const githubAppSlug = firstNonEmpty(env.GITHUB_APP_SLUG);
+  const githubAppSlug: string = firstNonEmpty(env.GITHUB_APP_SLUG);
   if (githubAppSlug && !/^[a-z0-9-]+$/i.test(githubAppSlug)) {
     throw new Error(
       "[env] GITHUB_APP_SLUG must be a URL-safe app slug. Check your .env (see .env.example).",
     );
   }
-  const githubWebhookSecret = firstNonEmpty(env.GITHUB_WEBHOOK_SECRET);
+  const githubWebhookSecret: string = firstNonEmpty(env.GITHUB_WEBHOOK_SECRET);
   // Optional dedicated secret for the signed install state; an empty value
   // falls back to the webhook secret at the controller (no boot warning).
-  const githubStateSecret = firstNonEmpty(env.GITHUB_STATE_SECRET);
-  const githubApiRaw =
+  const githubStateSecret: string = firstNonEmpty(env.GITHUB_STATE_SECRET);
+  const githubApiRaw: string =
     // readonly-исключение: дефолт публичного GitHub REST — read-конфиг (GHE
     // перекрывается через GITHUB_API_URL; set-but-invalid → ERROR в assertValidUrl).
     firstNonEmpty(env.GITHUB_API_URL) || DEFAULT_GITHUB_API_URL;
-  const githubApiUrl = assertValidUrl(githubApiRaw, "GITHUB_API_URL");
+  const githubApiUrl: string = assertValidUrl(githubApiRaw, "GITHUB_API_URL");
   // Per-attempt budget for every GitHub REST call (AbortSignal.timeout —
   // octokit@5 ignores `request.timeout`, so the signal is the enforcement).
   // Unset → documented 15000 ms default (read-tuning, no WARN: matches the
   // existing retry-timeout defaults); explicit garbage/<=0 is ERROR.
-  const githubTimeoutRaw = firstNonEmpty(env.GITHUB_REQUEST_TIMEOUT_MS);
-  let githubRequestTimeoutMs = DEFAULT_GITHUB_REQUEST_TIMEOUT_MS;
+  const githubTimeoutRaw: string = firstNonEmpty(
+    env.GITHUB_REQUEST_TIMEOUT_MS,
+  );
+  let githubRequestTimeoutMs: number = DEFAULT_GITHUB_REQUEST_TIMEOUT_MS;
   if (githubTimeoutRaw) {
-    const parsed = timeoutSchema.safeParse(githubTimeoutRaw);
+    const parsed: z.ZodSafeParseResult<number> =
+      timeoutSchema.safeParse(githubTimeoutRaw);
     if (!parsed.success || parsed.data <= 0) {
       throw new Error(
         `[env] GITHUB_REQUEST_TIMEOUT_MS must be a positive integer ms, got ${JSON.stringify(githubTimeoutRaw)}. ` +
@@ -1006,8 +1072,8 @@ export function validateEnvWithWarnings(
   // (user without password or vice versa) is a WARN + anonymous access —
   // the registry stays optional, so boot never stops for it. Values are
   // never echoed in errors/logs (names only + .env.example pointer).
-  const dockerRegistryRaw = firstNonEmpty(env.DOCKER_REGISTRY_URL);
-  let dockerRegistryUrl = "";
+  const dockerRegistryRaw: string = firstNonEmpty(env.DOCKER_REGISTRY_URL);
+  let dockerRegistryUrl: string = "";
   if (dockerRegistryRaw) {
     dockerRegistryUrl = assertValidUrl(
       dockerRegistryRaw,
@@ -1019,9 +1085,11 @@ export function validateEnvWithWarnings(
         'and the health flag is "skipped" (see .env.example).',
     );
   }
-  const dockerRegistryUser = firstNonEmpty(env.DOCKER_REGISTRY_USER);
-  const dockerRegistryPassword = firstNonEmpty(env.DOCKER_REGISTRY_PASSWORD);
-  const dockerRegistryToken = firstNonEmpty(env.DOCKER_REGISTRY_TOKEN);
+  const dockerRegistryUser: string = firstNonEmpty(env.DOCKER_REGISTRY_USER);
+  const dockerRegistryPassword: string = firstNonEmpty(
+    env.DOCKER_REGISTRY_PASSWORD,
+  );
+  const dockerRegistryToken: string = firstNonEmpty(env.DOCKER_REGISTRY_TOKEN);
   if (dockerRegistryRaw) {
     if (dockerRegistryToken && (dockerRegistryUser || dockerRegistryPassword)) {
       warn(
@@ -1032,7 +1100,7 @@ export function validateEnvWithWarnings(
       !dockerRegistryToken &&
       Boolean(dockerRegistryUser) !== Boolean(dockerRegistryPassword)
     ) {
-      const missing = dockerRegistryUser
+      const missing: string = dockerRegistryUser
         ? "DOCKER_REGISTRY_PASSWORD"
         : "DOCKER_REGISTRY_USER";
       warn(
@@ -1050,10 +1118,13 @@ export function validateEnvWithWarnings(
       );
     }
   }
-  const dockerTimeoutRaw = firstNonEmpty(env.DOCKER_REGISTRY_TIMEOUT_MS);
-  let dockerRegistryTimeoutMs = DEFAULT_DOCKER_REGISTRY_TIMEOUT_MS;
+  const dockerTimeoutRaw: string = firstNonEmpty(
+    env.DOCKER_REGISTRY_TIMEOUT_MS,
+  );
+  let dockerRegistryTimeoutMs: number = DEFAULT_DOCKER_REGISTRY_TIMEOUT_MS;
   if (dockerTimeoutRaw) {
-    const parsed = timeoutSchema.safeParse(dockerTimeoutRaw);
+    const parsed: z.ZodSafeParseResult<number> =
+      timeoutSchema.safeParse(dockerTimeoutRaw);
     if (!parsed.success) {
       throw new Error(
         `[env] DOCKER_REGISTRY_TIMEOUT_MS must be a non-negative integer ms, got ${JSON.stringify(dockerTimeoutRaw)}. ` +
@@ -1067,11 +1138,11 @@ export function validateEnvWithWarnings(
         `${DEFAULT_DOCKER_REGISTRY_TIMEOUT_MS} (see .env.example).`,
     );
   }
-  const dockerRetryMaxRaw = firstNonEmpty(
+  const dockerRetryMaxRaw: string = firstNonEmpty(
     env.DOCKER_REGISTRY_RETRY_MAX_ATTEMPTS,
   );
-  const dockerRegistryRetryMaxAttempts = dockerRetryMaxRaw
-    ? retryInt(
+  const dockerRegistryRetryMaxAttempts: number = dockerRetryMaxRaw
+    ? parseRetryInteger(
         dockerRetryMaxRaw,
         "DOCKER_REGISTRY_RETRY_MAX_ATTEMPTS",
         "",
@@ -1085,11 +1156,11 @@ export function validateEnvWithWarnings(
         `${DEFAULT_DOCKER_REGISTRY_RETRY_MAX_ATTEMPTS} (see .env.example).`,
     );
   }
-  const dockerRetryBaseRaw = firstNonEmpty(
+  const dockerRetryBaseRaw: string = firstNonEmpty(
     env.DOCKER_REGISTRY_RETRY_BASE_DELAY_MS,
   );
-  const dockerRegistryRetryBaseDelayMs = dockerRetryBaseRaw
-    ? retryInt(
+  const dockerRegistryRetryBaseDelayMs: number = dockerRetryBaseRaw
+    ? parseRetryInteger(
         dockerRetryBaseRaw,
         "DOCKER_REGISTRY_RETRY_BASE_DELAY_MS",
         " ms",
@@ -1103,11 +1174,11 @@ export function validateEnvWithWarnings(
         `${DEFAULT_DOCKER_REGISTRY_RETRY_BASE_DELAY_MS} (see .env.example).`,
     );
   }
-  const dockerRetryMaxDelayRaw = firstNonEmpty(
+  const dockerRetryMaxDelayRaw: string = firstNonEmpty(
     env.DOCKER_REGISTRY_RETRY_MAX_DELAY_MS,
   );
-  const dockerRegistryRetryMaxDelayMs = dockerRetryMaxDelayRaw
-    ? retryInt(
+  const dockerRegistryRetryMaxDelayMs: number = dockerRetryMaxDelayRaw
+    ? parseRetryInteger(
         dockerRetryMaxDelayRaw,
         "DOCKER_REGISTRY_RETRY_MAX_DELAY_MS",
         " ms",
@@ -1139,8 +1210,8 @@ export function validateEnvWithWarnings(
   // vice versa) is a WARN + anonymous access — the registry stays optional, so
   // boot never stops for it. Values are never echoed in errors/logs
   // (names only + .env.example pointer).
-  const npmRegistryRaw = firstNonEmpty(env.NPM_REGISTRY_URL);
-  let npmRegistryUrl = "";
+  const npmRegistryRaw: string = firstNonEmpty(env.NPM_REGISTRY_URL);
+  let npmRegistryUrl: string = "";
   if (npmRegistryRaw) {
     npmRegistryUrl = assertValidUrl(npmRegistryRaw, "NPM_REGISTRY_URL");
   } else {
@@ -1149,11 +1220,15 @@ export function validateEnvWithWarnings(
         'and the health flag is "skipped" (see .env.example).',
     );
   }
-  const npmRegistryTokenExplicit = firstNonEmpty(env.NPM_REGISTRY_TOKEN);
-  const npmLegacyToken = firstNonEmpty(env.NPM_TOKEN);
-  const npmRegistryToken = npmRegistryTokenExplicit || npmLegacyToken;
-  const npmRegistryUser = firstNonEmpty(env.NPM_REGISTRY_USER);
-  const npmRegistryPassword = firstNonEmpty(env.NPM_REGISTRY_PASSWORD);
+  const npmRegistryTokenExplicit: string = firstNonEmpty(
+    env.NPM_REGISTRY_TOKEN,
+  );
+  const npmLegacyToken: string = firstNonEmpty(env.NPM_TOKEN);
+  const npmRegistryToken: string = npmRegistryTokenExplicit || npmLegacyToken;
+  const npmRegistryUser: string = firstNonEmpty(env.NPM_REGISTRY_USER);
+  const npmRegistryPassword: string = firstNonEmpty(
+    env.NPM_REGISTRY_PASSWORD,
+  );
   if (npmRegistryRaw) {
     if (npmRegistryTokenExplicit && npmLegacyToken) {
       warn(
@@ -1174,7 +1249,7 @@ export function validateEnvWithWarnings(
         );
       }
     } else if (Boolean(npmRegistryUser) !== Boolean(npmRegistryPassword)) {
-      const missing = npmRegistryUser
+      const missing: string = npmRegistryUser
         ? "NPM_REGISTRY_PASSWORD"
         : "NPM_REGISTRY_USER";
       warn(
@@ -1189,10 +1264,10 @@ export function validateEnvWithWarnings(
     }
     // else: complete basic pair, no warning (valid Basic mode).
   }
-  const npmScopeRaw = firstNonEmpty(env.NPM_REGISTRY_SCOPE);
+  const npmScopeRaw: string = firstNonEmpty(env.NPM_REGISTRY_SCOPE);
   // readonly-исключение: дефолт npm scope — read-конфиг observe-only пробы
   // (не путь записи: модуль никогда не публикует/не ставит пакеты).
-  let npmRegistryScope = DEFAULT_NPM_REGISTRY_SCOPE;
+  let npmRegistryScope: string = DEFAULT_NPM_REGISTRY_SCOPE;
   if (npmScopeRaw) {
     if (/^@[a-z0-9-~][a-z0-9-._~]*$/.test(npmScopeRaw)) {
       npmRegistryScope = npmScopeRaw;
@@ -1203,10 +1278,11 @@ export function validateEnvWithWarnings(
       );
     }
   }
-  const npmTimeoutRaw = firstNonEmpty(env.NPM_REGISTRY_TIMEOUT_MS);
-  let npmRegistryTimeoutMs = DEFAULT_NPM_REGISTRY_TIMEOUT_MS;
+  const npmTimeoutRaw: string = firstNonEmpty(env.NPM_REGISTRY_TIMEOUT_MS);
+  let npmRegistryTimeoutMs: number = DEFAULT_NPM_REGISTRY_TIMEOUT_MS;
   if (npmTimeoutRaw) {
-    const parsed = timeoutSchema.safeParse(npmTimeoutRaw);
+    const parsed: z.ZodSafeParseResult<number> =
+      timeoutSchema.safeParse(npmTimeoutRaw);
     if (!parsed.success) {
       throw new Error(
         `[env] NPM_REGISTRY_TIMEOUT_MS must be a non-negative integer ms, got ${JSON.stringify(npmTimeoutRaw)}. ` +
@@ -1220,9 +1296,17 @@ export function validateEnvWithWarnings(
         `${DEFAULT_NPM_REGISTRY_TIMEOUT_MS} (see .env.example).`,
     );
   }
-  const npmRetryMaxRaw = firstNonEmpty(env.NPM_REGISTRY_RETRY_MAX_ATTEMPTS);
-  const npmRegistryRetryMaxAttempts = npmRetryMaxRaw
-    ? retryInt(npmRetryMaxRaw, "NPM_REGISTRY_RETRY_MAX_ATTEMPTS", "", 1, 10)
+  const npmRetryMaxRaw: string = firstNonEmpty(
+    env.NPM_REGISTRY_RETRY_MAX_ATTEMPTS,
+  );
+  const npmRegistryRetryMaxAttempts: number = npmRetryMaxRaw
+    ? parseRetryInteger(
+        npmRetryMaxRaw,
+        "NPM_REGISTRY_RETRY_MAX_ATTEMPTS",
+        "",
+        1,
+        10,
+      )
     : DEFAULT_NPM_REGISTRY_RETRY_MAX_ATTEMPTS;
   if (!npmRetryMaxRaw) {
     warn(
@@ -1230,9 +1314,11 @@ export function validateEnvWithWarnings(
         `${DEFAULT_NPM_REGISTRY_RETRY_MAX_ATTEMPTS} (see .env.example).`,
     );
   }
-  const npmRetryBaseRaw = firstNonEmpty(env.NPM_REGISTRY_RETRY_BASE_DELAY_MS);
-  const npmRegistryRetryBaseDelayMs = npmRetryBaseRaw
-    ? retryInt(
+  const npmRetryBaseRaw: string = firstNonEmpty(
+    env.NPM_REGISTRY_RETRY_BASE_DELAY_MS,
+  );
+  const npmRegistryRetryBaseDelayMs: number = npmRetryBaseRaw
+    ? parseRetryInteger(
         npmRetryBaseRaw,
         "NPM_REGISTRY_RETRY_BASE_DELAY_MS",
         " ms",
@@ -1246,11 +1332,11 @@ export function validateEnvWithWarnings(
         `${DEFAULT_NPM_REGISTRY_RETRY_BASE_DELAY_MS} (see .env.example).`,
     );
   }
-  const npmRetryMaxDelayRaw = firstNonEmpty(
+  const npmRetryMaxDelayRaw: string = firstNonEmpty(
     env.NPM_REGISTRY_RETRY_MAX_DELAY_MS,
   );
-  const npmRegistryRetryMaxDelayMs = npmRetryMaxDelayRaw
-    ? retryInt(
+  const npmRegistryRetryMaxDelayMs: number = npmRetryMaxDelayRaw
+    ? parseRetryInteger(
         npmRetryMaxDelayRaw,
         "NPM_REGISTRY_RETRY_MAX_DELAY_MS",
         " ms",
@@ -1272,13 +1358,13 @@ export function validateEnvWithWarnings(
   }
 
   // --- projects root + repos root + frontend api url --------------------------
-  const projectsRootRaw = firstNonEmpty(env.PROJECTS_ROOT);
+  const projectsRootRaw: string = firstNonEmpty(env.PROJECTS_ROOT);
   if (projectsRootRaw.includes("\0")) {
     throw new Error(
       "[env] PROJECTS_ROOT must be a valid directory path. Check your .env (see .env.example).",
     );
   }
-  const projectsRoot = projectsRootRaw;
+  const projectsRoot: string = projectsRootRaw;
   if (projectsRoot && !existsSync(resolvePath(projectsRoot))) {
     warn(
       `[env] WARN PROJECTS_ROOT points to a missing directory: ${JSON.stringify(projectsRoot)}. ` +
@@ -1287,7 +1373,7 @@ export function validateEnvWithWarnings(
   }
 
   // --- repos root (readonly git registry REPOS_ROOT/<user-space>/workspace/<repo>) ---
-  const reposRaw = firstNonEmpty(env.REPOS_ROOT);
+  const reposRaw: string = firstNonEmpty(env.REPOS_ROOT);
   if (reposRaw.includes("\0")) {
     throw new Error(
       "[env] REPOS_ROOT must be a valid directory path. Check your .env (see .env.example).",
@@ -1295,7 +1381,7 @@ export function validateEnvWithWarnings(
   }
   let reposRoot: string;
   if (reposRaw) {
-    const resolved = resolvePath(reposRaw);
+    const resolved: string = resolvePath(reposRaw);
     try {
       accessSync(resolved, fsConstants.R_OK);
     } catch {
@@ -1322,8 +1408,10 @@ export function validateEnvWithWarnings(
         "(reads deny with 503, creates answer 500). Set REPOS_ROOT in .env (see .env.example).",
     );
   }
-  const cloneAllowedHosts = parseCloneAllowedHosts(env.CLONE_ALLOWED_HOSTS);
-  const nextPublicApiRaw = firstNonEmpty(env.NEXT_PUBLIC_API_URL);
+  const cloneAllowedHosts: Array<string> = parseCloneAllowedHosts(
+    env.CLONE_ALLOWED_HOSTS,
+  );
+  const nextPublicApiRaw: string = firstNonEmpty(env.NEXT_PUBLIC_API_URL);
   let nextPublicApiUrl: string;
   if (nextPublicApiRaw && !looksBroken(nextPublicApiRaw)) {
     nextPublicApiUrl = assertValidUrl(nextPublicApiRaw, "NEXT_PUBLIC_API_URL");
@@ -1344,9 +1432,12 @@ export function validateEnvWithWarnings(
   // '7d' | seconds; garbage is ERROR. AUTH_LEGACY_MOCK_FALLBACK unset → false
   // (strict default) + WARN; explicit 'true' re-enables the mock for local
   // dev only (+ WARN, never production); 'false' stays strict; else ERROR.
-  const jwtAccessSecretRaw = firstNonEmpty(env.JWT_ACCESS_SECRET);
-  const jwtRefreshSecretRaw = firstNonEmpty(env.JWT_REFRESH_SECRET);
-  const checkJwtSecret = (raw: string, name: string): void => {
+  const jwtAccessSecretRaw: string = firstNonEmpty(env.JWT_ACCESS_SECRET);
+  const jwtRefreshSecretRaw: string = firstNonEmpty(env.JWT_REFRESH_SECRET);
+  const checkJwtSecret: (raw: string, name: string) => void = (
+    raw: string,
+    name: string,
+  ) => {
     if (raw.length < MIN_JWT_SECRET_LENGTH) {
       throw new Error(
         `[env] ${name} must be at least ${MIN_JWT_SECRET_LENGTH} chars (see .env.example).`,
@@ -1375,46 +1466,52 @@ export function validateEnvWithWarnings(
     );
     jwtRefreshSecret = ephemeralDevJwtSecret("refresh");
   }
-  const parseJwtTtl = (
+  const parseJwtTtl: (
     raw: string | undefined,
     name: string,
     fallback: number,
-  ): number => {
+  ) => number = (
+    raw: string | undefined,
+    name: string,
+    fallback: number,
+  ) => {
     // readonly-исключение: JWT TTL-дефолты (15m/7d) — тюнинг времени жизни
     // чтения/валидации токенов; мусор формата → ERROR ниже (60..7776000).
     if (!raw || raw.trim() === "") return fallback;
-    const v = raw.trim();
-    let sec = NaN;
-    if (/^\d+$/.test(v)) {
-      sec = Number(v);
+    const value: string = raw.trim();
+    let seconds: number = NaN;
+    if (/^\d+$/.test(value)) {
+      seconds = Number(value);
     } else {
-      const m = /^(\d+)\s*([smhd])$/i.exec(v);
-      if (m) {
-        const mult = { s: 1, m: 60, h: 3600, d: 86400 }[
-          m[2].toLowerCase() as "s" | "m" | "h" | "d"
+      const match: RegExpExecArray | null = /^(\d+)\s*([smhd])$/i.exec(value);
+      if (match) {
+        const multiplier: number = { s: 1, m: 60, h: 3600, d: 86400 }[
+          match[2].toLowerCase() as "s" | "m" | "h" | "d"
         ];
-        sec = Number(m[1]) * mult;
+        seconds = Number(match[1]) * multiplier;
       }
     }
-    if (!Number.isInteger(sec) || sec < 60 || sec > 90 * 86400) {
+    if (!Number.isInteger(seconds) || seconds < 60 || seconds > 90 * 86400) {
       throw new Error(
         `[env] ${name} must be a TTL like 15m/1h/7d or seconds 60-7776000, got ${JSON.stringify(raw)}. ` +
           "Check your .env (see .env.example).",
       );
     }
-    return sec;
+    return seconds;
   };
-  const jwtAccessTtlSec = parseJwtTtl(
+  const jwtAccessTtlSec: number = parseJwtTtl(
     firstNonEmpty(env.JWT_ACCESS_TTL) || undefined,
     "JWT_ACCESS_TTL",
     DEFAULT_JWT_ACCESS_TTL_SEC,
   );
-  const jwtRefreshTtlSec = parseJwtTtl(
+  const jwtRefreshTtlSec: number = parseJwtTtl(
     firstNonEmpty(env.JWT_REFRESH_TTL) || undefined,
     "JWT_REFRESH_TTL",
     DEFAULT_JWT_REFRESH_TTL_SEC,
   );
-  const legacyFallbackRaw = firstNonEmpty(env.AUTH_LEGACY_MOCK_FALLBACK);
+  const legacyFallbackRaw: string = firstNonEmpty(
+    env.AUTH_LEGACY_MOCK_FALLBACK,
+  );
   let authLegacyMockFallback: boolean;
   if (!legacyFallbackRaw) {
     authLegacyMockFallback = false;
@@ -1440,10 +1537,10 @@ export function validateEnvWithWarnings(
   // Session cookie SameSite policy: lax (default) | strict | none.
   // "none" is only valid with Secure — the controller forces secure=true.
   // Unset → documented "lax" default (no WARN); explicit garbage is ERROR.
-  const cookieSameSiteRaw = firstNonEmpty(env.AUTH_COOKIE_SAMESITE);
+  const cookieSameSiteRaw: string = firstNonEmpty(env.AUTH_COOKIE_SAMESITE);
   let authCookieSameSite: "lax" | "strict" | "none" = DEFAULT_AUTH_COOKIE_SAMESITE;
   if (cookieSameSiteRaw) {
-    const normalized = cookieSameSiteRaw.toLowerCase();
+    const normalized: string = cookieSameSiteRaw.toLowerCase();
     if (
       normalized !== "lax" &&
       normalized !== "strict" &&
@@ -1458,7 +1555,7 @@ export function validateEnvWithWarnings(
   }
 
   // --- unknown keys (likely typos) ---------------------------------------------
-  const unknownKeys = findSuspiciousUnknownKeys(source);
+  const unknownKeys: Array<string> = findSuspiciousUnknownKeys(source);
   if (unknownKeys.length > 0) {
     warn(
       `[env] WARN unknown env key(s) resembling app config: ${unknownKeys.join(", ")}. ` +

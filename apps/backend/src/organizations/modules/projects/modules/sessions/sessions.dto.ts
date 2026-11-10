@@ -1,17 +1,21 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { z } from 'zod';
 
-export const createSessionSchema = z.object({
+export type CreateSessionInput = {
+  chatId?: string | null;
+  status: 'open' | 'closed';
+  metadata?: Record<string, unknown> | null;
+};
+
+export const createSessionSchema: z.ZodType<CreateSessionInput> = z.object({
   chatId: z.string().uuid({ error: 'chatId must be a uuid' }).nullable().optional(),
   status: z.enum(['open', 'closed']).optional().default('open'),
   metadata: z.record(z.string(), z.unknown()).nullable().optional(),
 });
 
-export const closeSessionSchema = z.object({
+export const closeSessionSchema: z.ZodObject<{ status: z.ZodLiteral<'closed'> }> = z.object({
   status: z.literal('closed'),
 });
-
-export type CreateSessionInput = z.infer<typeof createSessionSchema>;
 
 export class CreateSessionDto {
   @ApiProperty({ required: false, format: 'uuid', nullable: true })

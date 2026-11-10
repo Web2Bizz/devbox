@@ -23,7 +23,9 @@ export {
  * and the whole body is optional (idempotent logout). `.default({})` keeps
  * bodyless requests working through the zod pipe.
  */
-export const logoutSchema = z
+export const logoutSchema: z.ZodDefault<
+  z.ZodObject<{ refreshToken: z.ZodOptional<z.ZodString> }>
+> = z
   .object({
     refreshToken: z.string().min(1).optional(),
   })

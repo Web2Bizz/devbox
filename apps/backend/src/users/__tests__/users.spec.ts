@@ -22,7 +22,7 @@
 import assert from "node:assert/strict";
 import { type SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { ExternalServiceError } from "../../common/external/external-error";
+import { ExternalServiceError } from "@common/external/external-error";
 import { UsersRepository } from "../users.repository";
 import { UsersService } from "../users.service";
 

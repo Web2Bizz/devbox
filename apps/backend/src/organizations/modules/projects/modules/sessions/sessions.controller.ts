@@ -13,8 +13,8 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagg
 import { JwtAuthGuard } from "../../../../../auth/jwt-auth.guard";
 import { ReqUser } from "../../../../../auth/req-user.decorator";
 import type { RequestIdentity } from "../../../../../auth/identity.service";
-import { NoIndexInterceptor } from "../../../../../common/http/noindex.interceptor";
-import { ZodValidationPipe } from "../../../../../common/validation";
+import { NoIndexInterceptor } from "@common/http/noindex.interceptor";
+import { ZodValidationPipe } from "@common/validation";
 import { SessionsService } from "./sessions.service";
 import {
   ProjectSessionDto,

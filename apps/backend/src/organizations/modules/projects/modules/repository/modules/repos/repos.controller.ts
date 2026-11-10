@@ -1,9 +1,11 @@
 import { BadRequestException, Controller, Get, Headers, NotFoundException, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { ZodValidationPipe } from '../../../../../../../common/validation';
+import type { z } from 'zod';
+import { ZodValidationPipe } from '@common/validation';
 import { JwtAuthGuard } from '../../../../../../../auth/jwt-auth.guard';
 import { ReqUser } from '../../../../../../../auth/req-user.decorator';
 import type { RequestIdentity } from '../../../../../../../auth/identity.service';
+import type { OrgRole } from '../../../../../../organizations.types';
 import { ProjectAccessService } from '../../../project-access/project-access.service';
 import { RepoDto, reposQuerySchema, userSpaceSchema, type ReposQuery } from './repos.dto';
 import { ReposService } from './repos.service';
@@ -68,7 +70,7 @@ export class ReposController {
     @ReqUser() identity: RequestIdentity,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<Array<RepoDto>> {
-    const parsed = userSpaceSchema.safeParse(userSpace);
+    const parsed: z.ZodSafeParseResult<string> = userSpaceSchema.safeParse(userSpace);
     if (!parsed.success) {
       throw new BadRequestException(
         parsed.error.issues[0]?.message ?? 'Invalid userSpace',
@@ -78,7 +80,11 @@ export class ReposController {
     // member org (reuse of the ProjectAccessService.getRole member rule —
     // strangers 404).
     if (parsed.data !== identity.id) {
-      const role = await this.access.getRole(parsed.data, identity.id, correlationId);
+      const role: OrgRole | null = await this.access.getRole(
+        parsed.data,
+        identity.id,
+        correlationId,
+      );
       if (!role) throw new NotFoundException(`Repo space ${parsed.data} not found`);
     }
     return this.repos.list(parsed.data, query, correlationId) as Promise<Array<RepoDto>>;

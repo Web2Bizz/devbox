@@ -109,17 +109,17 @@ export class ExternalServiceError extends Error {
   readonly httpStatus: number;
   readonly cause?: unknown;
 
-  constructor(opts: ExternalErrorOptions) {
-    super(opts.message);
+  constructor(options: ExternalErrorOptions) {
+    super(options.message);
     this.name = 'ExternalServiceError';
-    this.code = opts.code;
-    this.service = opts.service;
-    this.operation = opts.operation;
-    this.attempt = opts.attempt ?? 1;
-    this.status = opts.status;
-    this.isRetryable = opts.isRetryable ?? defaultRetryable(opts.code);
-    this.httpStatus = httpStatusFor(opts.code, opts.status);
-    if (opts.cause !== undefined) this.cause = opts.cause;
+    this.code = options.code;
+    this.service = options.service;
+    this.operation = options.operation;
+    this.attempt = options.attempt ?? 1;
+    this.status = options.status;
+    this.isRetryable = options.isRetryable ?? defaultRetryable(options.code);
+    this.httpStatus = httpStatusFor(options.code, options.status);
+    if (options.cause !== undefined) this.cause = options.cause;
   }
 }
 
@@ -154,17 +154,20 @@ export function isRetryableStatus(status: number): boolean {
  * True for aborts / timeouts: AbortError name, EXTERNAL_TIMEOUT code, or
  * timeout-ish messages. Inspects shape only — never logs values.
  */
-export function isTimeoutError(err: unknown): boolean {
-  if (err instanceof ExternalServiceError) return err.code === 'EXTERNAL_TIMEOUT';
-  if (typeof err !== 'object' || err === null) return false;
-  const rec = err as Record<string, unknown>;
-  if (rec['name'] === 'AbortError' || rec['code'] === 'AbortError') return true;
-  const msg = typeof rec['message'] === 'string' ? (rec['message'] as string).toLowerCase() : '';
+export function isTimeoutError(error: unknown): boolean {
+  if (error instanceof ExternalServiceError) return error.code === 'EXTERNAL_TIMEOUT';
+  if (typeof error !== 'object' || error === null) return false;
+  const record: Record<string, unknown> = error as Record<string, unknown>;
+  if (record['name'] === 'AbortError' || record['code'] === 'AbortError') return true;
+  const message: string =
+    typeof record['message'] === 'string'
+      ? (record['message'] as string).toLowerCase()
+      : '';
   return (
-    msg.includes('aborted') ||
-    msg.includes('timed out') ||
-    msg.includes('timeout') ||
-    msg.includes('exceeded the timeout')
+    message.includes('aborted') ||
+    message.includes('timed out') ||
+    message.includes('timeout') ||
+    message.includes('exceeded the timeout')
   );
 }
 
@@ -172,7 +175,7 @@ export function isTimeoutError(err: unknown): boolean {
 export function timeoutError(
   service: string,
   operation: string,
-  attempt = 1,
+  attempt: number = 1,
   cause?: unknown,
 ): ExternalServiceError {
   return new ExternalServiceError({
@@ -200,7 +203,7 @@ export function fromStatus(
   service: string,
   operation: string,
   status: number,
-  attempt = 1,
+  attempt: number = 1,
   cause?: unknown,
 ): ExternalServiceError {
   if (status === 429) {
@@ -311,17 +314,17 @@ export function fromStatus(
 export function fromUnknown(
   service: string,
   operation: string,
-  err: unknown,
-  attempt = 1,
+  error: unknown,
+  attempt: number = 1,
 ): ExternalServiceError {
-  if (err instanceof ExternalServiceError) return err;
-  if (isTimeoutError(err)) return timeoutError(service, operation, attempt, err);
-  const status =
-    typeof err === 'object' && err !== null && 'status' in err
-      ? Number((err as { status?: unknown }).status)
+  if (error instanceof ExternalServiceError) return error;
+  if (isTimeoutError(error)) return timeoutError(service, operation, attempt, error);
+  const status: number =
+    typeof error === 'object' && error !== null && 'status' in error
+      ? Number((error as { status?: unknown }).status)
       : NaN;
   if (Number.isInteger(status) && status >= 400 && status <= 599) {
-    return fromStatus(service, operation, status, attempt, err);
+    return fromStatus(service, operation, status, attempt, error);
   }
   return new ExternalServiceError({
     code: 'EXTERNAL_UNAVAILABLE',
@@ -330,6 +333,6 @@ export function fromUnknown(
     message: FIXED_MESSAGES.EXTERNAL_UNAVAILABLE,
     attempt,
     isRetryable: true,
-    cause: err,
+    cause: error,
   });
 }

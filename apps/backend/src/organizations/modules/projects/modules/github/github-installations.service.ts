@@ -1,15 +1,15 @@
 import { ForbiddenException, Injectable } from "@nestjs/common";
-import { and, desc, eq, isNull, or } from "drizzle-orm";
-import { AppLogger } from "../../../../../common/logger";
+import { and, desc, eq, isNull, or, type SQL } from "drizzle-orm";
+import { AppLogger } from "@common/logger";
 import {
   DbService,
   dbUnavailable,
   type DbClient,
-} from "../../../../../common/db/db.service";
+} from "@common/db/db.service";
 import {
   githubInstallations,
   type GithubInstallationRow,
-} from "../../../../../common/db/schema";
+} from "@common/db/schema";
 
 /**
  * Stored GitHub App installation (multi-tenant binding).
@@ -90,12 +90,12 @@ export class GithubInstallationsService {
   async upsert(
     input: UpsertInstallationInput,
     correlationId?: string,
-    prev?: GithubInstallation | null,
+    previous?: GithubInstallation | null,
   ): Promise<GithubInstallation> {
-    const existing =
-      prev === undefined
+    const existing: GithubInstallation | null =
+      previous === undefined
         ? await this.findByInstallationId(input.installationId, correlationId)
-        : prev;
+        : previous;
     if (
       typeof input.userId === "string" &&
       existing !== null &&
@@ -107,16 +107,16 @@ export class GithubInstallationsService {
         message: "GitHub App installation belongs to another user",
       });
     }
-    const userId = input.userId ?? existing?.userId ?? null;
-    const accountLogin = input.accountLogin ?? existing?.accountLogin ?? null;
-    const accountType = input.accountType ?? existing?.accountType ?? null;
-    const suspendedAt =
+    const userId: string | null = input.userId ?? existing?.userId ?? null;
+    const accountLogin: string | null = input.accountLogin ?? existing?.accountLogin ?? null;
+    const accountType: string | null = input.accountType ?? existing?.accountType ?? null;
+    const suspendedAt: string | null =
       input.suspendedAt !== undefined
         ? input.suspendedAt
         : (existing?.suspendedAt ?? null);
     if (!existing) {
       try {
-        const rows = await this.client()
+        const rows: Array<GithubInstallationRow> = await this.client()
           .insert(githubInstallations)
           .values({
             userId,
@@ -126,16 +126,16 @@ export class GithubInstallationsService {
             suspendedAt: parseSuspendedAt(suspendedAt) ?? null,
           })
           .returning();
-        const record = toInstallation(rows[0]);
+        const record: GithubInstallation = toInstallation(rows[0]);
         this.logger.info(
           `[github] installation upserted ${record.installationId}`,
           correlationId,
         );
         return record;
-      } catch (err) {
+      } catch (error) {
         dbUnavailable(
           "github-installations.upsert",
-          err,
+          error,
           this.logger,
           correlationId,
         );
@@ -143,7 +143,7 @@ export class GithubInstallationsService {
     }
     let rows: Array<GithubInstallationRow>;
     try {
-      const ownership =
+      const ownership: SQL<unknown> | undefined =
         typeof input.userId === "string"
           ? and(
               eq(githubInstallations.installationId, input.installationId),
@@ -164,10 +164,10 @@ export class GithubInstallationsService {
         })
         .where(ownership)
         .returning();
-    } catch (err) {
+    } catch (error) {
       dbUnavailable(
         "github-installations.upsert",
-        err,
+        error,
         this.logger,
         correlationId,
       );
@@ -178,7 +178,7 @@ export class GithubInstallationsService {
         message: "GitHub App installation belongs to another user",
       });
     }
-    const record = toInstallation(rows[0]);
+    const record: GithubInstallation = toInstallation(rows[0]);
     this.logger.info(
       `[github] installation upserted ${record.installationId}`,
       correlationId,
@@ -191,17 +191,17 @@ export class GithubInstallationsService {
     correlationId?: string,
   ): Promise<GithubInstallation | null> {
     try {
-      const rows = await this.client()
+      const rows: Array<GithubInstallationRow> = await this.client()
         .select()
         .from(githubInstallations)
         .where(eq(githubInstallations.userId, userId))
         .orderBy(desc(githubInstallations.updatedAt))
         .limit(1);
       return rows.length > 0 ? toInstallation(rows[0]) : null;
-    } catch (err) {
+    } catch (error) {
       dbUnavailable(
         "github-installations.findByUserId",
-        err,
+        error,
         this.logger,
         correlationId,
       );
@@ -213,16 +213,16 @@ export class GithubInstallationsService {
     correlationId?: string,
   ): Promise<GithubInstallation | null> {
     try {
-      const rows = await this.client()
+      const rows: Array<GithubInstallationRow> = await this.client()
         .select()
         .from(githubInstallations)
         .where(eq(githubInstallations.installationId, installationId))
         .limit(1);
       return rows.length > 0 ? toInstallation(rows[0]) : null;
-    } catch (err) {
+    } catch (error) {
       dbUnavailable(
         "github-installations.findByInstallationId",
-        err,
+        error,
         this.logger,
         correlationId,
       );
@@ -235,17 +235,17 @@ export class GithubInstallationsService {
     correlationId?: string,
   ): Promise<boolean> {
     try {
-      const rows = await this.client()
+      const rows: Array<GithubInstallationRow> = await this.client()
         .delete(githubInstallations)
         .where(eq(githubInstallations.installationId, installationId))
         .returning();
       if (rows.length === 0) return false;
       this.logger.info(`[github] installation removed ${installationId}`, correlationId);
       return true;
-    } catch (err) {
+    } catch (error) {
       dbUnavailable(
         "github-installations.removeByInstallationId",
-        err,
+        error,
         this.logger,
         correlationId,
       );

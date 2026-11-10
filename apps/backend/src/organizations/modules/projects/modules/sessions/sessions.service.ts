@@ -7,15 +7,15 @@ import {
   Inject,
 } from "@nestjs/common";
 import { and, eq, isNull } from "drizzle-orm";
-import { AppLogger } from "../../../../../common/logger";
+import { AppLogger } from "@common/logger";
 import {
   DbService,
   dbUnavailable,
   type DbClient,
-} from "../../../../../common/db/db.service";
-import { projectSessions, type ProjectSessionRow } from "../../../../../common/db/schema";
-import { ChatsService } from "../chats/chats.service";
-import { ProjectsService } from "../../projects.service";
+} from "@common/db/db.service";
+import { projectSessions, type ProjectSessionRow } from "@common/db/schema";
+import { ChatsService, type ProjectChat } from "../chats/chats.service";
+import { ProjectsService, type Project } from "../../projects.service";
 import { ProjectAccessService } from "../project-access/project-access.service";
 import type { CreateSessionInput } from "./sessions.dto";
 
@@ -100,10 +100,10 @@ export class SessionsService {
     correlationId?: string,
     requesterId?: string,
   ): Promise<Array<ProjectSession>> {
-    const project = await this.projects.getOrThrow(projectId, correlationId);
+    const project: Project = await this.projects.getOrThrow(projectId, correlationId);
     await this.checkAccess(project.id, project.ownerId, requesterId, correlationId);
     try {
-      const rows = await this.client()
+      const rows: Array<ProjectSessionRow> = await this.client()
         .select()
         .from(projectSessions)
         .where(
@@ -114,10 +114,10 @@ export class SessionsService {
         );
       return rows
         .map(toSession)
-        .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    } catch (err) {
-      if (err instanceof NotFoundException) throw err;
-      dbUnavailable("sessions.list", err, this.logger, correlationId);
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      dbUnavailable("sessions.list", error, this.logger, correlationId);
     }
   }
 
@@ -127,10 +127,10 @@ export class SessionsService {
     correlationId?: string,
     requesterId?: string,
   ): Promise<ProjectSession> {
-    const project = await this.projects.getOrThrow(projectId, correlationId);
+    const project: Project = await this.projects.getOrThrow(projectId, correlationId);
     await this.checkAccess(project.id, project.ownerId, requesterId, correlationId);
     try {
-      const rows = await this.client()
+      const rows: Array<ProjectSessionRow> = await this.client()
         .select()
         .from(projectSessions)
         .where(
@@ -147,9 +147,9 @@ export class SessionsService {
         );
       }
       return toSession(rows[0]);
-    } catch (err) {
-      if (err instanceof NotFoundException) throw err;
-      dbUnavailable("sessions.get", err, this.logger, correlationId);
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      dbUnavailable("sessions.get", error, this.logger, correlationId);
     }
   }
 
@@ -159,10 +159,10 @@ export class SessionsService {
     correlationId?: string,
     requesterId?: string,
   ): Promise<ProjectSession> {
-    const project = await this.projects.getOrThrow(projectId, correlationId);
+    const project: Project = await this.projects.getOrThrow(projectId, correlationId);
     await this.checkAccess(project.id, project.ownerId, requesterId, correlationId);
     if (input.chatId) {
-      const chat = await this.chats.getInProject(
+      const chat: ProjectChat | null = await this.chats.getInProject(
         projectId,
         input.chatId,
         correlationId,
@@ -174,7 +174,7 @@ export class SessionsService {
       }
     }
     try {
-      const rows = await this.client()
+      const rows: Array<ProjectSessionRow> = await this.client()
         .insert(projectSessions)
         .values({
           projectId,
@@ -183,16 +183,16 @@ export class SessionsService {
           metadata: (input.metadata ?? null) as Record<string, unknown> | null,
         })
         .returning();
-      // Per-request success on a hot path → debug (not info); cid-bound.
+      // Per-request success on a hot path → debug (not info); correlationId-bound.
       this.logger.debug(`[projects] session created`, correlationId);
       return toSession(rows[0]);
-    } catch (err) {
+    } catch (error) {
       if (
-        err instanceof NotFoundException ||
-        err instanceof BadRequestException
+        error instanceof NotFoundException ||
+        error instanceof BadRequestException
       )
-        throw err;
-      dbUnavailable("sessions.create", err, this.logger, correlationId);
+        throw error;
+      dbUnavailable("sessions.create", error, this.logger, correlationId);
     }
   }
 
@@ -204,7 +204,7 @@ export class SessionsService {
   ): Promise<ProjectSession> {
     await this.get(projectId, sessionId, correlationId, requesterId);
     try {
-      const rows = await this.client()
+      const rows: Array<ProjectSessionRow> = await this.client()
         .update(projectSessions)
         .set({ status: "closed", updatedAt: new Date() })
         .where(eq(projectSessions.id, sessionId))
@@ -214,12 +214,12 @@ export class SessionsService {
           `Session ${sessionId} not found in project ${projectId}`,
         );
       }
-      // Per-request success on a hot path → debug (not info); cid-bound.
+      // Per-request success on a hot path → debug (not info); correlationId-bound.
       this.logger.debug(`[projects] session closed`, correlationId);
       return toSession(rows[0]);
-    } catch (err) {
-      if (err instanceof NotFoundException) throw err;
-      dbUnavailable("sessions.close", err, this.logger, correlationId);
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      dbUnavailable("sessions.close", error, this.logger, correlationId);
     }
   }
 
@@ -238,10 +238,10 @@ export class SessionsService {
             isNull(projectSessions.deletedAt),
           ),
         );
-    } catch (err) {
+    } catch (error) {
       dbUnavailable(
         "sessions.removeByProject",
-        err,
+        error,
         this.logger,
         correlationId,
       );
@@ -259,8 +259,8 @@ export class SessionsService {
         .update(projectSessions)
         .set({ chatId: null, updatedAt: new Date() })
         .where(eq(projectSessions.chatId, chatId));
-    } catch (err) {
-      dbUnavailable("sessions.detachChat", err, this.logger, correlationId);
+    } catch (error) {
+      dbUnavailable("sessions.detachChat", error, this.logger, correlationId);
     }
   }
 
@@ -270,16 +270,16 @@ export class SessionsService {
     correlationId?: string,
   ): Promise<boolean> {
     try {
-      const rows = await this.client()
+      const rows: Array<ProjectSessionRow> = await this.client()
         .select()
         .from(projectSessions)
         .where(eq(projectSessions.id, sessionId))
         .limit(1);
       return rows.length > 0 && rows[0].chatId !== null;
-    } catch (err) {
+    } catch (error) {
       dbUnavailable(
         "sessions.hasChatReference",
-        err,
+        error,
         this.logger,
         correlationId,
       );

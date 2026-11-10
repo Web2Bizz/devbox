@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import type { AppLogger } from '../../../../../../../../../../common/logger';
-import type { WorkspacePathService } from '../../../../../../../../../../common/storage/workspace-path.service';
+import type { AppLogger } from '@common/logger';
+import type { WorkspacePathService } from '@common/storage/workspace-path.service';
 import type { CloneJobsRepository } from '../clone-jobs.repository';
 import { WorkspaceCloneService } from '../workspace-clone.service';
 
@@ -46,26 +46,26 @@ type Resolved = {
   scope: 'org';
   scopeId: string;
   projectId: string;
-  absBase: string;
-  absRepo: string;
-  absSecrets: string;
+  absoluteBase: string;
+  absoluteRepo: string;
+  absoluteSecrets: string;
   scopeSecrets: string;
-  abs: string;
-  rel: string;
+  absolutePath: string;
+  relativePath: string;
 };
 
-function resolvedAt(absRepo: string): Resolved {
-  const absBase = absRepo.replace(/\/content$/, '');
+function resolvedAt(absoluteRepo: string): Resolved {
+  const absoluteBase = absoluteRepo.replace(/\/content$/, '');
   return {
     scope: 'org',
     scopeId: UID,
     projectId: PID,
-    absBase,
-    absRepo,
-    absSecrets: `${absBase}/.secrets`,
+    absoluteBase,
+    absoluteRepo,
+    absoluteSecrets: `${absoluteBase}/.secrets`,
     scopeSecrets: `${JAIL}/orgs/${UID}/.secrets`,
-    abs: absRepo,
-    rel: '.',
+    absolutePath: absoluteRepo,
+    relativePath: '.',
   };
 }
 
@@ -118,7 +118,7 @@ function readyJobs(
 
 type PathsMock = {
   resolveOrg: (userId: string, projectId: string) => Promise<Resolved>;
-  assertInsideJail: (abs: string, jailReal: string) => Promise<string>;
+  assertInsideJail: (absolutePath: string, jailReal: string) => Promise<string>;
   realStrictRoot: () => Promise<string>;
 };
 
@@ -249,7 +249,7 @@ function permissivePaths(): PathsMock {
   return {
     resolveOrg: async () => resolvedAt(INSIDE_DEST),
     realStrictRoot: async () => JAIL,
-    assertInsideJail: async (abs) => abs,
+    assertInsideJail: async (absolutePath) => absolutePath,
   };
 }
 
@@ -316,9 +316,9 @@ describe('WorkspaceCloneService.clone destination jail', () => {
         seq.push('realStrictRoot');
         return JAIL;
       },
-      assertInsideJail: async (abs, jailReal) => {
-        seq.push(`assertInsideJail:${abs}:${jailReal}`);
-        return abs;
+      assertInsideJail: async (absolutePath, jailReal) => {
+        seq.push(`assertInsideJail:${absolutePath}:${jailReal}`);
+        return absolutePath;
       },
     };
     const svc = service(paths, jobs);
@@ -350,12 +350,12 @@ describe('WorkspaceCloneService.clone destination jail', () => {
         seq.push('realStrictRoot');
         return JAIL;
       },
-      assertInsideJail: async (abs) => {
-        seq.push(`assertInsideJail:${abs}`);
-        if (abs !== JAIL && !abs.startsWith(`${JAIL}/`)) {
+      assertInsideJail: async (absolutePath) => {
+        seq.push(`assertInsideJail:${absolutePath}`);
+        if (absolutePath !== JAIL && !absolutePath.startsWith(`${JAIL}/`)) {
           throw new ForbiddenException('Path traversal is forbidden');
         }
-        return abs;
+        return absolutePath;
       },
     };
     const svc = service(paths, jobs);

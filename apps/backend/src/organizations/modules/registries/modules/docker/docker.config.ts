@@ -1,4 +1,4 @@
-import type { AppEnv } from '../../../../../common/env/env';
+import type { AppEnv } from '@common/env/env';
 
 /**
  * Typed docker-registry config (resolved from AppEnv, never read from

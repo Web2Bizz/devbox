@@ -4,15 +4,15 @@ import {
   DEFAULT_NPM_REGISTRY_SCOPE,
   validateEnv,
   type AppEnv,
-} from '../../../../../common/env/env';
-import { AppLogger } from '../../../../../common/logger';
-import { ExternalClient } from '../../../../../common/external/external-client';
+} from '@common/env/env';
+import { AppLogger } from '@common/logger';
+import { ExternalClient } from '@common/external/external-client';
 import {
   ExternalServiceError,
   fromStatus,
   fromUnknown,
-} from '../../../../../common/external/external-error';
-import { withRetry } from '../../../../../common/external/retry';
+} from '@common/external/external-error';
+import { withRetry } from '@common/external/retry';
 import {
   npmRegistryAuthHeaders,
   npmRegistryAuthMode,
@@ -23,13 +23,13 @@ import type { NpmRegistryConfig } from './npm.types';
 export type NpmRegistryStatus = 'up' | 'down' | 'skipped';
 
 /** Internal down reasons (monitoring/logs only — never sent to clients). */
-export const NPM_REGISTRY_AUTH_401 = 'AUTH_401';
-export const NPM_REGISTRY_AUTH_403 = 'AUTH_403';
+export const NPM_REGISTRY_AUTH_401: string = 'AUTH_401';
+export const NPM_REGISTRY_AUTH_403: string = 'AUTH_403';
 
 /** Short budget for the /health probe — liveness must not wait on upstream. */
-export const NPM_REGISTRY_HEALTH_TIMEOUT_MS = 2000;
+export const NPM_REGISTRY_HEALTH_TIMEOUT_MS: number = 2000;
 
-const FALLBACK_TIMEOUT_MS = 10000;
+const FALLBACK_TIMEOUT_MS: number = 10000;
 
 /**
  * NpmRegistryService — single owner of NPM_REGISTRY_* config + Verdaccio probe.
@@ -90,17 +90,20 @@ export class NpmRegistryService implements OnModuleInit {
   }
 
   private resolved(): NpmRegistryConfig {
-    const env = this.resolvedEnv();
+    const env: AppEnv | null = this.resolvedEnv();
     if (env) return resolveNpmRegistryConfig(env);
     // readonly-исключение: fail-open к сырым ConfigService-значениям только для
     // чтения observe-only конфига (trimmed, never logged); пустой URL → 'skipped'
     // + 503 на status (никакого тихого успеха); ретрай-тюнинг дефолтится к
     // EXTERNAL_*-зеркалам при непарсируемом значении.
-    const num = (raw: string | undefined, fallback: number): number => {
-      const n = Number(raw);
-      return Number.isInteger(n) && n >= 0 ? n : fallback;
+    const parseNonNegativeInt: (rawValue: string | undefined, fallback: number) => number = (
+      rawValue: string | undefined,
+      fallback: number,
+    ): number => {
+      const parsed: number = Number(rawValue);
+      return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
     };
-    const scopeRaw = this.config?.get<string>('NPM_REGISTRY_SCOPE')?.trim() ?? '';
+    const scopeRaw: string = this.config?.get<string>('NPM_REGISTRY_SCOPE')?.trim() ?? '';
     return {
       url: (this.config?.get<string>('NPM_REGISTRY_URL')?.trim() ?? '').replace(/\/+$/, ''),
       token:
@@ -110,11 +113,11 @@ export class NpmRegistryService implements OnModuleInit {
       user: this.config?.get<string>('NPM_REGISTRY_USER')?.trim() ?? '',
       password: this.config?.get<string>('NPM_REGISTRY_PASSWORD')?.trim() ?? '',
       scope: /^@[a-z0-9-~][a-z0-9-._~]*$/.test(scopeRaw) ? scopeRaw : DEFAULT_NPM_REGISTRY_SCOPE,
-      timeoutMs: num(this.config?.get<string>('NPM_REGISTRY_TIMEOUT_MS'), FALLBACK_TIMEOUT_MS),
+      timeoutMs: parseNonNegativeInt(this.config?.get<string>('NPM_REGISTRY_TIMEOUT_MS'), FALLBACK_TIMEOUT_MS),
       retry: {
-        maxAttempts: num(this.config?.get<string>('NPM_REGISTRY_RETRY_MAX_ATTEMPTS'), 3) || 3,
-        baseDelayMs: num(this.config?.get<string>('NPM_REGISTRY_RETRY_BASE_DELAY_MS'), 200),
-        maxDelayMs: num(this.config?.get<string>('NPM_REGISTRY_RETRY_MAX_DELAY_MS'), 2000),
+        maxAttempts: parseNonNegativeInt(this.config?.get<string>('NPM_REGISTRY_RETRY_MAX_ATTEMPTS'), 3) || 3,
+        baseDelayMs: parseNonNegativeInt(this.config?.get<string>('NPM_REGISTRY_RETRY_BASE_DELAY_MS'), 200),
+        maxDelayMs: parseNonNegativeInt(this.config?.get<string>('NPM_REGISTRY_RETRY_MAX_DELAY_MS'), 2000),
       },
     };
   }
@@ -138,11 +141,11 @@ export class NpmRegistryService implements OnModuleInit {
   }
 
   private markUp(): void {
-    const was = this.status;
+    const previousStatus: NpmRegistryStatus = this.status;
     this.status = 'up';
     this.lastCheckAt = new Date().toISOString();
     this.lastError = null;
-    if (was !== 'up') {
+    if (previousStatus !== 'up') {
       this.logger.log('[npm-registry] reachable (status up)');
     }
   }
@@ -163,34 +166,36 @@ export class NpmRegistryService implements OnModuleInit {
    * never URL, credentials, or upstream bodies.
    */
   async onModuleInit(): Promise<void> {
-    const cfg = this.resolved();
-    if (!cfg.url) {
+    const configuration: NpmRegistryConfig = this.resolved();
+    if (!configuration.url) {
       this.status = 'skipped';
       this.logger.debug('[npm-registry] unconfigured (NPM_REGISTRY_URL empty) — status skipped');
       return;
     }
     try {
       await withRetry(
-        async (attempt) => {
-          await this.pingOnce(cfg, attempt);
+        async (attempt: number) => {
+          await this.pingOnce(configuration, attempt);
         },
         {
-          maxAttempts: cfg.retry.maxAttempts,
-          baseDelayMs: cfg.retry.baseDelayMs,
-          maxDelayMs: cfg.retry.maxDelayMs,
+          maxAttempts: configuration.retry.maxAttempts,
+          baseDelayMs: configuration.retry.baseDelayMs,
+          maxDelayMs: configuration.retry.maxDelayMs,
           method: 'GET',
         },
       );
       this.markUp();
-    } catch (err) {
-      const upstreamStatus = err instanceof ExternalServiceError ? err.status : undefined;
-      const code = err instanceof ExternalServiceError ? err.code : 'EXTERNAL_UNAVAILABLE';
+    } catch (error) {
+      const upstreamStatus: number | undefined =
+        error instanceof ExternalServiceError ? error.status : undefined;
+      const code: string =
+        error instanceof ExternalServiceError ? error.code : 'EXTERNAL_UNAVAILABLE';
       if (upstreamStatus === 401 || upstreamStatus === 403) {
-        const reason = upstreamStatus === 401 ? 'bad-credentials' : 'forbidden';
+        const reason: string = upstreamStatus === 401 ? 'bad-credentials' : 'forbidden';
         this.markDown(upstreamStatus === 401 ? NPM_REGISTRY_AUTH_401 : NPM_REGISTRY_AUTH_403);
         // Fixed fields only — authMode is a presence fact, never values.
         this.logger.error(
-          `[npm-registry] auth failed at startup status=${upstreamStatus} reason=${reason} authMode=${npmRegistryAuthMode(cfg)} status=down`,
+          `[npm-registry] auth failed at startup status=${upstreamStatus} reason=${reason} authMode=${npmRegistryAuthMode(configuration)} status=down`,
         );
         return;
       }
@@ -207,13 +212,15 @@ export class NpmRegistryService implements OnModuleInit {
    * never secrets); any other HTTP response except retryable 429/5xx
    * (which throw inside ExternalClient → 'down') means reachable → 'up'.
    */
-  async checkConnectivity(timeoutMs = NPM_REGISTRY_HEALTH_TIMEOUT_MS): Promise<NpmRegistryStatus> {
-    const cfg = this.resolved();
-    if (!cfg.url) return 'skipped';
+  async checkConnectivity(
+    timeoutMs: number = NPM_REGISTRY_HEALTH_TIMEOUT_MS,
+  ): Promise<NpmRegistryStatus> {
+    const configuration: NpmRegistryConfig = this.resolved();
+    if (!configuration.url) return 'skipped';
     try {
-      const res = await this.external.fetchWithRetry(
-        `${cfg.url}/-/ping`,
-        { method: 'GET', headers: npmRegistryAuthHeaders(cfg) },
+      const response: Response = await this.external.fetchWithRetry(
+        `${configuration.url}/-/ping`,
+        { method: 'GET', headers: npmRegistryAuthHeaders(configuration) },
         {
           service: 'npm-registry',
           operation: 'checkConnectivity',
@@ -221,26 +228,26 @@ export class NpmRegistryService implements OnModuleInit {
           retry: { maxAttempts: 1 },
         },
       );
-      if (res.status === 401 || res.status === 403) {
-        await res.arrayBuffer().catch(() => null);
-        const reason = res.status === 401 ? 'bad-credentials' : 'forbidden';
+      if (response.status === 401 || response.status === 403) {
+        await response.arrayBuffer().catch(() => null);
+        const reason: string = response.status === 401 ? 'bad-credentials' : 'forbidden';
         this.logger.warn(
-          `[npm-registry] auth failed status=${res.status} reason=${reason} authMode=${npmRegistryAuthMode(cfg)}`,
+          `[npm-registry] auth failed status=${response.status} reason=${reason} authMode=${npmRegistryAuthMode(configuration)}`,
         );
         return 'down';
       }
-      if (!res.ok && (res.status === 429 || (res.status >= 500 && res.status <= 599))) {
+      if (!response.ok && (response.status === 429 || (response.status >= 500 && response.status <= 599))) {
         // Defense-in-depth: ExternalClient already throws retryable 429/5xx, so
         // this branch is normally unreachable — kept so a client behavior change
         // can never flip a 5xx into a false 'up'.
-        await res.arrayBuffer().catch(() => null);
+        await response.arrayBuffer().catch(() => null);
         return 'down';
       }
-      await res.arrayBuffer().catch(() => null);
+      await response.arrayBuffer().catch(() => null);
       return 'up';
-    } catch (err) {
+    } catch (error) {
       this.logger.debug(
-        `[npm-registry] probe failed: ${err instanceof Error ? err.message : String(err)}`,
+        `[npm-registry] probe failed: ${error instanceof Error ? error.message : String(error)}`,
       );
       return 'down';
     }
@@ -261,8 +268,8 @@ export class NpmRegistryService implements OnModuleInit {
   async getStatusOrThrow(
     correlationId?: string,
   ): Promise<{ status: 'up'; url: string; scope: string }> {
-    const cfg = this.resolved();
-    if (!cfg.url) {
+    const configuration: NpmRegistryConfig = this.resolved();
+    if (!configuration.url) {
       this.logger.warn(
         '[npm-registry] status requested while unconfigured (NPM_REGISTRY_URL empty) — answering 503',
         correlationId,
@@ -276,32 +283,32 @@ export class NpmRegistryService implements OnModuleInit {
         isRetryable: false,
       });
     }
-    let res: Response;
+    let response: Response;
     try {
-      res = await this.external.fetchWithRetry(
-        `${cfg.url}/-/ping`,
-        { method: 'GET', headers: npmRegistryAuthHeaders(cfg) },
+      response = await this.external.fetchWithRetry(
+        `${configuration.url}/-/ping`,
+        { method: 'GET', headers: npmRegistryAuthHeaders(configuration) },
         {
           service: 'npm-registry',
           operation: 'getStatus',
-          timeoutMs: cfg.timeoutMs,
+          timeoutMs: configuration.timeoutMs,
           correlationId,
         },
       );
-    } catch (err) {
-      this.markDown(err instanceof ExternalServiceError ? err.code : 'EXTERNAL_UNAVAILABLE');
-      throw err instanceof ExternalServiceError
-        ? err
-        : fromUnknown('npm-registry', 'getStatus', err, cfg.retry.maxAttempts);
+    } catch (error) {
+      this.markDown(error instanceof ExternalServiceError ? error.code : 'EXTERNAL_UNAVAILABLE');
+      throw error instanceof ExternalServiceError
+        ? error
+        : fromUnknown('npm-registry', 'getStatus', error, configuration.retry.maxAttempts);
     }
-    if (res.status === 401 || res.status === 403) {
+    if (response.status === 401 || response.status === 403) {
       // Closed Verdaccio refused the credential: internal down(auth), outward
       // neutral 503. Drain the body (socket reuse); never echo it.
-      await res.arrayBuffer().catch(() => null);
-      this.markDown(res.status === 401 ? NPM_REGISTRY_AUTH_401 : NPM_REGISTRY_AUTH_403);
-      const reason = res.status === 401 ? 'bad-credentials' : 'forbidden';
+      await response.arrayBuffer().catch(() => null);
+      this.markDown(response.status === 401 ? NPM_REGISTRY_AUTH_401 : NPM_REGISTRY_AUTH_403);
+      const reason: string = response.status === 401 ? 'bad-credentials' : 'forbidden';
       this.logger.error(
-        `[npm-registry] auth failed status=${res.status} reason=${reason} authMode=${npmRegistryAuthMode(cfg)} status=down`,
+        `[npm-registry] auth failed status=${response.status} reason=${reason} authMode=${npmRegistryAuthMode(configuration)} status=down`,
         correlationId,
       );
       throw new ExternalServiceError({
@@ -309,60 +316,60 @@ export class NpmRegistryService implements OnModuleInit {
         service: 'npm-registry',
         operation: 'getStatus',
         message: 'сервис временно недоступен, повторите позже',
-        status: res.status,
-        attempt: cfg.retry.maxAttempts,
+        status: response.status,
+        attempt: configuration.retry.maxAttempts,
         isRetryable: false,
       });
     }
-    if (!res.ok && (res.status === 429 || (res.status >= 500 && res.status <= 599))) {
+    if (!response.ok && (response.status === 429 || (response.status >= 500 && response.status <= 599))) {
       // Defense-in-depth: ExternalClient already throws retryable 429/5xx, so
       // this branch is normally unreachable — kept so a client behavior change
       // can never flip a 5xx into a false 'up'.
-      this.markDown(`UPSTREAM_${res.status}`);
-      await res.arrayBuffer().catch(() => null);
-      throw fromStatus('npm-registry', 'getStatus', res.status, cfg.retry.maxAttempts);
+      this.markDown(`UPSTREAM_${response.status}`);
+      await response.arrayBuffer().catch(() => null);
+      throw fromStatus('npm-registry', 'getStatus', response.status, configuration.retry.maxAttempts);
     }
     // Any other HTTP response (2xx ping, or 404 — the process answered with
     // valid credentials for the ping path) means reachable: drain + mark up.
-    await res.arrayBuffer().catch(() => null);
+    await response.arrayBuffer().catch(() => null);
     this.markUp();
     // url/scope carry no secrets (token/user/password are never in the payload).
-    return { status: 'up', url: cfg.url, scope: cfg.scope };
+    return { status: 'up', url: configuration.url, scope: configuration.scope };
   }
 
   /** Single ping attempt (throws ExternalServiceError on any failure). */
-  private async pingOnce(cfg: NpmRegistryConfig, attempt: number): Promise<void> {
-    let res: Response;
+  private async pingOnce(configuration: NpmRegistryConfig, attempt: number): Promise<void> {
+    let response: Response;
     try {
-      res = await this.external.fetchWithRetry(
-        `${cfg.url}/-/ping`,
-        { method: 'GET', headers: npmRegistryAuthHeaders(cfg) },
+      response = await this.external.fetchWithRetry(
+        `${configuration.url}/-/ping`,
+        { method: 'GET', headers: npmRegistryAuthHeaders(configuration) },
         {
           service: 'npm-registry',
           operation: 'ping',
-          timeoutMs: cfg.timeoutMs,
+          timeoutMs: configuration.timeoutMs,
           retry: { maxAttempts: 1 },
         },
       );
-    } catch (err) {
-      if (err instanceof ExternalServiceError) {
-        err.attempt = attempt;
-        throw err;
+    } catch (error) {
+      if (error instanceof ExternalServiceError) {
+        error.attempt = attempt;
+        throw error;
       }
-      throw fromUnknown('npm-registry', 'ping', err, attempt);
+      throw fromUnknown('npm-registry', 'ping', error, attempt);
     }
     // Drain first (socket reuse); the body is never logged.
-    await res.arrayBuffer().catch(() => null);
+    await response.arrayBuffer().catch(() => null);
     // Auth refusal fails fast (not retryable — withRetry passes 4xx through):
     // the caller (onModuleInit) maps status 401/403 to AUTH_401/AUTH_403.
-    if (res.status === 401 || res.status === 403) {
-      throw fromStatus('npm-registry', 'ping', res.status, attempt);
+    if (response.status === 401 || response.status === 403) {
+      throw fromStatus('npm-registry', 'ping', response.status, attempt);
     }
     // Only 429/5xx are retryable failures worth another attempt; any other
     // HTTP response (2xx, or 404 = unexpected path but the process answered)
     // counts as reachable.
-    if (res.status === 429 || (res.status >= 500 && res.status <= 599)) {
-      throw fromStatus('npm-registry', 'ping', res.status, attempt);
+    if (response.status === 429 || (response.status >= 500 && response.status <= 599)) {
+      throw fromStatus('npm-registry', 'ping', response.status, attempt);
     }
   }
 }

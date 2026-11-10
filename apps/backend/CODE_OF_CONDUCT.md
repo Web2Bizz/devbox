@@ -20,6 +20,9 @@
 
 - Родительский модуль импортирует вложенные; вложенный никогда
   не регистрируется в `AppModule` напрямую.
+- **В модуле ровно один `*.controller.ts` и ровно один `*.service.ts`.
+  Второй сервис/контроллер в том же каталоге запрещён — вторая
+  сущность = новый вложенный модуль в `modules/<sub>/` (§2).**
 - Тесты рядом с кодом запрещены — все `*.spec.ts` / `*.e2e.ts`
   лежат в `<domain>/__tests__/`.
 - Вложенные модули в `modules/<sub>/` имеют собственные `__tests__/`
@@ -73,22 +76,19 @@ auth/
   `utils/session-cookie/` с `index.ts` + `__tests__/`.
 - `keys/` вне `modules/` — надо в `modules/keys/`.
 
-### 1.1. Контроллер отвечает только за свою область
+### 1.1. Один модуль — один контроллер и один сервис
 
-- В модуле с HTTP-слоем контроллер отдаёт маршруты **только своей сущности**.
-  Родительский домен не держит маршруты вложенных модулей: если у вложенного
+- В модуле ровно один `*.controller.ts` и ровно один `*.service.ts`.
+  Второй контроллер/сервис в том же каталоге запрещён — вторая сущность
+  или второй скоуп = новый вложенный модуль в `modules/<sub>/` (§2).
+- Чужой ресурс в пути или вторая сущность/скоуп → отдельный `modules/<sub>/`
+  со своим `<sub>.module.ts` / `<sub>.controller.ts` / `<sub>.service.ts` /
+  `<sub>.dto.ts` + `__tests__/`.
+- Родительский домен не держит маршруты вложенных модулей: если у вложенного
   модуля есть HTTP-слой, у него **свой** `<sub>.controller.ts` в
   `<parent>/modules/<sub>/`.
-- Второй контроллер того же домена (другая сущность или скоуп) — отдельный
-  класс с именем по сущности: `<entity>.controller.ts`
-  (`users.controller.ts`, `org-projects.controller.ts`), а не «второй набор
-  методов» в существующем файле.
-- Чужой ресурс в пути не даёт права писать маршрут в чужой контроллер:
-  `/organizations/:id/projects` принадлежит домену **projects** (данные отдаёт
-  projects), поэтому живёт в `org-projects.controller.ts`, а не в
-  `organizations.controller.ts`.
-- Заглушки удалённых фич (410) живут в домене своей сущности, а не в чужом
-  контроллере.
+- Заглушки удалённых фич (410) живут в контроллере своего `modules/<sub>/`,
+  а не в чужом контроллере.
 - Проверка на ревью: все маршруты одного класса относятся к одной сущности;
   у вложенного модуля с HTTP-слоем есть собственный контроллер.
 
@@ -102,7 +102,8 @@ organizations/
    └─ invites/                     ← модуль есть, контроллера нет
 
 projects/
-└─ projects.controller.ts          ← /projects* и /organizations/:id/projects* в одном классе
+├─ projects.controller.ts          ← /projects*
+└─ org-projects.controller.ts      ← второй контроллер рядом: /organizations/:id/projects*
 ```
 
 ```ts
@@ -129,7 +130,29 @@ organizations/
 
 projects/
 ├─ projects.controller.ts                   ← /projects*
-└─ org-projects.controller.ts               ← /organizations/:id/projects*
+└─ modules/
+   └─ org-projects/org-projects.controller.ts  ← /organizations/:id/projects*
+```
+
+```ts
+// modules/org-projects/org-projects.controller.ts — 410-заглушка в своём модуле
+@Controller("organizations/:id/projects")
+export class OrgProjectsController {
+  @Post(":projectId")
+  async linkProject(): Promise<void> {
+    throw new GoneException("project links removed");
+  }
+}
+```
+
+Контроль:
+
+```sh
+# все контроллеры — каждый обязан лежать в своём модуле/подмодуле
+rg --files src | rg '\.controller\.ts$'
+
+# max 1 controller/service на каталог (исключая modules/, utils/, __tests__/, common/)
+for f in $(rg --files src | rg '\.(controller|service)\.ts$' | rg -v '(modules/|utils/|__tests__/|common/)'); do dirname "$f"; done | sort | uniq -c | sort -rn | awk '$1 > 1'
 ```
 
 ### 2. Вложенные модули
@@ -140,6 +163,7 @@ projects/
 - Вложенный модуль не экспортируется во внешние слои — используется
   только внутри родительского домена; наружу торчит только родитель.
 - Прямые папки-соседи (`<parent>/<sub>/`) для Nest-модулей запрещены.
+- В каждом `<sub>/` — тоже ровно один контроллер и один сервис.
 
 #### Правильно
 ```
@@ -222,9 +246,9 @@ rg -g '*.ts' 'constructor\(.*private ' src | rg -v 'readonly'
 | Шаблон | Что это | Правило |
 | --- | --- | --- |
 | `<domain\|module>.module.ts` | Модуль | Ровно один класс `*Module` на файл. |
-| `<domain\|module>.controller.ts` | Контроллер | Классы `*Controller`; второй контроллер домена именуется по сущности (`users.controller.ts`, `org-projects.controller.ts`). |
+| `<domain\|module>.controller.ts` | Контроллер | Классы `*Controller`. Ровно один на модуль; второй = новый `modules/<sub>/`. |
 | `<domain\|module>.dto.ts` | DTO | Валидация форм из zod-схемы (§4.1); swagger-классы только для доков (§4.2). |
-| `<domain\|module>.service.ts` | Сервис | Бизнес-логика (`github-link.service.ts`, `workspace-path.service.ts`). |
+| `<domain\|module>.service.ts` | Сервис | Бизнес-логика (`github-link.service.ts`, `workspace-path.service.ts`). Ровно один на модуль; второй = новый `modules/<sub>/`. |
 | `<domain\|module>.repository.ts` | Репозиторий | Доступ к данным (`clone-jobs.repository.ts`). |
 | `utils/<name>/` | Директория утилиты | Каждая утилита — отдельная директория в kebab-case (`utils/session-cookie/`); плоские `*.util.ts` запрещены. |
 | `utils/<name>/<name>.util.ts` | Утилита | Реализация, имя совпадает с директорией (`utils/session-cookie/session-cookie.util.ts`); только чистые функции, сайд-эффектов нет. |

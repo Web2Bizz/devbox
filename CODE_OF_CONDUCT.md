@@ -225,3 +225,180 @@ Review-only — no reliable regex exists. Reviewers reject new abbreviations
 (`repo`, `cfg`, `ctx`, `msg`, `err`, `req`, `res`, `idx`, `tmp`, `util`
 as a name) unless the abbreviation is the canonical domain term
 (`id`, `url`, `api`) or an upstream API mandates it.
+
+---
+
+## 5. explicit-type-annotations
+
+### Scope
+
+Whole monorepo — same paths as §3. Mandatory for all new code.
+
+### Rule
+
+Every variable, object field, parameter, and return value is declared
+with an explicit type (`name: Type = value`) — inferred types are forbidden
+for new code. Applies to `const` / `let` / `var`, `readonly` fields,
+function and method signatures.
+
+```ts
+// do
+class UserCard {
+  readonly fullName: string = 'some';
+}
+
+const fullName: string = 'some';
+
+function findUserById(userId: string, userRepository: UserRepository): User {
+  const user: User = userRepository.findById(userId);
+  return user;
+}
+```
+
+```ts
+// don't
+class UserCard {
+  readonly fullName = 'some';
+}
+
+const fullName = 'some';
+
+function findUserById(userId, userRepository) {
+  const user = userRepository.findById(userId);
+  return user;
+}
+```
+
+### Exceptions (require justification in the PR)
+
+- Test-local constants where the literal makes the type trivial — only with
+  a `// type: trivial — <reason>` comment and reviewer sign-off.
+- Literals in local throwaway constants where the type is obvious from
+  the right-hand side — only with a comment stating why the annotation
+  adds nothing, and only by reviewer decision.
+- Upstream APIs that mandate inference (destructuring patterns the explicit
+  syntax cannot express) — only with a comment pointing at the upstream type.
+
+### Control
+
+```sh
+# candidates for review — every hit omits the explicit type and must be annotated
+# (triage out loop counters like for (let index = 0; ...))
+rg -g '*.ts' -g '*.tsx' '(const|let|var)\s+[A-Za-z0-9_]+\s*=' \
+  packages/contracts/src apps/backend/src apps/frontend/src apps/cli/src apps/mobile/src
+
+# candidates for review — readonly fields without an explicit type
+rg -g '*.ts' -g '*.tsx' 'readonly\s+[A-Za-z0-9_]+\s*=' \
+  packages/contracts/src apps/backend/src apps/frontend/src apps/cli/src apps/mobile/src
+```
+
+---
+
+## 6. exceptions-inline
+
+### Scope
+
+Whole monorepo — `apps/backend/src/**`, `packages/contracts/src/**`,
+`apps/frontend/**`, `apps/cli/src/**`, `apps/mobile/src/**`. Mandatory for all
+new and changed code.
+
+### Rule
+
+An exception is instantiated and thrown AT THE SITE. Helper functions or
+methods that build and return an exception instance are forbidden: they hide
+the throw site and turn one HTTP contract into an opaque helper.
+
+```ts
+// do
+if (!secret) {
+  throw new NotFoundException({
+    code: 'vault_secret_not_found',
+    message: 'Vault secret not found',
+  });
+}
+```
+
+```ts
+// don't
+export function secretNotFound(): NotFoundException {
+  return new NotFoundException({
+    code: 'vault_secret_not_found',
+    message: 'Vault secret not found',
+  });
+}
+```
+
+### Exceptions (require justification in the PR)
+
+- Upstream status/cause mappers in `common/external` (`fromStatus`,
+  `fromUnknown`, `toExternalServiceError`, `ExternalClient` retry/backoff) and
+  the private `failure()`/`unavailable()` mappers in `OpencodeHostService`:
+  they translate an ARBITRARY upstream status/cause into the
+  `ExternalServiceError` envelope and are boundary adapters, not fixed-message
+  factories. A new fixed-message helper is still forbidden.
+- Callback parameters that the transport requires to produce an error on
+  demand (e.g. `relaySse`'s `unreachableError: () => Error`) — the `new` stays
+  inline at the callback site, never behind a named factory.
+- Third-party exceptions constructed inside adapters that must translate
+  foreign error classes.
+
+### Control
+
+```sh
+# must print nothing outside the documented mappers
+rg -g '*.ts' -g '!**/common/external/**' -g '!**/opencode-host.service.ts' \
+  '\):\s*(NotFoundException|BadRequestException|ForbiddenException|UnauthorizedException|ConflictException|HttpException|ExternalServiceError)\b' \
+  apps/backend/src packages/contracts/src apps/frontend apps/cli/src apps/mobile/src
+```
+
+---
+
+## 7. uuid-validation-via-zod
+
+### Scope
+
+Whole monorepo production code — `apps/backend/src/**`,
+`packages/contracts/src/**`, `apps/frontend/**`, `apps/cli/src/**`,
+`apps/mobile/src/**`. Tests may assert with the same schemas.
+
+### Rule
+
+UUID shape is validated only by zod: `z.uuid()` for RFC UUIDs (any version,
+case-insensitive), `z.uuidv7()` for v7-only values (invite tokens),
+`z.guid()` only when an upstream contract is deliberately version-agnostic.
+Hand-written UUID regexes (`UUID_RE`, `USER_ID_PATTERN`, `[0-9a-f]{8}-…`)
+and boolean wrappers (`isUserId`, `isUuid`, `isUuidV7`) are forbidden.
+
+```ts
+// do — one schema, one decision point
+if (!uuidSchema.safeParse(identity.id).success) {
+  throw new UnauthorizedException({ code: 'unauthorized', message: 'Authentication required' });
+}
+
+// do — boundary schema
+const inputSchema = z.object({ projectId: z.uuid() });
+```
+
+```ts
+// don't
+const USER_ID_PATTERN: RegExp = /^[0-9a-f]{8}-…$/i;
+export function isUserId(value: string): boolean {
+  return USER_ID_PATTERN.test(value);
+}
+```
+
+### Exceptions (require justification in the PR)
+
+- Non-UUID identifiers (opencode `ses_*` host ids, slugs, opaque tokens) are
+  validated by their own contract, never by a UUID schema.
+- Test fixtures may keep literal UUID strings; validation still goes through
+  the schema.
+
+### Control
+
+```sh
+# must print nothing outside the exceptions above
+rg -g '*.ts' -g '!**/*.spec.ts' -g '!**/*.e2e.ts' -g '!**/__tests__/**' \
+  '\[0-9a-f\]\{8\}-\[0-9a-f\]\{4\}' \
+  apps/backend/src packages/contracts/src apps/frontend apps/cli/src apps/mobile/src
+```

@@ -1,4 +1,4 @@
-import type { ToolCall, ToolSettlement } from '../../../tools/tool.types';
+import type { ToolCall, ToolSettlement } from '../../../tool-runtime/tool-runtime.types';
 
 /**
  * Pure step-loop primitives (donor `packages/ai/src/loop.ts` semantics).
@@ -24,6 +24,26 @@ export type LoopStep = {
   /** Provider finish reason ('tool-calls' | 'stop' | 'length' | …). */
   finishReason: string | null;
   usage?: TokenUsage;
+  /** Model-router audit meta of this step (attempts/fallback), when reported. */
+  meta?: StepMeta;
+};
+
+/** One model attempt the router made for a step (fixed literals, no secrets). */
+export type StepAttempt = {
+  provider: string;
+  model: string;
+  attempt: number;
+  outcome: string;
+  reason: string;
+  latencyMs: number;
+};
+
+/** Audit meta of one model step (additive; absent transport meta stays absent). */
+export type StepMeta = {
+  provider?: string;
+  model?: string;
+  attempts?: Array<StepAttempt>;
+  fallback?: { attempts: number; switchedFrom?: string; reason?: string };
 };
 
 /** Next-request knobs derived from the step index. */
@@ -34,10 +54,18 @@ export type StepRequest = {
 
 /** Message appended to the conversation after one step round-trip. */
 export type LoopMessage = {
-  role: 'assistant' | 'tool';
+  /** `system`/`user` seed the conversation, `assistant`/`tool` continue it. */
+  role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   toolCallID?: string;
   toolName?: string;
+  /**
+   * Tool calls of an assistant echo (`stepMessages`), kept so the next model
+   * request carries the assistant tool_calls its tool rows answer to — a tool
+   * message without a matching call is invalid on the OpenAI wire. Absent on
+   * seed/user/system rows.
+   */
+  toolCalls?: Array<ToolCall>;
 };
 
 /** Settled state of one turn as reconstructed from published frames. */
@@ -77,13 +105,23 @@ export function nextRequest(_step: LoopStep, stepIndex: number): StepRequest {
   return { toolChoice: stepIndex === 0 ? 'required' : 'auto' };
 }
 
-/** Assistant echo + one tool row per settlement (call order preserved). */
+/**
+ * Assistant echo + one tool row per settlement (call order preserved).
+ *
+ * The assistant row carries the step's own `toolCalls` so the OpenAI wire sees
+ * a call for every `tool_call_id` row that follows; without it the next
+ * request is invalid (tool message without a matching assistant call).
+ */
 export function stepMessages(
   step: LoopStep,
   settlements: Array<ToolSettlement>,
 ): Array<LoopMessage> {
   const messages: Array<LoopMessage> = [
-    { role: 'assistant', content: step.text },
+    {
+      role: 'assistant',
+      content: step.text,
+      ...(step.calls.length > 0 ? { toolCalls: step.calls } : {}),
+    },
     ...settlements.map((settlement) => ({
       role: 'tool' as const,
       content: settlement.result,
@@ -97,7 +135,10 @@ export function stepMessages(
 /** Fold one usage row into the running total (absent counters stay absent). */
 export function addUsage(total: TokenUsage, usage?: TokenUsage): TokenUsage {
   if (!usage) return total;
-  const sum = (left: number | undefined, right: number | undefined): number | undefined =>
+  const sum: (
+    left: number | undefined,
+    right: number | undefined,
+  ) => number | undefined = (left: number | undefined, right: number | undefined) =>
     right === undefined ? left : (left ?? 0) + right;
   return {
     input: (total.input ?? 0) + usage.input,
@@ -120,10 +161,10 @@ export function addUsage(total: TokenUsage, usage?: TokenUsage): TokenUsage {
  * incomplete stream — never a silent partial turn.
  */
 export function collect(frames: Array<TurnFrame>): CollectedTurn {
-  let steps = 0;
-  let sawFinish = false;
-  let finishReason = '';
-  let text = '';
+  let steps: number = 0;
+  let sawFinish: boolean = false;
+  let finishReason: string = '';
+  let text: string = '';
   const toolResults: Array<ToolSettlement> = [];
   for (const frame of frames) {
     if (frame.type === 'step-start') {
@@ -132,16 +173,16 @@ export function collect(frames: Array<TurnFrame>): CollectedTurn {
     }
     if (frame.type === 'finish') {
       sawFinish = true;
-      const reason = frame.data.finishReason;
+      const reason: unknown = frame.data.finishReason;
       finishReason = typeof reason === 'string' && reason.length > 0 ? reason : 'stop';
-      const body = frame.data.text;
+      const body: unknown = frame.data.text;
       if (typeof body === 'string') text = body;
       continue;
     }
     if (frame.type === 'tool-result') {
-      const callID = frame.data.callID;
-      const name = frame.data.name;
-      const result = frame.data.result;
+      const callID: unknown = frame.data.callID;
+      const name: unknown = frame.data.name;
+      const result: unknown = frame.data.result;
       if (typeof callID === 'string' && typeof name === 'string' && typeof result === 'string') {
         toolResults.push({ callID, name, result });
       }

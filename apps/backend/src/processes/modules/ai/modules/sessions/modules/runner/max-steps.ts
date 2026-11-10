@@ -1,5 +1,5 @@
 /** Hard step budget of one turn — a model loop never runs unbounded. */
-export const DEFAULT_MAX_STEPS = 12;
+export const DEFAULT_MAX_STEPS: number = 12;
 
 /** Raised when a turn exceeds the budget (no silent truncation). */
 export class MaxStepsExceededError extends Error {

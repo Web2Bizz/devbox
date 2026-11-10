@@ -10,8 +10,8 @@ export const DEFAULT_RETRY_POLICY: RetryPolicy = {
   delayMs: 250,
 };
 
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 /**
@@ -23,14 +23,14 @@ export async function withRetry<T>(
   run: () => Promise<T>,
   policy: RetryPolicy = DEFAULT_RETRY_POLICY,
 ): Promise<T> {
-  const attempts = Math.max(1, Math.floor(policy.attempts));
+  const attempts: number = Math.max(1, Math.floor(policy.attempts));
   let lastError: unknown;
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+  for (let attempt: number = 1; attempt <= attempts; attempt += 1) {
     try {
       return await run();
-    } catch (err) {
-      lastError = err;
-      const retryable = policy.shouldRetry ? policy.shouldRetry(err) : true;
+    } catch (error) {
+      lastError = error;
+      const retryable: boolean = policy.shouldRetry ? policy.shouldRetry(error) : true;
       if (!retryable || attempt === attempts) break;
       await wait(policy.delayMs);
     }

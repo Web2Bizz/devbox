@@ -67,6 +67,14 @@ describe("stepMessages", () => {
     assert.equal(rows[1]?.toolCallID, "c1");
     assert.equal(rows[1]?.content, "alpha");
   });
+
+  it("carries the step's own tool calls on the assistant echo", () => {
+    const rows = stepMessages({ text: "", calls: [CALL], finishReason: "tool-calls" }, [
+      { callID: "c1", name: "read", result: "alpha" },
+    ]);
+    assert.deepEqual(rows[0]?.toolCalls, [CALL]);
+    assert.equal(rows[0]?.role, "assistant");
+  });
 });
 
 describe("addUsage", () => {

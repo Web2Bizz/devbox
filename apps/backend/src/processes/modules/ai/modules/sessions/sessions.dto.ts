@@ -42,6 +42,7 @@ export {
   type SessionInterruptResult,
   type SessionMessage,
   type SessionMessageList,
+  type SessionModel,
   type SessionMessagePartDeltaFrame,
   type SessionMessagePartUpdatedFrame,
   type SessionReasoningFrame,

@@ -2,7 +2,7 @@ import type { ToolView } from '@rush-code/contracts';
 
 export type ModelMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 
-export type ModelUsage = { in: number; out: number };
+export type ModelUsage = { inputTokens: number; outputTokens: number };
 
 export type ModelEvent =
   | { type: 'delta'; text: string }
@@ -30,5 +30,5 @@ export type ModelRequest = {
  * handlers or policy.
  */
 export abstract class ModelGateway {
-  abstract stream(req: ModelRequest): AsyncIterable<ModelEvent>;
+  abstract stream(request: ModelRequest): AsyncIterable<ModelEvent>;
 }

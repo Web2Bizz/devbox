@@ -1,4 +1,4 @@
-import { AppLogger } from '../../../../../common/logger';
+import { AppLogger } from '@common/logger';
 
 export type McpToolDescriptor = {
   name: string;
@@ -25,10 +25,10 @@ type RpcEnvelope = { result?: unknown; error?: unknown };
  * loop us).
  */
 export class McpClient {
-  private nextId = 1;
+  private nextId: number = 1;
   private sessionId: string | null = null;
-  private initialized = false;
-  private fallbackUsed = false;
+  private initialized: boolean = false;
+  private fallbackUsed: boolean = false;
 
   constructor(
     private readonly url: string,
@@ -47,12 +47,15 @@ export class McpClient {
 
   /** Lists the server tools (projection only — never invoked here). */
   async listTools(): Promise<Array<McpToolDescriptor>> {
-    const { result } = await this.rpc('tools/list', {});
-    const tools = (result as { tools?: unknown } | null)?.tools;
+    const { result }: RpcReply = await this.rpc('tools/list', {});
+    const tools: unknown = (result as { tools?: unknown } | null)?.tools;
     if (!Array.isArray(tools)) return [];
-    return tools.map((raw) => {
-      const tool = (raw ?? {}) as Record<string, unknown>;
-      const annotations = (tool.annotations ?? {}) as Record<string, unknown>;
+    return tools.map((raw: unknown) => {
+      const tool: Record<string, unknown> = (raw ?? {}) as Record<string, unknown>;
+      const annotations: Record<string, unknown> = (tool.annotations ?? {}) as Record<
+        string,
+        unknown
+      >;
       return {
         name: typeof tool.name === 'string' ? tool.name : '',
         ...(typeof tool.title === 'string' ? { title: tool.title } : {}),
@@ -66,8 +69,14 @@ export class McpClient {
   }
 
   /** Invokes one tool; the raw result object is the tool output. */
-  async callTool(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const { result } = await this.rpc('tools/call', { name, arguments: args });
+  async callTool(
+    name: string,
+    toolArguments: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const { result }: RpcReply = await this.rpc('tools/call', {
+      name,
+      arguments: toolArguments,
+    });
     if (result !== null && typeof result === 'object' && !Array.isArray(result)) {
       return result as Record<string, unknown>;
     }
@@ -76,7 +85,7 @@ export class McpClient {
 
   /** One JSON-RPC round trip (no retry — the MCP source registers what it got). */
   private async rpc(method: string, params: Record<string, unknown>): Promise<RpcReply> {
-    const res = await fetch(this.url, {
+    const response: Response = await fetch(this.url, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -89,28 +98,29 @@ export class McpClient {
 
     // One legacy handshake attempt: a modern-only server answers 400 to a
     // session-less call before initialize, so re-handshake once and replay.
-    if (res.status === 400 && !this.fallbackUsed && method !== 'initialize') {
+    if (response.status === 400 && !this.fallbackUsed && method !== 'initialize') {
       this.fallbackUsed = true;
       await this.initializeLegacy();
       return this.rpc(method, params);
     }
-    if (!res.ok) throw new Error(`mcp ${method} status=${res.status}`);
+    if (!response.ok) throw new Error(`mcp ${method} status=${response.status}`);
 
-    const contentType = res.headers.get('content-type') ?? '';
-    const sessionId = res.headers.get('mcp-session-id') ?? this.sessionId;
+    const contentType: string = response.headers.get('content-type') ?? '';
+    const sessionId: string | null =
+      response.headers.get('mcp-session-id') ?? this.sessionId;
 
     let envelope: RpcEnvelope;
     if (contentType.includes('text/event-stream')) {
-      const text = await res.text();
-      const dataLines = text
+      const text: string = await response.text();
+      const dataLines: Array<string> = text
         .split('\n')
         .map((line) => line.trim())
         .filter((line) => line.startsWith('data:'));
-      const last = dataLines[dataLines.length - 1];
+      const last: string | undefined = dataLines[dataLines.length - 1];
       if (!last) throw new Error(`mcp ${method} empty event stream`);
       envelope = JSON.parse(last.slice('data:'.length).trim()) as RpcEnvelope;
     } else {
-      envelope = (await res.json()) as RpcEnvelope;
+      envelope = (await response.json()) as RpcEnvelope;
     }
     if (envelope.error !== undefined) throw new Error('mcp rpc error');
 

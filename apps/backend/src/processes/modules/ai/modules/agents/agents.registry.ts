@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { AppLogger } from '../../../../../common/logger';
+import { AppLogger } from '@common/logger';
 import { AskAgent } from './ask.agent';
 import { AutoAgent } from './auto.agent';
 import { BackendAgent } from './backend.agent';
@@ -21,7 +21,7 @@ export type AgentDefinition = {
 };
 
 /** Default agent when no id travels (the server's own default, not guessed). */
-export const DEFAULT_AGENT_ID = 'ask';
+export const DEFAULT_AGENT_ID: 'ask' = 'ask';
 
 /**
  * AgentRegistry — single resolve/select/list source over the existing agent
@@ -34,7 +34,7 @@ export const DEFAULT_AGENT_ID = 'ask';
 @Injectable()
 export class AgentRegistry {
   private readonly logger: AppLogger = new AppLogger(AgentRegistry.name);
-  private readonly definitions = new Map<string, AgentDefinition>();
+  private readonly definitions: Map<string, AgentDefinition> = new Map<string, AgentDefinition>();
 
   constructor(
     private readonly ask: AskAgent,
@@ -67,10 +67,10 @@ export class AgentRegistry {
 
   /** Resolve one id (unknown/absent → default ask); never throws. */
   resolve(agentId?: string): AgentDefinition {
-    const fallback = this.definitions.get(DEFAULT_AGENT_ID);
+    const fallback: AgentDefinition | undefined = this.definitions.get(DEFAULT_AGENT_ID);
     if (!fallback) throw new Error('default agent is not registered');
     if (!agentId) return fallback;
-    const found = this.definitions.get(agentId);
+    const found: AgentDefinition | undefined = this.definitions.get(agentId);
     if (found) return found;
     this.logger.warn(`[agents] unknown agentId=${agentId} code=default_agent`);
     return fallback;

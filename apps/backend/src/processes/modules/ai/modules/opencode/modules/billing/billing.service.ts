@@ -1,13 +1,15 @@
 import { HttpException, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
-import { AppLogger } from "../../../../../../../common/logger";
-import { ExternalClient } from "../../../../../../../common/external/external-client";
+import { AppLogger } from "@common/logger";
+import { ExternalClient } from "@common/external/external-client";
 import {
   ExternalServiceError,
   fromStatus,
   fromUnknown,
-} from "../../../../../../../common/external/external-error";
-import { CryptoService } from "../../../../../../../common/crypto/crypto.service";
-import { OpencodeKeysService } from "../../../../../../../common/keys/opencode-keys.service";
+} from "@common/external/external-error";
+import { CryptoService, type EncryptedOpencodeKey } from "@common/crypto/crypto.service";
+import { OPENCODE_PROVIDER } from "@common/vault/vault.providers";
+import { VaultService } from "@common/vault/vault.service";
+import type { VaultSecret } from "@common/vault/vault.types";
 
 /** GET /api/v1/usage response (Zen Go contract + legacy backward-compat). */
 export type BillingLimitBucket = {
@@ -41,11 +43,18 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+/** Zen Go usage windows (only the windows upstream actually reported). */
+type ZenWindows = {
+  rolling?: BillingLimitBucket;
+  weekly?: BillingLimitBucket;
+  monthly?: BillingLimitBucket;
+};
+
 function parseBucket(value: unknown): BillingLimitBucket | undefined {
   if (typeof value !== "object" || value === null) return undefined;
-  const rec = value as Record<string, unknown>;
-  const used = rec["used"];
-  const limit = rec["limit"];
+  const record: Record<string, unknown> = value as Record<string, unknown>;
+  const used: unknown = record["used"];
+  const limit: unknown = record["limit"];
   if (!isFiniteNumber(used) || !isFiniteNumber(limit)) return undefined;
   return { used, limit };
 }
@@ -61,10 +70,10 @@ function parseBucket(value: unknown): BillingLimitBucket | undefined {
  */
 function parseZenWindow(value: unknown): BillingLimitBucket | undefined {
   if (typeof value !== "object" || value === null) return undefined;
-  const rec = value as Record<string, unknown>;
-  const status = rec["status"];
-  const percent = rec["percent"];
-  const resetsAt = rec["resetsAt"];
+  const record: Record<string, unknown> = value as Record<string, unknown>;
+  const status: unknown = record["status"];
+  const percent: unknown = record["percent"];
+  const resetsAt: unknown = record["resetsAt"];
   if (status !== "ok" && status !== "rate-limited") return undefined;
   if (!isFiniteNumber(percent)) return undefined;
   if (typeof resetsAt !== "string" || resetsAt.length === 0) return undefined;
@@ -76,29 +85,21 @@ function parseZenWindow(value: unknown): BillingLimitBucket | undefined {
  * `{ usage: { rolling, weekly, monthly } }` or a flat
  * `{ rolling, weekly, monthly }` (defensive — proxy unwraps happen).
  */
-function extractZenWindows(rec: Record<string, unknown>): {
-  rolling?: BillingLimitBucket;
-  weekly?: BillingLimitBucket;
-  monthly?: BillingLimitBucket;
-} | null {
-  const nested =
-    typeof rec["usage"] === "object" && rec["usage"] !== null
-      ? (rec["usage"] as Record<string, unknown>)
+function extractZenWindows(record: Record<string, unknown>): ZenWindows | null {
+  const nested: Record<string, unknown> | null =
+    typeof record["usage"] === "object" && record["usage"] !== null
+      ? (record["usage"] as Record<string, unknown>)
       : null;
-  const src = nested ?? rec;
-  const rolling = parseZenWindow(src["rolling"]);
-  const weekly = parseZenWindow(src["weekly"]);
-  const monthly = parseZenWindow(src["monthly"]);
+  const source: Record<string, unknown> = nested ?? record;
+  const rolling: BillingLimitBucket | undefined = parseZenWindow(source["rolling"]);
+  const weekly: BillingLimitBucket | undefined = parseZenWindow(source["weekly"]);
+  const monthly: BillingLimitBucket | undefined = parseZenWindow(source["monthly"]);
   if (!rolling && !weekly && !monthly) return null;
-  const out: {
-    rolling?: BillingLimitBucket;
-    weekly?: BillingLimitBucket;
-    monthly?: BillingLimitBucket;
-  } = {};
-  if (rolling) out.rolling = rolling;
-  if (weekly) out.weekly = weekly;
-  if (monthly) out.monthly = monthly;
-  return out;
+  const output: ZenWindows = {};
+  if (rolling) output.rolling = rolling;
+  if (weekly) output.weekly = weekly;
+  if (monthly) output.monthly = monthly;
+  return output;
 }
 
 /**
@@ -120,7 +121,7 @@ function extractZenWindows(rec: Record<string, unknown>): {
  *   `{ status: "ok" | "rate-limited", percent: number, resetsAt: ISO }`
  *   (Go limits: 5h = 20% monthly, weekly = 50%, monthly = 100%).
  */
-export const BILLING_URL = "https://opencode.ai/zen/go/v1/usage";
+export const BILLING_URL: string = "https://opencode.ai/zen/go/v1/usage";
 
 /**
  * BillingService — live upstream usage for the caller's own key.
@@ -154,7 +155,7 @@ export const BILLING_URL = "https://opencode.ai/zen/go/v1/usage";
 @Injectable()
 export class BillingService {
   constructor(
-    private readonly keys: OpencodeKeysService,
+    private readonly keys: VaultService,
     private readonly crypto: CryptoService,
     private readonly external: ExternalClient,
     private readonly logger: AppLogger = new AppLogger(BillingService.name),
@@ -168,9 +169,13 @@ export class BillingService {
     // Missing-key fast path: null/empty row → 404 opencode_key_missing
     // BEFORE any upstream request. Upstream is fetched only when a key
     // exists. 503 comes solely from a real Postgres outage (throw out of
-    // db.client() funneled via dbUnavailable in findByUserId) — never for
+    // db.client() funneled via dbUnavailable in pickNext) — never for
     // "no key stored".
-    const stored = await this.keys.findByUserId(userId, correlationId);
+    const stored: VaultSecret | null = await this.keys.pickNext(
+      { kind: "user", userId },
+      OPENCODE_PROVIDER,
+      correlationId,
+    );
     if (!stored || !stored.encryptedKey || !stored.iv) {
       throw new NotFoundException({
         code: "opencode_key_missing",
@@ -181,7 +186,7 @@ export class BillingService {
     // rotation window via the row's keyId; legacy rows without an id fall
     // back to active → previous). The plaintext never leaves this method
     // except as the upstream Bearer, and is never logged.
-    const apiKey = this.crypto.decrypt({
+    const apiKey: string = this.crypto.decrypt({
       keyId: stored.keyId,
       iv: stored.iv,
       data: stored.encryptedKey,
@@ -192,10 +197,15 @@ export class BillingService {
     // converges the rest).
     if (!this.crypto.isActiveKeyId(stored.keyId)) {
       try {
-        const fresh = this.crypto.encrypt(apiKey);
-        await this.keys.save(
-          userId,
-          { encryptedKey: fresh.data, iv: fresh.iv, keyId: fresh.keyId },
+        const fresh: EncryptedOpencodeKey = this.crypto.encrypt(apiKey);
+        await this.keys.rewrap(
+          { kind: "user", userId },
+          stored.id,
+          {
+            encryptedKey: fresh.data,
+            iv: fresh.iv,
+            keyId: fresh.keyId,
+          },
           correlationId,
         );
         this.logger.info("[billing] key re-encrypted", correlationId);
@@ -204,9 +214,9 @@ export class BillingService {
       }
     }
 
-    let res: Response;
+    let response: Response;
     try {
-      res = await this.external.fetchWithRetry(
+      response = await this.external.fetchWithRetry(
         this.billingUrl(),
         {
           method: "GET",
@@ -214,18 +224,18 @@ export class BillingService {
         },
         { service: "billing", operation: "getUsage", correlationId },
       );
-    } catch (err) {
-      if (err instanceof ExternalServiceError || err instanceof HttpException) throw err;
-      throw fromUnknown("billing", "getUsage", err);
+    } catch (error) {
+      if (error instanceof ExternalServiceError || error instanceof HttpException) throw error;
+      throw fromUnknown("billing", "getUsage", error);
     }
 
-    const observedAt = new Date().toISOString();
-    if (res.status === 401 || res.status === 403) {
-      await res.arrayBuffer().catch(() => null);
+    const observedAt: string = new Date().toISOString();
+    if (response.status === 401 || response.status === 403) {
+      await response.arrayBuffer().catch(() => null);
       // Fixed event only — never the key, never the upstream body.
       // One-liner with operation/status/code, no stack, no secrets.
       this.logger.warn(
-        `[billing] getUsage rejected status=${res.status} code=opencode_key_invalid`,
+        `[billing] getUsage rejected status=${response.status} code=opencode_key_invalid`,
         correlationId,
       );
       throw new UnauthorizedException({
@@ -233,20 +243,20 @@ export class BillingService {
         message: "OpenCode API key was rejected",
       });
     }
-    if (res.status === 429 || (res.status >= 500 && res.status <= 599)) {
-      await res.arrayBuffer().catch(() => null);
-      const mapped = fromStatus("billing", "getUsage", res.status);
+    if (response.status === 429 || (response.status >= 500 && response.status <= 599)) {
+      await response.arrayBuffer().catch(() => null);
+      const mapped: ExternalServiceError = fromStatus("billing", "getUsage", response.status);
       this.logger.warn(
-        `[billing] getUsage upstream status=${res.status} code=${mapped.code}`,
+        `[billing] getUsage upstream status=${response.status} code=${mapped.code}`,
         correlationId,
       );
       throw mapped;
     }
-    if (!res.ok) {
-      await res.arrayBuffer().catch(() => null);
-      const mapped = fromStatus("billing", "getUsage", res.status);
+    if (!response.ok) {
+      await response.arrayBuffer().catch(() => null);
+      const mapped: ExternalServiceError = fromStatus("billing", "getUsage", response.status);
       this.logger.warn(
-        `[billing] getUsage upstream status=${res.status} code=${mapped.code}`,
+        `[billing] getUsage upstream status=${response.status} code=${mapped.code}`,
         correlationId,
       );
       throw mapped;
@@ -254,11 +264,11 @@ export class BillingService {
 
     let payload: unknown;
     try {
-      payload = await res.json();
+      payload = await response.json();
     } catch {
-      await res.arrayBuffer().catch(() => null);
+      await response.arrayBuffer().catch(() => null);
       this.logger.warn(
-        `[billing] getUsage bad json status=${res.status} code=EXTERNAL_UNAVAILABLE`,
+        `[billing] getUsage bad json status=${response.status} code=EXTERNAL_UNAVAILABLE`,
         correlationId,
       );
       throw new ExternalServiceError({
@@ -269,10 +279,10 @@ export class BillingService {
         isRetryable: true,
       });
     }
-    const rec = payload as Record<string, unknown> | null;
-    if (typeof rec !== "object" || rec === null) {
+    const record: Record<string, unknown> | null = payload as Record<string, unknown> | null;
+    if (typeof record !== "object" || record === null) {
       this.logger.warn(
-        `[billing] getUsage shape mismatch status=${res.status} code=EXTERNAL_UNAVAILABLE`,
+        `[billing] getUsage shape mismatch status=${response.status} code=EXTERNAL_UNAVAILABLE`,
         correlationId,
       );
       throw new ExternalServiceError({
@@ -285,42 +295,42 @@ export class BillingService {
     }
     // Legacy pay-as-you-go shape (backward-compat for old mocks): finite
     // top-level { balance, usage } numbers.
-    const balance = rec["balance"];
-    const usage = rec["usage"];
+    const balance: unknown = record["balance"];
+    const usage: unknown = record["usage"];
     if (isFiniteNumber(balance) && isFiniteNumber(usage)) {
       // Additive passthrough: finite { used, limit } pairs only, else omitted.
-      const out: BillingUsage = { balance, usage, updatedAt: observedAt };
-      const daily = parseBucket(rec["daily"]);
-      const weekly = parseBucket(rec["weekly"]);
-      const monthly = parseBucket(rec["monthly"]);
-      if (daily) out.daily = daily;
-      if (weekly) out.weekly = weekly;
-      if (monthly) out.monthly = monthly;
+      const output: BillingUsage = { balance, usage, updatedAt: observedAt };
+      const daily: BillingLimitBucket | undefined = parseBucket(record["daily"]);
+      const weekly: BillingLimitBucket | undefined = parseBucket(record["weekly"]);
+      const monthly: BillingLimitBucket | undefined = parseBucket(record["monthly"]);
+      if (daily) output.daily = daily;
+      if (weekly) output.weekly = weekly;
+      if (monthly) output.monthly = monthly;
       // Legacy payloads never carry Zen windows — but tolerate them when present.
-      const zenExtra = extractZenWindows(rec);
-      if (zenExtra?.rolling && !out.rolling) out.rolling = zenExtra.rolling;
-      return out;
+      const zenExtra: ZenWindows | null = extractZenWindows(record);
+      if (zenExtra?.rolling && !output.rolling) output.rolling = zenExtra.rolling;
+      return output;
     }
     // Zen Go shape: { usage: { rolling, weekly, monthly } } with
     // { status, percent, resetsAt } windows (percent → used/limit 100).
     // Anything else → 503, never a mock.
     if (typeof usage === "object" && usage !== null) {
-      const zen = extractZenWindows(rec);
+      const zen: ZenWindows | null = extractZenWindows(record);
       if (zen) {
-        const out: BillingUsage = { updatedAt: observedAt };
-        if (zen.rolling) out.rolling = zen.rolling;
+        const output: BillingUsage = { updatedAt: observedAt };
+        if (zen.rolling) output.rolling = zen.rolling;
         // Legacy breakdown passthrough still honored when present.
-        const daily = parseBucket(rec["daily"]);
-        if (daily) out.daily = daily;
-        const legacyWeekly = parseBucket(rec["weekly"]);
-        const legacyMonthly = parseBucket(rec["monthly"]);
+        const daily: BillingLimitBucket | undefined = parseBucket(record["daily"]);
+        if (daily) output.daily = daily;
+        const legacyWeekly: BillingLimitBucket | undefined = parseBucket(record["weekly"]);
+        const legacyMonthly: BillingLimitBucket | undefined = parseBucket(record["monthly"]);
         // Zen windows win for weekly/monthly (real upstream percent);
         // legacy used/limit pairs are fallback when Zen windows are absent.
-        out.weekly = zen.weekly ?? legacyWeekly;
-        out.monthly = zen.monthly ?? legacyMonthly;
-        if (!out.rolling && !out.weekly && !out.monthly) {
+        output.weekly = zen.weekly ?? legacyWeekly;
+        output.monthly = zen.monthly ?? legacyMonthly;
+        if (!output.rolling && !output.weekly && !output.monthly) {
           this.logger.warn(
-            `[billing] getUsage shape mismatch status=${res.status} code=EXTERNAL_UNAVAILABLE`,
+            `[billing] getUsage shape mismatch status=${response.status} code=EXTERNAL_UNAVAILABLE`,
             correlationId,
           );
           throw new ExternalServiceError({
@@ -333,13 +343,13 @@ export class BillingService {
         }
         // Omit undefined keys so the envelope stays tight (no balance/usage
         // for Zen — the UI renders buckets only, never fake 0% bars).
-        if (!out.weekly) delete out.weekly;
-        if (!out.monthly) delete out.monthly;
-        return out;
+        if (!output.weekly) delete output.weekly;
+        if (!output.monthly) delete output.monthly;
+        return output;
       }
     }
     this.logger.warn(
-      `[billing] getUsage shape mismatch status=${res.status} code=EXTERNAL_UNAVAILABLE`,
+      `[billing] getUsage shape mismatch status=${response.status} code=EXTERNAL_UNAVAILABLE`,
       correlationId,
     );
     throw new ExternalServiceError({

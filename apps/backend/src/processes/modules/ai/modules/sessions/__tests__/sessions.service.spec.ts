@@ -1,9 +1,20 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { UnauthorizedException } from '@nestjs/common';
 import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
-import type { AppLogger } from '../../../../../../common/logger';
+import type { AppLogger } from '@common/logger';
 import { SessionsService } from '../sessions.service';
-import { SessionHarnessService } from '../session-harness.service';
+import type {
+  CreateSessionInput,
+  InterruptSessionInput,
+  RevertStageRequest,
+  SendMessageInput,
+  SessionForkRequest,
+} from '../sessions.dto';
+import { SessionStreamService } from '../modules/events/session-stream.service';
+import { SessionFrameBufferService } from '../modules/events/session-frame-buffer.service';
+import { AssistantRecorderService } from '../modules/recorder/assistant-recorder.service';
+import { SessionRuntimeStateService } from '../modules/state/session-runtime-state.service';
 
 const UID = '123e4567-e89b-12d3-a456-426614174001';
 const PID = '123e4567-e89b-12d3-a456-426614174003';
@@ -96,13 +107,13 @@ function unscopedFrame(id: string): Frame {
   return { id, type: 'server.connected', data: { version: '2.2.5' } };
 }
 
-type Harness = { svc: SessionsService; calls: Array<string> };
+type StreamHarness = { svc: SessionStreamService; calls: Array<string> };
 
 function harness(options: {
   localSessionIds: Array<string>;
   hostBindings?: Map<string, string>;
   frames: Array<unknown>;
-}): Harness {
+}): StreamHarness {
   const calls: Array<string> = [];
   const host = {
     getHost: async (): Promise<unknown> => {
@@ -138,18 +149,29 @@ function harness(options: {
       return undefined;
     },
   };
+  const logger = silentLogger();
+  const state = new SessionRuntimeStateService();
+  const buffer = new SessionFrameBufferService();
+  const recorder = new AssistantRecorderService(
+    host as unknown as ConstructorParameters<typeof AssistantRecorderService>[0],
+    history as unknown as ConstructorParameters<typeof AssistantRecorderService>[1],
+    state,
+    logger,
+  );
   const args: Array<unknown> = [
     host,
     access,
     { assertServeUser() {} },
     history,
-    undefined,
-    silentLogger(),
+    state,
+    buffer,
+    recorder,
+    logger,
   ];
-  const harnessSvc = new SessionHarnessService(
-    ...(args as unknown as ConstructorParameters<typeof SessionHarnessService>),
+  const svc = new SessionStreamService(
+    ...(args as unknown as ConstructorParameters<typeof SessionStreamService>),
   );
-  return { svc: new SessionsService(harnessSvc), calls };
+  return { svc, calls };
 }
 
 function parseWrites(writes: Array<string>): Array<unknown> {
@@ -189,7 +211,7 @@ function frameIds(frames: Array<unknown>): Array<unknown> {
   return frames.map((frame) => (frame as { id?: unknown } | null)?.id);
 }
 
-describe('SessionsService.streamEvents project scoping (embedded host)', () => {
+describe('SessionStreamService.streamEvents project scoping (embedded host)', () => {
   it('delivers frames whose session belongs to the requested project', async () => {
     const own = sessionFrame('e-own', 'ses_own');
     const { delivered, res } = await runStream({
@@ -288,6 +310,199 @@ describe('SessionsService.streamEvents project scoping (embedded host)', () => {
     // streamEvents lazily starts the single process-level assistant recorder
     // (test harnesses are fresh per case), then subscribes the client stream.
     assert.equal(hostSubs, 2, `expected recorder + stream subscription, got ${hostSubs}`);
+  });
+});
+
+describe('SessionsService gate order (401 before any zone work)', () => {
+  const SID = '123e4567-e89b-12d3-a456-426614174010';
+  const TREE = '0123456789abcdef0123456789abcdef01234567';
+
+  function gatedService(): { svc: SessionsService; zoneCalls: Array<string> } {
+    const zoneCalls: Array<string> = [];
+    const host = {
+      sessionCreate: async (): Promise<unknown> => {
+        zoneCalls.push('host.sessionCreate');
+        return { id: 'ses_host' };
+      },
+      sessionRemove: async (): Promise<void> => {
+        zoneCalls.push('host.sessionRemove');
+      },
+      sessionInterrupt: async (): Promise<unknown> => {
+        zoneCalls.push('host.sessionInterrupt');
+        return { interrupted: true };
+      },
+      providerList: async (): Promise<unknown> => {
+        zoneCalls.push('host.providerList');
+        return { data: [] };
+      },
+      modelList: async (): Promise<unknown> => {
+        zoneCalls.push('host.modelList');
+        return { data: [] };
+      },
+    };
+    const access = {
+      resolveProjectDirectory: async (projectId: string): Promise<unknown> => {
+        zoneCalls.push(`access:${projectId}`);
+        return { projectId, directory: DIR };
+      },
+    };
+    const auth = {
+      assertServeUser(): void {
+        zoneCalls.push('auth');
+        throw new UnauthorizedException();
+      },
+    };
+    const history = {
+      listLocalSessions: async (): Promise<Array<unknown>> => {
+        zoneCalls.push('history.listLocalSessions');
+        return [];
+      },
+      listMessages: async (): Promise<Array<unknown>> => {
+        zoneCalls.push('history.listMessages');
+        return [];
+      },
+      saveLocalSession: async (): Promise<void> => {
+        zoneCalls.push('history.saveLocalSession');
+      },
+      getHostSessionId: async (): Promise<undefined> => {
+        zoneCalls.push('history.getHostSessionId');
+        return undefined;
+      },
+      getAgent: async (): Promise<undefined> => {
+        zoneCalls.push('history.getAgent');
+        return undefined;
+      },
+      appendMessage: async (): Promise<void> => {
+        zoneCalls.push('history.appendMessage');
+      },
+      discardSession: async (): Promise<void> => {
+        zoneCalls.push('history.discardSession');
+      },
+    };
+    const stream = {
+      streamEvents: async (): Promise<void> => {
+        zoneCalls.push('stream.streamEvents');
+      },
+    };
+    const messaging = {
+      send: async (): Promise<unknown> => {
+        zoneCalls.push('messaging.send');
+        return {};
+      },
+    };
+    const inventory = {
+      providers: async (): Promise<Array<unknown>> => {
+        zoneCalls.push('inventory.providers');
+        return [];
+      },
+      models: async (): Promise<Array<unknown>> => {
+        zoneCalls.push('inventory.models');
+        return [];
+      },
+    };
+    const workspace = {
+      stage: async (): Promise<unknown> => {
+        zoneCalls.push('workspace.stage');
+        return {};
+      },
+      clear: async (): Promise<void> => {
+        zoneCalls.push('workspace.clear');
+      },
+      commit: async (): Promise<void> => {
+        zoneCalls.push('workspace.commit');
+      },
+      diff: async (): Promise<Array<unknown>> => {
+        zoneCalls.push('workspace.diff');
+        return [];
+      },
+      capture: async (): Promise<undefined> => {
+        zoneCalls.push('workspace.capture');
+        return undefined;
+      },
+    };
+    const state = {
+      isBusy: (): boolean => {
+        zoneCalls.push('state.isBusy');
+        return false;
+      },
+      clearBusy: (): boolean => {
+        zoneCalls.push('state.clearBusy');
+        return true;
+      },
+      bindHostSession(): void {
+        zoneCalls.push('state.bindHostSession');
+      },
+      unbindHostSession(): void {
+        zoneCalls.push('state.unbindHostSession');
+      },
+    };
+    const buffer = {
+      push: (): void => {
+        zoneCalls.push('buffer.push');
+      },
+      pushIdle: (): void => {
+        zoneCalls.push('buffer.pushIdle');
+      },
+    };
+    const args: Array<unknown> = [
+      host,
+      access,
+      auth,
+      history,
+      stream,
+      messaging,
+      inventory,
+      workspace,
+      state,
+      buffer,
+      undefined,
+      silentLogger(),
+    ];
+    return {
+      svc: new SessionsService(...(args as unknown as ConstructorParameters<typeof SessionsService>)),
+      zoneCalls,
+    };
+  }
+
+  async function rejects401(promise: Promise<unknown>): Promise<void> {
+    await assert.rejects(promise, (err: unknown) => err instanceof UnauthorizedException);
+  }
+
+  it('every domain method answers 401 before any zone/host/history work', async () => {
+    const { svc, zoneCalls } = gatedService();
+    await rejects401(svc.list(UID, PID, 'cid'));
+    await rejects401(svc.statusMap(UID, PID, 'cid'));
+    await rejects401(svc.listMessages(UID, SID, PID, undefined, undefined, 'cid'));
+    await rejects401(svc.create(UID, {} as CreateSessionInput, 'cid'));
+    await rejects401(
+      svc.sendMessage(UID, SID, { projectId: PID, text: 'hi' } as SendMessageInput, 'cid'),
+    );
+    await rejects401(
+      svc.interrupt(UID, SID, { projectId: PID } as InterruptSessionInput, 'cid'),
+    );
+    await rejects401(svc.providers(UID, PID, 'cid'));
+    await rejects401(svc.models(UID, PID, 'cid'));
+    await rejects401(svc.fork(UID, SID, { projectId: PID } as SessionForkRequest, 'cid'));
+    await rejects401(
+      svc.stageRevert(
+        UID,
+        SID,
+        { projectId: PID, messageID: 'm1' } as RevertStageRequest,
+        'cid',
+      ),
+    );
+    await rejects401(svc.clearRevert(UID, SID, PID, 'cid'));
+    await rejects401(svc.commitRevert(UID, SID, PID, 'cid'));
+    await rejects401(svc.snapshotDiff(UID, SID, PID, TREE, TREE, undefined, 'cid'));
+    const unexpected = zoneCalls.filter(
+      (call) => call !== 'auth' && !call.startsWith('access:'),
+    );
+    assert.deepEqual(unexpected, [], `a zone was reached before the 401: ${unexpected.join(',')}`);
+    assert.equal(
+      zoneCalls.filter((call) => call === 'auth').length,
+      13,
+      'each method must reach the serve-user gate',
+    );
   });
 });
 

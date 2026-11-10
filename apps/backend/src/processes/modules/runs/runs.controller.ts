@@ -17,8 +17,8 @@ import type { Request as ExpressRequest, Response as ExpressResponse } from 'exp
 import { JwtAuthGuard } from '../../../auth/jwt-auth.guard';
 import type { RequestIdentity } from '../../../auth/identity.service';
 import { ReqUser } from '../../../auth/req-user.decorator';
-import { ApiErrorDto } from '../../../common/http/api/api.dto';
-import { ZodValidationPipe } from '../../../common/validation';
+import { ApiErrorDto } from '@common/http/api/api.dto';
+import { ZodValidationPipe } from '@common/validation';
 import { createRunRequestSchema, type CreateRunInput, type RunInfo, type RunInfoList } from './runs.dto';
 import { RunsService } from './runs.service';
 
@@ -52,10 +52,10 @@ export class RunsController {
   async create(
     @ReqUser() identity: RequestIdentity,
     @Body(new ZodValidationPipe(createRunRequestSchema)) body: CreateRunInput,
-    @Headers('x-correlation-id') correlationId?: string,
+    @Headers('x-correlation-id') correlationIdHeader?: string,
   ): Promise<RunInfo> {
-    const cid = correlationId ?? '';
-    return this.runs.create(identity.id, body, cid);
+    const correlationId: string = correlationIdHeader ?? '';
+    return this.runs.create(identity.id, body, correlationId);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -68,14 +68,14 @@ export class RunsController {
   @ApiResponse({ status: 503, description: 'Postgres unreachable (EXTERNAL_UNAVAILABLE, Retry-After)', type: ApiErrorDto })
   async events(
     @ReqUser() identity: RequestIdentity,
-    @Req() req: ExpressRequest,
-    @Res({ passthrough: false }) res: ExpressResponse,
+    @Req() request: ExpressRequest,
+    @Res({ passthrough: false }) response: ExpressResponse,
     @Param('id') id: string,
     @Query('cursor') cursor?: string,
-    @Headers('x-correlation-id') correlationId?: string,
+    @Headers('x-correlation-id') correlationIdHeader?: string,
   ): Promise<void> {
-    const cid = correlationId ?? '';
-    await this.runs.streamEvents(identity.id, id, cursor, cid, req, res);
+    const correlationId: string = correlationIdHeader ?? '';
+    await this.runs.streamEvents(identity.id, id, cursor, correlationId, request, response);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -104,9 +104,9 @@ export class RunsController {
   async getOne(
     @ReqUser() identity: RequestIdentity,
     @Param('id') id: string,
-    @Headers('x-correlation-id') correlationId?: string,
+    @Headers('x-correlation-id') correlationIdHeader?: string,
   ): Promise<RunInfo> {
-    const cid = correlationId ?? '';
-    return this.runs.getOne(identity.id, id, cid);
+    const correlationId: string = correlationIdHeader ?? '';
+    return this.runs.getOne(identity.id, id, correlationId);
   }
 }

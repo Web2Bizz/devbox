@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { AppLogger } from '../../../../../common/logger';
+import { AppLogger } from '@common/logger';
 import { ModelGateway, type ModelEvent, type ModelRequest } from './model-gateway';
 
 /**
@@ -16,9 +16,11 @@ export class StubModelGateway extends ModelGateway {
     super();
   }
 
-  async *stream(req: ModelRequest): AsyncIterable<ModelEvent> {
-    this.logger.info(`[workers] llm.call model=${req.model} tools=${req.tools?.length ?? 0}`);
+  async *stream(request: ModelRequest): AsyncIterable<ModelEvent> {
+    this.logger.info(
+      `[workers] llm.call model=${request.model} tools=${request.tools?.length ?? 0}`,
+    );
     yield { type: 'delta', text: 'stub-turn' };
-    yield { type: 'done', usage: { in: 0, out: 1 } };
+    yield { type: 'done', usage: { inputTokens: 0, outputTokens: 1 } };
   }
 }

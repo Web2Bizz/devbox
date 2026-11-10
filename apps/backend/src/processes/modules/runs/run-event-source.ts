@@ -1,16 +1,19 @@
 import { Injectable } from '@nestjs/common';
-import { DbService, dbUnavailable } from '../../../common/db/db.service';
-import type { RunEventRow } from '../../../common/db/schema';
-import { AppLogger } from '../../../common/logger';
-import type { SseSubscription } from '../../../common/sse/sse-relay';
+import { DbService, dbUnavailable } from '@common/db/db.service';
+import type { RunEventRow } from '@common/db/schema';
+import { AppLogger } from '@common/logger';
+import type { SseSubscription } from '@common/sse/sse-relay';
 import { RunsRepository } from './runs.repository';
 
 /** LISTEN/NOTIFY channel published by the journal writers (E4). */
-const NOTIFY_CHANNEL = 'run_events';
+const NOTIFY_CHANNEL: string = 'run_events';
 /** Safety tick when a NOTIFY is missed (dedicated LISTEN connections drop). */
-const FALLBACK_POLL_MS = 2000;
+const FALLBACK_POLL_MS: number = 2000;
 /** AbortSignal event name (the biome no-literal-args plugin forbids the raw literal). */
-const ABORT_EVENT = 'abort' as const;
+const ABORT_EVENT: 'abort' = 'abort';
+
+/** Handle of one dedicated LISTEN connection (closing it is idempotent). */
+type RunEventListener = { close: () => Promise<void> };
 
 /**
  * RunEventSource — SSE source over the append-only `run_events` journal.
@@ -36,7 +39,7 @@ const ABORT_EVENT = 'abort' as const;
 export class RunEventSource {
   constructor(
     private readonly db: DbService,
-    private readonly repo: RunsRepository,
+    private readonly repository: RunsRepository,
     private readonly logger: AppLogger = new AppLogger(RunEventSource.name),
   ) {}
 
@@ -44,24 +47,28 @@ export class RunEventSource {
   async subscribe(
     runId: string,
     cursor: number,
-    cid: string,
+    correlationId: string,
     signal: AbortSignal,
   ): Promise<SseSubscription> {
     let pendingWake: (() => void) | null = null;
-    const release = await this.openListener(runId, cid, () => pendingWake?.());
+    const release: RunEventListener = await this.openListener(runId, correlationId, () =>
+      pendingWake?.(),
+    );
     // Captured for the generator body (a plain async generator has its own
     // `this`, so the instance is not reachable inside it).
-    const repo = this.repo;
+    const repository: RunsRepository = this.repository;
 
     /**
      * Resolves on a matching NOTIFY, on the fallback tick, or on downstream
      * abort — always clearing the timer and the abort listener so neither
      * leaks across waits.
      */
-    const waitForChange = (ms: number): Promise<void> =>
+    const waitForChange: (milliseconds: number) => Promise<void> = (
+      milliseconds: number,
+    ): Promise<void> =>
       new Promise<void>((resolve) => {
         let timer: ReturnType<typeof setTimeout> | null = null;
-        const settle = (): void => {
+        const settle: () => void = (): void => {
           if (timer !== null) clearTimeout(timer);
           timer = null;
           signal.removeEventListener(ABORT_EVENT, settle);
@@ -69,16 +76,20 @@ export class RunEventSource {
           resolve();
         };
         pendingWake = settle;
-        timer = setTimeout(settle, ms);
+        timer = setTimeout(settle, milliseconds);
         signal.addEventListener(ABORT_EVENT, settle, { once: true });
       });
 
-    let lastSeq = cursor;
-    const stream = (async function* (): AsyncGenerator<RunEventRow> {
+    let lastSeq: number = cursor;
+    const stream: AsyncGenerator<RunEventRow> = (async function* (): AsyncGenerator<RunEventRow> {
       try {
         for (;;) {
           if (signal.aborted) return;
-          const rows = await repo.listEventsAfter(runId, lastSeq, cid);
+          const rows: Array<RunEventRow> = await repository.listEventsAfter(
+            runId,
+            lastSeq,
+            correlationId,
+          );
           if (rows.length === 0) {
             await waitForChange(FALLBACK_POLL_MS);
             continue;
@@ -111,21 +122,21 @@ export class RunEventSource {
 
   /**
    * Dedicated LISTEN connection for this run. Failure maps to 503 (logged
-   * once via cid) — an unreachable Postgres is an outage, not 200 silence.
+   * once via correlationId) — an unreachable Postgres is an outage, not 200 silence.
    */
   private async openListener(
     runId: string,
-    cid: string,
+    correlationId: string,
     onWake: () => void,
-  ): Promise<{ close: () => Promise<void> }> {
+  ): Promise<RunEventListener> {
     try {
       return await this.db.listen(NOTIFY_CHANNEL, (payload) => {
         // The payload is opaque: `<runId>` or `<runId>:<…>` belongs to this
         // run; anything else is another run's notify and is ignored.
         if (payload === runId || payload.startsWith(`${runId}:`)) onWake();
       });
-    } catch (err) {
-      dbUnavailable('runs.subscribe', err, this.logger, cid);
+    } catch (error) {
+      dbUnavailable('runs.subscribe', error, this.logger, correlationId);
     }
   }
 }

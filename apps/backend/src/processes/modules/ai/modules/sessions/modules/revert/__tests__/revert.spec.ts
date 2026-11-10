@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { NotFoundException } from '@nestjs/common';
-import { WorkspacePathService } from '../../../../../../../../common/storage/workspace-path.service';
+import { WorkspacePathService } from '@common/storage/workspace-path.service';
 import type { SessionHistoryRepository } from '../../../session-history.repository';
 import { RevertService } from '../revert.service';
 import { SnapshotsService } from '../../snapshots/snapshots.service';

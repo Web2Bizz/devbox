@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import { canonicalJson } from '../../../../../common/canonical-json';
+import { canonicalJson } from '@common/canonical-json/canonical-json';
 
 /** First journal row carries no predecessor. */
-export const GENESIS_HASH = 'genesis';
+export const GENESIS_HASH: string = 'genesis';
 
 /**
  * Tamper-evident chain link: sha256 over the PREVIOUS hash + this row's
@@ -18,7 +18,7 @@ export function hashRunEvent(event: {
   prevHash: string;
   data: unknown;
 }): string {
-  const payload = `${event.prevHash}|${String(event.seq)}|${event.type}|${canonicalJson(event.data)}`;
+  const payload: string = `${event.prevHash}|${String(event.seq)}|${event.type}|${canonicalJson(event.data)}`;
   return createHash('sha256').update(payload).digest('hex');
 }
 

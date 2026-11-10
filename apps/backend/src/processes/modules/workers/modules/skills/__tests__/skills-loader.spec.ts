@@ -22,7 +22,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ToolView } from '@rush-code/contracts';
-import type { AppLogger } from '../../../../../../common/logger';
+import type { AppLogger } from '@common/logger';
 import { parseFrontmatter } from '../frontmatter';
 import { ForbiddenToolError, type LoadedSkill, type SkillBundle } from '../skill.types';
 import { SkillLoader } from '../skills-loader.service';

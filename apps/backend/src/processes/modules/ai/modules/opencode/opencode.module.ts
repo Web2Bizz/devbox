@@ -1,9 +1,9 @@
 import { Global, Module, type OnModuleInit } from '@nestjs/common';
-import { HealthRegistry } from '../../../../../common/health/health-registry';
+import { HealthRegistry } from '@common/health/health-registry';
 import { ServeAuthModule } from './modules/auth/serve-auth.module';
 import { BillingModule } from './modules/billing/billing.module';
-import { OpencodeKeysController } from './keys.controller';
 import { OpencodeHostService } from './opencode-host.service';
+import { OpencodeModelFetch } from './opencode-model-fetch';
 import { OrganizationsModule } from '../../../../../organizations/organizations.module';
 
 /**
@@ -21,10 +21,9 @@ import { OrganizationsModule } from '../../../../../organizations/organizations.
  * Decomposed into modules/* submodules (each with its own Nest module):
  * billing (BillingService, live usage), auth (ServeAuthService real-user gate:
  * non-uuid mock → 401 before any transport call).
- * The keys HTTP surface (keys.controller/keys.dto: /api/v1/key) lives here,
- * while GET /api/v1/usage is owned by BillingController in BillingModule;
- * the reusable crypto envelope (common/crypto) and key store (common/keys)
- * come from the global CommonModule — no explicit imports.
+ * GET /api/v1/usage is owned by BillingController in BillingModule; the
+ * reusable crypto envelope (common/crypto) and the shared secret vault
+ * (common/vault) come from the global CommonModule — no explicit imports.
  *
  * JwtAuthGuard comes from the global auth module, AppLogger from the global
  * CommonModule.
@@ -38,9 +37,8 @@ import { OrganizationsModule } from '../../../../../organizations/organizations.
 @Global()
 @Module({
   imports: [BillingModule, ServeAuthModule, OrganizationsModule],
-  controllers: [OpencodeKeysController],
-  providers: [OpencodeHostService],
-  exports: [BillingModule, ServeAuthModule, OpencodeHostService],
+  providers: [OpencodeHostService, OpencodeModelFetch],
+  exports: [BillingModule, ServeAuthModule, OpencodeHostService, OpencodeModelFetch],
 })
 export class OpencodeModule implements OnModuleInit {
   constructor(

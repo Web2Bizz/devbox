@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { WorkspacePathService } from '../../../common/storage/workspace-path.service';
+import { WorkspacePathService } from '@common/storage/workspace-path.service';
 import { OrganizationsModule } from '../../../organizations/organizations.module';
 import { RunEventSource } from './run-event-source';
 import { RunsController } from './runs.controller';

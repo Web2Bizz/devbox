@@ -149,6 +149,8 @@ export const sendMessageRequestSchema = z.object({
   text: z.string({ error: 'Field "text" is required' }).min(1),
   model: sessionInfoModelSchema.optional(),
   agentId: agentIdSchema.optional(),
+  /** Execution mode; omitted = auto, ask is read-only. */
+  mode: z.enum(['auto', 'ask']).optional(),
 }) satisfies z.ZodType<SendMessageRequest>;
 
 /** SSE frame envelope of GET /api/v1/sessions/events — the variant payload

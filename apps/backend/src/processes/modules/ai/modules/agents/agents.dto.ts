@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { z } from 'zod';
 
-export const askQuestionSchema = z.object({
+export const askQuestionSchema: z.ZodObject<{ question: z.ZodString }> = z.object({
   question: z.string().min(1, { error: 'question must be non-empty' }).max(4000, {
     error: 'question must be at most 4000 chars',
   }),

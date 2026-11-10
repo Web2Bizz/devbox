@@ -1,13 +1,19 @@
 import { Injectable } from '@nestjs/common';
-import type { RunRow } from '../../../../../common/db/schema';
-import { ExternalServiceError } from '../../../../../common/external/external-error';
-import { AppLogger } from '../../../../../common/logger';
-import { OpencodeHostService } from '../../../../modules/ai/modules/opencode/opencode-host.service';
+import type { RunRow } from '@common/db/schema';
+import { ExternalServiceError } from '@common/external/external-error';
+import { AppLogger } from '@common/logger';
+import {
+  type HostSessionInfo,
+  type OpencodeHost,
+  OpencodeHostService,
+} from '../../../../modules/ai/modules/opencode/opencode-host.service';
 
 /** Fixed messages (external-error.ts keeps its map private; same strings, no upstream echo). */
-const MESSAGES = {
+type SandboxMessages = { readonly unavailable: string };
+
+const MESSAGES: SandboxMessages = {
   unavailable: 'сервис временно недоступен, повторите позже',
-} as const;
+};
 
 /**
  * SandboxProvider — one command in the per-run sandbox, executed by the
@@ -37,28 +43,28 @@ export class SandboxProvider {
   async exec(
     run: RunRow,
     command: string,
-    cid: string,
+    correlationId: string,
   ): Promise<{ sessionId: string; output: unknown }> {
     try {
-      const host = await this.host.getHost();
-      const session = await host.sessions.create({
+      const host: OpencodeHost = await this.host.getHost();
+      const session: HostSessionInfo = await host.sessions.create({
         location: { directory: run.worktree },
         title: `run ${run.id}`,
       });
       await host.sessions.shell({ sessionID: session.id, command });
-      this.logger.info(`[workers] sandbox.exec session=${session.id} ok`, cid);
+      this.logger.info(`[workers] sandbox.exec session=${session.id} ok`, correlationId);
       return { sessionId: session.id, output: { command } };
-    } catch (err) {
-      if (err instanceof ExternalServiceError) throw err;
-      this.logger.warn('[workers] sandbox.exec failed', cid);
-      this.logger.debug((err as Error).message, cid);
+    } catch (error) {
+      if (error instanceof ExternalServiceError) throw error;
+      this.logger.warn('[workers] sandbox.exec failed', correlationId);
+      this.logger.debug((error as Error).message, correlationId);
       throw new ExternalServiceError({
         code: 'EXTERNAL_UNAVAILABLE',
         service: 'opencode',
         operation: 'sandbox.exec',
         message: MESSAGES.unavailable,
         isRetryable: true,
-        cause: err,
+        cause: error,
       });
     }
   }

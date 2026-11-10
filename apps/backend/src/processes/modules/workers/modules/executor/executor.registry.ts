@@ -1,11 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { AppLogger } from '../../../../../common/logger';
-import { ModelGateway } from '../model-gateway';
+import { AppLogger } from '@common/logger';
+import { ModelGateway } from '../model-gateway/model-gateway';
 import { type Executor, ModelGatewayExecutor } from './executor';
 
 /** Prototype run-level executor ids (agent ids are wire values, not Class.name). */
-const ASK_EXECUTOR_ID = 'ask';
-const DEFAULT_EXECUTOR_ID = 'default';
+const ASK_EXECUTOR_ID: string = 'ask';
+const DEFAULT_EXECUTOR_ID: string = 'default';
 
 /**
  * ExecutorRegistry — the step-level agent seam of the run engine.
@@ -22,7 +22,7 @@ const DEFAULT_EXECUTOR_ID = 'default';
  */
 @Injectable()
 export class ExecutorRegistry {
-  private readonly executors = new Map<string, Executor>();
+  private readonly executors: Map<string, Executor> = new Map<string, Executor>();
 
   constructor(
     gateway: ModelGateway,
@@ -48,7 +48,7 @@ export class ExecutorRegistry {
 
   /** Run-level resolution: unknown/absent agent id always lands on 'default'. */
   resolve(agentId: string | null): Executor {
-    const executor =
+    const executor: Executor | undefined =
       this.executors.get(agentId ?? DEFAULT_EXECUTOR_ID) ??
       this.executors.get(DEFAULT_EXECUTOR_ID);
     if (!executor) throw new Error('default executor is not registered');

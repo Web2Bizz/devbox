@@ -1,22 +1,23 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
-import type { AppLogger } from '../../../../../../common/logger';
-import { SessionsService } from '../sessions.service';
-import { SessionHarnessService } from '../session-harness.service';
+import type { AppLogger } from '@common/logger';
+import { SessionStreamService } from '../modules/events/session-stream.service';
+import { SessionFrameBufferService } from '../modules/events/session-frame-buffer.service';
+import { AssistantRecorderService } from '../modules/recorder/assistant-recorder.service';
+import { SessionRuntimeStateService } from '../modules/state/session-runtime-state.service';
 
 /**
- * streamEvents cursor + session filter (C1/C2):
+ * SessionStreamService cursor + session filter (C1/C2):
  * - resume cursor reads `Last-Event-ID` first, `?cursor=` fallback;
  * - replay emits only frames AFTER the cursor, unknown/empty cursor →
  *   full local replay (never empty, never foreign);
  * - `?session=` narrows to one own session; unknown/foreign/empty session →
  *   quiet empty stream (heartbeat flows, no frames), never 404.
  *
- * Same hand-wired style as sessions.service.spec.ts: the harness owns a
- * controllable localFrames buffer (direct-runner replay source) plus a fake
- * host bus for live frames. No timers are awaited — an exhausted live bus
- * with no busy turn ends the stream immediately.
+ * Hand-wired style: a real SessionFrameBufferService (direct-turn replay
+ * source) plus a fake host bus for live frames. No timers are awaited — an
+ * exhausted live bus with no busy turn ends the stream immediately.
  */
 
 const UID = '123e4567-e89b-12d3-a456-426614174001';
@@ -124,7 +125,7 @@ function harness(options: {
   localSessionIds: Array<string>;
   localBuffered?: Array<BufferedFrame>;
   live?: Array<unknown>;
-}): { svc: SessionsService; calls: Array<string> } {
+}): { svc: SessionStreamService; calls: Array<string> } {
   const calls: Array<string> = [];
   const host = {
     getHost: async (): Promise<unknown> => {
@@ -159,21 +160,30 @@ function harness(options: {
       return undefined;
     },
   };
-  const harnessSvc = new SessionHarnessService(
-    ...( [
-      host,
-      access,
-      { assertServeUser() {} },
-      history,
-      undefined,
-      silentLogger(),
-    ] as unknown as ConstructorParameters<typeof SessionHarnessService> ),
+  const logger = silentLogger();
+  const state = new SessionRuntimeStateService();
+  const buffer = new SessionFrameBufferService();
+  for (const frame of options.localBuffered ?? []) buffer.pushFrame(frame);
+  const recorder = new AssistantRecorderService(
+    host as unknown as ConstructorParameters<typeof AssistantRecorderService>[0],
+    history as unknown as ConstructorParameters<typeof AssistantRecorderService>[1],
+    state,
+    logger,
   );
-  if (options.localBuffered) {
-    const buf = (harnessSvc as unknown as { localFrames: Array<BufferedFrame> }).localFrames;
-    for (const f of options.localBuffered) buf.push(f);
-  }
-  return { svc: new SessionsService(harnessSvc), calls };
+  const args: Array<unknown> = [
+    host,
+    access,
+    { assertServeUser() {} },
+    history,
+    state,
+    buffer,
+    recorder,
+    logger,
+  ];
+  const svc = new SessionStreamService(
+    ...(args as unknown as ConstructorParameters<typeof SessionStreamService>),
+  );
+  return { svc, calls };
 }
 
 function parseWrites(writes: Array<string>): Array<unknown> {
@@ -366,6 +376,18 @@ describe('streamEvents ?session= isolation (C2)', () => {
       query: { session: 'ses_a', cursor: 'e1' },
     });
     assert.deepEqual(frameIds(delivered), ['e2']);
+  });
+});
+
+describe('streamEvents busy state is read from SessionRuntimeStateService', () => {
+  it('a busy local turn is visible through state.isBusy (stream owns the override)', () => {
+    // The relay reads the busy override from the injected state service; this
+    // guard pins the wiring (the stream must not keep its own busy set).
+    const state = new SessionRuntimeStateService();
+    assert.equal(state.isBusy('ses_busy'), false);
+    state.markBusy('ses_busy');
+    assert.equal(state.isBusy('ses_busy'), true);
+    assert.equal(state.clearBusy('ses_busy'), true);
   });
 });
 

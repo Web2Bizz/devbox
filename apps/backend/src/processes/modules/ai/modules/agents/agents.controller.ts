@@ -9,7 +9,7 @@ import {
 import { JwtAuthGuard } from '../../../../../auth/jwt-auth.guard';
 import type { RequestIdentity } from '../../../../../auth/identity.service';
 import { ReqUser } from '../../../../../auth/req-user.decorator';
-import { ZodValidationPipe } from '../../../../../common/validation';
+import { ZodValidationPipe } from '@common/validation';
 import { AgentsService } from './agents.service';
 import {
   AgentDto,
@@ -49,7 +49,7 @@ export class AgentsController {
     @Body(new ZodValidationPipe(askQuestionSchema)) body: AskQuestion,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<AskAnswerDto> {
-    const answer = await this.agents.askQuestion(
+    const answer: string = await this.agents.askQuestion(
       agentId,
       body.question,
       identity.id,

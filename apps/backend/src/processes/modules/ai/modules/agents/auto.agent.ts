@@ -1,23 +1,23 @@
 import { Injectable } from '@nestjs/common';
-import { AppLogger } from '../../../../../common/logger';
-import { JevService } from '../../../../../common/zen/jev.service';
+import { AppLogger } from '@common/logger';
+import { JevService, type JevClassifyResult } from '@common/zen/jev.service';
 import { AskAgent } from './ask.agent';
 import { BackendAgent } from './backend.agent';
 import { FrontendAgent } from './frontend.agent';
 import { FullstackAgent } from './fullstack.agent';
 
 /** Верхняя граница числа шагов цепочки (декомпозиция + выполнение). */
-const MAX_STEPS = 5;
+const MAX_STEPS: number = 5;
 
 /** Бюджет накопленного контекста предыдущих шагов в промпте шага. */
-const CONTEXT_LIMIT = 6000;
+const CONTEXT_LIMIT: number = 6000;
 
 /** Честный ответ на непонятный запрос — фиксированный текст, без гадания. */
-export const UNCLEAR_REQUEST_MESSAGE =
+export const UNCLEAR_REQUEST_MESSAGE: string =
   'Не понял запрос: непонятно, это backend, frontend или fullstack-задача. Уточни: что сделать, где (сервис/страница/оба) и что должно получиться.';
 
 /** Сквозное требование файлового результата (CARD-4 harden, итерация 1). */
-export const AUTO_FILES_REQUIREMENT =
+export const AUTO_FILES_REQUIREMENT: string =
   'Результат — файлы в workspace проекта плюс краткая сводка; ответ только в markdown без файлов запрещён.';
 
 type DomainExecutor = BackendAgent | FrontendAgent | FullstackAgent;
@@ -46,9 +46,10 @@ export function parseSteps(plan: string): Array<string> {
  */
 @Injectable()
 export class AutoAgent {
-  readonly id = 'auto';
-  readonly name = 'Auto';
-  readonly description = 'Router mode: classifies the request and runs the backend, frontend or fullstack workflow';
+  readonly id: 'auto' = 'auto';
+  readonly name: 'Auto' = 'Auto';
+  readonly description: string =
+    'Router mode: classifies the request and runs the backend, frontend or fullstack workflow';
 
   constructor(
     private readonly backend: BackendAgent,
@@ -65,7 +66,7 @@ export class AutoAgent {
     // domain executor; 'ask' → direct AskAgent answer (no chain);
     // 'unclear' → fixed honest text (no guessing).
     // The returned chat text stays clean — the route is visible only in logs.
-    const routing = await this.jev.classify(question, userId, {
+    const routing: JevClassifyResult = await this.jev.classify(question, userId, {
       correlationId,
     });
     this.logger.info(
@@ -80,7 +81,7 @@ export class AutoAgent {
       this.logger.info('[agents] auto route=unclear honest-answer', correlationId);
       return UNCLEAR_REQUEST_MESSAGE;
     }
-    const executor = this.executorFor(routing.route);
+    const executor: DomainExecutor = this.executorFor(routing.route);
     return this.runChain(question, userId, correlationId, executor);
   }
 
@@ -97,12 +98,12 @@ export class AutoAgent {
     execute: DomainExecutor,
   ): Promise<string> {
     this.logger.info('[agents] auto decompose', correlationId);
-    const plan = await execute.ask(
+    const plan: string = await execute.ask(
       `Разбей задачу на пронумерованные шаги (не более ${MAX_STEPS}), только список без лишнего текста. ${AUTO_FILES_REQUIREMENT} Задача: ${question}`,
       userId,
       correlationId,
     );
-    let steps = parseSteps(plan);
+    let steps: Array<string> = parseSteps(plan);
     if (steps.length === 0) {
       this.logger.info('[agents] auto single-step fallback', correlationId);
       steps = [question];
@@ -111,29 +112,29 @@ export class AutoAgent {
     }
 
     const results: Array<string> = [];
-    for (let i = 0; i < steps.length; i++) {
+    for (let index = 0; index < steps.length; index++) {
       this.logger.info(
-        `[agents] auto step start index=${i + 1} total=${steps.length}`,
+        `[agents] auto step start index=${index + 1} total=${steps.length}`,
         correlationId,
       );
-      const context = results.join('\n').slice(-CONTEXT_LIMIT);
+      const context: string = results.join('\n').slice(-CONTEXT_LIMIT);
       try {
-        const stepResult = await execute.ask(
-          `Исходная задача: ${question}\nШаг ${i + 1}/${steps.length}: ${steps[i]}\nПредыдущие результаты:\n${context}\nВыполни этот шаг. ${AUTO_FILES_REQUIREMENT}`,
+        const stepResult: string = await execute.ask(
+          `Исходная задача: ${question}\nШаг ${index + 1}/${steps.length}: ${steps[index]}\nПредыдущие результаты:\n${context}\nВыполни этот шаг. ${AUTO_FILES_REQUIREMENT}`,
           userId,
           correlationId,
         );
         results.push(stepResult);
         this.logger.info(
-          `[agents] auto step done index=${i + 1} total=${steps.length}`,
+          `[agents] auto step done index=${index + 1} total=${steps.length}`,
           correlationId,
         );
-      } catch (err) {
+      } catch (error) {
         this.logger.warn(
-          `[agents] auto step failed index=${i + 1} total=${steps.length}`,
+          `[agents] auto step failed index=${index + 1} total=${steps.length}`,
           correlationId,
         );
-        throw err;
+        throw error;
       }
     }
 

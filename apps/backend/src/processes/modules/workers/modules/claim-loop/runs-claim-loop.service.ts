@@ -1,24 +1,27 @@
 import { Injectable, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
+import type { ToolView } from '@rush-code/contracts';
 import { createHash, randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
-import { canonicalJson } from '../../../../../common/canonical-json';
-import type { RunRow } from '../../../../../common/db/schema';
-import { AppLogger, serializeCause } from '../../../../../common/logger';
+import { canonicalJson } from '@common/canonical-json/canonical-json';
+import type { RunRow, RunStepRow } from '@common/db/schema';
+import { AppLogger, serializeCause } from '@common/logger';
 import { RunLeaseFencedError, RunsRepository } from '../../../runs/runs.repository';
 import { isComplete, nextStep, type PrototypeStep } from '../../utils/step-plan';
-import { ExecutorRegistry } from '../executor';
-import { RunWorktreeService } from '../git';
-import type { ModelMessage } from '../model-gateway';
-import { SandboxProvider } from '../sandbox';
-import { SkillLoader, type SkillBundle } from '../skills';
-import { ToolRegistry } from '../tool-registry';
+import { type Executor } from '../executor/executor';
+import { ExecutorRegistry } from '../executor/executor.registry';
+import { RunWorktreeService } from '../git/run-worktree.service';
+import type { ModelMessage, ModelUsage } from '../model-gateway/model-gateway';
+import { SandboxProvider } from '../sandbox/sandbox.provider';
+import { type SkillBundle } from '../skills/skill.types';
+import { SkillLoader } from '../skills/skills-loader.service';
+import { ToolRegistry, type ToolInvokeResult } from '../tool-registry/tool-registry';
 
 /** Lease is renewed by every step transaction; this is the ceiling between renewals. */
-const LEASE_TTL_MS = 15_000;
+const LEASE_TTL_MS: number = 15_000;
 /** Idle poll cadence when there is no run to claim. */
-const POLL_MS = 250;
+const POLL_MS: number = 250;
 /** Backoff after a tick failure (Postgres blip, unexpected error). */
-const ERROR_BACKOFF_MS = 2_000;
+const ERROR_BACKOFF_MS: number = 2_000;
 
 function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
@@ -52,8 +55,8 @@ function sha256(value: string): string {
  */
 @Injectable()
 export class RunsClaimLoop implements OnModuleInit, OnModuleDestroy {
-  private readonly holder = `${hostname()}:${process.pid}:${randomUUID()}`;
-  private stopped = false;
+  private readonly holder: string = `${hostname()}:${process.pid}:${randomUUID()}`;
+  private stopped: boolean = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
@@ -83,15 +86,15 @@ export class RunsClaimLoop implements OnModuleInit, OnModuleDestroy {
 
   private async loop(): Promise<void> {
     while (!this.stopped) {
-      let worked = false;
+      let worked: boolean = false;
       try {
         worked = await this.tick();
-      } catch (err) {
+      } catch (error) {
         // A fenced worker is expected (another worker owns the run now) and
         // already logged by tick(); everything else is an outage/unexpected.
-        if (!(err instanceof RunLeaseFencedError)) {
+        if (!(error instanceof RunLeaseFencedError)) {
           this.logger.error('[workers] tick failed', '');
-          this.logger.debug(serializeCause(err), '');
+          this.logger.debug(serializeCause(error), '');
         }
         await this.sleep(ERROR_BACKOFF_MS);
         continue;
@@ -105,17 +108,17 @@ export class RunsClaimLoop implements OnModuleInit, OnModuleDestroy {
    * true means a run was claimed (whether or not it advanced cleanly).
    */
   async tick(): Promise<boolean> {
-    const run = await this.repo.claimNextRun(this.holder, LEASE_TTL_MS, '');
+    const run: RunRow | null = await this.repo.claimNextRun(this.holder, LEASE_TTL_MS, '');
     if (!run) return false;
     try {
       await this.advance(run);
-    } catch (err) {
-      if (err instanceof RunLeaseFencedError) {
+    } catch (error) {
+      if (error instanceof RunLeaseFencedError) {
         this.logger.warn('[workers] lease lost', '');
         return true;
       }
       this.logger.error('[workers] advance failed', '');
-      this.logger.debug(serializeCause(err), '');
+      this.logger.debug(serializeCause(error), '');
     }
     return true;
   }
@@ -124,18 +127,18 @@ export class RunsClaimLoop implements OnModuleInit, OnModuleDestroy {
   private async advance(run: RunRow): Promise<void> {
     try {
       await this.worktree.ensure(run, '');
-    } catch (err) {
-      if (err instanceof RunLeaseFencedError) throw err;
+    } catch (error) {
+      if (error instanceof RunLeaseFencedError) throw error;
       // Without a worktree nothing can run; fail the run instead of leaving it
       // claimed-but-stuck (the lease expires and the loop would spin on it).
       this.logger.error('[workers] worktree failed', '');
-      this.logger.debug(serializeCause(err), '');
+      this.logger.debug(serializeCause(error), '');
       await this.repo.finishRun(run.id, this.holder, 'failed', '');
       return;
     }
 
-    const steps = await this.repo.listSteps(run.id, '');
-    const step = nextStep(steps);
+    const steps: Array<RunStepRow> = await this.repo.listSteps(run.id, '');
+    const step: PrototypeStep | null = nextStep(steps);
     if (!step) {
       // All steps committed → park for a human. A failed/skipped step means
       // nothing can advance anymore → terminal failed (operator decides).
@@ -155,15 +158,16 @@ export class RunsClaimLoop implements OnModuleInit, OnModuleDestroy {
   }
 
   private async runLlm(run: RunRow, step: PrototypeStep): Promise<void> {
-    const model = run.model && typeof run.model.id === 'string' ? run.model.id : 'stub-model';
+    const model: string =
+      run.model && typeof run.model.id === 'string' ? run.model.id : 'stub-model';
     const messages: Array<ModelMessage> = [
       { role: 'user', content: run.title ?? 'prototype run' },
     ];
-    const definitionSetHash = run.definitionSetHash;
+    const definitionSetHash: string = run.definitionSetHash;
     // definitionSetHash is `sha256:<base_commit>`; a run created without an
     // explicit pin falls back to its own Forward-Only base — never the worktree
     // HEAD, so the pin can only move forward by creating a new run.
-    const commitSha = definitionSetHash.startsWith('sha256:')
+    const commitSha: string = definitionSetHash.startsWith('sha256:')
       ? definitionSetHash.slice('sha256:'.length)
       : run.baseCommit;
 
@@ -173,11 +177,11 @@ export class RunsClaimLoop implements OnModuleInit, OnModuleDestroy {
     let bundle: SkillBundle;
     try {
       bundle = await this.skills.loadForRun(run.worktree, commitSha);
-    } catch (err) {
-      if (err instanceof RunLeaseFencedError) throw err;
+    } catch (error) {
+      if (error instanceof RunLeaseFencedError) throw error;
       // Detail stays in debug; the journal gets a fixed code, no body.
-      this.logger.debug(serializeCause(err), '');
-      const inputHash = sha256(canonicalJson({ model, messages, definitionSetHash }));
+      this.logger.debug(serializeCause(error), '');
+      const inputHash: string = sha256(canonicalJson({ model, messages, definitionSetHash }));
       await this.repo.startStep({
         runId: run.id,
         seq: step.seq,
@@ -202,10 +206,10 @@ export class RunsClaimLoop implements OnModuleInit, OnModuleDestroy {
 
     // Deny-by-default: an active skill narrows the model-facing surface to its
     // `allowed-tools`; the model never sees effects or handlers (D3).
-    const tools = this.skills.filterToolViews(this.tools.listViews(), bundle);
-    const executor = this.executors.resolve(run.agentId);
+    const tools: Array<ToolView> = this.skills.filterToolViews(this.tools.listViews(), bundle);
+    const executor: Executor = this.executors.resolve(run.agentId);
 
-    const inputHash = sha256(canonicalJson({ model, messages, definitionSetHash }));
+    const inputHash: string = sha256(canonicalJson({ model, messages, definitionSetHash }));
 
     await this.repo.startStep({
       runId: run.id,
@@ -219,8 +223,8 @@ export class RunsClaimLoop implements OnModuleInit, OnModuleDestroy {
     });
 
     try {
-      let text = '';
-      let usage = { in: 0, out: 0 };
+      let text: string = '';
+      let usage: ModelUsage = { inputTokens: 0, outputTokens: 0 };
       for await (const event of executor.stream({
         model,
         system: bundle.system,
@@ -246,11 +250,11 @@ export class RunsClaimLoop implements OnModuleInit, OnModuleDestroy {
           effects: bundle.effects,
         },
       });
-    } catch (err) {
-      if (err instanceof RunLeaseFencedError) throw err;
+    } catch (error) {
+      if (error instanceof RunLeaseFencedError) throw error;
       // Detail (possibly provider-shaped) stays in debug; the journal gets a
       // fixed code, never a body or a secret.
-      this.logger.debug(serializeCause(err), '');
+      this.logger.debug(serializeCause(error), '');
       await this.repo.failStep({
         runId: run.id,
         seq: step.seq,
@@ -266,8 +270,8 @@ export class RunsClaimLoop implements OnModuleInit, OnModuleDestroy {
   }
 
   private async runTool(run: RunRow, step: PrototypeStep): Promise<void> {
-    const toolId = step.toolId ?? 'native:git.recon';
-    const inputHash = sha256(canonicalJson({ toolId, path: run.worktree }));
+    const toolId: string = step.toolId ?? 'native:git.recon';
+    const inputHash: string = sha256(canonicalJson({ toolId, path: run.worktree }));
 
     await this.repo.startStep({
       runId: run.id,
@@ -281,7 +285,11 @@ export class RunsClaimLoop implements OnModuleInit, OnModuleDestroy {
     });
 
     try {
-      const result = await this.tools.invoke(toolId, { path: run.worktree }, { cwd: run.worktree });
+      const result: ToolInvokeResult = await this.tools.invoke(
+        toolId,
+        { path: run.worktree },
+        { cwd: run.worktree },
+      );
       await this.repo.commitStep({
         runId: run.id,
         seq: step.seq,
@@ -290,9 +298,9 @@ export class RunsClaimLoop implements OnModuleInit, OnModuleDestroy {
         correlationId: '',
         resultRef: { toolId, ...result },
       });
-    } catch (err) {
-      if (err instanceof RunLeaseFencedError) throw err;
-      this.logger.debug(serializeCause(err), '');
+    } catch (error) {
+      if (error instanceof RunLeaseFencedError) throw error;
+      this.logger.debug(serializeCause(error), '');
       await this.repo.failStep({
         runId: run.id,
         seq: step.seq,
@@ -308,8 +316,8 @@ export class RunsClaimLoop implements OnModuleInit, OnModuleDestroy {
   }
 
   private async runSandbox(run: RunRow, step: PrototypeStep): Promise<void> {
-    const command = 'echo run-ready';
-    const inputHash = sha256(
+    const command: string = 'echo run-ready';
+    const inputHash: string = sha256(
       canonicalJson({ baseCommit: run.baseCommit, worktree: run.worktree, command }),
     );
 
@@ -325,7 +333,11 @@ export class RunsClaimLoop implements OnModuleInit, OnModuleDestroy {
     });
 
     try {
-      const result = await this.sandbox.exec(run, command, '');
+      const result: Awaited<ReturnType<SandboxProvider['exec']>> = await this.sandbox.exec(
+        run,
+        command,
+        '',
+      );
       await this.repo.commitStep({
         runId: run.id,
         seq: step.seq,
@@ -334,11 +346,11 @@ export class RunsClaimLoop implements OnModuleInit, OnModuleDestroy {
         correlationId: '',
         resultRef: { sessionId: result.sessionId, command, output: result.output },
       });
-    } catch (err) {
-      if (err instanceof RunLeaseFencedError) throw err;
+    } catch (error) {
+      if (error instanceof RunLeaseFencedError) throw error;
       // Upstream detail (possibly body-shaped) stays in debug; the journal
       // gets a fixed code, never a command output or a secret.
-      this.logger.debug(serializeCause(err), '');
+      this.logger.debug(serializeCause(error), '');
       await this.repo.failStep({
         runId: run.id,
         seq: step.seq,
@@ -354,7 +366,7 @@ export class RunsClaimLoop implements OnModuleInit, OnModuleDestroy {
   }
 
   private async runGitCommit(run: RunRow, step: PrototypeStep): Promise<void> {
-    const inputHash = sha256(
+    const inputHash: string = sha256(
       canonicalJson({ baseCommit: run.baseCommit, branch: run.branch, seq: step.seq }),
     );
 
@@ -370,7 +382,11 @@ export class RunsClaimLoop implements OnModuleInit, OnModuleDestroy {
     });
 
     try {
-      const { sha, branch } = await this.worktree.commit(run, step.seq, '');
+      const { sha, branch }: { sha: string; branch: string } = await this.worktree.commit(
+        run,
+        step.seq,
+        '',
+      );
       await this.repo.commitStep({
         runId: run.id,
         seq: step.seq,
@@ -379,9 +395,9 @@ export class RunsClaimLoop implements OnModuleInit, OnModuleDestroy {
         correlationId: '',
         resultRef: { sha, branch, baseCommit: run.baseCommit },
       });
-    } catch (err) {
-      if (err instanceof RunLeaseFencedError) throw err;
-      this.logger.debug(serializeCause(err), '');
+    } catch (error) {
+      if (error instanceof RunLeaseFencedError) throw error;
+      this.logger.debug(serializeCause(error), '');
       // TODO(dual-write-reconcile): no auto-retry yet; the operator sees the
       // failed step in the journal and decides (prototype policy).
       await this.repo.failStep({
@@ -398,12 +414,12 @@ export class RunsClaimLoop implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private sleep(ms: number): Promise<void> {
+  private sleep(milliseconds: number): Promise<void> {
     return new Promise<void>((resolve) => {
-      const timer = setTimeout(() => {
+      const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
         if (this.timer === timer) this.timer = null;
         resolve();
-      }, ms);
+      }, milliseconds);
       this.timer = timer;
     });
   }

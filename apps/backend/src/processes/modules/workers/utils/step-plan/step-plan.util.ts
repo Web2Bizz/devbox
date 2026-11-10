@@ -23,11 +23,11 @@ type ExistingStep = { seq: number | bigint; status: string };
  * exists but its effect has not been committed yet.
  */
 export function nextStep(existing: ReadonlyArray<ExistingStep>): PrototypeStep | null {
-  const bySeq = new Map<number, ExistingStep>();
+  const bySeq: Map<number, ExistingStep> = new Map<number, ExistingStep>();
   for (const row of existing) bySeq.set(Number(row.seq), row);
 
   for (const step of PROTOTYPE_STEPS) {
-    const row = bySeq.get(step.seq);
+    const row: ExistingStep | undefined = bySeq.get(step.seq);
     if (!row) return step;
     if (row.status === 'committed') continue;
     if (row.status === 'failed' || row.status === 'skipped') return null;
@@ -38,7 +38,7 @@ export function nextStep(existing: ReadonlyArray<ExistingStep>): PrototypeStep |
 
 /** All prototype steps committed. */
 export function isComplete(existing: ReadonlyArray<ExistingStep>): boolean {
-  const bySeq = new Map<number, ExistingStep>();
+  const bySeq: Map<number, ExistingStep> = new Map<number, ExistingStep>();
   for (const row of existing) bySeq.set(Number(row.seq), row);
   return PROTOTYPE_STEPS.every((step) => bySeq.get(step.seq)?.status === 'committed');
 }

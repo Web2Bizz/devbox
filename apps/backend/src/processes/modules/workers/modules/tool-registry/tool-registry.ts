@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import type { ToolView } from '@rush-code/contracts';
-import { canonicalJson } from '../../../../../common/canonical-json';
-import { AppLogger } from '../../../../../common/logger';
+import { canonicalJson } from '@common/canonical-json/canonical-json';
+import { AppLogger } from '@common/logger';
 import { createGitReconTool } from './tools/git-recon.tool';
 
 export type ToolEffect = 'read' | 'write-local' | 'write-remote' | 'exec';
@@ -11,7 +11,7 @@ export type ToolContext = { cwd: string };
 
 export type ToolHandler = (
   input: Record<string, unknown>,
-  ctx: ToolContext,
+  context: ToolContext,
 ) => Promise<Record<string, unknown>>;
 
 export type ToolDescriptor = {
@@ -45,7 +45,7 @@ function sha256(value: string): string {
  */
 @Injectable()
 export class ToolRegistry {
-  private readonly tools = new Map<string, ToolDescriptor>();
+  private readonly tools: Map<string, ToolDescriptor> = new Map<string, ToolDescriptor>();
 
   constructor(private readonly logger: AppLogger = new AppLogger(ToolRegistry.name)) {
     this.register(createGitReconTool());
@@ -76,17 +76,17 @@ export class ToolRegistry {
   async invoke(
     id: string,
     input: Record<string, unknown>,
-    ctx: ToolContext,
+    context: ToolContext,
   ): Promise<ToolInvokeResult> {
-    const tool = this.tools.get(id);
+    const tool: ToolDescriptor | undefined = this.tools.get(id);
     if (!tool) throw new Error(`unknown tool ${id}`);
 
-    const requestJson = canonicalJson({ id, input });
-    const requestHash = sha256(requestJson);
-    const startedAt = Date.now();
-    const output = await tool.handler(input, ctx);
-    const durationMs = Date.now() - startedAt;
-    const responseJson = canonicalJson(output);
+    const requestJson: string = canonicalJson({ id, input });
+    const requestHash: string = sha256(requestJson);
+    const startedAt: number = Date.now();
+    const output: Record<string, unknown> = await tool.handler(input, context);
+    const durationMs: number = Date.now() - startedAt;
+    const responseJson: string = canonicalJson(output);
 
     return {
       output,

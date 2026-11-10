@@ -1,10 +1,10 @@
 import { Injectable, type OnModuleInit } from '@nestjs/common';
-import { AppLogger, serializeCause } from '../../../../../common/logger';
-import { McpClient } from './mcp-client';
+import { AppLogger, serializeCause } from '@common/logger';
+import { McpClient, type McpToolDescriptor } from './mcp-client';
 import { ToolRegistry } from './tool-registry';
 
 /** MCP tool id prefix: ids stay '<mcp|skill|native>:<path>' shaped (D3). */
-const MCP_TOOL_PREFIX = 'mcp:';
+const MCP_TOOL_PREFIX: string = 'mcp:';
 
 /**
  * McpToolSource — boot-time discovery of an external MCP server's tools.
@@ -22,18 +22,18 @@ export class McpToolSource implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
-    const url = (process.env.MCP_SERVER_URL ?? '').trim();
+    const url: string = (process.env.MCP_SERVER_URL ?? '').trim();
     if (!url) {
       this.logger.debug('[workers] mcp source disabled (MCP_SERVER_URL unset)', '');
       return;
     }
 
     try {
-      const client = new McpClient(url);
+      const client: McpClient = new McpClient(url);
       await client.initialize();
-      const tools = await client.listTools();
+      const tools: Array<McpToolDescriptor> = await client.listTools();
       for (const tool of tools) {
-        const id = `${MCP_TOOL_PREFIX}${tool.name.toLowerCase().replace(/[^a-z0-9._/-]/g, '-')}`;
+        const id: string = `${MCP_TOOL_PREFIX}${tool.name.toLowerCase().replace(/[^a-z0-9._/-]/g, '-')}`;
         this.registry.register({
           view: {
             id,
@@ -42,14 +42,14 @@ export class McpToolSource implements OnModuleInit {
             inputSchema: tool.inputSchema ?? { type: 'object' },
           },
           effects: tool.readOnly ? ['read'] : ['write-remote'],
-          handler: (input) => client.callTool(tool.name, input),
+          handler: (input: Record<string, unknown>) => client.callTool(tool.name, input),
         });
       }
       this.logger.info(`[workers] mcp tools registered count=${tools.length}`, '');
-    } catch (err) {
+    } catch (error) {
       // Remote source is optional: unavailable → native tools only, boot stays up.
       this.logger.warn('[workers] mcp source unavailable', '');
-      this.logger.debug(serializeCause(err), '');
+      this.logger.debug(serializeCause(error), '');
     }
   }
 }

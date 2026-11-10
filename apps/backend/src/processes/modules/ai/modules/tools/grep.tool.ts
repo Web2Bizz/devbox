@@ -1,14 +1,20 @@
 import { Injectable } from '@nestjs/common';
-import { z } from 'zod';
-import { WorkspacePathService } from '../../../../../common/storage/workspace-path.service';
-import { resolveToolPath } from './tool-jail';
-import type { ToolContext, ToolHandler } from './tool.types';
-import { matchGlob, walkFiles } from './tool-walk';
+import { z } from 'zod/v4';
+import { WorkspacePathService } from '@common/storage/workspace-path.service';
+import { resolveToolPath } from './utils/tool-jail';
+import type { ToolContext, ToolDefinition, ToolHandler } from '../tool-runtime/tool-runtime.types';
+import { matchGlob } from './utils/glob-match';
+import { type WalkFile, walkFiles } from './utils/tool-walk';
 
-const MAX_FILE_BYTES = 512 * 1024;
-const MAX_MATCHES = 200;
+const MAX_FILE_BYTES: number = 512 * 1024;
+const MAX_MATCHES: number = 200;
 
-const inputSchema = z.object({
+const inputSchema: z.ZodType<{
+  pattern: string;
+  path?: string;
+  include?: string;
+  caseSensitive?: boolean;
+}> = z.object({
   pattern: z.string({ error: 'field "pattern" is required' }).min(1),
   path: z.string().optional(),
   include: z.string().optional(),
@@ -18,8 +24,8 @@ const inputSchema = z.object({
 /** grep — jailed regexp search across project files (file:line: text). */
 @Injectable()
 export class GrepTool implements ToolHandler {
-  readonly fullName = 'grep';
-  readonly definition = {
+  readonly fullName: string = 'grep';
+  readonly definition: ToolDefinition = {
     name: 'grep',
     description: 'Search project file contents with a JavaScript regexp (bounded matches).',
     inputSchema: {
@@ -37,21 +43,30 @@ export class GrepTool implements ToolHandler {
   constructor(private readonly paths: WorkspacePathService) {}
 
   async execute(input: unknown, context: ToolContext): Promise<string> {
-    const parsed = inputSchema.safeParse(input);
+    const parsed: z.ZodSafeParseResult<{
+      pattern: string;
+      path?: string;
+      include?: string;
+      caseSensitive?: boolean;
+    }> = inputSchema.safeParse(input);
     if (!parsed.success) return 'error: invalid input, expected { pattern: string }';
+    const pattern: string = parsed.data.pattern;
+    const include: string | undefined = parsed.data.include;
+    const relativePath: string | undefined = parsed.data.path;
     let regexp: RegExp;
     try {
-      regexp = new RegExp(parsed.data.pattern, parsed.data.caseSensitive === true ? '' : 'i');
+      regexp = new RegExp(pattern, parsed.data.caseSensitive === true ? '' : 'i');
     } catch {
       return 'error: invalid regexp pattern';
     }
-    const root = parsed.data.path
-      ? await resolveToolPath(this.paths, context.directory, parsed.data.path)
+    const root: string = relativePath
+      ? await resolveToolPath(this.paths, context.directory, relativePath)
       : context.directory;
     const matches: Array<string> = [];
-    await walkFiles(this.paths, root, async (file) => {
-      if (parsed.data.include && !matchGlob(parsed.data.include, file.relative)) return false;
-      const stat = await this.paths.statPath(file.absolute);
+    await walkFiles(this.paths, root, async (file: WalkFile) => {
+      if (include && !matchGlob(include, file.relative)) return false;
+      const stat: Awaited<ReturnType<WorkspacePathService['statPath']>> =
+        await this.paths.statPath(file.absolute);
       if (!stat || stat.size > MAX_FILE_BYTES) return false;
       let content: string;
       try {
@@ -60,9 +75,9 @@ export class GrepTool implements ToolHandler {
         return false;
       }
       if (content.includes('\0')) return false;
-      const lines = content.split('\n');
+      const lines: Array<string> = content.split('\n');
       for (let index = 0; index < lines.length; index += 1) {
-        const line = lines[index] ?? '';
+        const line: string = lines[index] ?? '';
         if (!regexp.test(line)) continue;
         matches.push(`${file.relative}:${index + 1}: ${line.slice(0, 300)}`);
         if (matches.length >= MAX_MATCHES) return true;

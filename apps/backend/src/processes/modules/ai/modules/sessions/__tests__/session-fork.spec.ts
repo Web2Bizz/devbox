@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { ConflictException, NotFoundException } from '@nestjs/common';
-import type { AppLogger } from '../../../../../../common/logger';
+import type { AppLogger } from '@common/logger';
 import type { RevertInfo, SessionForkResponse, SnapshotDiff } from '../sessions.dto';
-import { SessionHarnessService } from '../session-harness.service';
 import { SessionsService } from '../sessions.service';
+import { SessionFrameBufferService } from '../modules/events/session-frame-buffer.service';
+import { SessionRuntimeStateService } from '../modules/state/session-runtime-state.service';
 
 const UID = '123e4567-e89b-12d3-a456-426614174001';
 const PID = '123e4567-e89b-12d3-a456-426614174003';
@@ -55,11 +56,22 @@ type Appended = {
 function harness(messages: Array<Message>): {
   svc: SessionsService;
   appended: Array<Appended>;
+  buffer: SessionFrameBufferService;
 } {
   const appended: Array<Appended> = [];
   const host = {
     async sessionCreate(input: { title?: string | null }): Promise<unknown> {
       return { id: 'ses_fork_host', title: input.title ?? null };
+    },
+    async sessionRemove(): Promise<void> {},
+    async sessionInterrupt(): Promise<unknown> {
+      return { interrupted: true };
+    },
+    async providerList(): Promise<unknown> {
+      return { data: [] };
+    },
+    async modelList(): Promise<unknown> {
+      return { data: [] };
     },
   };
   const access = {
@@ -105,23 +117,46 @@ function harness(messages: Array<Message>): {
       return '';
     },
   };
-  const harnessSvc = new SessionHarnessService(
-    ...([
-      host,
-      access,
-      auth,
-      history,
-      undefined,
-      silentLogger(),
-      agents,
-    ] as unknown as ConstructorParameters<typeof SessionHarnessService>),
-  );
-  return { svc: new SessionsService(harnessSvc), appended };
+  const logger = silentLogger();
+  const state = new SessionRuntimeStateService();
+  const buffer = new SessionFrameBufferService();
+  const stream = { streamEvents: async (): Promise<void> => {} };
+  const messaging = { send: async (): Promise<unknown> => ({}) };
+  const inventory = {
+    providers: async (): Promise<Array<unknown>> => [],
+    models: async (): Promise<Array<unknown>> => [],
+  };
+  const workspace = {
+    stage: async (): Promise<unknown> => ({}),
+    clear: async (): Promise<void> => {},
+    commit: async (): Promise<void> => {},
+    diff: async (): Promise<Array<unknown>> => [],
+    capture: async (): Promise<undefined> => undefined,
+  };
+  const args: Array<unknown> = [
+    host,
+    access,
+    auth,
+    history,
+    stream,
+    messaging,
+    inventory,
+    workspace,
+    state,
+    buffer,
+    agents,
+    logger,
+  ];
+  return {
+    svc: new SessionsService(...(args as unknown as ConstructorParameters<typeof SessionsService>)),
+    appended,
+    buffer,
+  };
 }
 
-describe('SessionHarness.fork', () => {
+describe('SessionsService.fork', () => {
   it('copies the whole thread through the newest message by default', async () => {
-    const { svc, appended } = harness(MESSAGES);
+    const { svc, appended, buffer } = harness(MESSAGES);
     const result: SessionForkResponse = await svc.fork(UID, SRC, { projectId: PID }, 'cid');
     assert.notEqual(result.session.id, SRC);
     assert.deepEqual(result.boundary, { type: 'through', messageID: 'm3' });
@@ -131,6 +166,13 @@ describe('SessionHarness.fork', () => {
       appended.map((row) => row.text),
       ['one', 'two', 'three'],
     );
+    const forked = buffer.list().find((frame) => frame.type === 'session.forked');
+    assert.ok(forked, 'the fork must append one live session.forked frame');
+    assert.deepEqual(forked.data, {
+      sessionID: result.session.id,
+      parentID: SRC,
+      boundary: { type: 'through', messageID: 'm3' },
+    });
   });
 
   it('copies only messages strictly before the boundary', async () => {

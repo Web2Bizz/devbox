@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { spawn } from 'node:child_process';
 import { z } from 'zod';
-import type { ToolContext, ToolHandler } from './tool.types';
+import type { ToolContext, ToolDefinition, ToolHandler } from '../tool-runtime/tool-runtime.types';
 
 /** Commands the tool may run (no rm/cp/mv/shell built-ins — no PTY, no shell). */
-const ALLOWED = new Set([
+const ALLOWED: ReadonlySet<string> = new Set([
   'git',
   'ls',
   'pwd',
@@ -23,8 +23,8 @@ const ALLOWED = new Set([
   'biome',
 ]);
 
-const TIMEOUT_MS = 15_000;
-const MAX_OUTPUT = 8_000;
+const TIMEOUT_MS: number = 15_000;
+const MAX_OUTPUT: number = 8_000;
 
 /**
  * Deferred promise — keeps `new Promise` executors literal-free (the shared
@@ -32,22 +32,22 @@ const MAX_OUTPUT = 8_000;
  */
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((res) => {
-    resolve = res;
+  const promise: Promise<T> = new Promise<T>((resolver) => {
+    resolve = resolver;
   });
   return { promise, resolve };
 }
 
-const inputSchema = z.object({
+const inputSchema: z.ZodType<{ command: string }> = z.object({
   command: z.string({ error: 'field "command" is required' }).min(1),
 });
 
 /** Split a command line into argv with single/double quote support (no shell). */
 export function parseArgv(command: string): Array<string> | null {
   const argv: Array<string> = [];
-  let current = '';
+  let current: string = '';
   let quote: '"' | "'" | null = null;
-  let has = false;
+  let has: boolean = false;
   for (const char of command.trim()) {
     if (quote) {
       if (char === quote) {
@@ -82,8 +82,8 @@ export function parseArgv(command: string): Array<string> | null {
 /** shell — allowlisted argv exec in the project dir, bounded timeout/output. */
 @Injectable()
 export class ShellTool implements ToolHandler {
-  readonly fullName = 'shell';
-  readonly definition = {
+  readonly fullName: string = 'shell';
+  readonly definition: ToolDefinition = {
     name: 'shell',
     description: 'Run one allowlisted command (git/ls/cat/rg/bun/…) in the project directory.',
     inputSchema: {
@@ -94,28 +94,29 @@ export class ShellTool implements ToolHandler {
   };
 
   async execute(input: unknown, context: ToolContext): Promise<string> {
-    const parsed = inputSchema.safeParse(input);
+    const parsed: z.ZodSafeParseResult<{ command: string }> = inputSchema.safeParse(input);
     if (!parsed.success) return 'error: invalid input, expected { command: string }';
-    const argv = parseArgv(parsed.data.command);
+    const argv: Array<string> | null = parseArgv(parsed.data.command);
     if (!argv) return 'error: invalid command line';
-    const binary = argv[0] as string;
+    const binary: string = argv[0] as string;
     if (!ALLOWED.has(binary)) return `error: command "${binary}" is not allowed`;
-    const { promise, resolve } = deferred<string>();
-    const child = spawn(binary, argv.slice(1), {
+    const deferredResult: { promise: Promise<string>; resolve: (value: string) => void } =
+      deferred<string>();
+    const child: ReturnType<typeof spawn> = spawn(binary, argv.slice(1), {
       cwd: context.directory,
       shell: false,
       env: { PATH: process.env.PATH ?? '' },
     });
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
-    const finish = (result: string): void => {
+    let stdout: string = '';
+    let stderr: string = '';
+    let settled: boolean = false;
+    const finish: (result: string) => void = (result: string): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve(result.slice(0, MAX_OUTPUT));
+      deferredResult.resolve(result.slice(0, MAX_OUTPUT));
     };
-    const timer = setTimeout(() => {
+    const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
       child.kill('SIGKILL');
       finish(`error: command timed out after ${TIMEOUT_MS}ms`);
     }, TIMEOUT_MS);
@@ -130,10 +131,12 @@ export class ShellTool implements ToolHandler {
       stderr = (stderr + chunk.toString('utf8')).slice(0, MAX_OUTPUT);
     });
     child.on('error', () => finish('error: command could not start'));
-    child.on('close', (code) => {
-      const body = [stdout.trim(), stderr.trim()].filter((part) => part.length > 0).join('\n');
+    child.on('close', (code: number | null) => {
+      const body: string = [stdout.trim(), stderr.trim()]
+        .filter((part) => part.length > 0)
+        .join('\n');
       finish(`exit ${code ?? 0}${body.length > 0 ? `\n${body}` : ''}`);
     });
-    return promise;
+    return deferredResult.promise;
   }
 }

@@ -13,15 +13,19 @@
  */
 import 'reflect-metadata';
 import assert from 'node:assert/strict';
-import type { AppLogger } from '../../../../../../common/logger';
+import type { AppLogger } from '@common/logger';
 import { ModelGatewayExecutor } from '../executor';
 import { ExecutorRegistry } from '../executor.registry';
-import { ModelGateway, type ModelEvent, type ModelRequest } from '../../model-gateway';
+import {
+  ModelGateway,
+  type ModelEvent,
+  type ModelRequest,
+} from '../../model-gateway/model-gateway';
 
 class FakeGateway extends ModelGateway {
   async *stream(_req: ModelRequest): AsyncIterable<ModelEvent> {
     yield { type: 'delta', text: 'fake' };
-    yield { type: 'done', usage: { in: 0, out: 1 } };
+    yield { type: 'done', usage: { inputTokens: 0, outputTokens: 1 } };
   }
 }
 

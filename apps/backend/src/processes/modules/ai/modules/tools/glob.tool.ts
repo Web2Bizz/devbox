@@ -1,11 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { z } from 'zod';
-import { WorkspacePathService } from '../../../../../common/storage/workspace-path.service';
-import { resolveToolPath } from './tool-jail';
-import type { ToolContext, ToolHandler } from './tool.types';
-import { matchGlob, walkFiles } from './tool-walk';
+import { WorkspacePathService } from '@common/storage/workspace-path.service';
+import { resolveToolPath } from './utils/tool-jail';
+import type { ToolContext, ToolDefinition, ToolHandler } from '../tool-runtime/tool-runtime.types';
+import { matchGlob } from './utils/glob-match';
+import { type WalkFile, walkFiles } from './utils/tool-walk';
 
-const inputSchema = z.object({
+const inputSchema: z.ZodType<{ pattern: string; path?: string }> = z.object({
   pattern: z.string({ error: 'field "pattern" is required' }).min(1),
   path: z.string().optional(),
 });
@@ -13,8 +14,8 @@ const inputSchema = z.object({
 /** glob — jailed pattern listing (relative posix paths, bounded result set). */
 @Injectable()
 export class GlobTool implements ToolHandler {
-  readonly fullName = 'glob';
-  readonly definition = {
+  readonly fullName: string = 'glob';
+  readonly definition: ToolDefinition = {
     name: 'glob',
     description: 'List project files matching a glob (** crosses dirs, * stays in one segment).',
     inputSchema: {
@@ -27,14 +28,17 @@ export class GlobTool implements ToolHandler {
   constructor(private readonly paths: WorkspacePathService) {}
 
   async execute(input: unknown, context: ToolContext): Promise<string> {
-    const parsed = inputSchema.safeParse(input);
+    const parsed: z.ZodSafeParseResult<{ pattern: string; path?: string }> =
+      inputSchema.safeParse(input);
     if (!parsed.success) return 'error: invalid input, expected { pattern: string, path?: string }';
-    const root = parsed.data.path
-      ? await resolveToolPath(this.paths, context.directory, parsed.data.path)
+    const pattern: string = parsed.data.pattern;
+    const relativePath: string | undefined = parsed.data.path;
+    const root: string = relativePath
+      ? await resolveToolPath(this.paths, context.directory, relativePath)
       : context.directory;
     const matches: Array<string> = [];
-    await walkFiles(this.paths, root, (file) => {
-      if (!matchGlob(parsed.data.pattern, file.relative)) return false;
+    await walkFiles(this.paths, root, (file: WalkFile) => {
+      if (!matchGlob(pattern, file.relative)) return false;
       matches.push(file.relative);
       return matches.length >= 2_000;
     });

@@ -18,9 +18,9 @@ import type { Request as ExpressRequest, Response as ExpressResponse } from 'exp
 import { JwtAuthGuard } from '../../../../../auth/jwt-auth.guard';
 import type { RequestIdentity } from '../../../../../auth/identity.service';
 import { ReqUser } from '../../../../../auth/req-user.decorator';
-import { AppLogger } from '../../../../../common/logger';
-import { ZodValidationPipe } from '../../../../../common/validation';
-import { ApiErrorDto } from '../../../../../common/http/api/api.dto';
+import { AppLogger } from '@common/logger';
+import { ZodValidationPipe } from '@common/validation';
+import { ApiErrorDto } from '@common/http/api/api.dto';
 import {
   createSessionRequestSchema,
   interruptSessionRequestSchema,
@@ -37,6 +37,7 @@ import {
   type SessionInfo,
   type SessionInterruptResult,
   type SessionMessage,
+  type SessionModel,
   type SessionRunStatusMap,
   type SessionRunnerProvider,
   type SnapshotDiff,
@@ -47,8 +48,8 @@ import { SessionsService } from './sessions.service';
  * Domain session routes — /api/v1/sessions* (URI-versioned v1 under the
  * global 'api' prefix, NOT VERSION_NEUTRAL). This is the product-facing
  * contract that replaces the removed /api/opencode/* mirror: our names, our
- * shapes, no opencode vocabulary on the wire (SessionHarnessService owns the
- * translation, SessionsService is the thin facade over it).
+ * shapes, no opencode vocabulary on the wire (SessionsService orchestrates the
+ * domain zones and keeps the wire contract frozen).
  *
  * Auth: every route is JwtAuthGuard + the C4 project gate (projectId
  * required; strangers → 404 not_found with no existence leak). Guests →
@@ -77,11 +78,11 @@ export class SessionsController {
   async list(
     @ReqUser() identity: RequestIdentity,
     @Query('projectId') projectId?: string,
-    @Headers('x-correlation-id') correlationId?: string,
+    @Headers('x-correlation-id') correlationIdHeader?: string,
   ): Promise<Array<SessionInfo>> {
-    const cid = correlationId ?? '';
-    const rows = await this.sessions.list(identity.id, projectId, cid);
-    this.logger.info(`[sessions] list count=${rows.length}`, cid);
+    const correlationId: string = correlationIdHeader ?? '';
+    const rows: Array<SessionInfo> = await this.sessions.list(identity.id, projectId, correlationId);
+    this.logger.info(`[sessions] list count=${rows.length}`, correlationId);
     return rows;
   }
 
@@ -141,7 +142,7 @@ export class SessionsController {
     @ReqUser() identity: RequestIdentity,
     @Query('projectId') projectId?: string,
     @Headers('x-correlation-id') correlationId?: string,
-  ): Promise<Array<{ id: string; name: string; providerID: string }>> {
+  ): Promise<Array<SessionModel>> {
     return this.sessions.models(identity.id, projectId, correlationId ?? '');
   }
 
@@ -302,20 +303,20 @@ export class SessionsController {
   @ApiResponse({ status: 503, description: 'session runner unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or it refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async events(
     @ReqUser() identity: RequestIdentity,
-    @Req() req: ExpressRequest,
-    @Res({ passthrough: false }) res: ExpressResponse,
+    @Req() request: ExpressRequest,
+    @Res({ passthrough: false }) response: ExpressResponse,
     @Query('projectId') projectId?: string,
     @Query('session') session?: string,
     @Query('cursor') cursor?: string,
     @Headers('x-correlation-id') correlationId?: string,
     @Headers('last-event-id') lastEventId?: string,
   ): Promise<void> {
-    // ?session=/?cursor=/Last-Event-ID ride the raw request into the harness
-    // (query-parser already populated req.query/req.headers) — referenced here
-    // so the params stay explicit in the signature and swagger.
+    // ?session=/?cursor=/Last-Event-ID ride the raw request into the stream
+    // zone (query-parser already populated request.query/request.headers) —
+    // referenced here so the params stay explicit in the signature and swagger.
     void session;
     void cursor;
     void lastEventId;
-    await this.sessions.streamEvents(identity.id, projectId, correlationId ?? '', req, res);
+    await this.sessions.streamEvents(identity.id, projectId, correlationId ?? '', request, response);
   }
 }

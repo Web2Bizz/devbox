@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, gt, isNull, sql } from 'drizzle-orm';
-import { type DbClient, DbService, dbUnavailable } from '../../../common/db/db.service';
+import { type DbClient, DbService, dbUnavailable } from '@common/db/db.service';
 import {
   type RunEventRow,
   type RunRow,
@@ -9,8 +9,8 @@ import {
   runLeases,
   runRuns,
   runSteps,
-} from '../../../common/db/schema';
-import { AppLogger } from '../../../common/logger';
+} from '@common/db/schema';
+import { AppLogger } from '@common/logger';
 import type { RunInfo } from './runs.dto';
 import { GENESIS_HASH, nextPrevHash } from './utils/event-chain';
 
@@ -76,7 +76,7 @@ type RunTx = Parameters<Parameters<DbClient['transaction']>[0]>[0];
  * row in ONE transaction: a run that exists without a journal head or a
  * lease row would be invisible to the (E4) claim loop, so the three are one
  * unit. Every method funnels Postgres failures through `dbUnavailable` (503
- * EXTERNAL_UNAVAILABLE, logged once with the caller cid) — no silent
+ * EXTERNAL_UNAVAILABLE, logged once with the caller correlationId) — no silent
  * in-memory fallback.
  *
  * The claim loop story is the mirror image: claimNextRun takes an expired
@@ -103,10 +103,10 @@ export class RunsRepository {
    * second id here would break that 1:1 naming.
    */
   async createRun(input: CreateRunRowInput): Promise<RunRow> {
-    const runId = input.runId;
+    const runId: string = input.runId;
     try {
-      return await this.db.client.transaction(async (tx) => {
-        const rows = await tx
+      return await this.db.client.transaction(async (tx: RunTx) => {
+        const rows: Array<RunRow> = await tx
           .insert(runRuns)
           .values({
             id: runId,
@@ -149,35 +149,35 @@ export class RunsRepository {
         });
         return rows[0];
       });
-    } catch (err) {
-      dbUnavailable('runs.createRun', err, this.logger, input.correlationId);
+    } catch (error) {
+      dbUnavailable('runs.createRun', error, this.logger, input.correlationId);
     }
   }
 
   /** Live (non-soft-deleted) run row; null when unknown. */
-  async findRun(id: string, cid: string): Promise<RunRow | null> {
+  async findRun(id: string, correlationId: string): Promise<RunRow | null> {
     try {
-      const rows = await this.db.client
+      const rows: Array<RunRow> = await this.db.client
         .select()
         .from(runRuns)
         .where(and(eq(runRuns.id, id), isNull(runRuns.deletedAt)))
         .limit(1);
       return rows.length > 0 ? rows[0] : null;
-    } catch (err) {
-      dbUnavailable('runs.findRun', err, this.logger, cid);
+    } catch (error) {
+      dbUnavailable('runs.findRun', error, this.logger, correlationId);
     }
   }
 
   /** Project-scoped live runs, newest first (GET /api/v1/runs). */
-  async listRuns(projectId: string, cid: string): Promise<Array<RunRow>> {
+  async listRuns(projectId: string, correlationId: string): Promise<Array<RunRow>> {
     try {
       return await this.db.client
         .select()
         .from(runRuns)
         .where(and(eq(runRuns.projectId, projectId), isNull(runRuns.deletedAt)))
         .orderBy(desc(runRuns.createdAt));
-    } catch (err) {
-      dbUnavailable('runs.listRuns', err, this.logger, cid);
+    } catch (error) {
+      dbUnavailable('runs.listRuns', error, this.logger, correlationId);
     }
   }
 
@@ -188,7 +188,7 @@ export class RunsRepository {
   async listEventsAfter(
     runId: string,
     afterSeq: number,
-    cid: string,
+    correlationId: string,
   ): Promise<Array<RunEventRow>> {
     try {
       return await this.db.client
@@ -196,8 +196,8 @@ export class RunsRepository {
         .from(runEvents)
         .where(and(eq(runEvents.runId, runId), gt(runEvents.seq, afterSeq)))
         .orderBy(asc(runEvents.seq));
-    } catch (err) {
-      dbUnavailable('runs.listEventsAfter', err, this.logger, cid);
+    } catch (error) {
+      dbUnavailable('runs.listEventsAfter', error, this.logger, correlationId);
     }
   }
 
@@ -209,12 +209,12 @@ export class RunsRepository {
    * workers racing the same tick pick different runs instead of serializing
    * (or double-claiming) one. null means "nothing to do", not an error.
    */
-  async claimNextRun(holder: string, leaseTtlMs: number, cid: string): Promise<RunRow | null> {
+  async claimNextRun(holder: string, leaseTtlMs: number, correlationId: string): Promise<RunRow | null> {
     try {
-      return await this.db.client.transaction(async (tx) => {
+      return await this.db.client.transaction(async (tx: RunTx) => {
         // TODO(full-fencing): claim with an epoch bump and a holder check in
         // this same transaction (a stale epoch must fence the old worker).
-        const claimed = (await tx.execute(sql`
+        const claimed: { rows: Array<{ run_id?: string }> } = (await tx.execute(sql`
           SELECT rl.run_id
           FROM run_leases rl
           JOIN run_runs r ON r.id = rl.run_id
@@ -225,7 +225,7 @@ export class RunsRepository {
           LIMIT 1
           FOR UPDATE OF rl SKIP LOCKED
         `)) as unknown as { rows: Array<{ run_id?: string }> };
-        const runId = claimed.rows[0]?.run_id;
+        const runId: string | undefined = claimed.rows[0]?.run_id;
         if (!runId) return null;
         await tx.execute(sql`
           UPDATE run_leases
@@ -233,11 +233,15 @@ export class RunsRepository {
               expires_at = now() + make_interval(secs => ${leaseTtlMs / 1000})
           WHERE run_id = ${runId}
         `);
-        const rows = await tx.select().from(runRuns).where(eq(runRuns.id, runId)).limit(1);
+        const rows: Array<RunRow> = await tx
+          .select()
+          .from(runRuns)
+          .where(eq(runRuns.id, runId))
+          .limit(1);
         return rows.length > 0 ? rows[0] : null;
       });
-    } catch (err) {
-      dbUnavailable('runs.claimNextRun', err, this.logger, cid);
+    } catch (error) {
+      dbUnavailable('runs.claimNextRun', error, this.logger, correlationId);
     }
   }
 
@@ -250,31 +254,31 @@ export class RunsRepository {
     runId: string,
     holder: string,
     leaseTtlMs: number,
-    cid: string,
+    correlationId: string,
   ): Promise<boolean> {
     try {
-      const renewed = (await this.db.client.execute(sql`
+      const renewed: { rows: Array<{ run_id?: string }> } = (await this.db.client.execute(sql`
         UPDATE run_leases
         SET expires_at = now() + make_interval(secs => ${leaseTtlMs / 1000})
         WHERE run_id = ${runId} AND holder = ${holder}
         RETURNING run_id
       `)) as unknown as { rows: Array<{ run_id?: string }> };
       return renewed.rows.length > 0;
-    } catch (err) {
-      dbUnavailable('runs.heartbeat', err, this.logger, cid);
+    } catch (error) {
+      dbUnavailable('runs.heartbeat', error, this.logger, correlationId);
     }
   }
 
   /** Steps of one run in seq order (crash recovery reads what was journaled). */
-  async listSteps(runId: string, cid: string): Promise<Array<RunStepRow>> {
+  async listSteps(runId: string, correlationId: string): Promise<Array<RunStepRow>> {
     try {
       return await this.db.client
         .select()
         .from(runSteps)
         .where(eq(runSteps.runId, runId))
         .orderBy(asc(runSteps.seq));
-    } catch (err) {
-      dbUnavailable('runs.listSteps', err, this.logger, cid);
+    } catch (error) {
+      dbUnavailable('runs.listSteps', error, this.logger, correlationId);
     }
   }
 
@@ -289,15 +293,15 @@ export class RunsRepository {
    */
   async startStep(input: RunStepStartInput): Promise<{ step: RunStepRow; event: RunEventRow }> {
     try {
-      return await this.db.client.transaction(async (tx) => {
+      return await this.db.client.transaction(async (tx: RunTx) => {
         await this.lockRunTx(tx, input.runId);
         await this.assertLeaseTx(tx, input.runId, input.holder, input.leaseTtlMs);
-        const existing = await tx
+        const existing: Array<RunStepRow> = await tx
           .select()
           .from(runSteps)
           .where(and(eq(runSteps.runId, input.runId), eq(runSteps.seq, input.seq)))
           .limit(1);
-        const step =
+        const step: RunStepRow =
           existing.length > 0
             ? (
                 await tx
@@ -327,14 +331,14 @@ export class RunsRepository {
                   })
                   .returning()
               )[0];
-        const event = await this.appendEventTx(tx, input.runId, 'run.step.started', {
+        const event: RunEventRow = await this.appendEventTx(tx, input.runId, 'run.step.started', {
           step: { id: step.id, seq: input.seq, type: input.type },
         });
         return { step, event };
       });
-    } catch (err) {
-      if (err instanceof RunLeaseFencedError) throw err;
-      dbUnavailable('runs.startStep', err, this.logger, input.correlationId);
+    } catch (error) {
+      if (error instanceof RunLeaseFencedError) throw error;
+      dbUnavailable('runs.startStep', error, this.logger, input.correlationId);
     }
   }
 
@@ -347,15 +351,15 @@ export class RunsRepository {
    */
   async commitStep(input: RunStepFinishInput): Promise<RunEventRow> {
     try {
-      return await this.db.client.transaction(async (tx) => {
+      return await this.db.client.transaction(async (tx: RunTx) => {
         await this.lockRunTx(tx, input.runId);
         await this.assertLeaseTx(tx, input.runId, input.holder, input.leaseTtlMs);
-        const resultRef = input.resultRef ?? {};
+        const resultRef: Record<string, unknown> = input.resultRef ?? {};
         await tx
           .update(runSteps)
           .set({ status: 'committed', resultRef, endedAt: sql`now()` })
           .where(and(eq(runSteps.runId, input.runId), eq(runSteps.seq, input.seq)));
-        const event = await this.appendEventTx(tx, input.runId, 'run.step.committed', {
+        const event: RunEventRow = await this.appendEventTx(tx, input.runId, 'run.step.committed', {
           step: { seq: input.seq },
           resultRef,
         });
@@ -375,9 +379,9 @@ export class RunsRepository {
         `);
         return event;
       });
-    } catch (err) {
-      if (err instanceof RunLeaseFencedError) throw err;
-      dbUnavailable('runs.commitStep', err, this.logger, input.correlationId);
+    } catch (error) {
+      if (error instanceof RunLeaseFencedError) throw error;
+      dbUnavailable('runs.commitStep', error, this.logger, input.correlationId);
     }
   }
 
@@ -391,15 +395,15 @@ export class RunsRepository {
    */
   async failStep(input: RunStepFinishInput): Promise<RunEventRow> {
     try {
-      return await this.db.client.transaction(async (tx) => {
+      return await this.db.client.transaction(async (tx: RunTx) => {
         await this.lockRunTx(tx, input.runId);
         await this.assertLeaseTx(tx, input.runId, input.holder, input.leaseTtlMs);
-        const error = input.error ?? {};
+        const error: Record<string, unknown> = input.error ?? {};
         await tx
           .update(runSteps)
           .set({ status: 'failed', error, endedAt: sql`now()` })
           .where(and(eq(runSteps.runId, input.runId), eq(runSteps.seq, input.seq)));
-        const event = await this.appendEventTx(tx, input.runId, 'run.step.failed', {
+        const event: RunEventRow = await this.appendEventTx(tx, input.runId, 'run.step.failed', {
           step: { seq: input.seq },
           error,
         });
@@ -409,9 +413,9 @@ export class RunsRepository {
           .where(eq(runRuns.id, input.runId));
         return event;
       });
-    } catch (err) {
-      if (err instanceof RunLeaseFencedError) throw err;
-      dbUnavailable('runs.failStep', err, this.logger, input.correlationId);
+    } catch (error) {
+      if (error instanceof RunLeaseFencedError) throw error;
+      dbUnavailable('runs.failStep', error, this.logger, input.correlationId);
     }
   }
 
@@ -426,10 +430,10 @@ export class RunsRepository {
     runId: string,
     holder: string,
     status: 'awaiting_human' | 'failed',
-    cid: string,
+    correlationId: string,
   ): Promise<void> {
     try {
-      await this.db.client.transaction(async (tx) => {
+      await this.db.client.transaction(async (tx: RunTx) => {
         await this.lockRunTx(tx, runId);
         await tx.execute(sql`
           UPDATE run_leases
@@ -441,8 +445,8 @@ export class RunsRepository {
           .set({ status, updatedAt: sql`now()` })
           .where(eq(runRuns.id, runId));
       });
-    } catch (err) {
-      dbUnavailable('runs.finishRun', err, this.logger, cid);
+    } catch (error) {
+      dbUnavailable('runs.finishRun', error, this.logger, correlationId);
     }
   }
 
@@ -465,7 +469,7 @@ export class RunsRepository {
     holder: string,
     leaseTtlMs: number,
   ): Promise<void> {
-    const renewed = (await tx.execute(sql`
+    const renewed: { rows: Array<{ run_id?: string }> } = (await tx.execute(sql`
       UPDATE run_leases
       SET expires_at = now() + make_interval(secs => ${leaseTtlMs / 1000})
       WHERE run_id = ${runId} AND holder = ${holder}
@@ -488,18 +492,18 @@ export class RunsRepository {
     type: string,
     data: Record<string, unknown>,
   ): Promise<RunEventRow> {
-    const last = await tx
+    const last: Array<RunEventRow> = await tx
       .select()
       .from(runEvents)
       .where(eq(runEvents.runId, runId))
       .orderBy(desc(runEvents.seq))
       .limit(1);
-    const previous = last[0] ?? null;
-    const seq = previous ? Number(previous.seq) + 1 : 1;
+    const previous: RunEventRow | null = last[0] ?? null;
+    const seq: number = previous ? Number(previous.seq) + 1 : 1;
     // An empty journal still starts from genesis (createRun normally owns
     // that row; a run without one must not chain onto a fake predecessor).
-    const prevHash = previous ? nextPrevHash(previous) : GENESIS_HASH;
-    const inserted = await tx
+    const prevHash: string = previous ? nextPrevHash(previous) : GENESIS_HASH;
+    const inserted: Array<RunEventRow> = await tx
       .insert(runEvents)
       .values({ runId, seq, type, data, prevHash })
       .returning();

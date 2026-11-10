@@ -1,13 +1,15 @@
 import { Module } from '@nestjs/common';
-import { WorkspacePathService } from '../../../common/storage/workspace-path.service';
+import { WorkspacePathService } from '@common/storage/workspace-path.service';
 import { RunsModule } from '../runs/runs.module';
-import { RunsClaimLoop } from './modules/claim-loop';
-import { ExecutorRegistry } from './modules/executor';
-import { RunWorktreeService } from './modules/git';
-import { ModelGateway, StubModelGateway } from './modules/model-gateway';
-import { SandboxProvider } from './modules/sandbox';
-import { SkillLoader } from './modules/skills';
-import { McpToolSource, ToolRegistry } from './modules/tool-registry';
+import { RunsClaimLoop } from './modules/claim-loop/runs-claim-loop.service';
+import { ExecutorRegistry } from './modules/executor/executor.registry';
+import { RunWorktreeService } from './modules/git/run-worktree.service';
+import { ModelGateway } from './modules/model-gateway/model-gateway';
+import { StubModelGateway } from './modules/model-gateway/model-gateway.stub';
+import { SandboxProvider } from './modules/sandbox/sandbox.provider';
+import { SkillLoader } from './modules/skills/skills-loader.service';
+import { McpToolSource } from './modules/tool-registry/mcp-tool-source';
+import { ToolRegistry } from './modules/tool-registry/tool-registry';
 
 /**
  * WorkersModule — the in-process run engine (agent-harness prototype).

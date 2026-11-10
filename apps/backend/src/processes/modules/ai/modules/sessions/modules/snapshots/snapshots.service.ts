@@ -2,16 +2,30 @@ import { Injectable } from '@nestjs/common';
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { AppLogger } from '../../../../../../../common/logger';
-import { ExternalServiceError } from '../../../../../../../common/external/external-error';
-import { WorkspacePathService } from '../../../../../../../common/storage/workspace-path.service';
+import { AppLogger } from '@common/logger';
+import { ExternalServiceError } from '@common/external/external-error';
+import { WorkspacePathService } from '@common/storage/workspace-path.service';
 import type { SnapshotDiff } from '../../sessions.dto';
 
-const execFileAsync = promisify(execFile);
+/** Options of one git invocation (only the knobs this service tunes). */
+type GitExecOptions = {
+  timeout?: number;
+  maxBuffer?: number;
+  env?: NodeJS.ProcessEnv;
+};
 
-const TREE_RE = /^[0-9a-f]{40}$/;
-const MAX_BUFFER = 20 * 1024 * 1024;
-const GIT_TIMEOUT_MS = 60_000;
+/** Promisified `execFile` narrowed to the call shape this service uses. */
+type GitExecFileAsync = (
+  file: string,
+  args: ReadonlyArray<string>,
+  options: GitExecOptions,
+) => Promise<{ stdout: string; stderr: string }>;
+
+const execFileAsync: GitExecFileAsync = promisify(execFile);
+
+const TREE_RE: RegExp = /^[0-9a-f]{40}$/;
+const MAX_BUFFER: number = 20 * 1024 * 1024;
+const GIT_TIMEOUT_MS: number = 60_000;
 
 type GitOptions = { env?: NodeJS.ProcessEnv; timeoutMs?: number };
 
@@ -59,25 +73,32 @@ export class SnapshotsService {
    */
   async capture(directory: string): Promise<string | undefined> {
     try {
-      const worktree = await this.worktreeOf(directory);
+      const worktree: string | null = await this.worktreeOf(directory);
       if (!worktree) return undefined;
-      const gitDirRaw = (await this.git(worktree, ['rev-parse', '--git-dir'])).trim();
-      const gitDir = path.isAbsolute(gitDirRaw) ? gitDirRaw : path.resolve(worktree, gitDirRaw);
-      const indexFile = path.join(gitDir, `rush-code-snapshot-${crypto.randomUUID()}.index`);
+      const gitDirRaw: string = (await this.git(worktree, ['rev-parse', '--git-dir'])).trim();
+      const gitDir: string = path.isAbsolute(gitDirRaw)
+        ? gitDirRaw
+        : path.resolve(worktree, gitDirRaw);
+      const indexFile: string = path.join(
+        gitDir,
+        `rush-code-snapshot-${crypto.randomUUID()}.index`,
+      );
       try {
         await this.git(worktree, ['add', '-A'], { env: { GIT_INDEX_FILE: indexFile } });
-        const tree = (await this.git(worktree, ['write-tree'], {
-          env: { GIT_INDEX_FILE: indexFile },
-        })).trim();
+        const tree: string = (
+          await this.git(worktree, ['write-tree'], {
+            env: { GIT_INDEX_FILE: indexFile },
+          })
+        ).trim();
         if (!TREE_RE.test(tree)) throw new Error('bad tree id');
         await this.git(worktree, ['update-ref', `refs/rush-code/snapshots/${tree}`, tree]);
         return tree;
       } finally {
         await this.paths.removeDir(indexFile).catch(() => undefined);
       }
-    } catch (err) {
+    } catch (error) {
       this.logger.warn('[snapshots] capture skipped code=snapshot_failed');
-      this.logger.debug(err instanceof Error ? err.message : 'unknown');
+      this.logger.debug(error instanceof Error ? error.message : 'unknown');
       return undefined;
     }
   }
@@ -86,8 +107,8 @@ export class SnapshotsService {
   async files(directory: string, from: string, to: string): Promise<Array<string>> {
     this.assertTree(from);
     this.assertTree(to);
-    const worktree = await this.requireWorktree(directory, 'files');
-    const out = await this.git(worktree, [
+    const worktree: string = await this.requireWorktree(directory, 'files');
+    const output: string = await this.git(worktree, [
       'diff-tree',
       '-r',
       '--name-only',
@@ -95,7 +116,7 @@ export class SnapshotsService {
       from,
       to,
     ]);
-    return out
+    return output
       .split('\n')
       .map((line) => line.trim())
       .filter((line) => line.length > 0);
@@ -112,9 +133,9 @@ export class SnapshotsService {
     this.assertTree(from);
     this.assertTree(to);
     if (paths !== undefined && paths.length === 0) return [];
-    const worktree = await this.requireWorktree(directory, 'diff');
-    const unified = Math.max(0, Math.min(10, Math.floor(context ?? 3)));
-    const args = [
+    const worktree: string = await this.requireWorktree(directory, 'diff');
+    const unified: number = Math.max(0, Math.min(10, Math.floor(context ?? 3)));
+    const args: Array<string> = [
       'diff-tree',
       '-r',
       '-p',
@@ -125,8 +146,8 @@ export class SnapshotsService {
       to,
     ];
     if (paths && paths.length > 0) args.push('--', ...paths);
-    const out = await this.git(worktree, args);
-    return parseUnifiedDiff(out);
+    const output: string = await this.git(worktree, args);
+    return parseUnifiedDiff(output);
   }
 
   /**
@@ -136,11 +157,11 @@ export class SnapshotsService {
   async restore(directory: string, entries: Array<RestoreEntry>): Promise<void> {
     if (entries.length === 0) return;
     for (const entry of entries) this.assertTree(entry.snapshot);
-    const worktree = await this.requireWorktree(directory, 'restore');
+    const worktree: string = await this.requireWorktree(directory, 'restore');
     for (const entry of entries) {
-      const abs = this.jail(worktree, entry.path);
-      const relative = path.relative(worktree, abs).replace(/\\/g, '/');
-      const exists = await this.existsInTree(worktree, entry.snapshot, relative);
+      const absolutePath: string = this.jail(worktree, entry.path);
+      const relative: string = path.relative(worktree, absolutePath).replace(/\\/g, '/');
+      const exists: boolean = await this.existsInTree(worktree, entry.snapshot, relative);
       if (exists) {
         await this.git(worktree, [
           'restore',
@@ -150,7 +171,7 @@ export class SnapshotsService {
           relative,
         ]);
       } else {
-        await this.paths.removeDir(abs);
+        await this.paths.removeDir(absolutePath);
       }
     }
   }
@@ -164,12 +185,12 @@ export class SnapshotsService {
     if (relative.includes('\0') || path.isAbsolute(relative)) {
       throw new Error('path escapes the project');
     }
-    const abs = path.resolve(worktree, relative);
-    const withSep = worktree.endsWith(path.sep) ? worktree : worktree + path.sep;
-    if (abs !== worktree && !abs.startsWith(withSep)) {
+    const absolutePath: string = path.resolve(worktree, relative);
+    const withSeparator: string = worktree.endsWith(path.sep) ? worktree : worktree + path.sep;
+    if (absolutePath !== worktree && !absolutePath.startsWith(withSeparator)) {
       throw new Error('path escapes the project');
     }
-    return abs;
+    return absolutePath;
   }
 
   private async existsInTree(worktree: string, tree: string, relative: string): Promise<boolean> {
@@ -183,8 +204,8 @@ export class SnapshotsService {
 
   private async worktreeOf(directory: string): Promise<string | null> {
     try {
-      const out = await this.git(directory, ['rev-parse', '--show-toplevel']);
-      const worktree = out.trim();
+      const output: string = await this.git(directory, ['rev-parse', '--show-toplevel']);
+      const worktree: string = output.trim();
       return worktree.length > 0 ? worktree : null;
     } catch {
       return null;
@@ -192,7 +213,7 @@ export class SnapshotsService {
   }
 
   private async requireWorktree(directory: string, operation: string): Promise<string> {
-    const worktree = await this.worktreeOf(directory);
+    const worktree: string | null = await this.worktreeOf(directory);
     if (!worktree) {
       this.logger.warn(`[snapshots] operation=${operation} code=not_a_git_repository`);
       throw new ExternalServiceError({
@@ -225,14 +246,14 @@ export class SnapshotsService {
 export function parseUnifiedDiff(output: string): Array<SnapshotDiff> {
   const rows: Array<SnapshotDiff> = [];
   if (output.trim().length === 0) return rows;
-  const blocks = output.split(/^diff --git /m).filter((block) => block.length > 0);
+  const blocks: Array<string> = output.split(/^diff --git /m).filter((block) => block.length > 0);
   for (const block of blocks) {
-    const plus = block.match(/^\+\+\+ b\/(.+)$/m);
+    const plus: RegExpMatchArray | null = block.match(/^\+\+\+ b\/(.+)$/m);
     if (!plus) continue;
-    const file = plus[1]?.trim() ?? '';
+    const file: string = plus[1]?.trim() ?? '';
     if (file.length === 0) continue;
-    const hunkIndex = block.indexOf('\n@@');
-    const hunks = hunkIndex >= 0 ? block.slice(hunkIndex + 1) : '';
+    const hunkIndex: number = block.indexOf('\n@@');
+    const hunks: string = hunkIndex >= 0 ? block.slice(hunkIndex + 1) : '';
     rows.push(hunks.length > 0 ? { file, hunks } : { file });
   }
   return rows;

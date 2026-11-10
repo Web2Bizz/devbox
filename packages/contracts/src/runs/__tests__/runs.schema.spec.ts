@@ -7,6 +7,7 @@ import {
   runStreamFrameSchema,
   toolViewSchema,
 } from '../runs.schema';
+import { sendMessageRequestSchema } from '../../sessions/sessions.schema';
 
 const projectId = '0199c5b6-7c8f-7a1b-9d2e-1f2a3b4c5d6e';
 const runId = '0199c5b6-7c8f-7a1b-9d2e-1f2a3b4c5d6f';
@@ -26,6 +27,20 @@ const validRunInfo = {
   createdAt: '2026-11-05T10:00:00.000Z',
   updatedAt: '2026-11-05T10:00:00.000Z',
 };
+
+describe('sendMessageRequestSchema', () => {
+  const base = { projectId, text: 'hello' };
+
+  test('accepts mode auto|ask and omitted mode (default auto)', () => {
+    expect(sendMessageRequestSchema.safeParse({ ...base, mode: 'auto' }).success).toBe(true);
+    expect(sendMessageRequestSchema.safeParse({ ...base, mode: 'ask' }).success).toBe(true);
+    expect(sendMessageRequestSchema.safeParse(base).success).toBe(true);
+  });
+
+  test('rejects an unknown mode', () => {
+    expect(sendMessageRequestSchema.safeParse({ ...base, mode: 'hack' }).success).toBe(false);
+  });
+});
 
 describe('createRunRequestSchema', () => {
   test('accepts a project-scoped run create', () => {

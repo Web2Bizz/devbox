@@ -1,21 +1,32 @@
 import { z } from "zod";
 
 /** Шаблон идентификатора агента без спецсимволов */
-export const agentIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+export const agentIdPattern: RegExp = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 /** Шаблон имени инструмента без спецсимволов */
-export const toolNamePattern = /^[A-Za-z0-9_.-]+$/;
+export const toolNamePattern: RegExp = /^[A-Za-z0-9_.-]+$/;
 /** Шаблон имени модели без спецсимволов */
-export const modelNamePattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
+export const modelNamePattern: RegExp = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
 /** Шаблон значения effort без спецсимволов */
-export const effortValuePattern = /^[a-z0-9][a-z0-9_-]*$/i;
+export const effortValuePattern: RegExp = /^[a-z0-9][a-z0-9_-]*$/i;
 /** Шаблон имени агента без спецсимволов */
-export const agentNamePattern = /^[\p{L}\p{N} _.-]+$/u;
+export const agentNamePattern: RegExp = /^[\p{L}\p{N} _.-]+$/u;
 
 /** Роль отправителя сообщения диалога модели */
-export const agentRoleSchema = z.enum(["system", "user", "assistant"]);
+export const agentRoleSchema: z.ZodEnum<{
+  system: "system";
+  user: "user";
+  assistant: "assistant";
+}> = z.enum(["system", "user", "assistant"]);
 
 /** Сообщение диалога для модели генерации */
-export const agentMessageSchema = z.object({
+export const agentMessageSchema: z.ZodObject<{
+  role: z.ZodEnum<{
+    system: "system";
+    user: "user";
+    assistant: "assistant";
+  }>;
+  content: z.ZodString;
+}> = z.object({
   /** Роль отправителя этого сообщения диалога */
   role: agentRoleSchema,
   /** Текст содержимого этого сообщения диалога */
@@ -26,7 +37,17 @@ export const agentMessageSchema = z.object({
 export type AgentMessage = z.infer<typeof agentMessageSchema>;
 
 /** Опции создания нового экземпляра агента */
-export const agentBaseOptionsSchema = z
+export const agentBaseOptionsSchema: z.ZodObject<{
+  id: z.ZodString;
+  name: z.ZodString;
+  description: z.ZodString;
+  systemPrompt: z.ZodString;
+  allowedTools: z.ZodOptional<z.ZodReadonly<z.ZodArray<z.ZodString>>>;
+  deniedTools: z.ZodOptional<z.ZodReadonly<z.ZodArray<z.ZodString>>>;
+  models: z.ZodReadonly<z.ZodArray<z.ZodString>>;
+  model: z.ZodOptional<z.ZodString>;
+  effort: z.ZodOptional<z.ZodReadonly<z.ZodArray<z.ZodString>>>;
+}> = z
   .object({
     /** Уникальный идентификатор агента для реестра */
     id: z
@@ -94,20 +115,23 @@ export const agentBaseOptionsSchema = z
       .readonly()
       .optional(),
   })
-  .superRefine((options, ctx) => {
-    const model = options.model ?? options.models[0];
+  // type: contextual — zod's own `superRefine` callback types (`output<this>`
+  // and `$RefinementCtx<output<this>>`) cannot be restated by an explicit
+  // annotation while the schema const itself is still being declared.
+  .superRefine((options, context) => {
+    const model: string | undefined = options.model ?? options.models[0];
     if (model && !options.models.includes(model)) {
-      ctx.addIssue({
+      context.addIssue({
         code: "custom",
         message: `Model '${model}' is not supported`,
         path: ["model"],
       });
     }
-    const allowed = options.allowedTools ?? [];
-    const denied = options.deniedTools ?? [];
-    const conflict = allowed.filter((tool) => denied.includes(tool));
+    const allowed: ReadonlyArray<string> = options.allowedTools ?? [];
+    const denied: ReadonlyArray<string> = options.deniedTools ?? [];
+    const conflict: Array<string> = allowed.filter((tool) => denied.includes(tool));
     if (conflict.length > 0) {
-      ctx.addIssue({
+      context.addIssue({
         code: "custom",
         message: `Tools denied and allowed: ${conflict.join(", ")}`,
         path: ["deniedTools"],
@@ -119,7 +143,11 @@ export const agentBaseOptionsSchema = z
 export type AgentBaseOptions = z.infer<typeof agentBaseOptionsSchema>;
 
 /** Параметры одного вызова агента */
-export const agentCallOptionsSchema = z.object({
+export const agentCallOptionsSchema: z.ZodObject<{
+  messages: z.ZodOptional<z.ZodReadonly<z.ZodArray<typeof agentMessageSchema>>>;
+  model: z.ZodOptional<z.ZodString>;
+  effort: z.ZodOptional<z.ZodString>;
+}> = z.object({
   /** История диалога для этого вызова */
   messages: z.array(agentMessageSchema).max(100).readonly().optional(),
   /** Модель для этого вызова */
@@ -166,7 +194,7 @@ export abstract class AgentBase {
 
   /** Создаёт агента из заданных опций */
   protected constructor(options: AgentBaseOptions) {
-    const parsed = agentBaseOptionsSchema.parse(options);
+    const parsed: AgentBaseOptions = agentBaseOptionsSchema.parse(options);
     this.id = parsed.id;
     this.name = parsed.name;
     this.description = parsed.description;
@@ -195,7 +223,7 @@ export abstract class AgentBase {
 
   /** Проверяет модель для этого вызова */
   protected resolveModel(override?: string): string {
-    const model = override ?? this.defaultModel;
+    const model: string = override ?? this.defaultModel;
     if (!modelNamePattern.test(model)) {
       throw new Error(`Model '${model}' has forbidden characters`);
     }
@@ -227,7 +255,10 @@ export abstract class AgentBase {
     input: string,
     history: ReadonlyArray<AgentMessage> = [],
   ): ReadonlyArray<AgentMessage> {
-    const parsed = z.array(agentMessageSchema).max(100).parse([...history]);
+    const parsed: Array<AgentMessage> = z
+      .array(agentMessageSchema)
+      .max(100)
+      .parse([...history]);
     return [
       { role: "system", content: this.systemPrompt },
       ...parsed,

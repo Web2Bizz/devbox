@@ -324,9 +324,9 @@ async function main(): Promise<void> {
   const originalResolveOrgStrict = pathsProto.resolveOrgStrict;
   const originalRealStrictRoot = pathsProto.realStrictRoot;
   const originalAssertInsideJail = pathsProto.assertInsideJail;
-  pathsProto.resolveOrgStrict = async () => ({ absRepo: JAIL_DIR });
+  pathsProto.resolveOrgStrict = async () => ({ absoluteRepo: JAIL_DIR });
   pathsProto.realStrictRoot = async () => E2E_ROOT;
-  pathsProto.assertInsideJail = async (abs: string) => abs;
+  pathsProto.assertInsideJail = async (absolutePath: string) => absolutePath;
 
   // AppLogger capture (keys.e2e reference): warn/error stay one-liners and no
   // authorization material or unserialized object ever reaches a log line.

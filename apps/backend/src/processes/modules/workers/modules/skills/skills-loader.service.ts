@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { ToolView } from '@rush-code/contracts';
-import { AppLogger, serializeCause } from '../../../../../common/logger';
+import { AppLogger, serializeCause } from '@common/logger';
 import { parseFrontmatter } from './frontmatter';
 import {
   ForbiddenToolError,
@@ -12,20 +12,27 @@ import {
   type SkillEffect,
 } from './skill.types';
 
-const execFileAsync = promisify(execFile);
+/** Promisified `execFile` narrowed to the call shape this service uses. */
+type ExecFileAsync = (
+  file: string,
+  args: ReadonlyArray<string>,
+  options?: { cwd?: string; timeout?: number; maxBuffer?: number },
+) => Promise<{ stdout: string; stderr: string }>;
+
+const execFileAsync: ExecFileAsync = promisify(execFile);
 
 /** Hard limits of one skill definition (metadata stays cheap, body bounded). */
-const MAX_NAME = 64;
-const MAX_DESCRIPTION = 1024;
+const MAX_NAME: number = 64;
+const MAX_DESCRIPTION: number = 1024;
 /** ~4 chars per token — the same rough estimate the rest of the harness uses. */
-const MAX_BODY_TOKENS = 5000;
-const SKILLS_DIR = 'skills';
+const MAX_BODY_TOKENS: number = 5000;
+const SKILLS_DIR: string = 'skills';
 
-const SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
-const COMMIT_SHA_PATTERN = /^[0-9a-f]{7,40}$/i;
+const SKILL_NAME_PATTERN: RegExp = /^[a-z0-9][a-z0-9-]*$/;
+const COMMIT_SHA_PATTERN: RegExp = /^[0-9a-f]{7,40}$/i;
 
-const GIT_TIMEOUT_MS = 5000;
-const GIT_MAX_BUFFER = 1024 * 1024;
+const GIT_TIMEOUT_MS: number = 5000;
+const GIT_MAX_BUFFER: number = 1024 * 1024;
 
 /**
  * SkillLoader — repository skills, pinned by the run's definition set.
@@ -54,9 +61,10 @@ export class SkillLoader {
 
   /** Parses one SKILL.md (metadata validation + body budget + read effect). */
   parseSkill(raw: string): LoadedSkill {
-    const { meta, body } = parseFrontmatter(raw);
+    const { meta, body }: { meta: Record<string, unknown>; body: string } =
+      parseFrontmatter(raw);
 
-    const name = typeof meta.name === 'string' ? meta.name.trim() : '';
+    const name: string = typeof meta.name === 'string' ? meta.name.trim() : '';
     if (name.length === 0 || name.length > MAX_NAME || !SKILL_NAME_PATTERN.test(name)) {
       throw new Error('skill name must be a slug of 1-64 chars');
     }
@@ -64,12 +72,12 @@ export class SkillLoader {
     if (typeof meta.description !== 'string') {
       throw new Error('skill description is required');
     }
-    const description = meta.description.trim();
+    const description: string = meta.description.trim();
     if (description.length > MAX_DESCRIPTION) {
       throw new Error('skill description exceeds 1024 chars');
     }
 
-    const allowedTools = this.parseAllowedTools(meta.allowedTools);
+    const allowedTools: ReadonlyArray<string> = this.parseAllowedTools(meta.allowedTools);
     if (body.length / 4 > MAX_BODY_TOKENS) {
       throw new Error('skill body exceeds 5000 token budget');
     }
@@ -89,17 +97,21 @@ export class SkillLoader {
    * `commitSha` must be a real sha (never a ref): a moving ref would defeat the
    * pinning guarantee the journal records as `definitionSetHash`.
    */
-  async loadForRun(repoDir: string, commitSha: string, baseSystem = ''): Promise<SkillBundle> {
+  async loadForRun(
+    repositoryDirectory: string,
+    commitSha: string,
+    baseSystem: string = '',
+  ): Promise<SkillBundle> {
     if (!COMMIT_SHA_PATTERN.test(commitSha)) {
       throw new Error('definitionSetHash must pin a commit sha');
     }
 
-    const listing = await this.git(repoDir, [
+    const listing: string = await this.git(repositoryDirectory, [
       'ls-tree',
       '--name-only',
       `${commitSha}:${SKILLS_DIR}`,
     ]).catch(() => '');
-    const entries = listing
+    const entries: Array<string> = listing
       .split('\n')
       .map((entry) => entry.trim())
       .filter((entry) => entry.length > 0);
@@ -111,23 +123,25 @@ export class SkillLoader {
 
     const skills: Array<LoadedSkill> = [];
     for (const entry of entries) {
-      const name = path.basename(entry);
+      const name: string = path.basename(entry);
       if (!SKILL_NAME_PATTERN.test(name)) {
         this.logger.warn(`[workers] skill skipped name=${name}`, '');
         continue;
       }
 
-      const raw = await this.git(repoDir, ['show', `${commitSha}:${SKILLS_DIR}/${name}/SKILL.md`])
-        .catch((err: unknown) => {
-          // A skill directory without SKILL.md must not take the run down.
-          this.logger.warn(`[workers] skill skipped name=${name}`, '');
-          this.logger.debug(serializeCause(err), '');
-          return null;
-        });
+      const raw: string | null = await this.git(repositoryDirectory, [
+        'show',
+        `${commitSha}:${SKILLS_DIR}/${name}/SKILL.md`,
+      ]).catch((error: unknown) => {
+        // A skill directory without SKILL.md must not take the run down.
+        this.logger.warn(`[workers] skill skipped name=${name}`, '');
+        this.logger.debug(serializeCause(error), '');
+        return null;
+      });
       if (raw === null) continue;
 
-      const skill = this.parseSkill(raw);
-      const scripts = await this.git(repoDir, [
+      const skill: LoadedSkill = this.parseSkill(raw);
+      const scripts: string = await this.git(repositoryDirectory, [
         'ls-tree',
         '--name-only',
         `${commitSha}:${SKILLS_DIR}/${name}/scripts`,
@@ -137,8 +151,8 @@ export class SkillLoader {
       skills.push({ meta: skill.meta, body: skill.body, effects });
     }
 
-    const allowedTools = new Set<string>();
-    const effects = new Set<SkillEffect>();
+    const allowedTools: Set<string> = new Set<string>();
+    const effects: Set<SkillEffect> = new Set<SkillEffect>();
     for (const skill of skills) {
       for (const toolId of skill.meta.allowedTools) allowedTools.add(toolId);
       for (const effect of skill.effects) effects.add(effect);
@@ -181,9 +195,10 @@ export class SkillLoader {
   }
 
   /** One git invocation (execFile, no shell, bounded output) → trimmed stdout. */
-  private async git(repoDir: string, args: Array<string>): Promise<string> {
+  private async git(repositoryDirectory: string, args: Array<string>): Promise<string> {
+    // Destructuring an upstream exec result — explicit annotation cannot be expressed here.
     const { stdout } = await execFileAsync('git', args, {
-      cwd: repoDir,
+      cwd: repositoryDirectory,
       timeout: GIT_TIMEOUT_MS,
       maxBuffer: GIT_MAX_BUFFER,
     });

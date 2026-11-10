@@ -225,10 +225,10 @@ async function main(): Promise<void> {
     ProjectAccessService.prototype as unknown as { assertProjectAccess: unknown }
   ).assertProjectAccess = async () => undefined;
   const pathsProto = WorkspacePathService.prototype as unknown as Record<string, unknown>;
-  pathsProto.resolveOrgStrict = async () => ({ absRepo: JAIL_DIR });
-  pathsProto.resolveOrg = async () => ({ abs: JAIL_DIR, rel: '.' });
+  pathsProto.resolveOrgStrict = async () => ({ absoluteRepo: JAIL_DIR });
+  pathsProto.resolveOrg = async () => ({ absolutePath: JAIL_DIR, relativePath: '.' });
   pathsProto.realStrictRoot = async () => '/tmp/rush-code-e2e-root';
-  pathsProto.assertInsideJail = async (abs: string) => abs;
+  pathsProto.assertInsideJail = async (absolutePath: string) => absolutePath;
 
   // AppLogger capture: warn/error stay one-liners, secrets never appear.
   const logged: Array<{ method: string; text: string }> = [];

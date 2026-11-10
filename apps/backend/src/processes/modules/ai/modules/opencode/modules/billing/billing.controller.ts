@@ -10,13 +10,10 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagg
 import { JwtAuthGuard } from "../../../../../../../auth/jwt-auth.guard";
 import type { RequestIdentity } from "../../../../../../../auth/identity.service";
 import { ReqUser } from "../../../../../../../auth/req-user.decorator";
-import { AppLogger } from "../../../../../../../common/logger";
-import { BillingService } from "./billing.service";
-import { OpencodeUsageDto } from "../../keys.dto";
-
-function isUserId(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
-}
+import { AppLogger } from "@common/logger";
+import { uuidSchema } from "@common/validation";
+import { BillingService, type BillingUsage } from "./billing.service";
+import { BillingUsageDto } from "./billing.dto";
 
 /**
  * BillingController — the caller's live OpenCode usage (billing domain).
@@ -33,7 +30,7 @@ function isUserId(value: string): boolean {
  *   503 EXTERNAL_UNAVAILABLE with Retry-After 30, fixed message
  *   «сервис временно недоступен, повторите позже», never a mock 200).
  */
-@ApiTags("opencode-keys")
+@ApiTags("usage")
 @ApiBearerAuth()
 @Controller()
 @UseGuards(JwtAuthGuard)
@@ -44,7 +41,7 @@ export class BillingController {
   ) {}
 
   private ownUserId(identity: RequestIdentity): string {
-    if (!isUserId(identity.id)) {
+    if (!uuidSchema.safeParse(identity.id).success) {
       throw new UnauthorizedException({
         code: "unauthorized",
         message: "Authentication required",
@@ -56,7 +53,7 @@ export class BillingController {
   @Get("usage")
   @HttpCode(200)
   @ApiOperation({ summary: "Live OpenCode balance+usage for your stored key" })
-  @ApiResponse({ status: 200, type: OpencodeUsageDto })
+  @ApiResponse({ status: 200, type: BillingUsageDto })
   @ApiResponse({ status: 401, description: "missing/invalid bearer or rejected key" })
   @ApiResponse({ status: 404, description: "no key stored (opencode_key_missing)" })
   @ApiResponse({ status: 429, description: "upstream rate limit (EXTERNAL_RATE_LIMITED, Retry-After)" })
@@ -65,11 +62,14 @@ export class BillingController {
   @ApiResponse({ status: 504, description: "upstream timeout (EXTERNAL_TIMEOUT, Retry-After)" })
   async usage(
     @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
-  ): Promise<OpencodeUsageDto> {
-    const correlationId = req?.correlationId;
-    const out = await this.billing.getUsage(this.ownUserId(identity), correlationId);
+    @Req() request?: { correlationId?: string },
+  ): Promise<BillingUsageDto> {
+    const correlationId: string | undefined = request?.correlationId;
+    const output: BillingUsage = await this.billing.getUsage(
+      this.ownUserId(identity),
+      correlationId,
+    );
     this.logger.debug("[opencode-billing] usage ok", correlationId);
-    return out;
+    return output;
   }
 }

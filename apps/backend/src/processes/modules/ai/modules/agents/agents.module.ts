@@ -10,10 +10,11 @@ import { FullstackAgent } from './fullstack.agent';
 import { SubagentJobService } from './modules/subagent/subagent-job.service';
 
 /**
- * AgentsModule — registry of AI agents (Ask answers through the harness-owned
- * runner behind the caller's key, Backend/Frontend/Fullstack with domain
- * system prompts, Auto chains via the Jev-routed domain executor;
- * SessionRunnerService comes from the global CommonModule, no import needed).
+ * AgentsModule — registry of AI agents (Ask answers through the model chain
+ * router behind the caller's per-user key, Backend/Frontend/Fullstack with
+ * domain system prompts, Auto chains via the Jev-routed domain executor).
+ * VaultService/CryptoService come from the global CommonModule and
+ * OpencodeModelFetch from the global OpencodeModule, no import needed.
  */
 @Module({
   controllers: [AgentsController],

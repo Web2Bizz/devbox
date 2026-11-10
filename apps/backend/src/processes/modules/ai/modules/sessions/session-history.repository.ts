@@ -1,20 +1,27 @@
 import { Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
-import { DbService, dbUnavailable } from '../../../../../common/db/db.service';
+import { DbService, dbUnavailable } from '@common/db/db.service';
 import {
   projectSessions,
   sessionAgents,
   sessionMessages,
-} from '../../../../../common/db/schema';
-import { AppLogger } from '../../../../../common/logger';
+} from '@common/db/schema';
+import { AppLogger } from '@common/logger';
+import { uuidSchema } from '@common/validation';
 import type { SessionInfo, SessionMessage } from './sessions.dto';
 
-/**
- * `project_sessions.id` is a uuid column. Only a value matching this shape may
- * be used as an update key; upstream session ids (`ses_*`) never do.
- */
-const LOCAL_SESSION_ID =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Durable registry row joined with the stored agent (list read shape). */
+type SessionRegistryRow = {
+  id: string;
+  projectId: string;
+  metadata: Record<string, unknown> | null;
+  createdAt: Date;
+  updatedAt: Date;
+  agentId: string | null;
+};
+
+/** Selected metadata-only row (bindings / owner lookups). */
+type SessionMetadataRow = { metadata: Record<string, unknown> | null };
 
 /**
  * Durable session history — the ONLY place the sessions domain touches
@@ -24,7 +31,7 @@ const LOCAL_SESSION_ID =
  * thread — user receipts and assistant text answers (`role` user/assistant,
  * `text` non-empty). Reasoning (`session.reasoning.*`) and tool lifecycle
  * (`session.tool.*`) are live-only SSE detail: they stream project-scoped
- * via SessionHarnessService.streamEvents, are never appended here, and do
+ * via SessionStreamService.streamEvents, are never appended here, and do
  * not survive reload. Reload refetches this durable thread (REST) while the
  * live trace restarts empty — an explicit product decision, not a loss.
  *
@@ -39,7 +46,7 @@ const LOCAL_SESSION_ID =
  * backend restart no longer drops it.
  *
  * Every method maps Postgres failures through `dbUnavailable` (503
- * EXTERNAL_UNAVAILABLE, logged once with the caller cid) — there is no
+ * EXTERNAL_UNAVAILABLE, logged once with the caller correlationId) — there is no
  * silent fallback to process memory.
  */
 @Injectable()
@@ -81,14 +88,14 @@ export class SessionHistoryRepository {
       // it makes Postgres raise 22P02, which `dbUnavailable` would surface as
       // a 503. Non-uuid ids are therefore a deliberate no-op (nothing to bump
       // — upstream sessions have no local registry row).
-      if (LOCAL_SESSION_ID.test(row.sessionId)) {
+      if (uuidSchema.safeParse(row.sessionId).success) {
         await this.db.client
           .update(projectSessions)
           .set({ updatedAt: new Date() })
           .where(eq(projectSessions.id, row.sessionId));
       }
-    } catch (err) {
-      dbUnavailable('sessionMessagesAppend', err, this.logger);
+    } catch (error) {
+      dbUnavailable('sessionMessagesAppend', error, this.logger);
     }
   }
 
@@ -99,34 +106,35 @@ export class SessionHistoryRepository {
         .update(sessionMessages)
         .set({ deletedAt: new Date() })
         .where(eq(sessionMessages.id, id));
-    } catch (err) {
-      dbUnavailable('sessionMessagesDiscard', err, this.logger);
+    } catch (error) {
+      dbUnavailable('sessionMessagesDiscard', error, this.logger);
     }
   }
 
   /** Live messages of one session, oldest first (soft-deleted rows hidden). */
   async listMessages(sessionId: string): Promise<Array<SessionMessage>> {
     try {
-      const rows = await this.db.client
-        .select({
-          id: sessionMessages.id,
-          role: sessionMessages.role,
-          createdAt: sessionMessages.createdAt,
-          text: sessionMessages.text,
-        })
-        .from(sessionMessages)
-        .where(
-          and(eq(sessionMessages.sessionId, sessionId), isNull(sessionMessages.deletedAt)),
-        )
-        .orderBy(asc(sessionMessages.createdAt));
+      const rows: Array<{ id: string; role: string; createdAt: Date; text: string }> =
+        await this.db.client
+          .select({
+            id: sessionMessages.id,
+            role: sessionMessages.role,
+            createdAt: sessionMessages.createdAt,
+            text: sessionMessages.text,
+          })
+          .from(sessionMessages)
+          .where(
+            and(eq(sessionMessages.sessionId, sessionId), isNull(sessionMessages.deletedAt)),
+          )
+          .orderBy(asc(sessionMessages.createdAt));
       return rows.map((row) => ({
         id: row.id,
         type: row.role,
         createdAt: row.createdAt.toISOString(),
         text: row.text,
       }));
-    } catch (err) {
-      dbUnavailable('sessionMessagesList', err, this.logger);
+    } catch (error) {
+      dbUnavailable('sessionMessagesList', error, this.logger);
     }
   }
 
@@ -140,35 +148,35 @@ export class SessionHistoryRepository {
           target: sessionAgents.sessionId,
           set: { agentId, projectId, updatedAt: new Date() },
         });
-    } catch (err) {
-      dbUnavailable('sessionAgentsSet', err, this.logger);
+    } catch (error) {
+      dbUnavailable('sessionAgentsSet', error, this.logger);
     }
   }
 
   /** Stored agent for one session (undefined → caller applies its default). */
   async getAgent(sessionId: string): Promise<string | undefined> {
     try {
-      const rows = await this.db.client
+      const rows: Array<{ agentId: string }> = await this.db.client
         .select({ agentId: sessionAgents.agentId })
         .from(sessionAgents)
         .where(eq(sessionAgents.sessionId, sessionId))
         .limit(1);
       return rows[0]?.agentId;
-    } catch (err) {
-      dbUnavailable('sessionAgentsGet', err, this.logger);
+    } catch (error) {
+      dbUnavailable('sessionAgentsGet', error, this.logger);
     }
   }
 
   /** Project-scoped session→agent map (one query for the session list). */
   async listAgents(projectId: string): Promise<Map<string, string>> {
     try {
-      const rows = await this.db.client
+      const rows: Array<{ sessionId: string; agentId: string }> = await this.db.client
         .select({ sessionId: sessionAgents.sessionId, agentId: sessionAgents.agentId })
         .from(sessionAgents)
         .where(eq(sessionAgents.projectId, projectId));
       return new Map(rows.map((row) => [row.sessionId, row.agentId]));
-    } catch (err) {
-      dbUnavailable('sessionAgentsList', err, this.logger);
+    } catch (error) {
+      dbUnavailable('sessionAgentsList', error, this.logger);
     }
   }
 
@@ -179,12 +187,15 @@ export class SessionHistoryRepository {
    */
   async setHostSessionId(sessionId: string, hostSessionId: string): Promise<void> {
     try {
-      const rows = await this.db.client
+      const rows: Array<SessionMetadataRow> = await this.db.client
         .select({ metadata: projectSessions.metadata })
         .from(projectSessions)
         .where(eq(projectSessions.id, sessionId))
         .limit(1);
-      const current = (rows[0]?.metadata ?? {}) as Record<string, unknown>;
+      const current: Record<string, unknown> = (rows[0]?.metadata ?? {}) as Record<
+        string,
+        unknown
+      >;
       await this.db.client
         .update(projectSessions)
         .set({
@@ -192,15 +203,15 @@ export class SessionHistoryRepository {
           updatedAt: new Date(),
         })
         .where(eq(projectSessions.id, sessionId));
-    } catch (err) {
-      dbUnavailable('sessionsSetHostId', err, this.logger);
+    } catch (error) {
+      dbUnavailable('sessionsSetHostId', error, this.logger);
     }
   }
 
   /** Host session id bound to our uuid (undefined → no embedded-host binding). */
   async getHostSessionId(sessionId: string, projectId?: string): Promise<string | undefined> {
     try {
-      const rows = await this.db.client
+      const rows: Array<SessionMetadataRow> = await this.db.client
         .select({ metadata: projectSessions.metadata })
         .from(projectSessions)
         .where(
@@ -213,12 +224,16 @@ export class SessionHistoryRepository {
               ),
         )
         .limit(1);
-      const meta = (rows[0]?.metadata ?? {}) as Record<string, unknown>;
-      return typeof meta.opencodeSessionId === 'string' && meta.opencodeSessionId.length > 0
-        ? meta.opencodeSessionId
+      const metadata: Record<string, unknown> = (rows[0]?.metadata ?? {}) as Record<
+        string,
+        unknown
+      >;
+      return typeof metadata.opencodeSessionId === 'string' &&
+        metadata.opencodeSessionId.length > 0
+        ? metadata.opencodeSessionId
         : undefined;
-    } catch (err) {
-      dbUnavailable('sessionsGetHostId', err, this.logger);
+    } catch (error) {
+      dbUnavailable('sessionsGetHostId', error, this.logger);
     }
   }
 
@@ -231,40 +246,41 @@ export class SessionHistoryRepository {
     hostSessionId: string,
   ): Promise<{ id: string; projectId: string; userId?: string } | undefined> {
     try {
-      const rows = await this.db.client
-        .select({
-          id: projectSessions.id,
-          projectId: projectSessions.projectId,
-          metadata: projectSessions.metadata,
-        })
-        .from(projectSessions)
-        .where(
-          and(
-            eq(projectSessions.origin, 'harness'),
-            isNull(projectSessions.deletedAt),
-            sql`${projectSessions.metadata} ->> 'opencodeSessionId' = ${hostSessionId}`,
-          ),
-        )
-        .limit(1);
-      const row = rows[0];
+      const rows: Array<{ id: string; projectId: string } & SessionMetadataRow> =
+        await this.db.client
+          .select({
+            id: projectSessions.id,
+            projectId: projectSessions.projectId,
+            metadata: projectSessions.metadata,
+          })
+          .from(projectSessions)
+          .where(
+            and(
+              eq(projectSessions.origin, 'harness'),
+              isNull(projectSessions.deletedAt),
+              sql`${projectSessions.metadata} ->> 'opencodeSessionId' = ${hostSessionId}`,
+            ),
+          )
+          .limit(1);
+      const row: { id: string; projectId: string } & SessionMetadataRow | undefined = rows[0];
       if (!row) return undefined;
-      const meta = (row.metadata ?? {}) as Record<string, unknown>;
+      const metadata: Record<string, unknown> = (row.metadata ?? {}) as Record<string, unknown>;
       return {
         id: row.id,
         projectId: row.projectId,
-        ...(typeof meta.userId === 'string' && meta.userId.length > 0
-          ? { userId: meta.userId }
+        ...(typeof metadata.userId === 'string' && metadata.userId.length > 0
+          ? { userId: metadata.userId }
           : {}),
       };
-    } catch (err) {
-      dbUnavailable('sessionsFindByHostId', err, this.logger);
+    } catch (error) {
+      dbUnavailable('sessionsFindByHostId', error, this.logger);
     }
   }
 
   /** Project-scoped reverse map: host session id → our durable uuid (SSE scope). */
   async listHostBindings(projectId: string): Promise<Map<string, string>> {
     try {
-      const rows = await this.db.client
+      const rows: Array<{ id: string } & SessionMetadataRow> = await this.db.client
         .select({ id: projectSessions.id, metadata: projectSessions.metadata })
         .from(projectSessions)
         .where(
@@ -274,16 +290,19 @@ export class SessionHistoryRepository {
             isNull(projectSessions.deletedAt),
           ),
         );
-      const map = new Map<string, string>();
+      const bindings: Map<string, string> = new Map<string, string>();
       for (const row of rows) {
-        const meta = (row.metadata ?? {}) as Record<string, unknown>;
-        if (typeof meta.opencodeSessionId === 'string' && meta.opencodeSessionId.length > 0) {
-          map.set(meta.opencodeSessionId, row.id);
+        const metadata: Record<string, unknown> = (row.metadata ?? {}) as Record<string, unknown>;
+        if (
+          typeof metadata.opencodeSessionId === 'string' &&
+          metadata.opencodeSessionId.length > 0
+        ) {
+          bindings.set(metadata.opencodeSessionId, row.id);
         }
       }
-      return map;
-    } catch (err) {
-      dbUnavailable('sessionsListHostBindings', err, this.logger);
+      return bindings;
+    } catch (error) {
+      dbUnavailable('sessionsListHostBindings', error, this.logger);
     }
   }
 
@@ -294,8 +313,8 @@ export class SessionHistoryRepository {
         .update(projectSessions)
         .set({ deletedAt: new Date(), updatedAt: new Date() })
         .where(eq(projectSessions.id, sessionId));
-    } catch (err) {
-      dbUnavailable('sessionsDiscard', err, this.logger);
+    } catch (error) {
+      dbUnavailable('sessionsDiscard', error, this.logger);
     }
   }
 
@@ -321,15 +340,15 @@ export class SessionHistoryRepository {
           origin: 'harness',
         })
         .onConflictDoNothing({ target: projectSessions.id });
-    } catch (err) {
-      dbUnavailable('sessionsSaveLocal', err, this.logger);
+    } catch (error) {
+      dbUnavailable('sessionsSaveLocal', error, this.logger);
     }
   }
 
   /** Harness-created sessions of a project, with their stored agent. */
   async listLocalSessions(projectId: string): Promise<Array<SessionInfo>> {
     try {
-      const rows = await this.db.client
+      const rows: Array<SessionRegistryRow> = await this.db.client
         .select({
           id: projectSessions.id,
           projectId: projectSessions.projectId,
@@ -351,15 +370,15 @@ export class SessionHistoryRepository {
         )
         .orderBy(desc(projectSessions.updatedAt), desc(projectSessions.createdAt));
       return rows.map((row) => this.toSessionInfo(row));
-    } catch (err) {
-      dbUnavailable('sessionsListLocal', err, this.logger);
+    } catch (error) {
+      dbUnavailable('sessionsListLocal', error, this.logger);
     }
   }
 
   /** Distinct session ids of a project that own durable messages (SSE scope). */
   async listSessionIdsWithMessages(projectId: string): Promise<Array<string>> {
     try {
-      const rows = await this.db.client
+      const rows: Array<{ sessionId: string }> = await this.db.client
         .selectDistinct({ sessionId: sessionMessages.sessionId })
         .from(sessionMessages)
         .where(
@@ -369,31 +388,24 @@ export class SessionHistoryRepository {
           ),
         );
       return rows.map((row) => row.sessionId);
-    } catch (err) {
-      dbUnavailable('sessionMessagesSessionIds', err, this.logger);
+    } catch (error) {
+      dbUnavailable('sessionMessagesSessionIds', error, this.logger);
     }
   }
 
   /** Durable project_sessions row + metadata → domain SessionInfo. */
-  private toSessionInfo(row: {
-    id: string;
-    projectId: string;
-    metadata: Record<string, unknown> | null;
-    createdAt: Date;
-    updatedAt: Date;
-    agentId: string | null;
-  }): SessionInfo {
-    const meta = (row.metadata ?? {}) as Record<string, unknown>;
+  private toSessionInfo(row: SessionRegistryRow): SessionInfo {
+    const metadata: Record<string, unknown> = (row.metadata ?? {}) as Record<string, unknown>;
     return {
       id: row.id,
-      title: typeof meta.title === 'string' ? meta.title : null,
+      title: typeof metadata.title === 'string' ? metadata.title : null,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
-      directory: typeof meta.directory === 'string' ? meta.directory : '',
+      directory: typeof metadata.directory === 'string' ? metadata.directory : '',
       projectId: row.projectId,
-      model: (meta.model ?? null) as SessionInfo['model'],
+      model: (metadata.model ?? null) as SessionInfo['model'],
       agentId: row.agentId ?? null,
-      status: (meta.status ?? { type: 'idle' }) as SessionInfo['status'],
+      status: (metadata.status ?? { type: 'idle' }) as SessionInfo['status'],
     };
   }
 }

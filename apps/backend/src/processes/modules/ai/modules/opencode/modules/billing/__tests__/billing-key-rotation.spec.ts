@@ -89,26 +89,83 @@ async function main(): Promise<void> {
     const crypto = new CryptoService();
 
     type StoredRow = {
-      userId: string;
+      id: string;
+      consumerKind: "user" | "org";
+      consumerId: string;
+      provider: string;
+      label: string;
       encryptedKey: string;
       iv: string;
       keyId: string;
+      createdAt: string;
       updatedAt: string;
     };
     const table = new Map<string, StoredRow>();
-    let saves = 0;
-    const fakeKeys = {
-      async save(
-        userId: string,
-        input: { encryptedKey: string; iv: string; keyId: string },
+    const key = (consumerId: string, provider: string) => `${consumerId}:${provider}`;
+    let rewraps = 0;
+    let nextId = 1;
+    const fakeVault = {
+      async create(
+        consumer: { kind: "user" | "org"; userId?: string; organizationId?: string },
+        input: {
+          provider: string;
+          label: string;
+          encryptedKey: string;
+          iv: string;
+          keyId: string;
+        },
       ): Promise<StoredRow> {
-        saves += 1;
-        const row: StoredRow = { userId, ...input, updatedAt: new Date().toISOString() };
-        table.set(userId, row);
+        const consumerId = consumer.kind === "user" ? (consumer.userId as string) : (consumer.organizationId as string);
+        const row: StoredRow = {
+          id: `secret-${nextId}`,
+          consumerKind: consumer.kind,
+          consumerId,
+          provider: input.provider,
+          label: input.label,
+          encryptedKey: input.encryptedKey,
+          iv: input.iv,
+          keyId: input.keyId,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        nextId += 1;
+        table.set(key(consumerId, input.provider), row);
         return row;
       },
-      async findByUserId(userId: string): Promise<StoredRow | null> {
-        return table.get(userId) ?? null;
+      async pickNext(
+        consumer: { kind: "user" | "org"; userId?: string; organizationId?: string },
+        provider: string,
+      ): Promise<StoredRow | null> {
+        const consumerId = consumer.kind === "user" ? (consumer.userId as string) : (consumer.organizationId as string);
+        return table.get(key(consumerId, provider)) ?? null;
+      },
+      async list(
+        consumer: { kind: "user" | "org"; userId?: string; organizationId?: string },
+        provider?: string,
+      ): Promise<Array<StoredRow>> {
+        const consumerId = consumer.kind === "user" ? (consumer.userId as string) : (consumer.organizationId as string);
+        return [...table.values()].filter(
+          (row) =>
+            row.consumerId === consumerId &&
+            (provider === undefined || row.provider === provider),
+        );
+      },
+      async rewrap(
+        _consumer: unknown,
+        id: string,
+        envelope: { encryptedKey: string; iv: string; keyId: string },
+      ): Promise<StoredRow | null> {
+        rewraps += 1;
+        for (const row of table.values()) {
+          if (row.id === id) {
+            row.encryptedKey = envelope.encryptedKey;
+            row.iv = envelope.iv;
+            row.keyId = envelope.keyId;
+            row.updatedAt = new Date().toISOString();
+            return row;
+          }
+        }
+        return null;
       },
     };
     let lastAuth: string | null = null;
@@ -124,7 +181,7 @@ async function main(): Promise<void> {
     };
 
     const billing = new BillingService(
-      fakeKeys as never,
+      fakeVault as never,
       crypto as never,
       fakeExternal as never,
     );
@@ -132,11 +189,16 @@ async function main(): Promise<void> {
 
     // PUT-like: encrypt first, persist ciphertext only.
     const enc = crypto.encrypt(PLAINTEXT);
-    const stored = await fakeKeys.save(userId, {
-      encryptedKey: enc.data,
-      iv: enc.iv,
-      keyId: enc.keyId,
-    });
+    const stored = await fakeVault.create(
+      { kind: "user", userId },
+      {
+        provider: "opencode",
+        label: "default",
+        encryptedKey: enc.data,
+        iv: enc.iv,
+        keyId: enc.keyId,
+      },
+    );
     assert.equal(stored.keyId, crypto.activeKeyId());
     assert.ok(!stored.encryptedKey.includes(PLAINTEXT));
     assert.ok(!stored.iv.includes(PLAINTEXT));
@@ -153,7 +215,7 @@ async function main(): Promise<void> {
     assert.ok(typeof out.updatedAt === "string" && out.updatedAt.length > 0);
     assert.equal(lastAuth, `Bearer ${PLAINTEXT}`);
     assert.ok(!JSON.stringify(out).includes(PLAINTEXT));
-    assert.equal(saves, 1);
+    assert.equal(rewraps, 0);
 
     // Missing key → 404 (no secret needed).
     assert.equal(await codeOfAsync(() => billing.getUsage("22222222-2222-4222-8222-222222222222")), "opencode_key_missing");
@@ -165,32 +227,68 @@ async function main(): Promise<void> {
     const staleEnc = staleCrypto.encrypt(PLAINTEXT);
 
     type StoredRow = {
-      userId: string;
+      id: string;
+      consumerKind: "user" | "org";
+      consumerId: string;
+      provider: string;
+      label: string;
       encryptedKey: string;
       iv: string;
       keyId: string;
+      createdAt: string;
       updatedAt: string;
     };
     const table = new Map<string, StoredRow>();
+    const key = (consumerId: string, provider: string) => `${consumerId}:${provider}`;
     const userId = "33333333-3333-4333-8333-333333333333";
-    table.set(userId, {
-      userId,
+    table.set(key(userId, "opencode"), {
+      id: "secret-stale",
+      consumerKind: "user",
+      consumerId: userId,
+      provider: "opencode",
+      label: "default",
       encryptedKey: staleEnc.data,
       iv: staleEnc.iv,
       keyId: "v1",
+      createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
-    const fakeKeys = {
-      async save(
-        uid: string,
-        input: { encryptedKey: string; iv: string; keyId: string },
-      ): Promise<StoredRow> {
-        const row: StoredRow = { userId: uid, ...input, updatedAt: new Date().toISOString() };
-        table.set(uid, row);
-        return row;
+    let rewraps = 0;
+    const fakeVault = {
+      async pickNext(
+        consumer: { kind: "user" | "org"; userId?: string; organizationId?: string },
+        provider: string,
+      ): Promise<StoredRow | null> {
+        const consumerId = consumer.kind === "user" ? (consumer.userId as string) : (consumer.organizationId as string);
+        return table.get(key(consumerId, provider)) ?? null;
       },
-      async findByUserId(uid: string): Promise<StoredRow | null> {
-        return table.get(uid) ?? null;
+      async list(
+        consumer: { kind: "user" | "org"; userId?: string; organizationId?: string },
+        provider?: string,
+      ): Promise<Array<StoredRow>> {
+        const consumerId = consumer.kind === "user" ? (consumer.userId as string) : (consumer.organizationId as string);
+        return [...table.values()].filter(
+          (row) =>
+            row.consumerId === consumerId &&
+            (provider === undefined || row.provider === provider),
+        );
+      },
+      async rewrap(
+        _consumer: unknown,
+        id: string,
+        envelope: { encryptedKey: string; iv: string; keyId: string },
+      ): Promise<StoredRow | null> {
+        rewraps += 1;
+        for (const row of table.values()) {
+          if (row.id === id) {
+            row.encryptedKey = envelope.encryptedKey;
+            row.iv = envelope.iv;
+            row.keyId = envelope.keyId;
+            row.updatedAt = new Date().toISOString();
+            return row;
+          }
+        }
+        return null;
       },
     };
     const fakeExternal = {
@@ -206,13 +304,13 @@ async function main(): Promise<void> {
     setKeyring(ACTIVE_B, { activeId: "v2", previous: ACTIVE_A, previousId: "v1" });
     try {
       const billing = new BillingService(
-        fakeKeys as never,
+        fakeVault as never,
         new CryptoService() as never,
         fakeExternal as never,
       );
       const out = await billing.getUsage(userId);
       assert.equal(out.balance, 42.5);
-      const converged = table.get(userId);
+      const converged = table.get(key(userId, "opencode"));
       assert.ok(converged);
       assert.equal(converged?.keyId, "v2");
       assert.equal(
@@ -226,7 +324,8 @@ async function main(): Promise<void> {
       // Second read stays on the active KEK (no further rotation needed).
       const again = await billing.getUsage(userId);
       assert.equal(again.usage, 7.25);
-      assert.equal(table.get(userId)?.keyId, "v2");
+      assert.equal(table.get(key(userId, "opencode"))?.keyId, "v2");
+      assert.equal(rewraps, 1);
     } finally {
       setKeyring(ACTIVE_A);
     }

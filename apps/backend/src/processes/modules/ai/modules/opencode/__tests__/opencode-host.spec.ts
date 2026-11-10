@@ -13,8 +13,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { AppLogger } from '../../../../../../common/logger';
-import { ExternalServiceError } from '../../../../../../common/external/external-error';
+import type { AppLogger } from '@common/logger';
+import { ExternalServiceError } from '@common/external/external-error';
 import { OpencodeHostService } from '../opencode-host.service';
 
 function silentLogger(): AppLogger {

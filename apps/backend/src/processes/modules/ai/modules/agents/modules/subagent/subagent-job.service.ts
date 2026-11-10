@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { AppLogger } from '../../../../../../../common/logger';
-import type { ToolSettlement } from '../../../tools/tool.types';
+import { AppLogger } from '@common/logger';
+import type { ToolSettlement } from '../../../tool-runtime/tool-runtime.types';
 import { AgentsService } from '../../agents.service';
-import { AgentRegistry } from '../../agents.registry';
+import { AgentRegistry, type AgentDefinition } from '../../agents.registry';
 
 /** One subagent job: which agent answers, the prompt and its owner. */
 export type SubagentJobRequest = {
@@ -30,11 +30,11 @@ export class SubagentJobService {
   ) {}
 
   async run(request: SubagentJobRequest): Promise<ToolSettlement> {
-    const agent = this.registry.resolve(request.agentId);
-    const callID = request.callID ?? Bun.randomUUIDv7();
-    const name = `subagent.${agent.id}`;
+    const agent: AgentDefinition = this.registry.resolve(request.agentId);
+    const callID: string = request.callID ?? Bun.randomUUIDv7();
+    const name: string = `subagent.${agent.id}`;
     try {
-      const answer = await this.agents.askQuestion(
+      const answer: string = await this.agents.askQuestion(
         agent.id,
         request.prompt,
         request.userId,
@@ -42,13 +42,13 @@ export class SubagentJobService {
       );
       this.logger.info(`[agents] subagent done agent=${agent.id}`, request.correlationId);
       return { callID, name, result: answer };
-    } catch (err) {
+    } catch (error) {
       this.logger.warn(`[agents] subagent failed agent=${agent.id}`, request.correlationId);
-      this.logger.debug(err instanceof Error ? err.message : 'unknown');
+      this.logger.debug(error instanceof Error ? error.message : 'unknown');
       return {
         callID,
         name,
-        result: `error: ${err instanceof Error ? err.message : 'subagent failed'}`,
+        result: `error: ${error instanceof Error ? error.message : 'subagent failed'}`,
       };
     }
   }

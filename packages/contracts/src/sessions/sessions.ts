@@ -157,6 +157,12 @@ export type SendMessageRequest = {
    * additive: without it the session keeps its stored agent (default 'ask').
    */
   agentId?: string;
+  /**
+   * Execution mode of this turn. Optional and additive: omitted = 'auto'.
+   * 'ask' is read-only: mutating tools are filtered at bind time and refused
+   * again by dispatch.
+   */
+  mode?: 'auto' | 'ask';
 };
 
 /**

@@ -4,7 +4,7 @@ import {
   type ModelGateway,
   type ModelMessage,
   type ModelRequest,
-} from '../model-gateway';
+} from '../model-gateway/model-gateway';
 
 /** Request of one run step (system + skills already resolved by the engine). */
 export type ExecutorRequest = {
@@ -18,7 +18,7 @@ export type ExecutorRequest = {
 /** Step-level executor (D-level seam: agents answer steps, ModelGateway is transport). */
 export type Executor = {
   readonly id: string;
-  stream(req: ExecutorRequest): AsyncIterable<ModelEvent>;
+  stream(request: ExecutorRequest): AsyncIterable<ModelEvent>;
 };
 
 /** Default executor: one gateway behind an agent id ('ask' in the prototype). */
@@ -28,7 +28,7 @@ export class ModelGatewayExecutor implements Executor {
     private readonly gateway: ModelGateway,
   ) {}
 
-  stream(req: ExecutorRequest): AsyncIterable<ModelEvent> {
-    return this.gateway.stream(req);
+  stream(request: ExecutorRequest): AsyncIterable<ModelEvent> {
+    return this.gateway.stream(request);
   }
 }

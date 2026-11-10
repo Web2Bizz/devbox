@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { z } from 'zod';
-import { WorkspacePathService } from '../../../../../common/storage/workspace-path.service';
-import { resolveToolPath } from './tool-jail';
-import type { ToolContext, ToolHandler } from './tool.types';
+import { WorkspacePathService } from '@common/storage/workspace-path.service';
+import { resolveToolPath } from './utils/tool-jail';
+import type { ToolContext, ToolDefinition, ToolHandler } from '../tool-runtime/tool-runtime.types';
 
-const inputSchema = z.object({
+const inputSchema: z.ZodType<{ patch: string }> = z.object({
   patch: z.string({ error: 'field "patch" is required' }).min(1),
 });
 
@@ -16,14 +16,14 @@ export type PatchSection = { file: string; hunks: Array<Hunk> };
 
 /** Split a unified diff into per-file sections (no filesystem access). */
 export function parseUnifiedPatch(patch: string): Array<PatchSection> {
-  const lines = patch.replace(/\r\n/g, '\n').split('\n');
+  const lines: Array<string> = patch.replace(/\r\n/g, '\n').split('\n');
   const sections: Array<PatchSection> = [];
   let current: PatchSection | null = null;
   let hunk: Hunk | null = null;
   for (const line of lines) {
     if (line.startsWith('+++ ')) {
-      const raw = line.slice(4).trim().split(/\s+/)[0] ?? '';
-      const file = raw.replace(/^[ab]\//, '');
+      const raw: string = line.slice(4).trim().split(/\s+/)[0] ?? '';
+      const file: string = raw.replace(/^[ab]\//, '');
       current = { file, hunks: [] };
       sections.push(current);
       hunk = null;
@@ -33,7 +33,7 @@ export function parseUnifiedPatch(patch: string): Array<PatchSection> {
       hunk = null;
       continue;
     }
-    const header = line.match(/^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@/);
+    const header: RegExpMatchArray | null = line.match(/^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@/);
     if (header) {
       hunk = { oldStart: Number(header[1]), lines: [] };
       if (!current) throw new Error('hunk without a file header');
@@ -41,7 +41,7 @@ export function parseUnifiedPatch(patch: string): Array<PatchSection> {
       continue;
     }
     if (!hunk) continue;
-    const kind = line.charAt(0);
+    const kind: string = line.charAt(0);
     if (kind === ' ' || kind === '-' || kind === '+') {
       hunk.lines.push({ kind: kind as HunkLine['kind'], text: line.slice(1) });
     }
@@ -51,38 +51,38 @@ export function parseUnifiedPatch(patch: string): Array<PatchSection> {
 
 /** Apply parsed hunks to one file body; strict context match, no fuzzing. */
 export function applyHunks(original: string, hunks: Array<Hunk>): string {
-  const source = original.split('\n');
-  const out: Array<string> = [];
-  let cursor = 0;
+  const source: Array<string> = original.split('\n');
+  const output: Array<string> = [];
+  let cursor: number = 0;
   for (const hunk of hunks) {
-    const start = Math.max(0, hunk.oldStart - 1);
+    const start: number = Math.max(0, hunk.oldStart - 1);
     if (start < cursor) throw new Error('overlapping hunks');
     while (cursor < start) {
-      out.push(source[cursor] as string);
+      output.push(source[cursor] as string);
       cursor += 1;
     }
     for (const line of hunk.lines) {
       if (line.kind === '+') {
-        out.push(line.text);
+        output.push(line.text);
         continue;
       }
       if (source[cursor] !== line.text) throw new Error('patch context mismatch');
-      if (line.kind === ' ') out.push(line.text);
+      if (line.kind === ' ') output.push(line.text);
       cursor += 1;
     }
   }
   while (cursor < source.length) {
-    out.push(source[cursor] as string);
+    output.push(source[cursor] as string);
     cursor += 1;
   }
-  return out.join('\n');
+  return output.join('\n');
 }
 
 /** patch — apply a unified diff to project files (strict, jail-checked). */
 @Injectable()
 export class PatchTool implements ToolHandler {
-  readonly fullName = 'patch';
-  readonly definition = {
+  readonly fullName: string = 'patch';
+  readonly definition: ToolDefinition = {
     name: 'patch',
     description: 'Apply a unified diff to project files (strict context match).',
     inputSchema: {
@@ -95,26 +95,30 @@ export class PatchTool implements ToolHandler {
   constructor(private readonly paths: WorkspacePathService) {}
 
   async execute(input: unknown, context: ToolContext): Promise<string> {
-    const parsed = inputSchema.safeParse(input);
+    const parsed: z.ZodSafeParseResult<{ patch: string }> = inputSchema.safeParse(input);
     if (!parsed.success) return 'error: invalid input, expected { patch: string }';
     let sections: Array<PatchSection>;
     try {
       sections = parseUnifiedPatch(parsed.data.patch);
-    } catch (err) {
-      return `error: ${(err as Error).message}`;
+    } catch (error) {
+      return `error: ${(error as Error).message}`;
     }
     if (sections.length === 0) return 'error: patch carries no file sections';
     const applied: Array<string> = [];
     for (const section of sections) {
-      const abs = await resolveToolPath(this.paths, context.directory, section.file);
-      const original = await this.paths.readFile(abs);
+      const absolute: string = await resolveToolPath(
+        this.paths,
+        context.directory,
+        section.file,
+      );
+      const original: string = await this.paths.readFile(absolute);
       let updated: string;
       try {
         updated = applyHunks(original, section.hunks);
-      } catch (err) {
-        return `error: ${section.file}: ${(err as Error).message}`;
+      } catch (error) {
+        return `error: ${section.file}: ${(error as Error).message}`;
       }
-      await this.paths.writeFile(abs, updated);
+      await this.paths.writeFile(absolute, updated);
       applied.push(section.file);
     }
     return `patched ${applied.join(', ')}`;

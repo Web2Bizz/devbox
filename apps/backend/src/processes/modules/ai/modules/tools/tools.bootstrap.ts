@@ -6,8 +6,8 @@ import { PatchTool } from './patch.tool';
 import { ReadTool } from './read.tool';
 import { ShellTool } from './shell.tool';
 import { TodoTool } from './todo.tool';
-import { ToolRegistryService } from './tool-registry.service';
-import type { ToolHandler } from './tool.types';
+import { ToolRegistryService } from '../tool-registry/tool-registry.service';
+import type { ToolHandler } from '../tool-runtime/tool-runtime.types';
 import { WriteTool } from './write.tool';
 
 /**

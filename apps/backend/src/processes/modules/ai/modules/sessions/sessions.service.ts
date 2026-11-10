@@ -1,5 +1,21 @@
-import { Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  HttpException,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
+import { ProjectAccessService } from '../../../../../organizations/modules/projects/modules/project-access/project-access.service';
+import {
+  ExternalServiceError,
+  fromUnknown,
+} from '@common/external/external-error';
+import { AppLogger } from '@common/logger';
+import { AgentsService } from '../agents/agents.service';
+import { OpencodeHostService, type HostSessionInfo } from '../opencode/opencode-host.service';
+import { ServeAuthService } from '../opencode/modules/auth/serve-auth.service';
 import type {
   CreateSessionInput,
   InterruptSessionInput,
@@ -12,107 +28,426 @@ import type {
   SessionInterruptResult,
   SessionMessage,
   SessionRunStatusMap,
+  SessionModel,
   SessionRunnerProvider,
   SnapshotDiff,
 } from './sessions.dto';
-import { SessionHarnessService } from './session-harness.service';
+import type { GatedProjectScope } from './sessions.types';
+import { SessionHistoryRepository } from './session-history.repository';
+import { SessionFrameBufferService } from './modules/events/session-frame-buffer.service';
+import { SessionStreamService } from './modules/events/session-stream.service';
+import { SessionInventoryService } from './modules/inventory/session-inventory.service';
+import { SessionMessagingService } from './modules/messaging/session-messaging.service';
+import { SessionRuntimeStateService } from './modules/state/session-runtime-state.service';
+import { TurnWorkspaceService } from './modules/workspace/turn-workspace.service';
 
 /**
- * SessionsService — thin domain facade behind /api/v1/sessions*.
+ * SessionsService — the sessions DOMAIN orchestrator behind /api/v1/sessions*.
  *
- * Card 1 (harness-core): all orchestration (create/send/interrupt/status,
- * transport + opencode → Rush Code translation) lives in
- * SessionHarnessService behind the SessionHarness interface; this service
- * keeps the stable domain method names the controller calls so the
- * sessions/* contract and the SSE events shape stay frozen (back-compat).
- * No transport imports here — the embedded OpenCode host
- * (OpencodeHostService) is owned solely by the harness. The project directory
- * jail rides ProjectAccessService.resolveProjectDirectory.
+ * Owns only the domain decisions: the C4 gate + auth order, the durable
+ * registry/thread (SessionHistoryRepository), and the frozen wire shapes.
+ * Work is delegated to the domain zones:
+ * - messaging (SessionMessagingService) — file commands / direct / host turns;
+ * - streaming (SessionStreamService) — SSE re-stream of the host bus;
+ * - inventory (SessionInventoryService) — provider/model projections;
+ * - workspace (TurnWorkspaceService) — snapshots, staged revert, diffs;
+ * - runtime state (SessionRuntimeStateService) + live frames
+ *   (SessionFrameBufferService) — in-process only, never durable.
+ *
+ * No parsers, no buffers, no recorder, no git calls live here. Durable
+ * Postgres history stays the source of truth for list/thread; the embedded
+ * OpenCode host is reached only through the zones. Logs ride AppLogger
+ * one-liners without URLs/secrets/stacks.
  */
 @Injectable()
 export class SessionsService {
-  constructor(private readonly harness: SessionHarnessService) {}
+  constructor(
+    private readonly host: OpencodeHostService,
+    private readonly access: ProjectAccessService,
+    private readonly auth: ServeAuthService,
+    private readonly history: SessionHistoryRepository,
+    private readonly stream: SessionStreamService,
+    private readonly messaging: SessionMessagingService,
+    private readonly inventory: SessionInventoryService,
+    private readonly workspace: TurnWorkspaceService,
+    private readonly state: SessionRuntimeStateService,
+    private readonly buffer: SessionFrameBufferService,
+    @Optional() private readonly agents?: AgentsService,
+    private readonly logger: AppLogger = new AppLogger(SessionsService.name),
+  ) {}
 
-  /** GET /api/v1/sessions?projectId — list scoped to the gated jail. */
-  async list(userId: string, projectId: string | undefined, cid: string): Promise<Array<SessionInfo>> {
-    return this.harness.list(userId, projectId, cid);
+  /** Same non-negative-integer query guard the mirror uses for ?limit. */
+  private parseLimit(limitRaw?: string): number | undefined {
+    if (limitRaw === undefined) return undefined;
+    const limit: number = Number(limitRaw);
+    if (!Number.isInteger(limit) || limit < 0) {
+      throw new BadRequestException('Query "limit" must be a non-negative integer');
+    }
+    return limit;
   }
 
-  /** GET /api/v1/sessions/status?projectId — sessionId → derived runtime status. */
+  /** Non-negative integer query guard for ?context (git -U). */
+  private parseContext(contextRaw?: string): number | undefined {
+    if (contextRaw === undefined) return undefined;
+    const context: number = Number(contextRaw);
+    if (!Number.isInteger(context) || context < 0 || context > 10) {
+      throw new BadRequestException('Query "context" must be an integer between 0 and 10');
+    }
+    return context;
+  }
+
+  /** Validate a client-supplied agentId against the registry (honest 404). */
+  private resolveAgentId(agentId: string | undefined, correlationId: string): string | undefined {
+    if (agentId === undefined) return undefined;
+    const known: boolean = this.agents?.list().some((agent) => agent.id === agentId) ?? false;
+    if (!known) {
+      this.logger.warn(`[sessions] unknown agent agentId=${agentId}`, correlationId);
+      throw new NotFoundException(`Agent '${agentId}' not found`);
+    }
+    return agentId;
+  }
+
+  /** Drop a staged row without masking the original failure (best effort). */
+  private async discardQuietly(sessionId: string, correlationId: string): Promise<void> {
+    try {
+      await this.history.discardSession(sessionId);
+    } catch (error) {
+      this.logger.warn('[sessions] rollback failed', correlationId);
+      this.logger.debug((error as Error).message, correlationId);
+    }
+  }
+
+  /** GET /api/v1/sessions?projectId — durable list scoped to the gated jail. */
+  async list(
+    userId: string,
+    projectId: string | undefined,
+    correlationId: string,
+  ): Promise<Array<SessionInfo>> {
+    this.auth.assertServeUser(userId, correlationId);
+    const project: GatedProjectScope = await this.access.resolveProjectDirectory(
+      projectId,
+      userId,
+      correlationId,
+    );
+    return this.history.listLocalSessions(project.projectId);
+  }
+
+  /** GET /api/v1/sessions/status?projectId — sessionId → runtime status. */
   async statusMap(
     userId: string,
     projectId: string | undefined,
-    cid: string,
+    correlationId: string,
   ): Promise<SessionRunStatusMap> {
-    return this.harness.statusMap(userId, projectId, cid);
+    const rows: Array<SessionInfo> = await this.list(userId, projectId, correlationId);
+    const map: SessionRunStatusMap = {};
+    for (const row of rows) {
+      map[row.id] = this.state.isBusy(row.id) ? { type: 'busy' } : { type: 'idle' };
+    }
+    return map;
   }
 
-  /** POST /api/v1/sessions — create in the gated jail. */
-  async create(userId: string, body: CreateSessionInput, cid: string): Promise<SessionInfo> {
-    return this.harness.create(userId, body, cid);
+  /**
+   * POST /api/v1/sessions — durable row first (our uuid), then the embedded
+   * host session; the host id is stored in `metadata.opencodeSessionId`.
+   * A host failure soft-deletes the staged row and answers the typed 503.
+   */
+  async create(userId: string, body: CreateSessionInput, correlationId: string): Promise<SessionInfo> {
+    this.auth.assertServeUser(userId, correlationId);
+    const project: GatedProjectScope = await this.access.resolveProjectDirectory(
+      body.projectId,
+      userId,
+      correlationId,
+    );
+    // Fail fast on an unknown agent (honest 404, no side effects) before any
+    // durable/host work; undefined keeps the pre-agent behavior (agentId null).
+    const agentId: string | undefined = this.resolveAgentId(body.agentId, correlationId);
+    const id: string = Bun.randomUUIDv7();
+    const info: SessionInfo = {
+      id,
+      title: body.title ?? null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      directory: project.directory,
+      projectId: project.projectId,
+      model: body.model ?? null,
+      agentId: agentId ?? null,
+      status: { type: 'idle' },
+    };
+    // Row first: the domain id exists before the host does, and list/status
+    // never need an upstream round-trip.
+    await this.history.saveLocalSession(info, userId);
+
+    let created: HostSessionInfo;
+    try {
+      created = await this.host.sessionCreate({
+        directory: project.directory,
+        title: body.title,
+        parentID: body.parentID,
+        model: body.model,
+        agent: agentId,
+      });
+    } catch (error) {
+      // No half state: the row never becomes a visible session without a host
+      // binding. The error keeps its honest mapping (4xx stays 4xx, outage 503).
+      await this.discardQuietly(id, correlationId);
+      if (error instanceof ExternalServiceError || error instanceof HttpException) {
+        throw error;
+      }
+      throw fromUnknown('opencode', 'sessionsCreate', error);
+    }
+
+    // Bind before persisting so live SSE subscribers can resolve the host id.
+    this.state.bindHostSession(created.id, {
+      projectId: project.projectId,
+      localSessionId: id,
+      userId,
+    });
+    try {
+      await this.history.setHostSessionId(id, created.id);
+      if (agentId !== undefined) {
+        await this.history.setAgent(id, project.projectId, agentId);
+      }
+    } catch (error) {
+      // Postgres outage after the host session exists: drop both sides so a
+      // retry does not leave an orphan host session or a phantom row.
+      this.state.unbindHostSession(created.id);
+      await this.host.sessionRemove(created.id).catch(() => undefined);
+      await this.discardQuietly(id, correlationId);
+      throw error;
+    }
+
+    this.logger.info('[sessions] created', correlationId);
+    return {
+      ...info,
+      title:
+        typeof created.title === 'string' && created.title.length > 0
+          ? created.title
+          : info.title,
+    };
   }
 
-  /** GET /api/v1/sessions/{id}/messages — normalized domain rows. */
+  /**
+   * GET /api/v1/sessions/{id}/messages — durable Postgres thread only.
+   * `limit` keeps its validation contract (400 on garbage) but the durable
+   * read has no cursor semantics; an unknown session is an honest empty array.
+   */
   async listMessages(
     userId: string,
     sessionId: string,
     projectId: string | undefined,
     limitRaw: string | undefined,
-    cursor: string | undefined,
-    cid: string,
+    _cursor: string | undefined,
+    correlationId: string,
   ): Promise<Array<SessionMessage>> {
-    return this.harness.listMessages(userId, sessionId, projectId, limitRaw, cursor, cid);
+    this.auth.assertServeUser(userId, correlationId);
+    await this.access.resolveProjectDirectory(projectId, userId, correlationId);
+    this.parseLimit(limitRaw);
+    return this.history.listMessages(sessionId);
   }
 
-  /** POST /api/v1/sessions/{id}/messages — queue the prompt, answer the receipt. */
+  /**
+   * POST /api/v1/sessions/{id}/messages — one message turn. Gate order is
+   * intentional: access first, then the serve-user gate, then the agent
+   * registry, then the messaging zone (file command → auto host → direct).
+   */
   async sendMessage(
     userId: string,
     sessionId: string,
     body: SendMessageInput,
-    cid: string,
+    correlationId: string,
   ): Promise<SessionMessage> {
-    return this.harness.sendMessage(userId, sessionId, body, cid);
+    const project: GatedProjectScope = await this.access.resolveProjectDirectory(
+      body.projectId,
+      userId,
+      correlationId,
+    );
+    this.auth.assertServeUser(userId, correlationId);
+    // Fail fast on an unknown agent (honest 404, no side effects) before any
+    // transport work — both paths share this gate.
+    const explicitAgentId: string | undefined = this.resolveAgentId(body.agentId, correlationId);
+    return this.messaging.send(
+      userId,
+      sessionId,
+      body,
+      project.directory,
+      explicitAgentId,
+      correlationId,
+    );
   }
 
-  /** GET /api/v1/sessions/events — SSE re-stream of domain frames (contract frozen). */
+  /** GET /api/v1/sessions/events — SSE re-stream (contract frozen). */
   async streamEvents(
     userId: string,
     projectId: string | undefined,
-    cid: string,
-    req: ExpressRequest,
-    res: ExpressResponse,
+    correlationId: string,
+    request: ExpressRequest,
+    response: ExpressResponse,
   ): Promise<void> {
-    return this.harness.streamEvents(userId, projectId, cid, req, res);
+    return this.stream.streamEvents(userId, projectId, correlationId, request, response);
   }
 
-  /** POST /api/v1/sessions/{id}/interrupt — honest {interrupted} answer. */
+  /**
+   * POST /api/v1/sessions/{id}/interrupt — interrupt the bound host session.
+   * A local direct turn is marked interrupted here (its late answer is
+   * dropped); an idle direct session keeps the honest no-op answer.
+   */
   async interrupt(
     userId: string,
     sessionId: string,
     body: InterruptSessionInput,
-    cid: string,
+    correlationId: string,
   ): Promise<SessionInterruptResult> {
-    return this.harness.interrupt(userId, sessionId, body, cid);
+    this.auth.assertServeUser(userId, correlationId);
+    await this.access.resolveProjectDirectory(body.projectId, userId, correlationId);
+    const localInterrupted: boolean = this.state.clearBusy(sessionId);
+    // Guarantee the hanging client sending flag clears even if the terminal
+    // session.idle was lost.
+    if (localInterrupted) this.buffer.pushIdle(sessionId);
+    const hostSessionId: string | undefined = await this.history.getHostSessionId(
+      sessionId,
+      body.projectId,
+    );
+    if (!hostSessionId) {
+      if (localInterrupted) return { interrupted: true };
+      throw new NotFoundException({
+        code: 'opencode_session_unbound',
+        message: 'Session is not bound to the embedded OpenCode host',
+      });
+    }
+    try {
+      const answer: { interrupted: boolean } = await this.host.sessionInterrupt(hostSessionId);
+      this.logger.info('[sessions] interrupted', correlationId);
+      return { interrupted: answer.interrupted || localInterrupted };
+    } catch (error) {
+      this.logger.warn('[sessions] interrupt failed', correlationId);
+      this.logger.debug((error as Error).message, correlationId);
+      const mapped: ExternalServiceError =
+        error instanceof ExternalServiceError
+          ? error
+          : fromUnknown('opencode', 'sessionInterrupt', error);
+      // Host does not know the session but we did interrupt a direct turn.
+      if (localInterrupted && mapped.code === 'EXTERNAL_NOT_FOUND') {
+        this.logger.info('[sessions] interrupted locally', correlationId);
+        return { interrupted: true };
+      }
+      throw mapped;
+    }
   }
 
-  /** GET /api/v1/sessions/providers — runner provider inventory (gated jail). */
-  async providers(userId: string, projectId: string | undefined, cid: string): Promise<Array<SessionRunnerProvider>> {
-    return this.harness.providers(userId, projectId, cid);
+  /**
+   * GET /api/v1/sessions/providers — the project's host provider inventory.
+   * The domain row is the REQUIRED artifact subset
+   * (Provider.Info: id/name/activation/package); settings/headers/body are
+   * never projected. A row violating the required set fails loud.
+   */
+  async providers(
+    userId: string,
+    projectId: string | undefined,
+    correlationId: string,
+  ): Promise<Array<SessionRunnerProvider>> {
+    this.auth.assertServeUser(userId, correlationId);
+    const project: GatedProjectScope = await this.access.resolveProjectDirectory(
+      projectId,
+      userId,
+      correlationId,
+    );
+    return this.inventory.providers(project.directory, correlationId);
   }
 
-  /** GET /api/v1/sessions/models — runner model inventory (Go/Zen family). */
-  async models(userId: string, projectId: string | undefined, cid: string): Promise<Array<{ id: string; name: string; providerID: string }>> {
-    return this.harness.models(userId, projectId, cid);
+  /**
+   * GET /api/v1/sessions/models — host model inventory filtered to the
+   * OpenCode Go/Zen family (provider id opencode / opencode-go / opencode-zen).
+   */
+  async models(
+    userId: string,
+    projectId: string | undefined,
+    correlationId: string,
+  ): Promise<Array<SessionModel>> {
+    this.auth.assertServeUser(userId, correlationId);
+    const project: GatedProjectScope = await this.access.resolveProjectDirectory(
+      projectId,
+      userId,
+      correlationId,
+    );
+    return this.inventory.models(project.directory, correlationId);
   }
 
-  /** POST /api/v1/sessions/{id}/fork — copy the durable thread up to a boundary. */
+  /**
+   * POST /api/v1/sessions/{id}/fork — create a new session and copy the
+   * durable thread up to the boundary. `before` excludes that message;
+   * without it the whole thread is copied ('through' the newest message).
+   * An empty thread answers 409 ForkEmpty, an absent boundary 404
+   * MessageNotFound — both honest non-retryable answers.
+   */
   async fork(
     userId: string,
     sessionId: string,
     body: SessionForkRequest,
-    cid: string,
+    correlationId: string,
   ): Promise<SessionForkResponse> {
-    return this.harness.fork(userId, sessionId, body, cid);
+    this.auth.assertServeUser(userId, correlationId);
+    const project: GatedProjectScope = await this.access.resolveProjectDirectory(
+      body.projectId,
+      userId,
+      correlationId,
+    );
+    const messages: Array<SessionMessage> = await this.history.listMessages(sessionId);
+    const last: SessionMessage | undefined = messages[messages.length - 1];
+    if (!last) {
+      throw new ConflictException({
+        code: 'ForkEmpty',
+        message: `Session '${sessionId}' has no messages to fork`,
+      });
+    }
+    let copied: Array<SessionMessage>;
+    let boundary: SessionForkResponse['boundary'];
+    if (body.before !== undefined) {
+      const index: number = messages.findIndex((message) => message.id === body.before);
+      if (index < 0) {
+        throw new NotFoundException({
+          code: 'MessageNotFound',
+          message: `Message '${body.before}' not found in session`,
+        });
+      }
+      copied = messages.slice(0, index);
+      boundary = { type: 'before', messageID: body.before };
+    } else {
+      copied = messages;
+      boundary = { type: 'through', messageID: last.id };
+    }
+    const sessions: Array<SessionInfo> = await this.history.listLocalSessions(project.projectId);
+    const source: SessionInfo | undefined = sessions.find((row) => row.id === sessionId);
+    const agentId: string =
+      (await this.history.getAgent(sessionId)) ?? source?.agentId ?? 'ask';
+    const created: SessionInfo = await this.create(
+      userId,
+      {
+        projectId: project.projectId,
+        ...(source?.title ? { title: source.title } : {}),
+        ...(source?.model ? { model: source.model } : {}),
+        agentId,
+      },
+      correlationId,
+    );
+    for (const message of copied) {
+      await this.history.appendMessage({
+        id: Bun.randomUUIDv7(),
+        sessionId: created.id,
+        projectId: project.projectId,
+        userId,
+        role: message.type === 'assistant' ? 'assistant' : 'user',
+        agentId,
+        text: message.text ?? '',
+        createdAt: message.createdAt,
+      });
+    }
+    this.buffer.push('session.forked', {
+      sessionID: created.id,
+      parentID: sessionId,
+      boundary,
+    });
+    this.logger.info(`[sessions] forked messages=${copied.length}`, correlationId);
+    return { session: created, boundary };
   }
 
   /** POST /api/v1/sessions/{id}/revert/stage — restore + diff the boundary turn. */
@@ -120,9 +455,31 @@ export class SessionsService {
     userId: string,
     sessionId: string,
     body: RevertStageRequest,
-    cid: string,
+    correlationId: string,
   ): Promise<RevertInfo> {
-    return this.harness.stageRevert(userId, sessionId, body, cid);
+    this.auth.assertServeUser(userId, correlationId);
+    const project: GatedProjectScope = await this.access.resolveProjectDirectory(
+      body.projectId,
+      userId,
+      correlationId,
+    );
+    const info: RevertInfo = await this.workspace.stage(
+      {
+        sessionId,
+        directory: project.directory,
+        messageID: body.messageID,
+        ...(body.files !== undefined ? { files: body.files } : {}),
+      },
+      correlationId,
+    );
+    this.buffer.push('revert.staged', {
+      sessionID: sessionId,
+      messageID: info.messageID,
+      snapshot: info.snapshot,
+      files: info.files,
+    });
+    this.logger.info(`[sessions] revert staged files=${info.files.length}`, correlationId);
+    return info;
   }
 
   /** DELETE /api/v1/sessions/{id}/revert — discard the staged revert. */
@@ -130,9 +487,13 @@ export class SessionsService {
     userId: string,
     sessionId: string,
     projectId: string | undefined,
-    cid: string,
+    correlationId: string,
   ): Promise<void> {
-    return this.harness.clearRevert(userId, sessionId, projectId, cid);
+    this.auth.assertServeUser(userId, correlationId);
+    await this.access.resolveProjectDirectory(projectId, userId, correlationId);
+    await this.workspace.clear(sessionId, correlationId);
+    this.buffer.push('revert.cleared', { sessionID: sessionId });
+    this.logger.info('[sessions] revert cleared', correlationId);
   }
 
   /** POST /api/v1/sessions/{id}/revert/commit — keep the restored files. */
@@ -140,21 +501,43 @@ export class SessionsService {
     userId: string,
     sessionId: string,
     projectId: string | undefined,
-    cid: string,
+    correlationId: string,
   ): Promise<void> {
-    return this.harness.commitRevert(userId, sessionId, projectId, cid);
+    this.auth.assertServeUser(userId, correlationId);
+    await this.access.resolveProjectDirectory(projectId, userId, correlationId);
+    await this.workspace.commit(sessionId, correlationId);
+    this.buffer.push('revert.committed', { sessionID: sessionId });
+    this.logger.info('[sessions] revert committed', correlationId);
   }
 
   /** GET /api/v1/sessions/{id}/snapshots/diff?from&to — per-file diff rows. */
   async snapshotDiff(
     userId: string,
-    sessionId: string,
+    _sessionId: string,
     projectId: string | undefined,
     from: string,
     to: string,
     contextRaw: string | undefined,
-    cid: string,
+    correlationId: string,
   ): Promise<Array<SnapshotDiff>> {
-    return this.harness.snapshotDiff(userId, sessionId, projectId, from, to, contextRaw, cid);
+    this.auth.assertServeUser(userId, correlationId);
+    const project: GatedProjectScope = await this.access.resolveProjectDirectory(
+      projectId,
+      userId,
+      correlationId,
+    );
+    const treeIdPattern: RegExp = /^[0-9a-f]{40}$/;
+    if (!treeIdPattern.test(from) || !treeIdPattern.test(to)) {
+      throw new BadRequestException('Query "from"/"to" must be snapshot tree ids');
+    }
+    const rows: Array<SnapshotDiff> = await this.workspace.diff(
+      project.directory,
+      from,
+      to,
+      this.parseContext(contextRaw),
+      correlationId,
+    );
+    this.logger.info(`[sessions] snapshot diff files=${rows.length}`, correlationId);
+    return rows;
   }
 }

@@ -1,14 +1,6 @@
 import { Injectable, UnauthorizedException } from "@nestjs/common";
-import { AppLogger } from "../../../../../../../common/logger";
-
-/**
- * uuid shape check — reuse of the ownUserId/isUserId pattern from
- * OpencodeKeysController (and UsersService.isUserId): a non-uuid caller id
- * (mock identities like 'default') → 401 before any transport traffic.
- */
-function isUserId(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
-}
+import { AppLogger } from "@common/logger";
+import { uuidSchema } from "@common/validation";
 
 /**
  * ServeAuthService — real-user gate for the session paths.
@@ -18,7 +10,7 @@ function isUserId(value: string): boolean {
  * durable or host work, so only real users reach sessions. The legacy server
  * Basic password is gone with the embedded runner — the embedded host needs
  * no upstream credentials.
- * Billing is untouched — BillingService keeps its own findByUserId → decrypt
+ * Billing is untouched — BillingService keeps its own vault pick → decrypt
  * lookup and never used this service.
  */
 @Injectable()
@@ -28,7 +20,7 @@ export class ServeAuthService {
   ) {}
 
   assertServeUser(userId: string, correlationId?: string): void {
-    if (!isUserId(userId)) {
+    if (!uuidSchema.safeParse(userId).success) {
       this.logger.debug("[serve-auth] non-uuid identity status=401 code=unauthorized", correlationId);
       throw new UnauthorizedException({
         code: "unauthorized",

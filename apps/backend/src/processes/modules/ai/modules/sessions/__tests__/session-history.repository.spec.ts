@@ -3,8 +3,8 @@ import {
   projectSessions,
   sessionAgents,
   sessionMessages,
-} from "../../../../../../common/db/schema";
-import type { AppLogger } from "../../../../../../common/logger";
+} from "@common/db/schema";
+import type { AppLogger } from "@common/logger";
 import { SessionHistoryRepository } from "../session-history.repository";
 
 /**

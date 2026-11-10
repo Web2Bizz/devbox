@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { UnauthorizedException } from "@nestjs/common";
-import type { AppLogger } from "../../../../../../../../common/logger";
+import type { AppLogger } from "@common/logger";
 import { ServeAuthService } from "../serve-auth.service";
 
 function silentLogger(): AppLogger {

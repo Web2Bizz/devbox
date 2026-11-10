@@ -4,8 +4,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { ExternalServiceError } from '../../../../../../../../common/external/external-error';
-import { WorkspacePathService } from '../../../../../../../../common/storage/workspace-path.service';
+import { ExternalServiceError } from '@common/external/external-error';
+import { WorkspacePathService } from '@common/storage/workspace-path.service';
 import { parseUnifiedDiff, SnapshotsService } from '../snapshots.service';
 
 const exec = promisify(execFile);

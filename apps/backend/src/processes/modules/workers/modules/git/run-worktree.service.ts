@@ -2,17 +2,24 @@ import { Injectable } from '@nestjs/common';
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { RunRow } from '../../../../../common/db/schema';
-import { AppLogger } from '../../../../../common/logger';
-import { WorkspacePathService } from '../../../../../common/storage/workspace-path.service';
+import type { RunRow } from '@common/db/schema';
+import { AppLogger } from '@common/logger';
+import { WorkspacePathService } from '@common/storage/workspace-path.service';
 
-const execFileAsync = promisify(execFile);
+/** Promisified `execFile` narrowed to the call shape this service uses. */
+type ExecFileAsync = (
+  file: string,
+  args: ReadonlyArray<string>,
+  options?: { cwd?: string; timeout?: number; maxBuffer?: number },
+) => Promise<{ stdout: string; stderr: string }>;
+
+const execFileAsync: ExecFileAsync = promisify(execFile);
 
 /** Hard ceiling for one git command (no interactive prompts, no network). */
-const GIT_TIMEOUT_MS = 10_000;
+const GIT_TIMEOUT_MS: number = 10_000;
 
 /** git status/commit output stays tiny; 1 MiB is already generous. */
-const GIT_MAX_BUFFER = 1024 * 1024;
+const GIT_MAX_BUFFER: number = 1024 * 1024;
 
 /**
  * Forward-Only guard on the argument list itself.
@@ -23,9 +30,9 @@ const GIT_MAX_BUFFER = 1024 * 1024;
  * and commits forward, so this is a belt-and-braces check, not the mechanism.
  */
 function assertSafeGitArgs(args: ReadonlyArray<string>): void {
-  const has = (flag: string): boolean => args.includes(flag);
-  const resetHard = has('reset') && has('--hard');
-  const pushForce = has('push') && (has('--force') || has('-f'));
+  const has: (flag: string) => boolean = (flag: string): boolean => args.includes(flag);
+  const resetHard: boolean = has('reset') && has('--hard');
+  const pushForce: boolean = has('push') && (has('--force') || has('-f'));
   if (resetHard || pushForce) throw new Error('forbidden git command');
 }
 
@@ -50,20 +57,23 @@ export class RunWorktreeService {
    * worktree already on `run.branch` is left untouched, so a re-claimed run
    * continues instead of failing on `worktree add`.
    */
-  async ensure(run: RunRow, cid: string): Promise<void> {
+  async ensure(run: RunRow, correlationId: string): Promise<void> {
     await this.paths.assertInsideJail(run.worktree, await this.paths.realStrictRoot());
     // <content>/wt/<run_id> → the project checkout the worktree branches from.
-    const repoRoot = path.resolve(run.worktree, '..', '..');
+    const repoRoot: string = path.resolve(run.worktree, '..', '..');
 
     try {
-      const current = await this.git(['rev-parse', '--abbrev-ref', 'HEAD'], run.worktree);
+      const current: string = await this.git(
+        ['rev-parse', '--abbrev-ref', 'HEAD'],
+        run.worktree,
+      );
       if (current === run.branch) return;
     } catch {
       // Not a worktree yet (missing dir / plain directory) — create it below.
     }
 
     await this.paths.ensureDir(path.dirname(run.worktree));
-    const branchExists = await this.git(
+    const branchExists: boolean = await this.git(
       ['show-ref', '--verify', '--quiet', `refs/heads/${run.branch}`],
       repoRoot,
     )
@@ -78,7 +88,7 @@ export class RunWorktreeService {
         repoRoot,
       );
     }
-    this.logger.info('[workers] worktree ready', cid);
+    this.logger.info('[workers] worktree ready', correlationId);
   }
 
   /**
@@ -89,10 +99,10 @@ export class RunWorktreeService {
    * are deferred; a git failure surfaces as step.failed and an operator sees
    * it instead of a silent half-applied step.
    */
-  async commit(run: RunRow, stepSeq: number, cid: string): Promise<{ sha: string; branch: string }> {
+  async commit(run: RunRow, stepSeq: number, correlationId: string): Promise<{ sha: string; branch: string }> {
     await this.assertForwardOnly(run);
     await this.git(['add', '-A'], run.worktree);
-    const message = `chore(run): prototype step ${stepSeq}\n\nRun-Id: ${run.id}\nStep-Id: ${stepSeq}`;
+    const message: string = `chore(run): prototype step ${stepSeq}\n\nRun-Id: ${run.id}\nStep-Id: ${stepSeq}`;
     await this.git(
       [
         '-c',
@@ -106,8 +116,8 @@ export class RunWorktreeService {
       ],
       run.worktree,
     );
-    const sha = await this.git(['rev-parse', 'HEAD'], run.worktree);
-    this.logger.info(`[workers] git.commit sha=${sha} branch=${run.branch}`, cid);
+    const sha: string = await this.git(['rev-parse', 'HEAD'], run.worktree);
+    this.logger.info(`[workers] git.commit sha=${sha} branch=${run.branch}`, correlationId);
     return { sha, branch: run.branch };
   }
 
@@ -123,6 +133,7 @@ export class RunWorktreeService {
   /** One git invocation (execFile, no shell, bounded output) → trimmed stdout. */
   private async git(args: Array<string>, cwd: string): Promise<string> {
     assertSafeGitArgs(args);
+    // Destructuring an upstream exec result — explicit annotation cannot be expressed here.
     const { stdout } = await execFileAsync('git', args, {
       cwd,
       timeout: GIT_TIMEOUT_MS,

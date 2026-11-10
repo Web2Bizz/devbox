@@ -1,13 +1,13 @@
 import { HttpException, Injectable } from '@nestjs/common';
 import type { ToolView } from '@rush-code/contracts';
-import type { CryptoService } from '@common/crypto/crypto.service';
+import { CryptoService } from '@common/crypto/crypto.service';
 import {
   ExternalServiceError,
   fromUnknown,
 } from '@common/external/external-error';
 import { AppLogger } from '@common/logger';
-import type { VaultService } from '@common/vault/vault.service';
-import type { OpencodeModelFetch } from '../../../opencode/opencode-model-fetch';
+import { VaultService } from '@common/vault/vault.service';
+import { OpencodeModelFetch } from '../../../opencode/opencode-model-fetch';
 import {
   InMemoryToolEffectsStore,
   ToolDispatchService,

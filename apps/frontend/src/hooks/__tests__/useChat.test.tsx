@@ -79,6 +79,7 @@ const streamMock = mock((projectId: string, signal: AbortSignal, opts?: StreamOp
 );
 
 mock.module('../../api/sessions-client', () => ({
+  DEFAULT_AGENT_ID: 'ask',
   ensureSessionAuth: async () => {},
   createSession: (body: unknown, opts?: unknown) => createMock(body, opts),
   sendSessionMessage: (p: string, s: string, text: string, opts?: unknown) =>

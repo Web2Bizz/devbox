@@ -16,11 +16,34 @@
         "!**/*.e2e.ts",
         "!**/*.test.ts",
         "!**/*.test.tsx",
-        "!**/__tests__/**"
+        "!**/__tests__/**",
+        // Dev-only CLIs (draft stand + e2e runner): console is their output
+        // channel, and their literals sit inside `new Promise(...)` callbacks
+        // the GritQL plugin cannot type-distinguish (false positives).
+        "!draft-stand/**",
+        "!scripts/**"
       ]
     }
   ],
+  // Same two dev-only trees: `console.*` is the intended CLI output, not a
+  // runtime logger bypass (runtime code still goes through AppLogger).
+  "overrides": [
+    {
+      "includes": ["draft-stand/**", "scripts/**"],
+      "linter": { "rules": { "suspicious": { "noConsole": "off" } } }
+    }
+  ],
   "files": {
-    "includes": ["**", "!!**/dist/**", "!!**/node_modules/**", "!!**/coverage/**"]
+    // Dev-only CLIs are excluded from lint: `console.*` is their output
+    // channel, and the GritQL literal plugin cannot type-distinguish their
+    // stdlib calls inside `new Promise(...)` callbacks (false positives).
+    "includes": [
+      "**",
+      "!!**/dist/**",
+      "!!**/node_modules/**",
+      "!!**/coverage/**",
+      "!!draft-stand/**",
+      "!!scripts/**"
+    ]
   }
 }

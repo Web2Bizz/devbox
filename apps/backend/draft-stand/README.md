@@ -22,7 +22,7 @@
 - `OpencodeHostService` (`provider.list`/`model.list` для R6) —
   `src/processes/modules/ai/modules/opencode/opencode-host.service.ts`.
 - `SessionRunnerService` / `JevService` — эталон per-user ключа
-  (`OpencodeKeysService` + `CryptoService`, расшифровка в памяти) —
+  (`UserKeysService` + `CryptoService`, расшифровка в памяти) —
   `src/common/zen/session-runner.service.ts`,
   `src/common/zen/jev.service.ts`.
 - `ToolRegistryService` / `ToolDispatchService` — счётчик вызовов (=0

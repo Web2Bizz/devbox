@@ -17,7 +17,7 @@
  * - описание `native:git.recon` для модели:
  *   `createGitReconTool().view` в
  *   `src/processes/modules/workers/modules/tool-registry/tools/git-recon.tool.ts`;
- * - per-user ключ (`OpencodeKeysService` + `CryptoService`, расшифровка
+ * - per-user ключ (`UserKeysService` + `CryptoService`, расшифровка
  *   в памяти): `src/common/zen/session-runner.service.ts`,
  *   `src/common/zen/jev.service.ts` (здесь — auth.json как локальный
  *   эквивалент вызывающего пользователя, формат как в

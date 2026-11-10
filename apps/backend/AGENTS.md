@@ -69,7 +69,7 @@ if (!reposRoot) {
 
 ## Логирование — без стеков и секретов в normal path
 
-Правила: только через `AppLogger` (`src/common/logger/`), `console.*` в runtime запрещён. Уровни `debug → info → warn → error → fatal`, уважает `LOG_LEVEL`. Normal path — однострочники `[domain] op key=value` + `correlationId`, без `\n at `, без URL/query/headers/body/`Bearer`/секретов/PII. Стек/`cause` (санитизирован, ≤2000, через `serializeCause`) — только в `debug`. `ExternalClient` — только `service/operation/attempt/latencyMs/status/code`. e2e-скан секретов обязателен (эталон `src/processes/modules/ai/modules/opencode/__tests__/keys.e2e.ts`).
+Правила: только через `AppLogger` (`src/common/logger/`), `console.*` в runtime запрещён. Уровни `debug → info → warn → error → fatal`, уважает `LOG_LEVEL`. Normal path — однострочники `[domain] op key=value` + `correlationId`, без `\n at `, без URL/query/headers/body/`Bearer`/секретов/PII. Стек/`cause` (санитизирован, ≤2000, через `serializeCause`) — только в `debug`. `ExternalClient` — только `service/operation/attempt/latencyMs/status/code`. e2e-скан секретов обязателен (эталон `src/vault/__tests__/vault.e2e.ts`).
 
 ### Не правильно
 
@@ -112,13 +112,13 @@ logger.error(`[external] failure service=${service} operation=${op} status=${sta
 | `bun run lint` | проверка типов (`tsc --noEmit`) + стиля (`biome`) |
 | `bun run test` | юнит-спеки из `dist` (`*.spec.js`) |
 | `bun run test:e2e` | полный e2e-сьют: build + `scripts/e2e.ts` (последовательно, таймаут на сьют) |
-| `bun run test:e2e:auth` / `:projects` / `:github` / `:repos` / `:opencode-keys` | точечные e2e |
+| `bun run test:e2e:auth` / `:projects` / `:github` / `:repos` / `:vault` | точечные e2e |
 | `bun run keys:reencrypt` | перешифровка opencode-ключей |
 | `bun run db:check-integrity` | проверка целостности Drizzle-схемы |
 
 ### e2e и Postgres
 
-Строгие сьюты (`auth`, `organizations`, `projects`, `github`, `keys`) поднимают
+Строгие сьюты (`auth`, `organizations`, `projects`, `github`, `vault`) поднимают
 одноразовый `postgres:16-alpine` через testcontainers
 (`src/common/db/e2e-db.container.ts`), применяют `drizzle/`-миграции и гасят
 контейнер в `stop()`; Ryuk добирает его при аварийном выходе. Нужен запущенный
@@ -137,6 +137,44 @@ Docker — без него сьют падает с явной ошибкой (�
 с жёстким бюджетом `E2E_SUITE_TIMEOUT_MS` (по умолчанию 300000). Зависший сьют
 падает с `[e2e] FAILED … (timed out …)`, а не блокирует прогон и CI. Фильтры:
 `bun scripts/e2e.ts auth.e2e` (подстрока пути), несколько фильтров — OR.
+
+## Scaffold (plop) — единственный мутационный путь для src/**
+
+Новый домен, вложенный модуль и утилита создаются только генераторами из
+`plopfile.mjs` (`plop/backend-domain.mjs`, `plop/backend-sub.mjs`,
+`plop/backend-util.mjs`). Пути вычисляются из ответов, агент их не выбирает.
+Прямые write/edit в `src/**` для scaffolding запрещены — только правки внутри
+уже созданных файлов.
+
+```sh
+bunx plop backend-domain
+# domain: billing-accounts
+# → src/billing-accounts/*.module|controller|service|dto|repository|config|types.ts + __tests__/billing-accounts.spec.ts
+
+bunx plop backend-sub
+# parent: organizations / sub: members
+# → src/organizations/modules/members/*.module|controller|service|dto|types.ts + __tests__/members.spec.ts
+
+bunx plop backend-util
+# domainPath: auth (или organizations/modules/members) / name: session-cookie
+# → auth/utils/session-cookie/index.ts + session-cookie.util.ts + __tests__/session-cookie.spec.ts
+```
+
+Программный вызов (тот же путь, без интерактива):
+
+```ts
+import { nodePlop } from 'node-plop';
+const plop = await nodePlop('./plopfile.mjs');
+await plop.getGenerator('backend-domain').runActions({ domain: 'billing-accounts' });
+await plop.getGenerator('backend-sub').runActions({ parent: 'organizations', sub: 'members' });
+await plop.getGenerator('backend-util').runActions({ domainPath: 'auth', name: 'session-cookie' });
+```
+
+Шаблоны фиксируют CoC: только `export type` (`&`, не `interface`), только
+`Array<T>` (не `T[]`), `*At: string` ISO-8601 + `z.iso.datetime()`, полные имена
+(`error`, `request`, `response`, `configuration`, `message` — не `err/req/res/cfg/msg`),
+явный `name: Type` на каждом `const`/возврате, конструкторы `private readonly`,
+логгер `new AppLogger(ClassName.name)`.
 
 ## Scope-правила (кратко)
 

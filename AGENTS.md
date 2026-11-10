@@ -49,4 +49,5 @@ Rules:
 - Dirty graphify-out/ files are expected after hooks or incremental updates; dirty graph files are not a reason to skip graphify. Only skip graphify if the task is about stale or incorrect graph output, or the user explicitly says not to use it.
 - If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
 - Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
-- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+- Refresh the graph through the `graphify` pack tool (no shell permission needed): `graphify({command:"update"})` after code changes (AST-only, no LLM/API cost; idempotent — `No code-graph topology changes detected` when nothing moved); after refactors that delete or move code use `graphify({command:"update", force:true})` — without `force` a rebuild with fewer nodes is rejected and the graph silently stays stale. Reads go through the same tool: `query`, `path`, `explain`, `affected`.
+- `bash .opencode/scripts/graphify/run.sh` (`index|search|status`, also `graphify({command:"index"|"search"|"status"})`) maintains only the lightweight search index — it does not refresh `graphify-out/`.

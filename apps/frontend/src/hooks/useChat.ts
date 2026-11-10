@@ -142,6 +142,7 @@ type FrameText =
   | { kind: 'snapshot'; text: string; partId: string | null }
   | { kind: 'full'; text: string }
   | { kind: 'idle' }
+  | { kind: 'failed' }
   | null;
 
 function frameText(frame: SessionStreamFrame): FrameText {
@@ -168,6 +169,12 @@ function frameText(frame: SessionStreamFrame): FrameText {
   }
   if (frame.type === 'session.execution.succeeded' || frame.type === 'session.step.ended') {
     return { kind: 'idle' };
+  }
+  // Terminal failure frames (backend turn died before the answer): a
+  // terminal signal like idle, but it surfaces `data.message` and keeps the
+  // partial text. `stream.error` (transport) stays a separate channel.
+  if (frame.type === 'session.execution.failed' || frame.type === 'session.step.failed') {
+    return { kind: 'failed' };
   }
   // legacy SDK-shape (kept for backward compat if backend ever switches):
   if (frame.type === 'message.part.delta') {
@@ -578,6 +585,21 @@ export function useChat(options?: UseChatOptions): UseChatResult {
       setError(message);
     };
 
+    // Terminal backend turn failure (`session.execution.failed` /
+    // `session.step.failed`): the answer produced before the failure is real,
+    // so the partial stream is committed as the assistant row, then the fixed
+    // error surfaces through the same terminal cleanup. Idempotent — sending
+    // is cleared, so a later session.idle is a no-op.
+    const failTurn = (frame: { data?: unknown }): void => {
+      if (sendingRef.current && !abortedTurnRef.current) {
+        const partial = streamingRef.current;
+        if (partial) {
+          setMessages((prev) => [...prev, { id: newId(), role: 'assistant', text: partial }]);
+        }
+      }
+      failTerminal(frame);
+    };
+
     const clearWatchdog = (): void => {
       if (watchdog) clearTimeout(watchdog);
       watchdog = null;
@@ -744,6 +766,12 @@ export function useChat(options?: UseChatOptions): UseChatResult {
           }
           const ft = frameText(frame);
           if (!ft) continue;
+          // Backend turn failure: terminal, commits the partial answer and
+          // surfaces the fixed error (never a spinner without an error).
+          if (ft.kind === 'failed') {
+            failTurn(frame);
+            continue;
+          }
           // The subscription accumulates REGARDLESS of `sending` (F5-dogон:
           // after reload sending=false but the thread must catch up); only
           // `finalize()` is gated on a live turn (see below).

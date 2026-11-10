@@ -473,6 +473,21 @@ const streamError = (session: string, message?: string) => ({
   session,
 });
 
+// Backend turn failure frames (C5): terminal like idle, but they surface
+// data.message and keep the partial answer that already streamed.
+const execFailed = (session: string, message?: string) => ({
+  id: `evt-execfailed-${session}`,
+  type: 'session.execution.failed',
+  data: message === undefined ? { sessionID: session } : { sessionID: session, message },
+  session,
+});
+const stepFailed = (session: string, message?: string) => ({
+  id: `evt-stepfailed-${session}`,
+  type: 'session.step.failed',
+  data: message === undefined ? { sessionID: session } : { sessionID: session, message },
+  session,
+});
+
   test('agent: per-send override rides create + prompt without changing the stored agent', async () => {
     const { result } = renderHook(() => useChat({ ...PROJECT }));
     await settle();
@@ -523,6 +538,59 @@ const streamError = (session: string, message?: string) => ({
     expect((result.current.error ?? '').length).toBeGreaterThan(0);
     expect(result.current.sending).toBe(false);
     expect(result.current.messages.length).toBe(1);
+  });
+
+  test('execution.failed is terminal: partial answer committed, fixed error surfaces', async () => {
+    const { result } = renderHook(() => useChat({ ...PROJECT }));
+    await settle();
+
+    act(() => {
+      void result.current.send('hello');
+    });
+    pushFrames([delta('ses-1', 'partial answer'), execFailed('ses-1', 'ход не выполнен')]);
+    await settle(16);
+
+    expect(result.current.error).toBe('ход не выполнен');
+    expect(result.current.sending).toBe(false);
+    expect(result.current.streamingText).toBe('');
+    expect(result.current.activeToolName).toBeNull();
+    expect(result.current.messages.length).toBe(2);
+    expect(result.current.messages[1]).toMatchObject({
+      role: 'assistant',
+      text: 'partial answer',
+    });
+  });
+
+  test('step.failed without partial text leaves the thread, still clears sending', async () => {
+    const { result } = renderHook(() => useChat({ ...PROJECT }));
+    await settle();
+
+    act(() => {
+      void result.current.send('hello');
+    });
+    pushFrames([stepFailed('ses-1')]);
+    await settle(16);
+
+    expect(typeof result.current.error).toBe('string');
+    expect(result.current.sending).toBe(false);
+    expect(result.current.messages.length).toBe(1);
+    expect(result.current.messages[0]).toMatchObject({ role: 'user', text: 'hello' });
+  });
+
+  test('failed frame is idempotent with a later idle (no duplicate commit)', async () => {
+    const { result } = renderHook(() => useChat({ ...PROJECT }));
+    await settle();
+
+    act(() => {
+      void result.current.send('hello');
+    });
+    pushFrames([delta('ses-1', 'once'), execFailed('ses-1', 'boom'), idle('ses-1')]);
+    await settle(16);
+
+    expect(result.current.messages.length).toBe(2);
+    expect(result.current.messages[1]).toMatchObject({ role: 'assistant', text: 'once' });
+    expect(result.current.error).toBe('boom');
+    expect(result.current.sending).toBe(false);
   });
 
   test('stream.error of a foreign session never touches this chat', async () => {

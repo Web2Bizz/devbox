@@ -367,6 +367,20 @@ function toLangChainMessage(message: LoopMessage): BaseMessage {
   });
 }
 
+/**
+ * System prompt + conversation: the agent's `system` is prepended once. An
+ * explicit `system` row already present in the history is not duplicated, and
+ * an empty prompt adds nothing.
+ */
+function toLangChainMessages(
+  system: string,
+  messages: Array<LoopMessage>,
+): Array<BaseMessage> {
+  const mapped: Array<BaseMessage> = messages.map(toLangChainMessage);
+  if (system.trim().length === 0 || messages[0]?.role === 'system') return mapped;
+  return [new SystemMessage(system), ...mapped];
+}
+
 /** Router meta → runner `StepMeta` (same fixed fields, no secrets). */
 function stepMetaOf(meta: ModelRunMeta): StepMeta {
   return {
@@ -422,7 +436,7 @@ export function createStepExecutor(deps: StepExecutorDeps): StepExecutor {
           deps.tools.length > 0
             ? chat.bindTools([...deps.tools], { tool_choice: toolChoice })
             : chat;
-        const response = await bound.invoke(messages.map(toLangChainMessage));
+        const response = await bound.invoke(toLangChainMessages(deps.system, messages));
         return loopStepFromResponse(response as AIMessage);
       },
     });

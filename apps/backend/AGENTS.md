@@ -138,6 +138,50 @@ Docker — без него сьют падает с явной ошибкой (�
 падает с `[e2e] FAILED … (timed out …)`, а не блокирует прогон и CI. Фильтры:
 `bun scripts/e2e.ts auth.e2e` (подстрока пути), несколько фильтров — OR.
 
+## Миграции — только через Drizzle ORM
+
+Источник правды схемы — `src/common/db/schema.ts` (code-first). Живая БД
+обязана соответствовать схеме; расхождение чинится миграцией, не кодом
+(схему под БД не подгоняем).
+
+Миграции создаются и применяются ТОЛЬКО через `drizzle-kit` CLI:
+
+```sh
+# из apps/backend: создание миграции из schema.ts
+bunx drizzle-kit generate
+# применение: окружение — через корневой with-env (DATABASE_URL из .env)
+bun scripts/dev/with-env.ts sh -c 'bunx drizzle-kit migrate'
+```
+
+Запрещено: писать SQL миграций вручную, править `drizzle/*.sql` /
+`drizzle/meta/_journal.json` / `drizzle/meta/*_snapshot.json` руками,
+применять DDL через `psql`/клиент/`push` без явного указания пользователя.
+`push` может дропать таблицы — только после показанного плана и явного
+«применяй».
+
+### Не правильно
+
+```sh
+# Ручная правка цепочки kit / DDL в обход миграций
+vim drizzle/0003_fix.sql
+psql $DATABASE_URL -c 'ALTER TABLE agent_checkpoints ADD COLUMN ...'
+bunx drizzle-kit push
+```
+
+### Правильно
+
+```sh
+# 1. Правим только schema.ts 2. generate 3. migrate через with-env
+bunx drizzle-kit generate
+bun scripts/dev/with-env.ts sh -c 'bunx drizzle-kit migrate'
+```
+
+Почему: журнал и снэпшоты — консистентная цепочка kit; ручные правки и
+обход приводят к скипу миграций — `migrate` молча «successfully», а
+таблицы/индексы отсутствуют. Реальный кейс: голый `agent_checkpoints` без
+unique-индекса → `42P10` в upsert. `bun run db:check-integrity` —
+проверка, не ремонт: расхождение чинится миграцией выше.
+
 ## Scaffold (plop) — единственный мутационный путь для src/**
 
 Новый домен, вложенный модуль и утилита создаются только генераторами из

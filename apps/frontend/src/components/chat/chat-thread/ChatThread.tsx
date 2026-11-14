@@ -7,9 +7,10 @@ import {
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
+  toast,
 } from '@web2bizz/ui/widgets';
+import { useEffect, useRef } from 'react';
 import { Alert, AlertDescription, AlertTitle, Button } from '@web2bizz/ui/components';
-import { ErrorState } from '../../states';
 import { useI18n } from '../../../i18n';
 import { ChatMessageRow } from '../chat-message';
 import { ChatToolRow } from '../chat-tool-row';
@@ -42,6 +43,7 @@ export function ChatThread({
   loading = false,
   sending = false,
   error = null,
+  onRetry,
   activeAgentName,
   activeToolName,
   approval = null,
@@ -51,9 +53,55 @@ export function ChatThread({
   onFork,
   onRevert,
   className,
+  sessionId = null,
   composerHeight = 0,
 }: ChatThreadProps) {
   const { t } = useI18n();
+  const lastToastKeyRef = useRef<string | null>(null);
+  // Toast-only errors (kit sonner via `@web2bizz/ui/widgets` — no wrapper):
+  // inline ErrorState removed — failures surface as a top-right toast
+  // (sonner `id` dedupes repeats) so the thread layout never shifts.
+  // Retry (SSE redial + refetch) comes from `onRetry` via the toast action.
+  // Dedup survives remount (StrictMode double-effect, F5 remount) via
+  // sessionStorage key `sessionId + message`; in-memory ref covers the
+  // same-mount repeat. Storage is cleared when the error clears so the same
+  // message on a later turn may toast again.
+  useEffect(() => {
+    if (!error) {
+      const prev = lastToastKeyRef.current;
+      lastToastKeyRef.current = null;
+      if (prev) {
+        try {
+          sessionStorage.removeItem(`chat-thread-toast:${prev}`);
+        } catch {
+          /* storage unavailable — in-memory ref already reset */
+        }
+      }
+      return;
+    }
+    const toastKey = `${sessionId ?? 'anon'}:${error}`;
+    const storageKey = `chat-thread-toast:${toastKey}`.slice(0, 500);
+    let storedHit = false;
+    try {
+      storedHit = sessionStorage.getItem(storageKey) === '1';
+    } catch {
+      storedHit = false;
+    }
+    const dedupHit = lastToastKeyRef.current === toastKey || storedHit;
+    if (dedupHit) return;
+    lastToastKeyRef.current = toastKey;
+    try {
+      sessionStorage.setItem(storageKey, '1');
+    } catch {
+      /* storage unavailable — sonner `id` still dedupes */
+    }
+    toast.error(t.errors.somethingWentWrong, {
+      id: `chat-thread:${error}`,
+      description: error,
+      duration: 5500,
+      ...(onRetry ? { action: { label: t.common.retry, onClick: onRetry } } : {}),
+    });
+  }, [error, onRetry, t, sessionId]);
   // Single chain-index source: entries own the order (no legacy fallback).
   const thread = buildThreadRows(entries, leafId);
   const chain = thread.chain;
@@ -83,11 +131,7 @@ export function ChatThread({
   }
 
   if (error && visibleText.length === 0 && !sending && !hasReasoningEntry && !thinking) {
-    return (
-      <div className="min-h-[20rem] px-1 pt-[calc(var(--header-height)_+_1rem)]">
-        <ErrorState message={error} />
-      </div>
-    );
+    return <ChatThreadEmpty />;
   }
 
   if (visibleText.length === 0 && !sending && !hasReasoningEntry && !thinking) {
@@ -96,7 +140,6 @@ export function ChatThread({
 
   return (
     <div className={className ? `grid min-h-0 gap-2 ${className}` : 'grid min-h-0 gap-2'}>
-      {error ? <ErrorState message={error} /> : null}
       {approval ? (
         <Alert data-testid="chat-approval-banner">
           <AlertTitle>{t.chat.approvalTitle}</AlertTitle>

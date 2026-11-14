@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button, Progress, Skeleton } from '@web2bizz/ui/components';
-import { EmptyState, ErrorState } from '../../components/states';
+import { toast } from '@web2bizz/ui/widgets';
+import { EmptyState } from '../../components/states';
 import type { OpencodeLimitBucket } from '@rush-code/contracts';
 import { useI18n } from '../../i18n';
 import { useUsage } from '../../hooks/useUsage';
@@ -36,6 +37,28 @@ export function UsageSection() {
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const openDialog = () => setDialogOpen(true);
+
+  // Toast-only errors (kit sonner): usage failures surface as a top-right
+  // toast with Retry (invalidateQueries via `reload`); the section keeps
+  // its last body so the layout never jumps.
+  const lastErrorRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (status.kind !== 'session-expired' && status.kind !== 'failed') {
+      lastErrorRef.current = null;
+      return;
+    }
+    if (lastErrorRef.current === status.message) return;
+    lastErrorRef.current = status.message;
+    toast.error(t.errors.somethingWentWrong, {
+      id: `usage:${status.message}`,
+      description:
+        status.kind === 'failed' && status.shortId
+          ? `${status.message} — ${t.errors.diagnosticId}: ${status.shortId}`
+          : status.message,
+      duration: 5500,
+      action: { label: t.common.retry, onClick: reload },
+    });
+  }, [status, reload, t]);
 
   const skeleton = (
     <div className="grid gap-2" aria-busy="true" aria-label={t.common.loadingPage}>
@@ -73,7 +96,7 @@ export function UsageSection() {
   } else if (status.kind === 'session-expired' || status.kind === 'failed') {
     body = (
       <div className="grid gap-1">
-        <ErrorState message={status.message} onRetry={reload} />
+        <p className="text-muted-foreground text-sm">{status.message}</p>
         {status.kind === 'failed' && status.shortId && (
           <p className="text-muted-foreground text-xs">
             {t.errors.diagnosticId}: {status.shortId}

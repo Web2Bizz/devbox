@@ -1,8 +1,10 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { cn } from '@web2bizz/ui/utils';
-import { EmptyState, ErrorState, LoadingState } from '../../states';
+import { toast } from '@web2bizz/ui/widgets';
+import { EmptyState, LoadingState } from '../../states';
+import { useI18n } from '../../../i18n';
 
 export type ContentEmpty = {
   title: string;
@@ -26,7 +28,7 @@ export type ContentProps = {
   /** When true — LoadingState skeleton grid (from states.tsx). */
   isLoading?: boolean;
   loadingRows?: number;
-  /** Non-empty string — ErrorState alert (from states.tsx). */
+  /** Non-empty string — error toast via kit sonner (content keeps rendering). */
   error?: string | null;
   errorTitle?: string;
   errorRetryLabel?: string;
@@ -54,6 +56,25 @@ export function Content({
   empty,
   variant = 'default',
 }: ContentProps) {
+  const { t } = useI18n();
+  const lastKeyRef = useRef<string | null>(null);
+  // Toast-only errors (kit sonner via `@web2bizz/ui/widgets`): inline
+  // ErrorState removed — failures surface as a top-right toast (Toaster in
+  // providers.tsx, zIndex 70 above Header z-30) so the page layout is kept.
+  useEffect(() => {
+    if (!error) {
+      lastKeyRef.current = null;
+      return;
+    }
+    if (lastKeyRef.current === error) return;
+    lastKeyRef.current = error;
+    toast.error(errorTitle ?? t.errors.somethingWentWrong, {
+      id: `content:${error}`,
+      description: error,
+      duration: 5500,
+      ...(onRetry ? { action: { label: errorRetryLabel ?? t.common.retry, onClick: onRetry } } : {}),
+    });
+  }, [error, errorRetryLabel, errorTitle, onRetry, t]);
   return (
     <main
       id="main-content"
@@ -87,13 +108,6 @@ export function Content({
       >
         {isLoading ? (
           <LoadingState rows={loadingRows} />
-        ) : error ? (
-          <ErrorState
-            message={error}
-            onRetry={onRetry}
-            title={errorTitle}
-            retryLabel={errorRetryLabel}
-          />
         ) : isEmpty && empty ? (
           <EmptyState
             title={empty.title}

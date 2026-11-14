@@ -8,7 +8,8 @@ import {
   Button,
   Separator,
 } from '@web2bizz/ui/components';
-import { EmptyState, ErrorState, LoadingState } from '../../states';
+import { EmptyState, LoadingState } from '../../states';
+import { toast } from '@web2bizz/ui/widgets';
 import { useSessionEvents } from '../../../hooks/useSessionEvents';
 import { useSessions } from '../../../hooks/useSessions';
 import { useI18n } from '../../../i18n';
@@ -103,6 +104,24 @@ export function RunningSessionsTab({
     if (lastType.startsWith('session.')) reload();
   }, [events.length]);
 
+  // Toast-only errors (kit sonner): list failures surface as a top-right
+  // toast with Retry (invalidateQueries via `reload`); the tab stays mounted.
+  const lastErrorRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!error) {
+      lastErrorRef.current = null;
+      return;
+    }
+    if (lastErrorRef.current === error) return;
+    lastErrorRef.current = error;
+    toast.error(t.errors.somethingWentWrong, {
+      id: `running-list:${error}`,
+      description: error,
+      duration: 5500,
+      action: { label: t.common.retry, onClick: reload },
+    });
+  }, [error, reload, t]);
+
   // Busy filter: the derived status map, overlaid by the row's own status
   // while the map query has no entry yet (same server-computed source).
   const running = sessions.filter((s) => {
@@ -147,16 +166,14 @@ export function RunningSessionsTab({
 
         {loading && <LoadingState rows={2} />}
 
-        {!loading && error && <ErrorState message={error} onRetry={reload} />}
-
-        {!loading && !error && running.length === 0 && (
+        {!loading && running.length === 0 && (
           <EmptyState
             title={t.sessions.runningTitle}
             description={t.sessions.emptyRunning}
           />
         )}
 
-        {!loading && !error && running.length > 0 && (
+        {!loading && running.length > 0 && (
           <div
             ref={parentRef}
             className="overflow-y-auto overscroll-contain"

@@ -27,17 +27,20 @@ try {
 const { cleanup, render, screen } = await import('@testing-library/react');
 const userEvent = (await import('@testing-library/user-event')).default;
 const { ChatThread } = await import('..');
+const { Toaster, toast } = await import('@web2bizz/ui/widgets');
 const { ChatInput } = await import('../../chat-input');
 const { I18nProvider } = await import('../../../../i18n');
 
 afterEach(() => {
   cleanup();
+  toast.dismiss();
 });
 
 function renderThread(props?: Partial<Parameters<typeof ChatThread>[0]>) {
   return render(
     <I18nProvider>
-      <ChatThread messages={[]} streamingText="" {...props} />
+      <ChatThread entries={[]} {...props} />
+      <Toaster position="top-right" visibleToasts={4} closeButton />
     </I18nProvider>,
   );
 }
@@ -55,6 +58,7 @@ describe('ChatThread', () => {
 
   test('error: shows the message with NO top retry (retry lives only in user footer)', async () => {
     renderThread({ error: 'boom' });
+    // Toast-only (kit sonner): the message surfaces in the sonner toast, not inline.
     expect(await screen.findByText('boom')).toBeDefined();
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
@@ -78,10 +82,13 @@ describe('ChatThread', () => {
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 
-  test('error: empty thread renders the ErrorState text with NO retry button (nothing to preserve)', async () => {
+  test('error: empty thread pushes a toast with NO retry button (nothing to preserve)', async () => {
     renderThread({ error: 'boom' });
+    // Toast-only (T2, kit sonner): the error pushes a toast (sonner `id`
+    // dedupes repeats), the thread falls back to the empty placeholder —
+    // no inline ErrorState.
     expect(await screen.findByText('boom')).toBeDefined();
-    expect(screen.queryByText('Start a conversation')).toBeNull();
+    expect(await screen.findByText('Start a conversation')).toBeDefined();
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 

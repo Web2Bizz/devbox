@@ -12,6 +12,10 @@ export type ChatThreadProps = {
   loading?: boolean;
   sending?: boolean;
   error?: string | null;
+  /** Owning session — part of the toast dedup key (survives remount via sessionStorage). */
+  sessionId?: string | null;
+  /** Retry for the toast action — SSE redial + history refetch (owned by the section/hook). */
+  onRetry?: () => void;
   /** Live tool name with no chain row yet (in-flight SSE sidecar). */
   activeAgentName?: string;
   activeToolName?: string;

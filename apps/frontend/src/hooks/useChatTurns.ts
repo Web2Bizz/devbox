@@ -156,8 +156,13 @@ export function useChatTurns(params: {
   // Terminal transport frame (C0 stream.error): the thread is PRESERVED,
   // the error surfaces separately (C6 renders it as a banner, not a
   // replacement). Transient failures never reach here — they redial quietly.
+  // Replay gate: ignore terminal frames when no turn is live. A full replay
+  // (cursor:null connect) replays old failed frames with sending:false —
+  // they must not surface as a toast. Only a live turn (sending:true) may
+  // set the error (same sendingRef gate as finalize).
   const failTerminal = useCallback(
     (frame: { data?: unknown }): void => {
+      if (!sendingRef.current) return;
       const data =
         frame.data && typeof frame.data === 'object' ? (frame.data as Record<string, unknown>) : {};
       const message =
@@ -184,7 +189,8 @@ export function useChatTurns(params: {
   // is cleared, so a later session.idle is a no-op.
   const failTurn = useCallback(
     (frame: { data?: unknown }): void => {
-      if (sendingRef.current && !abortedTurnRef.current) {
+      if (!sendingRef.current) return;
+      if (!abortedTurnRef.current) {
         const partial = live.streamingRef.current;
         if (partial) {
           chain.appendAssistantPartial(partial);

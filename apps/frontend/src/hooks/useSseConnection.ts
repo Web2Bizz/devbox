@@ -87,6 +87,10 @@ export function useSseConnection(params: {
   const { projectId, chain, turns } = params;
 
   useEffect(() => {
+    // StrictMode double-mount: the first mount's cleanup (disposed=true +
+    // abort + timers/listeners cleared below) must fully silence it, so the
+    // second connect is the only live subscription. No contract change —
+    // same deps, same frames, same cursor resume.
     if (!projectId) return;
     let disposed = false;
     let ctrl: AbortController | null = null;
@@ -212,7 +216,9 @@ export function useSseConnection(params: {
           // send() resets abortedTurnRef, re-arming the subscription.
           if (turns.abortedTurnRef.current) continue;
           const sid = turns.sessionIdRef.current;
-          if (!sid || frame.session !== sid) continue;
+          if (!sid || frame.session !== sid) {
+            continue;
+          }
           // Terminal error channel — never the text tract, never finalize().
           if (frame.type === 'stream.error') {
             turns.failTerminal(frame);
@@ -353,6 +359,8 @@ export function useSseConnection(params: {
           if (!ft) continue;
           // Backend turn failure: terminal, commits the partial answer and
           // surfaces the fixed error (never a spinner without an error).
+          // Gated on a live turn inside failTurn — replayed failures with
+          // sending:false are ignored (no toast on full-replay connect).
           if (ft.kind === 'failed') {
             turns.failTurn(frame);
             continue;

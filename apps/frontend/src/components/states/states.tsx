@@ -103,7 +103,14 @@ export function ProjectsHeaderSkeleton() {
   );
 }
 
-/** Destructive Alert + retry, with explicit ApiClientError text. */
+/**
+ * Destructive Alert + retry, with explicit ApiClientError text.
+ *
+ * @deprecated Toast-only migration: all call sites now surface failures via
+ * the kit sonner toast (`Toaster`/`toast` from `@web2bizz/ui/widgets`,
+ * mounted in `src/providers.tsx`). Kept one release for external callers —
+ * do not add new usages.
+ */
 export function ErrorState({
   message,
   onRetry,

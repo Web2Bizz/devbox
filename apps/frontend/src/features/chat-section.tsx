@@ -31,10 +31,10 @@ export type ChatSectionProps = {
  * `components/chat/*`. No `entities/`/`shared/` — no new deprecated
  * re-exports. Flat Content (§7): linear section, no Card wrappers.
  *
- * States: loading skeleton, upstream failures (ErrorState + retry, `reload`
+ * States: loading skeleton, upstream failures (toast + retry, `reload`
  * redials SSE + refetches history) and empty copy are all owned by
  * `ChatThread` — the section just wires props so there is a single render
- * path and the alert is never duplicated under the thread. STOP keeps the
+ * path and the toast is never duplicated under the thread. STOP keeps the
  * partial stream as the assistant answer (see `useChat.stop`).
  *
  * Geometry comes from the route layout via `className`/`composerClassName` —
@@ -78,6 +78,7 @@ export function ChatSection({ sessionId, projectId, className, composerClassName
     approval,
     send,
     stop,
+    reload,
   } = chat;
 
   // Approval gate (WEB-20 / D2): the parked long-session turn resolves via
@@ -194,6 +195,8 @@ export function ChatSection({ sessionId, projectId, className, composerClassName
         loading={loading}
         sending={sending}
         error={approvalError ?? error}
+        sessionId={activeSessionId}
+        onRetry={reload}
         activeAgentName={activeAgentName}
         activeToolName={activeToolName ?? undefined}
         approval={approval}

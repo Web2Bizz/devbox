@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import {
   Badge,
   Button,
@@ -12,7 +12,7 @@ import {
   DialogTitle,
   Separator,
 } from '@web2bizz/ui/components';
-import { ErrorState } from '../components/states';
+import { toast } from '@web2bizz/ui/widgets';
 import { toErrorMessage } from '../api/sessions-client';
 import { useI18n } from '../i18n';
 import { useRevert } from '../hooks/useRevert';
@@ -55,6 +55,34 @@ export function ChatRevertDialog({
   const files = stage.data?.files ?? [];
   const error = stage.error ?? clear.error ?? commit.error;
 
+  // Toast-only errors (kit sonner): revert failures surface as a top-right
+  // toast with Retry (stage redial); the dialog stays open so the staged
+  // boundary choice is never lost.
+  const lastErrorRef = useRef<string | null>(null);
+  const errorText = error ? toErrorMessage(error) : null;
+  useEffect(() => {
+    if (!errorText) {
+      lastErrorRef.current = null;
+      return;
+    }
+    if (lastErrorRef.current === errorText) return;
+    lastErrorRef.current = errorText;
+    toast.error(t.errors.somethingWentWrong, {
+      id: `revert:${errorText}`,
+      description: errorText,
+      duration: 5500,
+      ...(messageId
+        ? {
+            action: {
+              label: t.chat.retry,
+              onClick: () => stage.mutate(messageId),
+            },
+          }
+        : {}),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [errorText, t]);
+
   return (
     <Dialog open={open} onOpenChange={(next) => (busy ? undefined : onOpenChange(next))}>
       <DialogContent showCloseButton={!busy}>
@@ -63,13 +91,7 @@ export function ChatRevertDialog({
           <DialogDescription>{t.chat.revertDesc}</DialogDescription>
         </DialogHeader>
 
-        {error ? (
-          <ErrorState
-            message={toErrorMessage(error)}
-            onRetry={messageId ? () => stage.mutate(messageId) : undefined}
-            retryLabel={t.chat.retry}
-          />
-        ) : stage.isPending ? (
+        {stage.isPending ? (
           <p className="text-sm text-muted-foreground" aria-busy="true">
             {t.chat.revertStage}
           </p>

@@ -1,9 +1,11 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@web2bizz/ui/components';
-import { ChatRowSkeleton, ErrorState } from '../../states';
+import { toast } from '@web2bizz/ui/widgets';
+import { ChatRowSkeleton } from '../../states';
 import { useSessions } from '../../../hooks/useSessions';
 import { projectSessionPath } from '../../../lib/navigation';
 import { SidebarNav, useSidebarClose } from '../../layout/Sidebar';
@@ -113,6 +115,25 @@ export function SessionList({
     router.push(projectSessionPath(orgId, projectId, created.id));
   };
 
+  // Toast-only errors (kit sonner): list failures surface as a top-right
+  // toast with Retry (invalidateQueries via `reload`); the dialog/list stays
+  // open so nothing is lost.
+  const lastErrorRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!error) {
+      lastErrorRef.current = null;
+      return;
+    }
+    if (lastErrorRef.current === error) return;
+    lastErrorRef.current = error;
+    toast.error(t.errors.somethingWentWrong, {
+      id: `sessions-list:${error}`,
+      description: error,
+      duration: 5500,
+      action: { label: t.common.retry, onClick: reload },
+    });
+  }, [error, reload, t]);
+
   return (
     <div className="flex w-full min-w-0 flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
@@ -140,13 +161,11 @@ export function SessionList({
         </ul>
       )}
 
-      {!loading && error && <ErrorState message={error} onRetry={reload} />}
-
-      {!loading && !error && sessions.length === 0 && (
+      {!loading && sessions.length === 0 && (
         <p className="text-muted-foreground text-xs">{t.sessions.emptyAll}</p>
       )}
 
-      {!loading && !error && sessions.length > 0 && (
+      {!loading && sessions.length > 0 && (
         <ul className="flex w-full min-w-0 list-none flex-col gap-1.5 m-0 p-0">
           {sessions.map((session) => {
             const title = session.title?.trim() || t.sessions.untitled;

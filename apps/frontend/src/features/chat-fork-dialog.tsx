@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
 import {
   Button,
   Dialog,
@@ -9,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@web2bizz/ui/components';
-import { ErrorState } from '../components/states';
+import { toast } from '@web2bizz/ui/widgets';
 import { toErrorMessage } from '../api/sessions-client';
 import { useI18n } from '../i18n';
 import { useForkSession } from '../hooks/useForkSession';
@@ -41,6 +42,30 @@ export function ChatForkDialog({
   const fork = useForkSession(sessionId, projectId);
   const busy = fork.isPending;
 
+  // Toast-only errors (kit sonner): fork failures surface as a top-right
+  // toast with Retry (invalidateQueries via `fork.mutate`); the dialog stays
+  // open so the boundary choice is never lost.
+  const lastErrorRef = useRef<string | null>(null);
+  const forkError = fork.error ? toErrorMessage(fork.error) : null;
+  useEffect(() => {
+    if (!forkError) {
+      lastErrorRef.current = null;
+      return;
+    }
+    if (lastErrorRef.current === forkError) return;
+    lastErrorRef.current = forkError;
+    toast.error(t.errors.somethingWentWrong, {
+      id: `fork:${forkError}`,
+      description: forkError,
+      duration: 5500,
+      action: {
+        label: t.common.retry,
+        onClick: () => fork.mutate(messageId ?? undefined),
+      },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [forkError, t]);
+
   return (
     <Dialog open={open} onOpenChange={(next) => (busy ? undefined : onOpenChange(next))}>
       <DialogContent showCloseButton={!busy}>
@@ -49,9 +74,7 @@ export function ChatForkDialog({
           <DialogDescription>{t.chat.forkDesc}</DialogDescription>
         </DialogHeader>
 
-        {fork.error ? (
-          <ErrorState message={toErrorMessage(fork.error)} />
-        ) : fork.data ? (
+        {fork.data ? (
           <p className="text-sm text-muted-foreground">
             {t.chat.forkSuccess}: <span className="font-mono text-xs">{fork.data.session.id}</span>
           </p>

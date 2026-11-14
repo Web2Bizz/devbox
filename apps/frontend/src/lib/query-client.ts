@@ -39,8 +39,9 @@ export function createQueryClient(): QueryClient {
 /**
  * Active-client registry — lets the module-level sign-out path
  * (`signOutAndRedirect` in lib/auth-store, which can't call the
- * `useQueryClient` hook) clear the React Query cache. Providers registers
- * the mounted client; consumers outside a provider (tests) simply get null.
+ * `useQueryClient` hook) clear the React Query cache. `getQueryClient`
+ * registers the singleton below; consumers outside a provider (tests)
+ * simply get null after `registerActiveQueryClient(null)`.
  */
 let activeClient: QueryClient | null = null;
 
@@ -50,4 +51,23 @@ export function registerActiveQueryClient(client: QueryClient | null): void {
 
 export function getActiveQueryClient(): QueryClient | null {
   return activeClient;
+}
+
+let browserQueryClient: QueryClient | undefined;
+
+/**
+ * Module singleton — one QueryClient per browser tab (not per mounted tree).
+ *
+ * - Browser: lazy singleton — no per-render recreation, no StrictMode double
+ *   mount leak, HMR-safe (module state persists across fast-refresh).
+ * - SSR / server: fresh client per call — never share cache across requests.
+ * - Side effect: registers the singleton as the active client (when no
+ *   explicit client is registered) so `signOutAndRedirect` logout-clear
+ *   works without a registration effect in `Providers`.
+ */
+export function getQueryClient(): QueryClient {
+  if (typeof window === 'undefined') return createQueryClient();
+  if (!browserQueryClient) browserQueryClient = createQueryClient();
+  if (activeClient === null) activeClient = browserQueryClient;
+  return browserQueryClient;
 }

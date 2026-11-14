@@ -4,6 +4,8 @@ import { cookies } from 'next/headers';
 import '@web2bizz/ui/styles.css';
 import './globals.css';
 import { Providers } from '@/providers';
+import { ToasterHost } from '@/components/toaster-host';
+import { ThemeScript } from '@/components/theme-script';
 import { en } from '@/i18n/dictionaries/en';
 import { ru } from '@/i18n/dictionaries/ru';
 
@@ -27,22 +29,26 @@ export async function generateMetadata(): Promise<Metadata> {
     description: dict.metadata.description,
     icons: {
       icon: [
-        { url: '/icon.png', type: 'image/png' },
-        { url: '/logo.png', type: 'image/png' },
+        { url: '/assets/favicon.ico', type: 'image/x-icon' },
+        { url: '/assets/icon.png', type: 'image/png', sizes: '512x512' },
       ],
-      shortcut: '/logo.png',
-      apple: '/logo.png',
+      shortcut: '/assets/favicon.ico',
+      apple: [{ url: '/assets/apple-icon.png', sizes: '180x180' }],
     },
   };
 }
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    // suppressHydrationWarning: ThemeProvider toggles `light`/`dark` class on
-    // <html> after mount; the server prerender can't know the stored theme.
     <html lang="en" suppressHydrationWarning>
+      <head>
+        <ThemeScript storageKey="theme" defaultTheme="system" />
+      </head>
       <body>
-        <Providers>{children}</Providers>
+        <Providers>
+          {children}
+          <ToasterHost />
+        </Providers>
       </body>
     </html>
   );

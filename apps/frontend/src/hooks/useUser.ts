@@ -22,7 +22,7 @@ export type UseUserResult = {
 
 /**
  * Single-user hook — GET /api/v1/users/:id (own profile only).
- * - 403 ( чужой id) → forbidden + ErrorState «доступ запрещён», no retry
+ * - 403 ( чужой id) → forbidden + error toast «доступ запрещён», no retry
  * - 404 → notFound, no retry
  * - Errors via formatApiError + t. No list fetching — single id only.
  */

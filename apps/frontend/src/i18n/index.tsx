@@ -17,12 +17,9 @@
  * - `generateMetadata` stays per-request: it reads the `rush-code-locale`
  *   cookie server-side, so title/description localize without URL change.
  *
- * Compatibility with ThemeProvider mount-guard (src/providers.tsx):
- * - ThemeProvider reads `localStorage` in its `useState` initializer (no SSR
- *   guard) → must mount client-only. I18nProvider below is SSR-safe (no
+ * SSR-safe note: I18nProvider below is SSR-safe (no
  *   storage access during render; hydration happens in `useEffect`), so it
- *   renders on the server AND wraps the mount-guarded ThemeProvider: children
- *   always have `useI18n`, theme context arrives after hydration.
+ *   renders on the server: children always have `useI18n`.
  * - `document.documentElement.lang` syncs in `useEffect` (no SSR DOM access).
  *
  * Persistence: `rush-code-locale` cookie (1y, SameSite=Lax, path=/) — readable

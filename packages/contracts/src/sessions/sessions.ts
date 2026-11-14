@@ -135,10 +135,115 @@ export type SessionMessage = {
   createdAt: string;
   /** plain-text projection; null for non-text variants (never faked) */
   text: string | null;
+  /**
+   * Additive chain link (unified ChatEntry): parent message id, null for the
+   * root. Optional — pre-chain rows omit it and the client defaults to a
+   * linear chain. Backend write path untouched (never required on input).
+   */
+  parentId?: string | null;
+  /**
+   * Additive entry kind (unified ChatEntry): 'text' chat bubble vs 'tool'
+   * timeline step vs 'reasoning' thinking trace. Optional — absent reads as
+   * text when `text` is present, tool/reasoning rows carry name/status/detail.
+   * Wire kind=reasoning renders as thinking: the frontend projects it into a
+   * tool-timeline entry named 'reasoning' (thinking vs tool UI split on the
+   * name, not on the kind).
+   */
+  kind?: 'text' | 'tool' | 'reasoning';
+  /** Additive tool/reasoning name (registry tool id or 'reasoning'). Optional. */
+  name?: string | null;
+  /** Additive lifecycle status (called/progress/done/failed, started/delta/ended). Optional. */
+  status?: string | null;
+  /** Additive single-line detail (status snippet, never secrets). Optional. */
+  detail?: string | null;
 };
 
 /** GET /api/v1/sessions/{id}/messages — normalized message list. */
 export type SessionMessageList = Array<SessionMessage>;
+
+/**
+ * Total-steps ceiling of one turn (WEB-14 / B3) — single home of the 200
+ * budget: segments (`CHECKPOINT_SEGMENT_STEPS` in the runner) accumulate
+ * under this ceiling, the turn closes with `limit_reached` on hit.
+ */
+export const CHECKPOINT_MAX_TOTAL_STEPS: number = 200;
+
+/**
+ * Checkpoint status persisted between segments — mirrors the
+ * `agent_checkpoints.status` contract (plain text, no CHECK): `running`
+ * after every non-terminal segment, `completed` on a terminal stop,
+ * `limit_reached` when the `CHECKPOINT_MAX_TOTAL_STEPS` ceiling is hit,
+ * `cancelled` on a segment-boundary interrupt, `failed` on an unexpected
+ * throw, `paused`/`awaiting_approval` for durable pause/resume slices.
+ */
+export type SessionCheckpointStatus =
+  | 'running'
+  | 'paused'
+  | 'awaiting_approval'
+  | 'limit_reached'
+  | 'cancelled'
+  | 'completed'
+  | 'failed';
+
+/**
+ * Human decision for a turn parked in `awaiting_approval` (WEB-15 / C1) —
+ * single confirmation endpoint answers `approve` (resume the turn) or
+ * `reject` (stop the turn without resuming).
+ */
+export type SessionApprovalDecision = 'approve' | 'reject';
+
+/**
+ * POST /api/v1/sessions/{id}/approval body — projectId is the C4 gate uuid
+ * (strict like interrupt/fork: backend-generated, never upstream passthrough).
+ * `reason` is the human note (rejection motive / approval comment), optional
+ * and never faked by the server.
+ */
+export type SessionApprovalRequest = {
+  projectId: string;
+  decision: SessionApprovalDecision;
+  reason?: string;
+};
+
+/**
+ * SSE frame emitted when the runner parks a turn on `awaiting_approval`
+ * (WEB-15 / C1): the UI confirmation entry point. `data.sessionID` is the
+ * owning session (same hoist rule as every SessionStreamFrame), `data.reason`
+ * is the short human-readable pause cause (never secrets).
+ */
+export type SessionApprovalRequestedFrame = SessionStreamFrame & {
+  type: 'session.approval.requested';
+  data: {
+    sessionID: string;
+    reason: string;
+  };
+};
+
+/**
+ * Branch child of one parent message (GET /api/v1/sessions/{id}/variants) —
+ * the branch-switcher row: child id, creation time (ISO-8601) and a short
+ * text preview. Time-ordered (createdAt ASC, id ASC) by the repository.
+ */
+export type SessionMessageVariant = {
+  childId: string;
+  /** ISO-8601 */
+  createdAt: string;
+  /** single-line preview of the child text (truncated, never faked) */
+  preview: string;
+};
+
+/** GET /api/v1/sessions/{id}/variants — branch children list. */
+export type SessionMessageVariantList = Array<SessionMessageVariant>;
+
+/**
+ * Thread view of one session: the active chain (root → leaf), the branch
+ * children of the viewed parent and the active leaf cursor (null when the
+ * thread is empty / the root was reverted).
+ */
+export type SessionThreadView = {
+  chain: SessionMessageList;
+  variants: SessionMessageVariantList;
+  activeLeaf: string | null;
+};
 
 /**
  * POST /api/v1/sessions/{id}/messages body — the domain chat prompt. `text`
@@ -163,6 +268,12 @@ export type SendMessageRequest = {
    * again by dispatch.
    */
   mode?: 'auto' | 'ask';
+  /**
+   * Explicit branch parent (active-leaf tip the client renders). Optional
+   * and additive: omitted = the linear clock tail; null = explicit root.
+   * The server never resurrects a deleted sibling from a null parent.
+   */
+  parentId?: string | null;
 };
 
 /**
@@ -313,6 +424,25 @@ export type RevertInfo = {
 };
 
 /**
+ * POST /api/v1/sessions/{id}/messages/revert body — projectId is the C4 gate
+ * uuid, messageID is the revert boundary (the boundary + all its descendants
+ * are soft-deleted, files untouched).
+ */
+export type RevertMessagesRequest = {
+  projectId: string;
+  messageID: string;
+};
+
+/**
+ * POST /api/v1/sessions/{id}/messages/revert answer — the new leaf cursor
+ * after the soft-delete (the boundary parent, null when the root was
+ * reverted). Unknown boundary is 404, never null.
+ */
+export type RevertMessagesResult = {
+  activeLeaf: string | null;
+};
+
+/**
  * One tool call visible in the session timeline (id from the runtime call,
  * registry name + optional namespace, textual result the model received).
  */
@@ -365,9 +495,11 @@ export type SessionTextEndedFrame = SessionStreamFrame & {
 
 /**
  * Live reasoning frame (`session.reasoning.started/delta/ended`): the
- * thinking trace of the turn. Live-only, never durable history and never
- * chat text — the chat renders it as collapsed reasoning steps beside the
- * answer, never inside `streamingText` or `SessionMessage.text`.
+ * thinking trace of the turn. Transport-only live frame, never chat text —
+ * the chat renders live frames as collapsed reasoning steps. Durable
+ * projection (0012): the recorder buffers started/delta into one
+ * kind=reasoning row on ended, rendered as a tool-timeline entry named
+ * 'reasoning' (thinking vs tool UI split on the name).
  */
 export type SessionReasoningFrame = SessionStreamFrame & {
   type: 'session.reasoning.started' | 'session.reasoning.delta' | 'session.reasoning.ended';
@@ -381,8 +513,12 @@ export type SessionReasoningFrame = SessionStreamFrame & {
 /**
  * Live tool lifecycle frame (`session.tool.called/progress/success/failed`
  * plus `session.tool.input.started/delta/ended`): one tool call of the turn.
- * Live-only, never durable history and never chat text — the chat renders
- * it as timeline steps (`activeToolName` + per-turn `tool` trace rows).
+ * Transport-only live frame, never chat text — the chat renders live frames
+ * as timeline steps (`activeToolName` + per-turn `tool` trace rows). Durable
+ * projection (0012): called/progress/tool input markers/success/failed each append one
+ * kind=tool row (the recorder links them, parent=tip); only markers without
+ * stable call identity (`session.text.started`, `session.step.*`,
+ * `session.execution.*`) stay live-only.
  * `data` keeps the known detail keys optional (single-line status snippets
  * only — full argument/result bodies never travel here); unknown extra keys
  * stay tolerated via the envelope stance.

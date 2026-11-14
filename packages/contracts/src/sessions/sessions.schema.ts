@@ -6,8 +6,14 @@ import type {
   CreateSessionRequest,
   InterruptSessionRequest,
   RevertInfo,
+  RevertMessagesRequest,
+  RevertMessagesResult,
   RevertStageRequest,
   SendMessageRequest,
+  SessionApprovalDecision,
+  SessionApprovalRequest,
+  SessionApprovalRequestedFrame,
+  SessionCheckpointStatus,
   SessionExecutionFrame,
   SessionForkBoundary,
   SessionForkRequest,
@@ -21,6 +27,8 @@ import type {
   SessionMessageList,
   SessionMessagePartDeltaFrame,
   SessionMessagePartUpdatedFrame,
+  SessionMessageVariant,
+  SessionMessageVariantList,
   SessionReasoningFrame,
   SessionRunnerProvider,
   SessionRunnerProviderList,
@@ -32,6 +40,7 @@ import type {
   SessionTextDeltaFrame,
   SessionTextEndedFrame,
   SessionTextStartedFrame,
+  SessionThreadView,
   SessionToolLifecycleFrame,
   SnapshotDiff,
   SnapshotDiffList,
@@ -117,6 +126,49 @@ export const sessionRunStatusMapSchema = z.record(
   sessionRunStatusSchema,
 ) satisfies z.ZodType<SessionRunStatusMap>;
 
+/**
+ * Checkpoint status (WEB-14 / B3) — mirrors `agent_checkpoints.status`
+ * (plain text, no CHECK): `limit_reached` closes the turn on the
+ * `CHECKPOINT_MAX_TOTAL_STEPS` ceiling, never a throw.
+ */
+export const sessionCheckpointStatusSchema = z.enum(
+  ['running', 'paused', 'awaiting_approval', 'limit_reached', 'cancelled', 'completed', 'failed'],
+  { error: 'Field "status" must be a checkpoint lifecycle value' },
+) satisfies z.ZodType<SessionCheckpointStatus>;
+
+/**
+ * Approval decision (WEB-15 / C1) — `approve` resumes the parked turn,
+ * `reject` stops it without resuming. Single confirmation endpoint.
+ */
+export const sessionApprovalDecisionSchema = z.enum(['approve', 'reject'], {
+  error: 'Field "decision" must be one of approve|reject',
+}) satisfies z.ZodType<SessionApprovalDecision>;
+
+/** POST /api/v1/sessions/{id}/approval body — gate uuid + decision + optional human note. */
+export const sessionApprovalRequestSchema = z.object({
+  projectId: z.uuid({ error: 'Field "projectId" is required' }),
+  decision: sessionApprovalDecisionSchema,
+  reason: z.string().min(1).max(500).optional(),
+}) satisfies z.ZodType<SessionApprovalRequest>;
+
+export type SessionApprovalInput = z.infer<typeof sessionApprovalRequestSchema>;
+
+/**
+ * session.approval.requested — runner parked a turn on `awaiting_approval`.
+ * Session required, reason required (short human-readable pause cause, never
+ * secrets). Unknown extra keys tolerated via catchall (runner enrichment
+ * must not break the confirmation UI).
+ */
+export const sessionApprovalRequestedFrameSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  type: z.literal('session.approval.requested'),
+  data: z.object({
+    sessionID: z.string({ error: 'Field "data.sessionID" is required' }).min(1),
+    reason: z.string({ error: 'Field "data.reason" is required' }).min(1),
+  }).catchall(z.unknown()),
+  session: z.string().optional(),
+}) satisfies z.ZodType<SessionApprovalRequestedFrame>;
+
 /** POST /api/v1/sessions body — projectId required (sessions are project-scoped). */
 export const createSessionRequestSchema = z.object({
   projectId: z.uuid({ error: 'Field "projectId" is required' }),
@@ -130,20 +182,50 @@ export type CreateSessionInput = z.infer<typeof createSessionRequestSchema>;
 
 /** GET /api/v1/sessions/{id}/messages item — normalized Session.Message.Info
  * projection (text null for non-text variants; createdAt is backend-emitted
- * ISO like SessionInfo.createdAt, hence the same strict datetime). */
+ * ISO like SessionInfo.createdAt, hence the same strict datetime).
+ * `parentId`/`kind`/`name`/`status`/`detail` are additive chain hints
+ * (unified ChatEntry) — optional, never required, backend write path untouched.
+ * `name`/`status` are min(1) when present (mirror openapi.yaml minLength: 1);
+ * wire kind=reasoning renders as thinking (frontend tool-timeline entry
+ * named 'reasoning' — thinking vs tool UI split on the name). */
 export const sessionMessageSchema = z.object({
   id: z.string({ error: 'Field "id" is required' }).min(1),
   type: z.string({ error: 'Field "type" is required' }).min(1),
   createdAt: z.iso.datetime({ error: 'Field "createdAt" must be an ISO-8601 timestamp' }),
   text: z.string().nullable(),
+  parentId: z.string().min(1).nullable().optional(),
+  kind: z.enum(['text', 'tool', 'reasoning']).optional(),
+  name: z.string().min(1).nullable().optional(),
+  status: z.string().min(1).nullable().optional(),
+  detail: z.string().nullable().optional(),
 }) satisfies z.ZodType<SessionMessage>;
 
 export const sessionMessageListSchema = z.array(sessionMessageSchema) satisfies z.ZodType<
   SessionMessageList
 >;
 
+/** GET /api/v1/sessions/{id}/variants item — branch child (child id, ISO time, preview). */
+export const sessionMessageVariantSchema = z.object({
+  childId: z.string({ error: 'Field "childId" is required' }).min(1),
+  createdAt: z.iso.datetime({ error: 'Field "createdAt" must be an ISO-8601 timestamp' }),
+  preview: z.string({ error: 'Field "preview" is required' }),
+}) satisfies z.ZodType<SessionMessageVariant>;
+
+export const sessionMessageVariantListSchema = z.array(sessionMessageVariantSchema) satisfies z.ZodType<
+  SessionMessageVariantList
+>;
+
+/** Thread view — active chain + branch children + active leaf cursor. */
+export const sessionThreadViewSchema = z.object({
+  chain: sessionMessageListSchema,
+  variants: sessionMessageVariantListSchema,
+  activeLeaf: z.string({ error: 'Field "activeLeaf" is required' }).min(1).nullable(),
+}) satisfies z.ZodType<SessionThreadView>;
+
 /** POST /api/v1/sessions/{id}/messages body — text mirrors the v2 prompt's
- * only required payload field; projectId is the gate uuid (strict, Q2). */
+ * only required payload field; projectId is the gate uuid (strict, Q2).
+ * `parentId` is the additive branch tip (unified ChatEntry): omitted = the
+ * linear clock tail, explicit null = root, string = branch tip. */
 export const sendMessageRequestSchema = z.object({
   projectId: z.uuid({ error: 'Field "projectId" is required' }),
   text: z.string({ error: 'Field "text" is required' }).min(1),
@@ -151,6 +233,7 @@ export const sendMessageRequestSchema = z.object({
   agentId: agentIdSchema.optional(),
   /** Execution mode; omitted = auto, ask is read-only. */
   mode: z.enum(['auto', 'ask']).optional(),
+  parentId: z.string().min(1).nullable().optional(),
 }) satisfies z.ZodType<SendMessageRequest>;
 
 /** SSE frame envelope of GET /api/v1/sessions/events — the variant payload
@@ -252,9 +335,10 @@ export const sessionTextEndedFrameSchema = z.object({
 
 /**
  * session.reasoning.* — live thinking trace (started/delta/ended). Session
- * required, delta/text optional (started carries neither). Live-only, never
- * durable: consumers render it as collapsed reasoning steps, never as chat
- * text and never into the durable thread.
+ * required, delta/text optional (started carries neither). Transport-only
+ * live frames, never chat text: consumers render them as collapsed reasoning
+ * steps. Durable projection (0012): the recorder buffers started/delta into
+ * one kind=reasoning row on ended (tool-timeline entry named 'reasoning').
  */
 export const sessionReasoningFrameSchema = z.object({
   id: z.string({ error: 'Field "id" is required' }).min(1),
@@ -273,8 +357,12 @@ export const sessionReasoningFrameSchema = z.object({
  * session.tool.* — live tool lifecycle (called/progress/success/failed plus
  * input.started/delta/ended). Session required, detail keys optional and
  * guarded (tool/toolName/name for the name, message/progress/status/text/
- * error for the single-line timeline detail). Live-only, never durable and
- * never chat text: consumers project it to live status + timeline rows.
+ * error/delta/input/arguments for the single-line redacted timeline detail).
+ * Transport-only live frames, never chat text: consumers project them to live
+ * status + timeline rows. Durable projection (0012): every broadcast
+ * (called/progress/tool input markers/success/failed) appends one kind=tool row via the
+ * recorder (parent=tip, idempotent by frame id); only markers without stable
+ * call identity stay live-only.
  */
 export const sessionToolLifecycleFrameSchema = z.object({
   id: z.string({ error: 'Field "id" is required' }).min(1),
@@ -422,6 +510,17 @@ export const revertInfoSchema = z.object({
   files: z.array(snapshotDiffSchema),
 }) satisfies z.ZodType<RevertInfo>;
 
+/** POST /api/v1/sessions/{id}/messages/revert body — boundary message (files untouched). */
+export const revertMessagesRequestSchema = z.object({
+  projectId: z.uuid({ error: 'Field "projectId" is required' }),
+  messageID: z.string({ error: 'Field "messageID" is required' }).min(1).max(200),
+}) satisfies z.ZodType<RevertMessagesRequest>;
+
+/** POST /api/v1/sessions/{id}/messages/revert answer — new leaf (null when the root was reverted). */
+export const revertMessagesResultSchema = z.object({
+  activeLeaf: z.string({ error: 'Field "activeLeaf" is required' }).min(1).nullable(),
+}) satisfies z.ZodType<RevertMessagesResult>;
+
 /** Tool-call timeline row (call id, registry name, optional namespace, result text). */
 export const toolCallInfoSchema = z.object({
   id: z.string({ error: 'Field "id" is required' }).min(1),
@@ -432,3 +531,4 @@ export const toolCallInfoSchema = z.object({
 
 export type SessionForkInput = z.infer<typeof sessionForkRequestSchema>;
 export type RevertStageInput = z.infer<typeof revertStageRequestSchema>;
+export type RevertMessagesInput = z.infer<typeof revertMessagesRequestSchema>;

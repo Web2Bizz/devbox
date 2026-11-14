@@ -2296,6 +2296,56 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+  /api/v1/sessions/{id}/messages/revert:
+    post:
+      summary: Revert the durable message tail from a boundary (messages only, files untouched)
+      operationId: revertSessionMessagesDomain
+      tags: [sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevertMessagesRequest'
+      responses:
+        '200':
+          description: new leaf cursor after the soft-delete (the boundary parent, null when the root was reverted)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevertMessagesResult'
+        '400':
+          description: >-
+            missing projectId (code PROJECT_REQUIRED, the C4 gate) or invalid body (code bad_request — our
+            zod) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) or the boundary message is absent (code MessageNotFound) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: session runner or durable store unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
   /api/v1/sessions/{id}/interrupt:
     post:
       summary: 'Interrupt the active session execution (idle interruption is an honest no-op: interrupted=false)'
@@ -2343,6 +2393,60 @@ paths:
             session runner unreachable (code EXTERNAL_UNAVAILABLE, Retry-After), it refused our
             credentials (code EXTERNAL_UNAUTHORIZED, no Retry-After) or its answer drifted off the
             artifact interrupt shape (code EXTERNAL_UNAVAILABLE — contract drift fails loud)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/sessions/{id}/approval:
+    post:
+      summary: Resolve a turn parked on awaiting_approval (approve resumes the same checkpoint thread, reject parks it on paused)
+      operationId: resolveSessionApprovalDomain
+      tags: [sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionApprovalRequest'
+      responses:
+        '200':
+          description: approval resolution (running = resumed on the same thread_id, paused = parked without resuming)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionApprovalResult'
+        '400':
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or invalid body (code bad_request — our zod) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: no turn awaiting approval (code ApprovalNotPending) or the resumed turn is already running (code ApprovalTurnBusy) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: session runner or durable store unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
           headers:
             Retry-After:
               description: seconds to wait before retrying
@@ -3545,7 +3649,8 @@ components:
         contracts/opencode-stand-2.2.0.json Session.Message.*): id/type/time.created are required on
         every variant; text is the variant's own text or the assistant content[] text parts joined,
         null for non-text variants (never faked). Variant nesting the UI does not consume is
-        intentionally not exposed.
+        intentionally not exposed. parentId/kind are additive chain hints (unified ChatEntry) —
+        optional, backend write path untouched, absent reads as a linear text chain.
       properties:
         id:
           type: string
@@ -3558,6 +3663,29 @@ components:
         text:
           type: string
           nullable: true
+        parentId:
+          type: string
+          nullable: true
+          minLength: 1
+          description: additive chain link (parent message id, null for the root) — optional
+        kind:
+          type: string
+          enum: [text, tool, reasoning]
+          description: additive entry kind (unified ChatEntry) — optional, absent reads as text; reasoning rows render as thinking (frontend projects them into tool-timeline entries named 'reasoning')
+        name:
+          type: string
+          minLength: 1
+          nullable: true
+          description: additive tool/reasoning name (registry tool id, or 'reasoning' for thinking traces) — optional
+        status:
+          type: string
+          minLength: 1
+          nullable: true
+          description: additive lifecycle status (called/progress/done/failed, started/delta/ended) — optional
+        detail:
+          type: string
+          nullable: true
+          description: additive single-line detail (never secrets) — optional
     SendMessageRequest:
       type: object
       required: [projectId, text]
@@ -3590,6 +3718,74 @@ components:
             execution mode of the turn (additive); omitted = auto, ask is
             read-only (mutating tools are filtered at bind time and refused
             again by dispatch)
+        parentId:
+          type: string
+          nullable: true
+          minLength: 1
+          description: >-
+            explicit branch parent (active-leaf tip the client renders,
+            additive); omitted = the linear clock tail, null = explicit root
+    SessionMessageVariant:
+      type: object
+      required: [childId, createdAt, preview]
+      description: >-
+        Branch child of one parent message (GET /api/v1/sessions/{id}/variants) —
+        the branch-switcher row: child id, creation time and a short text
+        preview. Time-ordered (createdAt ASC, id ASC).
+      properties:
+        childId:
+          type: string
+          minLength: 1
+        createdAt:
+          type: string
+          format: date-time
+        preview:
+          type: string
+    SessionThreadView:
+      type: object
+      required: [chain, variants, activeLeaf]
+      description: >-
+        Thread view of one session — the active chain (root to leaf), the
+        branch children of the viewed parent and the active leaf cursor (null
+        when the thread is empty or the root was reverted).
+      properties:
+        chain:
+          type: array
+          items:
+            $ref: '#/components/schemas/SessionMessage'
+        variants:
+          type: array
+          items:
+            $ref: '#/components/schemas/SessionMessageVariant'
+        activeLeaf:
+          type: string
+          nullable: true
+    RevertMessagesRequest:
+      type: object
+      required: [projectId, messageID]
+      description: >-
+        POST /api/v1/sessions/{id}/messages/revert body — projectId is the C4
+        gate uuid, messageID is the revert boundary (the boundary plus all its
+        descendants are soft-deleted, files untouched).
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        messageID:
+          type: string
+          minLength: 1
+          maxLength: 200
+    RevertMessagesResult:
+      type: object
+      required: [activeLeaf]
+      description: >-
+        POST /api/v1/sessions/{id}/messages/revert answer — the new leaf cursor
+        after the soft-delete (the boundary parent, null when the root was
+        reverted). Unknown boundary answers 404 MessageNotFound, never null.
+      properties:
+        activeLeaf:
+          type: string
+          nullable: true
     SessionStreamFrame:
       type: object
       required: [id, type, data]
@@ -3603,9 +3799,11 @@ components:
         is never mirrored here). Wire: `id:` line mirrors `id` (Last-Event-ID cursor),
         `: ping` comments are transport heartbeats (not frames), and `type: stream.error`
         is the terminal failure frame (finite data.message/code, then the stream ends).
-        Live-only variants (session.text.*, session.reasoning.*, session.tool.*, session.step.*,
-        session.execution.*) ride this envelope project-scoped and are never durable history:
-        reload refetches the durable thread (REST) while the live trace restarts empty.
+        Live frames (session.text.*, session.reasoning.*, session.tool.*, session.step.*,
+        session.execution.*) ride this envelope project-scoped: text deltas, step/execution
+        markers and tool markers/input.* stay live-only, while reasoning/tool project durably
+        via recorder as kind=reasoning/tool rows. Reload refetches the durable thread (REST)
+        while the live trace restarts empty.
       properties:
         id:
           type: string
@@ -3681,7 +3879,8 @@ components:
       required: [id, type, data]
       description: >-
         Live thinking trace (session.reasoning.started/delta/ended) — collapsed reasoning steps
-        beside the answer, never chat text and never durable history.
+        beside the answer, live frame, never chat text. Durable projection via recorder as one
+        kind=reasoning row (buffers started/delta, commits on ended).
       properties:
         id:
           type: string
@@ -3705,7 +3904,9 @@ components:
       required: [id, type, data]
       description: >-
         Live tool lifecycle (session.tool.called/progress/success/failed plus
-        session.tool.input.started/delta/ended) — timeline steps, never chat text, never durable.
+        session.tool.input.started/delta/ended) — timeline steps, live frame, never chat text.
+        Durable projection via recorder as kind=tool row (called/progress/success/failed);
+        markers/input.* stay live-only.
       properties:
         id:
           type: string
@@ -3794,6 +3995,41 @@ components:
       properties:
         interrupted:
           type: boolean
+    SessionApprovalDecision:
+      type: string
+      enum: [approve, reject]
+      description: >-
+        Human decision for a turn parked in awaiting_approval (WEB-15 / C1) —
+        approve resumes the turn on the same checkpoint thread, reject stops
+        it without resuming.
+    SessionApprovalRequest:
+      type: object
+      required: [projectId, decision]
+      description: >-
+        POST /api/v1/sessions/{id}/approval body — projectId is the C4 gate uuid
+        (strict like interrupt/fork, backend-generated, never upstream passthrough).
+        reason is the human note (rejection motive / approval comment), optional.
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        decision:
+          $ref: '#/components/schemas/SessionApprovalDecision'
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+    SessionApprovalResult:
+      type: object
+      required: [status]
+      description: >-
+        POST /api/v1/sessions/{id}/approval answer — running means the turn
+        resumed on the same checkpoint thread, paused means it parked without
+        resuming (cancel rides a separate endpoint and never lands here).
+      properties:
+        status:
+          type: string
+          enum: [running, paused]
     SessionRunnerProvider:
       type: object
       required: [id, name, activation, package]

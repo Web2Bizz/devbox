@@ -10,15 +10,20 @@ import { HostTurnService } from '../modules/messaging/host-turn.service';
 import { SessionMessagingService } from '../modules/messaging/session-messaging.service';
 
 /**
- * Direct-runner lifecycle markers (ask/text-only path) — live-only parity
- * with the host/auto bus.
+ * Direct-runner lifecycle (ask/text-only path) — live-only parity with the
+ * host/auto bus, WITHOUT fake tool frames.
  *
- * The direct transport has no host tool bus, so without explicit markers a
- * direct turn would stream text with no reasoning/tool steps and the chat
- * would show a mute shimmer. DirectTurnService buffers live-only
- * `session.reasoning.started/ended` + `session.tool.called/success` frames
- * into the shared bounded SessionFrameBufferService (project-scoped via
- * data.sessionID), never durable history (AssistantRecorderService skips
+ * Ask is an answer mode, NOT a tool: a plain direct turn buffers live-only
+ * `session.reasoning.started/ended` + text deltas + `session.idle` and MUST
+ * NOT buffer any `session.tool.*` frame (a `tool: 'ask'` frame would be a
+ * fake tool call surfacing as `ask called/done` in the chat timeline).
+ * The deterministic file/shell bridge is the exception: it performs a REAL
+ * tool (`write`/`read`/`shell` — the registry name of the command that ran)
+ * and buffers that real name, never the agent id. The readonly `read` case
+ * is the ask-mode proof that real readonly tools keep their real names.
+ *
+ * Frames ride the shared bounded SessionFrameBufferService (project-scoped
+ * via data.sessionID), never durable history (AssistantRecorderService skips
  * reasoning/tool by type, history keeps only user + assistant text).
  *
  * Runs against COMPILED dist:
@@ -199,7 +204,7 @@ function bufferedFrames(buffer: SessionFrameBufferService): Array<BufferedFrame>
 
 const checks: Array<{ name: string; run: () => Promise<void> }> = [
   {
-    name: 'direct ask turn buffers reasoning + tool lifecycle around text, then idle',
+    name: 'direct ask turn buffers reasoning around text, then idle — no fake ask tool frames',
     run: async () => {
       const calls: Array<string> = [];
       const { service, buffer } = wire({ calls });
@@ -212,31 +217,35 @@ const checks: Array<{ name: string; run: () => Promise<void> }> = [
       const frames = bufferedFrames(buffer);
       const types = frames.map((frame) => frame.type);
       assert.ok(types.includes('session.reasoning.started'), `missing reasoning.started, got ${JSON.stringify(types)}`);
-      assert.ok(types.includes('session.tool.called'), `missing tool.called, got ${JSON.stringify(types)}`);
-      assert.ok(types.includes('session.tool.success'), `missing tool.success, got ${JSON.stringify(types)}`);
       assert.ok(types.includes('session.reasoning.ended'), `missing reasoning.ended, got ${JSON.stringify(types)}`);
       assert.ok(types.includes('session.idle'), `missing session.idle, got ${JSON.stringify(types)}`);
-      // Order: lifecycle start before text, end before idle.
+      assert.ok(types.includes('message.part.delta'), `missing text deltas, got ${JSON.stringify(types)}`);
+      // Ask "Привет" shining path: no `ask called/done` rows — the direct
+      // text path emits NO tool frames at all (neither `ask` nor any other).
+      const toolFrames = frames.filter((frame) => frame.type.startsWith('session.tool.'));
+      assert.deepEqual(
+        toolFrames,
+        [],
+        `direct ask text must not buffer tool frames, got ${JSON.stringify(toolFrames.map((frame) => ({ type: frame.type, data: frame.data })))}`,
+      );
+      // Order: reasoning start before text, reasoning end before idle.
       const firstReasoning = types.indexOf('session.reasoning.started');
       const firstDelta = types.indexOf('message.part.delta');
-      const toolSuccess = types.indexOf('session.tool.success');
+      const reasoningEnded = types.indexOf('session.reasoning.ended');
       const idle = types.indexOf('session.idle');
       assert.ok(firstReasoning < firstDelta, 'reasoning.started must precede text deltas');
-      assert.ok(toolSuccess < idle, 'tool.success must precede session.idle');
+      assert.ok(reasoningEnded < idle, 'reasoning.ended must precede session.idle');
       // Project scope: every buffered frame carries our session uuid.
       for (const frame of frames) {
         assert.equal(frame.data.sessionID, SID);
       }
-      // Tool frames carry the direct agent id (frontend activeToolName source).
-      const called = frames.find((frame) => frame.type === 'session.tool.called');
-      assert.equal(called?.data.tool, 'ask');
       // Durable history keeps only user + assistant text (no reasoning rows).
       const appends = calls.filter((call) => call.startsWith('history.appendMessage:'));
       assert.deepEqual(appends, ['history.appendMessage:user', 'history.appendMessage:assistant']);
     },
   },
   {
-    name: 'direct file command buffers the same live-only lifecycle',
+    name: 'direct file command buffers the REAL write tool (never ask)',
     run: async () => {
       const calls: Array<string> = [];
       const { service, buffer } = wire({ calls, withPaths: true });
@@ -246,12 +255,46 @@ const checks: Array<{ name: string; run: () => Promise<void> }> = [
         { projectId: PID, text: 'создай файл hello.txt с текстом hi', agentId: 'ask' },
         'cid-direct-file-lifecycle',
       );
-      const types = bufferedFrames(buffer).map((frame) => frame.type);
+      const frames = bufferedFrames(buffer);
+      const types = frames.map((frame) => frame.type);
       assert.ok(types.includes('session.reasoning.started'));
       assert.ok(types.includes('session.tool.called'));
       assert.ok(types.includes('session.tool.success'));
       assert.ok(types.includes('session.reasoning.ended'));
       assert.ok(types.includes('session.idle'));
+      const called = frames.find((frame) => frame.type === 'session.tool.called');
+      const succeeded = frames.find((frame) => frame.type === 'session.tool.success');
+      assert.equal(called?.data.tool, 'write');
+      assert.equal(succeeded?.data.tool, 'write');
+      // No fake agent-id tool frame anywhere on the turn.
+      for (const frame of frames) {
+        if (frame.type.startsWith('session.tool.')) {
+          assert.notEqual(frame.data.tool, 'ask', 'file turn must not emit a fake ask tool frame');
+        }
+      }
+    },
+  },
+  {
+    name: 'direct file read buffers the REAL readonly read tool (never ask)',
+    run: async () => {
+      const calls: Array<string> = [];
+      const { service, buffer } = wire({ calls, withPaths: true });
+      await service.sendMessage(
+        UID,
+        SID,
+        { projectId: PID, text: 'прочитай файл hello.txt', agentId: 'ask' },
+        'cid-direct-file-read-lifecycle',
+      );
+      const frames = bufferedFrames(buffer);
+      const called = frames.find((frame) => frame.type === 'session.tool.called');
+      const succeeded = frames.find((frame) => frame.type === 'session.tool.success');
+      assert.equal(called?.data.tool, 'read');
+      assert.equal(succeeded?.data.tool, 'read');
+      for (const frame of frames) {
+        if (frame.type.startsWith('session.tool.')) {
+          assert.notEqual(frame.data.tool, 'ask', 'read turn must not emit a fake ask tool frame');
+        }
+      }
     },
   },
 ];

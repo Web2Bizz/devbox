@@ -305,6 +305,11 @@ function makeDb(
     ops,
     state,
     transactionCount: () => transactions,
+    // executeRead passthrough — runs the read once (no retry), like a closed breaker.
+    executeRead: async (
+      _operation: string,
+      read: (attempt: number) => Promise<never>,
+    ): Promise<never> => read(1),
   };
 }
 

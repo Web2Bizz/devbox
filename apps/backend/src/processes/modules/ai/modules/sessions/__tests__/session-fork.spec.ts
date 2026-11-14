@@ -47,7 +47,6 @@ const MESSAGES: Array<Message> = [
 type Appended = {
   id: string;
   sessionId: string;
-  projectId: string;
   role: 'user' | 'assistant';
   text: string;
   createdAt?: string;

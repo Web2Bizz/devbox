@@ -19,6 +19,11 @@
  * - (h) resolveProjectDirectory: blank → 400 PROJECT_REQUIRED,
  *       stranger → 404, org-less → 404, member → {projectId, directory}
  *       inside the org jail, escaping path → 403.
+ * - (i) projectAccessRow ECONNRESET (real DbService breaker+retry, stubbed
+ *       drizzle edge): two transient failures then success (no restart);
+ * - (j) projectAccessRow persistent ECONNRESET → 503 EXTERNAL_UNAVAILABLE
+ *       after exactly 5 attempts (Retry-After 30 comes from the filter);
+ * - (k) projectAccessRow non-retryable failure (22P02) → exactly 1 attempt.
  *
  * Logs are silent; no secrets or PII appear anywhere in this file.
  */
@@ -29,7 +34,8 @@ import {
   ForbiddenException,
   NotFoundException,
 } from "@nestjs/common";
-import type { DbService } from "@common/db/db.service";
+import { ExternalServiceError } from "@common/external/external-error";
+import { DbService } from "@common/db/db.service";
 import { WorkspacePathService } from "@common/storage/workspace-path.service";
 import type { OrganizationsGuard } from "../../../../../organizations.guard";
 import { ProjectAccessService } from "../project-access.service";
@@ -56,6 +62,16 @@ function silentLogger() {
 }
 
 /**
+ * executeRead passthrough — runs the read once (no retry), like a closed breaker.
+ */
+function passthroughRead(
+  _operation: string,
+  read: (attempt: number) => Promise<unknown>,
+): Promise<unknown> {
+  return read(1);
+}
+
+/**
  * DbService stub for the only shape the gate uses:
  * `select({...}).from(projects).where(...)` → rows (no .limit()).
  */
@@ -71,6 +87,7 @@ function fakeDb(rows: Array<ProjectRow>) {
     get client() {
       return client as never;
     },
+    executeRead: passthroughRead,
   } as unknown as DbService;
 }
 
@@ -116,6 +133,81 @@ function service(
 
 function isNotFound(err: unknown): boolean {
   return err instanceof NotFoundException;
+}
+
+const noSleep = (): Promise<void> => Promise.resolve();
+
+/** pg transient-connection throw shaped like the node-postgres driver. */
+function pgTransient(code: string): Error {
+  return Object.assign(new Error(`read ${code}`), { code });
+}
+
+/**
+ * select({orgId, ownerId}).from().where() following a script; repeats the
+ * last step (the project-access shape has no .limit() — where() is awaited
+ * directly).
+ */
+function flakyProjectDb(
+  script: Array<{ error?: unknown; rows?: Array<ProjectRow> }>,
+): { stub: unknown; getCalls: () => number } {
+  let calls: number = 0;
+  const stub: unknown = {
+    select: () => ({
+      from: () => ({
+        where: async (): Promise<Array<ProjectRow>> => {
+          calls += 1;
+          const step: { error?: unknown; rows?: Array<ProjectRow> } =
+            script[Math.min(calls - 1, script.length - 1)];
+          if (step.error !== undefined) throw step.error;
+          return step.rows ?? [];
+        },
+      }),
+    }),
+  };
+  const getCalls: () => number = () => calls;
+  return { stub, getCalls };
+}
+
+/**
+ * REAL DbService (breaker + 5-attempt retry) with a stubbed drizzle client:
+ * proves the gate delegates reads to executeRead. The pool stays null
+ * (DATABASE_URL/POSTGRES_* cleared around construction, then restored) so no
+ * socket is ever opened; the injected client answers the SQL edge.
+ */
+function makeResilientService(
+  stubClient: unknown,
+  roles: Record<string, string> = {},
+): { service: ProjectAccessService; database: DbService } {
+  const savedDatabaseUrl: string | undefined = process.env.DATABASE_URL;
+  const savedUser: string | undefined = process.env.POSTGRES_USER;
+  const savedDb: string | undefined = process.env.POSTGRES_DB;
+  delete process.env.DATABASE_URL;
+  delete process.env.POSTGRES_USER;
+  delete process.env.POSTGRES_DB;
+  try {
+    const configStub = { get: (): undefined => undefined };
+    const database: DbService = new DbService(
+      configStub as never,
+      silentLogger() as never,
+    );
+    Object.defineProperty(database, "client", {
+      get: () => stubClient as never,
+      configurable: true,
+    });
+    const fake = fakeGuard(roles);
+    const service: ProjectAccessService = new ProjectAccessService(
+      silentLogger(),
+      database as never,
+      fake.guard,
+      new WorkspacePathService(),
+    );
+    return { service, database };
+  } finally {
+    if (savedDatabaseUrl !== undefined)
+      process.env.DATABASE_URL = savedDatabaseUrl;
+    if (savedUser !== undefined) process.env.POSTGRES_USER = savedUser;
+    if (savedDb !== undefined) process.env.POSTGRES_DB = savedDb;
+  }
 }
 
 const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
@@ -320,6 +412,67 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
         if (previousRoot === undefined) delete process.env.REPOS_ROOT;
         else process.env.REPOS_ROOT = previousRoot;
       }
+    },
+  },
+  {
+    name: "(i) projectAccessRow ECONNRESET retries then succeeds (recovery without restart)",
+    run: async () => {
+      const flaky = flakyProjectDb([
+        { error: pgTransient("ECONNRESET") },
+        { error: pgTransient("ECONNRESET") },
+        { rows: [{ orgId: ORG_ID, ownerId: OWNER_ID }] },
+      ]);
+      const { service: resilient } = makeResilientService(flaky.stub);
+      const row = await resilient.projectAccessRow(PROJECT_ID, "cid-r1", {
+        jitter: false,
+        sleep: noSleep,
+      });
+      assert.deepEqual(row, { orgId: ORG_ID, ownerId: OWNER_ID });
+      assert.equal(flaky.getCalls(), 3);
+    },
+  },
+  {
+    name: "(j) projectAccessRow persistent ECONNRESET → 503 EXTERNAL_UNAVAILABLE (5 attempts, no crash)",
+    run: async () => {
+      const flaky = flakyProjectDb([{ error: pgTransient("ECONNRESET") }]);
+      const { service: resilient } = makeResilientService(flaky.stub);
+      await assert.rejects(
+        () =>
+          resilient.projectAccessRow(PROJECT_ID, "cid-r2", {
+            jitter: false,
+            sleep: noSleep,
+          }),
+        (error: unknown) => {
+          assert.ok(error instanceof ExternalServiceError);
+          const typed: ExternalServiceError = error as ExternalServiceError;
+          assert.equal(typed.code, "EXTERNAL_UNAVAILABLE");
+          assert.equal(typed.service, "db");
+          assert.equal(typed.httpStatus, 503);
+          assert.equal(typed.isRetryable, true);
+          return true;
+        },
+      );
+      assert.equal(flaky.getCalls(), 5);
+    },
+  },
+  {
+    name: "(k) projectAccessRow non-retryable failure runs once then 503",
+    run: async () => {
+      const flaky = flakyProjectDb([
+        {
+          error: Object.assign(new Error("invalid input syntax"), {
+            code: "22P02",
+          }),
+        },
+      ]);
+      const { service: resilient } = makeResilientService(flaky.stub);
+      await assert.rejects(() =>
+        resilient.projectAccessRow(PROJECT_ID, "cid-r3", {
+          jitter: false,
+          sleep: noSleep,
+        }),
+      );
+      assert.equal(flaky.getCalls(), 1);
     },
   },
 ];

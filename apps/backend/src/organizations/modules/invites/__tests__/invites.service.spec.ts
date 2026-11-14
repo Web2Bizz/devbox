@@ -54,7 +54,18 @@ function untouchedDb() {
     get client(): never {
       throw new Error('db-touched');
     },
+    executeRead: async (): Promise<never> => {
+      throw new Error('db-touched');
+    },
   } as never;
+}
+
+/** executeRead passthrough — runs the read once (no retry), like a closed breaker. */
+function passthroughRead(
+  _operation: string,
+  read: (attempt: number) => Promise<unknown>,
+): Promise<unknown> {
+  return read(1);
 }
 
 /** Minimal query-builder stub: select().from().where().limit() → rows. */
@@ -68,7 +79,7 @@ function mockDb(selectRows: Array<unknown> = []) {
       }),
     }),
   };
-  return { get client() { return client as never; } } as never;
+  return { get client() { return client as never; }, executeRead: passthroughRead } as never;
 }
 
 function stubPaths() {

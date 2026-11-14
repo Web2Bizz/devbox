@@ -48,7 +48,7 @@ function body(text: string): SendMessageInput {
 
 type Recorded = {
   setAgent: Array<{ sessionId: string; projectId: string; agentId: string }>;
-  appended: Array<{ role: 'user' | 'assistant'; text: string }>;
+  appended: Array<{ role: 'user' | 'assistant' | 'tool'; text: string | null; kind?: string; name?: string }>;
   turns: Array<{ sessionId: string; messageID: string }>;
 };
 
@@ -73,8 +73,8 @@ function makeHarness(options: HarnessOptions = {}): {
     setAgent: async (sessionId: string, projectId: string, agentId: string) => {
       recorded.setAgent.push({ sessionId, projectId, agentId });
     },
-    appendMessage: async (row: { role: 'user' | 'assistant'; text: string }) => {
-      recorded.appended.push({ role: row.role, text: row.text });
+    appendMessage: async (row: { role: 'user' | 'assistant' | 'tool'; text: string | null; kind?: string; name?: string }) => {
+      recorded.appended.push({ role: row.role, text: row.text, kind: row.kind, name: row.name });
     },
   } as unknown as SessionHistoryRepository;
 
@@ -115,7 +115,7 @@ function makeHarness(options: HarnessOptions = {}): {
 
 describe('FileCommandTurnService', () => {
   it('a traversal escape answers 403 with no durable writes', async () => {
-    const { service, recorded, writes, state } = makeHarness();
+    const { service, recorded, writes, state, buffer } = makeHarness();
     await assert.rejects(
       service.tryHandle({
         userId: 'u1',
@@ -132,6 +132,8 @@ describe('FileCommandTurnService', () => {
     assert.equal(recorded.turns.length, 0);
     assert.equal(writes.length, 0);
     assert.equal(state.isBusy('s1'), false);
+    // Jail rejects before the turn starts: no lifecycle frames at all.
+    assert.deepEqual(buffer.list(), []);
   });
 
   it('create writes through the jailed paths and answers the user receipt', async () => {
@@ -150,16 +152,26 @@ describe('FileCommandTurnService', () => {
     assert.deepEqual(dirs, ['/repo/notes']);
     assert.deepEqual(
       recorded.appended.map((row) => row.role),
-      ['user', 'assistant'],
+      ['user', 'tool', 'assistant'],
     );
-    assert.equal(recorded.appended[1]?.text, 'Файл notes/a.txt создан.');
+    assert.equal(recorded.appended[2]?.text, 'Файл notes/a.txt создан.');
     assert.equal(state.isBusy('s1'), false);
     assert.ok(buffer.list().some((frame) => frame.type === 'session.idle'));
     assert.ok(buffer.list().some((frame) => frame.type === 'message.part.updated'));
+    // Real deterministic tool with its registry name — never a fake `ask` frame.
+    const called = buffer.list().find((frame) => frame.type === 'session.tool.called');
+    const succeeded = buffer.list().find((frame) => frame.type === 'session.tool.success');
+    assert.equal(called?.data.tool, 'write');
+    assert.equal(succeeded?.data.tool, 'write');
+    for (const frame of buffer.list()) {
+      if (frame.type.startsWith('session.tool.')) {
+        assert.notEqual(frame.data.tool, 'ask');
+      }
+    }
   });
 
   it('read echoes the jailed file content in the assistant row', async () => {
-    const { service, recorded } = makeHarness({ readContent: 'file body' });
+    const { service, recorded, buffer } = makeHarness({ readContent: 'file body' });
     const result = await service.tryHandle({
       userId: 'u1',
       sessionId: 's1',
@@ -169,11 +181,16 @@ describe('FileCommandTurnService', () => {
       correlationId: 'cid-1',
     });
     assert.equal(result?.type, 'user');
-    assert.equal(recorded.appended[1]?.text, 'file body');
+    assert.equal(recorded.appended[2]?.text, 'file body');
+    // Readonly real tool keeps its real name end-to-end (ask-mode proof).
+    const called = buffer.list().find((frame) => frame.type === 'session.tool.called');
+    const succeeded = buffer.list().find((frame) => frame.type === 'session.tool.success');
+    assert.equal(called?.data.tool, 'read');
+    assert.equal(succeeded?.data.tool, 'read');
   });
 
   it('shell runs through the host in the same jail', async () => {
-    const { service, recorded, shellCalls } = makeHarness({ shellOutput: { output: 'hi\n' } });
+    const { service, recorded, shellCalls, buffer } = makeHarness({ shellOutput: { output: 'hi\n' } });
     const result = await service.tryHandle({
       userId: 'u1',
       sessionId: 's1',
@@ -184,7 +201,11 @@ describe('FileCommandTurnService', () => {
     });
     assert.equal(result?.type, 'user');
     assert.deepEqual(shellCalls, [{ directory: '/repo', command: 'echo hi' }]);
-    assert.equal(recorded.appended[1]?.text, 'hi\n');
+    assert.equal(recorded.appended[2]?.text, 'hi\n');
+    const called = buffer.list().find((frame) => frame.type === 'session.tool.called');
+    const succeeded = buffer.list().find((frame) => frame.type === 'session.tool.success');
+    assert.equal(called?.data.tool, 'shell');
+    assert.equal(succeeded?.data.tool, 'shell');
   });
 
   it('without the jail primitives the turn is not claimed', async () => {

@@ -2,9 +2,12 @@ import "reflect-metadata";
 import assert from "node:assert/strict";
 import { MODULE_METADATA } from "@nestjs/common/constants";
 import { AgentsModule } from "../modules/agents/agents.module";
+import { ModesModule } from "../modules/modes/modes.module";
 import { OpencodeModule } from "../modules/opencode/opencode.module";
 import { SessionsModule } from "../modules/sessions/sessions.module";
+import { SubagentModule } from "../modules/subagent/subagent.module";
 import { ToolsModule } from "../modules/tools/tools.module";
+import { WorkflowsModule } from "../modules/workflows/workflows.module";
 import { WorkersModule } from "../../workers/workers.module";
 import { AiModule } from "../ai.module";
 
@@ -33,9 +36,12 @@ describe("AiModule metadata", () => {
     assert.equal(AiModule.name, "AiModule");
   });
 
-  it("imports agents, workers, opencode, tools and sessions modules", () => {
+  it("imports agents, modes, workflows, subagent, workers, opencode, tools and sessions modules", () => {
     assert.deepEqual(meta<Array<unknown>>(MODULE_METADATA.IMPORTS), [
       AgentsModule,
+      ModesModule,
+      WorkflowsModule,
+      SubagentModule,
       WorkersModule,
       OpencodeModule,
       ToolsModule,

@@ -494,15 +494,123 @@ describe('SessionsService gate order (401 before any zone work)', () => {
     await rejects401(svc.clearRevert(UID, SID, PID, 'cid'));
     await rejects401(svc.commitRevert(UID, SID, PID, 'cid'));
     await rejects401(svc.snapshotDiff(UID, SID, PID, TREE, TREE, undefined, 'cid'));
+    await rejects401(svc.listVariants(UID, SID, PID, null, 'cid'));
+    await rejects401(svc.revertMessages(UID, SID, PID, 'm1', 'cid'));
     const unexpected = zoneCalls.filter(
       (call) => call !== 'auth' && !call.startsWith('access:'),
     );
     assert.deepEqual(unexpected, [], `a zone was reached before the 401: ${unexpected.join(',')}`);
     assert.equal(
       zoneCalls.filter((call) => call === 'auth').length,
-      13,
+      15,
       'each method must reach the serve-user gate',
     );
+  });
+});
+
+describe('SessionsService branches (leaf/variants/revert)', () => {
+  const SID = '123e4567-e89b-12d3-a456-426614174010';
+
+  function branchService(history: Record<string, unknown>): SessionsService {
+    const access = {
+      resolveProjectDirectory: async (projectId: string): Promise<unknown> => ({
+        projectId,
+        directory: DIR,
+      }),
+    };
+    const auth = { assertServeUser(): void {} };
+    const buffer = { push(): void {} };
+    const args: Array<unknown> = [
+      {},
+      access,
+      auth,
+      history,
+      {},
+      {},
+      {},
+      {},
+      {},
+      buffer,
+      undefined,
+      silentLogger(),
+    ];
+    return new SessionsService(
+      ...(args as unknown as ConstructorParameters<typeof SessionsService>),
+    );
+  }
+
+  it('listMessages with leafId narrows to the active chain (unknown leaf 404)', async () => {
+    const svc = branchService({
+      listActiveChain: async (): Promise<Array<unknown>> => [{ id: 'root' }, { id: 'c' }],
+    });
+    const chain = await svc.listMessages(UID, SID, PID, undefined, undefined, 'cid', 'c');
+    assert.deepEqual(
+      chain.map((row) => (row as { id: string }).id),
+      ['root', 'c'],
+    );
+    const empty = branchService({ listActiveChain: async (): Promise<Array<unknown>> => [] });
+    await assert.rejects(empty.listMessages(UID, SID, PID, undefined, undefined, 'cid', 'nope'));
+  });
+
+  it('listVariants delegates to history (unknown parent 404)', async () => {
+    const svc = branchService({
+      listMessages: async (): Promise<Array<unknown>> => [{ id: 'root' }, { id: 'c' }],
+      listVariants: async (): Promise<Array<unknown>> => [{ childId: 'c' }],
+    });
+    const out = await svc.listVariants(UID, SID, PID, 'root', 'cid');
+    assert.equal(out.length, 1);
+    await assert.rejects(svc.listVariants(UID, SID, PID, 'nope', 'cid'));
+  });
+
+  it('revertMessages answers the new leaf (unknown boundary 404)', async () => {
+    const svc = branchService({ revertMessages: async (): Promise<string | null> => 'root' });
+    const out = await svc.revertMessages(UID, SID, PID, 'b', 'cid');
+    assert.deepEqual(out, { activeLeaf: 'root' });
+    const missing = branchService({ revertMessages: async (): Promise<undefined> => undefined });
+    await assert.rejects(missing.revertMessages(UID, SID, PID, 'nope', 'cid'));
+  });
+
+  it('revertMessages on the root answers null and omits parentId/leafId in buffer', async () => {
+    const pushes: Array<{ type: string; payload: unknown }> = [];
+    const access = {
+      resolveProjectDirectory: async (projectId: string): Promise<unknown> => ({
+        projectId,
+        directory: DIR,
+      }),
+    };
+    const auth = { assertServeUser(): void {} };
+    const history = { revertMessages: async (): Promise<null> => null };
+    const buffer = {
+      push: (type: string, payload: unknown): void => {
+        pushes.push({ type, payload });
+      },
+    };
+    const args: Array<unknown> = [
+      {},
+      access,
+      auth,
+      history,
+      {},
+      {},
+      {},
+      {},
+      {},
+      buffer,
+      undefined,
+      silentLogger(),
+    ];
+    const svc = new SessionsService(
+      ...(args as unknown as ConstructorParameters<typeof SessionsService>),
+    );
+    const out = await svc.revertMessages(UID, SID, PID, 'root', 'cid');
+    assert.deepEqual(out, { activeLeaf: null });
+    assert.equal(pushes.length, 1);
+    assert.equal(pushes[0]?.type, 'session.reverted');
+    const payload = pushes[0]?.payload as Record<string, unknown>;
+    assert.equal(payload.sessionID, SID);
+    assert.equal(payload.messageID, 'root');
+    assert.ok(!('parentId' in payload), 'root revert must omit parentId');
+    assert.ok(!('leafId' in payload), 'root revert must omit leafId');
   });
 });
 

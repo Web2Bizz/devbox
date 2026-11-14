@@ -130,21 +130,33 @@ async function main(): Promise<void> {
   });
   await dbService.client.insert(sessionMessages).values([
     {
-      id: 'msg_u1',
+      domainId: 'msg_u1',
       sessionId: SESSION_A,
-      projectId: E2E_PROJECT_ID,
       userId: E2E_USER_ID,
       role: 'user',
       text: 'Hello',
       createdAt: new Date(BASE_TIME + 3000),
     },
     {
-      id: 'msg_a1',
+      domainId: 'msg_t1',
       sessionId: SESSION_A,
-      projectId: E2E_PROJECT_ID,
+      userId: E2E_USER_ID,
+      role: 'tool',
+      text: 'write ok',
+      kind: 'tool',
+      name: 'write',
+      status: 'done',
+      detail: 'write ok',
+      parentId: 'msg_u1',
+      createdAt: new Date(BASE_TIME + 3050),
+    },
+    {
+      domainId: 'msg_a1',
+      sessionId: SESSION_A,
       userId: E2E_USER_ID,
       role: 'assistant',
       text: 'Part one\n\nPart two',
+      parentId: 'msg_t1',
       createdAt: new Date(BASE_TIME + 3100),
     },
   ]);
@@ -288,21 +300,21 @@ async function main(): Promise<void> {
       });
     });
 
-    await check('GET messages → durable thread only', `/api/v1/sessions/${SESSION_A}/messages?projectId=${E2E_PROJECT_ID}`, undefined, 200, (_res, body) => {
+    await check('GET messages → durable chain incl. tools (additive, chain order)', `/api/v1/sessions/${SESSION_A}/messages?projectId=${E2E_PROJECT_ID}`, undefined, 200, (_res, body) => {
       const rows = body as Array<Record<string, unknown>>;
-      assert.ok(Array.isArray(rows) && rows.length === 2, `expected 2 rows, got ${JSON.stringify(body)?.slice(0, 160)}`);
-      assert.deepEqual(rows[0], {
-        id: 'msg_u1',
-        type: 'user',
-        createdAt: new Date(BASE_TIME + 3000).toISOString(),
-        text: 'Hello',
-      });
-      assert.deepEqual(rows[1], {
-        id: 'msg_a1',
-        type: 'assistant',
-        createdAt: new Date(BASE_TIME + 3100).toISOString(),
-        text: 'Part one\n\nPart two',
-      });
+      assert.ok(Array.isArray(rows) && rows.length === 3, `expected 3 rows, got ${JSON.stringify(body)?.slice(0, 200)}`);
+      assert.equal(rows[0]!['id'], 'msg_u1');
+      assert.equal(rows[0]!['type'], 'user');
+      assert.equal(rows[0]!['text'], 'Hello');
+      assert.equal(rows[1]!['id'], 'msg_t1');
+      assert.equal(rows[1]!['kind'], 'tool');
+      assert.equal(rows[1]!['name'], 'write');
+      assert.equal(rows[1]!['status'], 'done');
+      assert.equal(rows[1]!['parentId'], 'msg_u1');
+      assert.equal(rows[2]!['id'], 'msg_a1');
+      assert.equal(rows[2]!['type'], 'assistant');
+      assert.equal(rows[2]!['text'], 'Part one\n\nPart two');
+      assert.equal(rows[2]!['parentId'], 'msg_t1');
     });
 
     await check('GET messages limit=abc → 400 bad_request', `/api/v1/sessions/${SESSION_A}/messages?projectId=${E2E_PROJECT_ID}&limit=abc`, undefined, 400, (_res, body) => {
@@ -353,11 +365,16 @@ async function main(): Promise<void> {
     }
 
     // --- agent file tools (jailed project content) --------------------------
-    // The direct runner (SessionRunnerService.chat) is text-only with no
-    // working directory, so file commands are handled by the harness file
-    // bridge against the SAME gated jail create() passes to the embedded
-    // host (project content). Files land in content/ and are visible via
-    // GET project-files; traversal escapes answer 403.
+    // Ask shining path (e2e): the session answers in `ask` mode by default,
+    // so these deterministic turns ARE the Ask path. The direct runner
+    // (SessionRunnerService.chat) is text-only with no working directory, so
+    // file commands are handled by the harness file bridge against the SAME
+    // gated jail create() passes to the embedded host (project content).
+    // Files land in content/ and are visible via GET project-files; traversal
+    // escapes answer 403. Live SSE detail of these turns carries the REAL
+    // tool names (`write`/`read`/`shell`, never `ask`); a plain Ask text
+    // answer ("Привет") carries reasoning + text + idle with zero tool
+    // frames — no `ask called/done` rows (see the direct-lifecycle spec).
     if (createdId) {
       await check(
         'POST messages «создай файл hello.txt» → 200 (jailed write, no model key needed)',
@@ -369,7 +386,7 @@ async function main(): Promise<void> {
         },
       );
       await check(
-        'GET messages after file command → durable user + assistant rows',
+        'GET messages after file command → durable user + tool + assistant chain',
         `/api/v1/sessions/${createdId}/messages?projectId=${E2E_PROJECT_ID}`,
         undefined,
         200,
@@ -379,6 +396,15 @@ async function main(): Promise<void> {
             rows.some((r) => r.type === 'assistant' && typeof r.text === 'string' && (r.text as string).includes('hello.txt')),
             `assistant file receipt missing: ${JSON.stringify(body)?.slice(0, 200)}`,
           );
+          const tool = rows.find((r) => r.kind === 'tool');
+          assert.ok(tool, `tool chain link missing: ${JSON.stringify(body)?.slice(0, 200)}`);
+          assert.equal(tool!['name'], 'write');
+          const user = rows.find((r) => r.type === 'user');
+          assert.equal(tool!['parentId'], user!['id']);
+          const assistant = rows.find(
+            (r) => r.type === 'assistant' && typeof r.text === 'string' && (r.text as string).includes('hello.txt'),
+          );
+          assert.equal(assistant!['parentId'], tool!['id']);
         },
       );
       await check(

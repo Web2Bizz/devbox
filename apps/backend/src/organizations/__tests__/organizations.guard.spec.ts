@@ -55,7 +55,18 @@ function untouchedDb() {
     get client(): never {
       throw new Error('db-touched');
     },
+    executeRead: async (): Promise<never> => {
+      throw new Error('db-touched');
+    },
   } as never;
+}
+
+/** executeRead passthrough — runs the read once (no retry), like a closed breaker. */
+function passthroughRead(
+  _operation: string,
+  read: (attempt: number) => Promise<unknown>,
+): Promise<unknown> {
+  return read(1);
 }
 
 /**
@@ -81,7 +92,7 @@ function fakeDb(orgRows: Array<unknown>, memberRows: Array<unknown>) {
       },
     }),
   };
-  return { get client() { return client as never; } } as never;
+  return { get client() { return client as never; }, executeRead: passthroughRead } as never;
 }
 
 /** Fake ExecutionContext exposing exactly what the guard reads. */

@@ -17,7 +17,9 @@ import { SessionRuntimeStateService } from '../modules/state/session-runtime-sta
  *
  * Hand-wired style: a real SessionFrameBufferService (direct-turn replay
  * source) plus a fake host bus for live frames. No timers are awaited — an
- * exhausted live bus with no busy turn ends the stream immediately.
+ * exhausted live bus with no busy turn ends the stream immediately. The one
+ * exception is the single-flight pull case, which needs a bus slower than the
+ * relay poll window (400ms per frame) to prove no frame is dropped.
  */
 
 const UID = '123e4567-e89b-12d3-a456-426614174001';
@@ -111,6 +113,35 @@ function iterableOf(frames: Array<unknown>): AsyncIterable<unknown> {
   };
 }
 
+/**
+ * Host-bus stand-in whose `next()` resolves only after `delayMs` — slower
+ * than the relay poll window (POLL_MS = 250). This is the shape that used to
+ * lose frames: every timed-out poll abandoned a reader, the next poll opened
+ * a second one, and the event landed on the abandoned promise.
+ */
+function delayedIterable(frames: Array<unknown>, delayMs: number): AsyncIterable<unknown> {
+  return {
+    [Symbol.asyncIterator](): AsyncIterator<unknown> {
+      let index = 0;
+      return {
+        next: (): Promise<IteratorResult<unknown>> =>
+          new Promise((resolve) => {
+            setTimeout(() => {
+              if (index < frames.length) {
+                const value: unknown = frames[index];
+                index += 1;
+                resolve({ done: false, value });
+                return;
+              }
+              resolve({ done: true, value: undefined });
+            }, delayMs);
+          }),
+        return: async (): Promise<IteratorResult<unknown>> => ({ done: true, value: undefined }),
+      };
+    },
+  };
+}
+
 type BufferedFrame = { id: string; type: string; data: Record<string, unknown> };
 
 function localFrame(id: string, sessionID: string): BufferedFrame {
@@ -125,6 +156,7 @@ function harness(options: {
   localSessionIds: Array<string>;
   localBuffered?: Array<BufferedFrame>;
   live?: Array<unknown>;
+  liveIterable?: AsyncIterable<unknown>;
 }): { svc: SessionStreamService; calls: Array<string> } {
   const calls: Array<string> = [];
   const host = {
@@ -134,7 +166,7 @@ function harness(options: {
     },
     subscribeEvents: async (): Promise<AsyncIterable<unknown>> => {
       calls.push('host.subscribeEvents');
-      return iterableOf(options.live ?? []);
+      return options.liveIterable ?? iterableOf(options.live ?? []);
     },
   };
   const access = {
@@ -212,6 +244,7 @@ async function runStream(options: {
   localSessionIds: Array<string>;
   localBuffered?: Array<BufferedFrame>;
   live?: Array<unknown>;
+  liveIterable?: AsyncIterable<unknown>;
   query?: Record<string, string>;
   headers?: Record<string, string | Array<string>>;
 }): Promise<{ delivered: Array<unknown>; res: FakeRes }> {
@@ -379,6 +412,26 @@ describe('streamEvents ?session= isolation (C2)', () => {
   });
 });
 
+describe('streamEvents live pull is single-flight', () => {
+  it('host frames slower than POLL_MS are never lost and the terminator is delivered', async () => {
+    // Every pull resolves after 400ms > POLL_MS (250ms): with the old
+    // fire-and-forget race each timeout abandoned a reader and the next poll
+    // swallowed the event, so host frames (and the terminal idle) vanished.
+    const live = delayedIterable(
+      [
+        hostFrame('slow-1', 'ses_a'),
+        hostFrame('slow-2', 'ses_a'),
+        { id: 'slow-idle', type: 'session.idle', data: { sessionID: 'ses_a' } },
+      ],
+      400,
+    );
+    const { delivered, res } = await runStream({ localSessionIds: ['ses_a'], liveIterable: live });
+    assert.deepEqual(frameIds(delivered), ['slow-1', 'slow-2', 'slow-idle']);
+    assert.deepEqual(frameSessions(delivered), ['ses_a', 'ses_a', 'ses_a']);
+    assert.equal(res.writableEnded, true);
+  });
+});
+
 describe('streamEvents busy state is read from SessionRuntimeStateService', () => {
   it('a busy local turn is visible through state.isBusy (stream owns the override)', () => {
     // The relay reads the busy override from the injected state service; this
@@ -388,6 +441,64 @@ describe('streamEvents busy state is read from SessionRuntimeStateService', () =
     state.markBusy('ses_busy');
     assert.equal(state.isBusy('ses_busy'), true);
     assert.equal(state.clearBusy('ses_busy'), true);
+  });
+});
+
+describe('streamEvents ask lifecycle (no fake ask tool)', () => {
+  function askFrame(id: string, type: string, data: Record<string, unknown>): BufferedFrame {
+    return { id, type, data };
+  }
+
+  it('plain ask text streams reasoning + deltas + idle with zero tool frames', async () => {
+    // Ask "Привет" shining path: thinking lives only until the text, then
+    // idle commits — and no `ask called/done` tool row may appear.
+    const localBuffered = [
+      askFrame('a1', 'session.reasoning.started', { sessionID: 'ses_a' }),
+      localFrame('a2', 'ses_a'),
+      askFrame('a3', 'session.reasoning.ended', { sessionID: 'ses_a' }),
+    ];
+    const live = [{ id: 'live-idle', type: 'session.idle', data: { sessionID: 'ses_a' } }];
+    const { delivered } = await runStream({
+      localSessionIds: ['ses_a'],
+      localBuffered,
+      live,
+      query: { session: 'ses_a' },
+    });
+    assert.deepEqual(frameIds(delivered), ['a1', 'a2', 'a3', 'live-idle']);
+    for (const frame of delivered) {
+      const type = (frame as { type?: unknown }).type;
+      assert.ok(
+        typeof type !== 'string' || !type.startsWith('session.tool.'),
+        `plain ask must not stream tool frames, got ${String(type)}`,
+      );
+    }
+  });
+
+  it('real readonly/file tools stream with their real names (never ask)', async () => {
+    // Ask with a real readonly call (`read`) and a deterministic `write`:
+    // both ride the same buffer with REAL names and the relay must not drop
+    // or rename them; the text answer travels separately (localFrame).
+    const localBuffered = [
+      askFrame('t0', 'session.reasoning.started', { sessionID: 'ses_a' }),
+      askFrame('t1', 'session.tool.called', { sessionID: 'ses_a', tool: 'read' }),
+      askFrame('t2', 'session.tool.success', { sessionID: 'ses_a', tool: 'read' }),
+      askFrame('t3', 'session.tool.called', { sessionID: 'ses_a', tool: 'write' }),
+      askFrame('t4', 'session.tool.success', { sessionID: 'ses_a', tool: 'write' }),
+      localFrame('t5', 'ses_a'),
+    ];
+    const { delivered } = await runStream({
+      localSessionIds: ['ses_a'],
+      localBuffered,
+      query: { session: 'ses_a' },
+    });
+    assert.deepEqual(frameIds(delivered), ['t0', 't1', 't2', 't3', 't4', 't5']);
+    const tools = delivered
+      .map((frame) => (frame as { data?: { tool?: unknown } }).data?.tool)
+      .filter((tool) => tool !== undefined);
+    assert.deepEqual(tools, ['read', 'read', 'write', 'write']);
+    for (const tool of tools) {
+      assert.notEqual(tool, 'ask');
+    }
   });
 });
 

@@ -21,6 +21,8 @@ import {
   fromStatus,
   timeoutError,
 } from '../external-error';
+import { AppError } from '../../exceptions/app-error';
+import { DbUnavailableError } from '../../db/exceptions/db-unavailable.error';
 
 const noSleep = () => Promise.resolve();
 const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
@@ -80,6 +82,68 @@ const checks: Array<{ name: string; run: () => Promise<void> | void }> = [
       assert.equal(isRetryableError(fromStatus('s', 'o', 404)), false);
       assert.equal(isRetryableError({ status: 404 }), false);
       assert.equal(isRetryableError(new Error('upstream_400')), false);
+    },
+  },
+  {
+    name: 'isRetryableError: AppError short-circuits on retryable, cause never re-inspected',
+    run: () => {
+      // Non-retryable AppError WITH a network-shaped cause stays false:
+      // the isAppError branch returns error.retryable without looking at
+      // the cause chain (a retry with the same refused credentials fails
+      // the same way, even if the wrapped cause looks transient).
+      const networkCause = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:9'), {
+        code: 'ECONNREFUSED',
+      });
+      const refused = new AppError({
+        code: 'GITHUB_AUTH',
+        service: 'github',
+        operation: 'o',
+        message: 'm',
+        cause: networkCause,
+      });
+      assert.equal(refused.retryable, false);
+      assert.equal(isRetryableError(refused), false);
+    },
+  },
+  {
+    name: 'isRetryableError: DbUnavailableError (retryable AppError service=db) is true',
+    run: () => {
+      const outage = new DbUnavailableError('checkDb');
+      assert.equal(outage.retryable, true);
+      assert.equal(isRetryableError(outage), true);
+    },
+  },
+  {
+    name: 'isRetryableError: pg transient codes ECONNRESET/ETIMEDOUT/EPIPE true',
+    run: () => {
+      for (const code of ['ECONNRESET', 'ETIMEDOUT', 'EPIPE']) {
+        assert.equal(isRetryableError(Object.assign(new Error(`read ${code}`), { code })), true);
+      }
+      assert.equal(isRetryableError(new Error('read ECONNRESET')), true);
+      assert.equal(isRetryableError(Object.assign(new Error('duplicate key'), { code: '23505' })), false);
+      assert.equal(isRetryableError(Object.assign(new Error('invalid input'), { code: '22P02' })), false);
+    },
+  },
+  {
+    name: 'isRetryableError: codeless pg drop + SQLSTATE shutdown + drizzle cause-chain true',
+    run: () => {
+      // Exact pg/lib/client.js string (no `code`) that crashed the process
+      // via uncaughtException — idempotent reads must retry it, not fail fast.
+      assert.equal(isRetryableError(new Error('Connection terminated unexpectedly')), true);
+      for (const code of ['57P01', '57P02', '08006']) {
+        assert.equal(isRetryableError(Object.assign(new Error('terminating connection'), { code })), true);
+      }
+      // drizzle-orm `DrizzleQueryError('Failed query: …')` wraps the pg
+      // error on `.cause` — top-level carries no signal, unwrap required.
+      assert.equal(
+        isRetryableError(
+          Object.assign(new Error('Failed query: select ... params: 1'), {
+            cause: new Error('Connection terminated unexpectedly'),
+          }),
+        ),
+        true,
+      );
+      assert.equal(isRetryableError(Object.assign(new Error('duplicate key'), { code: '23505' })), false);
     },
   },
   {

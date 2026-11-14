@@ -238,7 +238,7 @@ async function main(): Promise<void> {
     );
     const historyProto = SessionHistoryRepository.prototype as unknown as {
       listLocalSessions: (projectId: string) => Promise<Array<unknown>>;
-      listMessages: (sessionId: string) => Promise<Array<unknown>>;
+      listMessages: (sessionId: string, projectId?: string) => Promise<Array<unknown>>;
     };
     const originalListLocalSessions = historyProto.listLocalSessions;
     const originalListMessages = historyProto.listMessages;

@@ -5,7 +5,7 @@ import {
   sessionMessages,
 } from "@common/db/schema";
 import type { AppLogger } from "@common/logger";
-import { SessionHistoryRepository } from "../session-history.repository";
+import { SessionHistoryRepository, orderByParentChain } from "../session-history.repository";
 
 /**
  * Fake-drizzle checks for SessionHistoryRepository: mapping/filters only.
@@ -73,6 +73,9 @@ function walk(
       return;
     }
     if ("value" in obj && !Array.isArray(obj.value)) onValue(obj.value);
+    if ("value" in obj && Array.isArray(obj.value)) {
+      for (const item of obj.value as Array<unknown>) onValue(item);
+    }
     for (const key of Object.keys(obj)) visit(obj[key]);
   };
   visit(node);
@@ -186,9 +189,13 @@ function makeDb(seed: Partial<State> = {}) {
       values.some((value) => value === row[key]);
     let out = rows;
     if (table === sessionMessages) {
-      if (cols.includes("id")) out = out.filter((row) => matches("id", row));
+      // 0010: surrogate uuid PK (row "id") + UNIQUE(domain_id). Reads filter
+      // on the domain id; the surrogate never appears in a WHERE.
+      if (cols.includes("domain_id")) out = out.filter((row) => matches("domainId", row));
+      if (cols.includes("id")) out = out.filter((row) => matches("domainId", row));
       if (cols.includes("session_id")) out = out.filter((row) => matches("sessionId", row));
-      if (cols.includes("project_id")) out = out.filter((row) => matches("projectId", row));
+      // Chain 0009: no project_id on messages — project scope is the JOIN
+      // with project_sessions (handled in selectBuilder), never a column.
       if (cols.includes("deleted_at")) out = out.filter(isLive);
     }
     if (table === sessionAgents) {
@@ -241,7 +248,7 @@ function makeDb(seed: Partial<State> = {}) {
       }
       let rows = filterRows(table, rowsFor(table), cond);
       // The only join the repository issues: project_sessions ⟕ session_agents
-      // on the text session id. Attach the agent so the projection sees it.
+      // on the uuid session id (0010). Attach the agent so the projection sees it.
       if (table === projectSessions && joins.includes(sessionAgents)) {
         rows = rows.map((row) => ({
           ...row,
@@ -250,12 +257,39 @@ function makeDb(seed: Partial<State> = {}) {
               ?.agentId ?? null,
         }));
       }
+      // Chain 0009: session_messages ⋈ project_sessions on the uuid FK for
+      // project-scoped reads. Keep only messages whose parent registry row is
+      // live and (when the cond carries a project_id value) belongs to that
+      // project.
+      if (table === sessionMessages && joins.includes(projectSessions)) {
+        const wanted = referencedValues(cond).filter(
+          (value) => typeof value === "string" && /^[0-9a-f-]{36}$/i.test(value),
+        );
+        rows = rows.filter((row) => {
+          const parent = state.projectSessions.find(
+            (session) => session.id === row.sessionId && isLive(session),
+          );
+          if (!parent) return false;
+          if (wanted.length === 0) return true;
+          return wanted.includes(parent.projectId);
+        });
+      }
+      // Drizzle projection: select({ id: domainId, ... }) — the fake stores
+      // both the surrogate (`row-*`) and the domain id, so project the wire
+      // id back (otherwise chain tests link on surrogate ids, never real).
+      if (table === sessionMessages) {
+        rows = rows.map((row) => ({ ...row, id: row.domainId ?? row.id }));
+      }
       return rows.map((row) => ({ ...row }));
     };
     const builder: Record<string, unknown> = {};
     const chain = () => builder;
     builder.where = (cond: unknown) => result(resolve(cond));
     builder.leftJoin = (joinTable: unknown) => {
+      joins.push(joinTable);
+      return builder;
+    };
+    builder.innerJoin = (joinTable: unknown) => {
       joins.push(joinTable);
       return builder;
     };
@@ -284,7 +318,10 @@ function makeDb(seed: Partial<State> = {}) {
           ops.push({ kind: "insert", table, values, conflict: mode });
           const rows = rowsFor(table);
           if (table === sessionMessages) {
-            if (!rows.some((row) => row.id === values.id)) rows.push({ ...values });
+            // 0010: replay dedupes on domain_id (surrogate uuid is per-row).
+            if (!rows.some((row) => row.domainId === values.domainId)) {
+              rows.push({ id: `row-${String(values.domainId)}`, ...values });
+            }
             return;
           }
           if (table === sessionAgents) {
@@ -333,10 +370,16 @@ function makeRepo(db: { client: unknown }): SessionHistoryRepository {
 }
 
 function messageRow(overrides: Partial<Row> = {}): Row {
+  // Seeds historically pass { id: "mX" } meaning the DOMAIN id; the 0010
+  // surrogate uuid is never asserted, so both default from the domain value.
+  const domainId: string =
+    typeof overrides.domainId === "string"
+      ? (overrides.domainId as string)
+      : typeof overrides.id === "string"
+        ? (overrides.id as string)
+        : "m1";
   return {
-    id: "m1",
-    sessionId: "ses_a",
-    projectId: PID,
+    sessionId: HARNESS_ID,
     userId: UID,
     role: "user",
     agentId: null,
@@ -344,6 +387,8 @@ function messageRow(overrides: Partial<Row> = {}): Row {
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
     deletedAt: null,
     ...overrides,
+    id: `row-${domainId}`,
+    domainId,
   };
 }
 
@@ -354,11 +399,11 @@ describe("SessionHistoryRepository.listMessages", () => {
         messageRow({ id: "m2", role: "assistant", text: "yo", createdAt: new Date("2026-01-01T00:00:01.000Z") }),
         messageRow({ id: "m1", role: "user", text: "hi" }),
         messageRow({ id: "m3", text: "gone", deletedAt: new Date("2026-01-02T00:00:00.000Z") }),
-        messageRow({ id: "m4", sessionId: "ses_other", text: "foreign" }),
+        messageRow({ id: "m4", sessionId: "0190a0b0-0000-7000-8000-000000000099", text: "foreign" }),
       ],
     });
     const repo = makeRepo(db);
-    const out = await repo.listMessages("ses_a");
+    const out = await repo.listMessages(HARNESS_ID);
     assert.deepEqual(
       out.map((row) => row.id),
       ["m1", "m2"],
@@ -374,6 +419,20 @@ describe("SessionHistoryRepository.listMessages", () => {
       "reads must constrain deleted_at",
     );
   });
+
+  it("project scope joins project_sessions (no direct project_id on messages)", async () => {
+    const db = makeDb({
+      projectSessions: [
+        { id: HARNESS_ID, projectId: PID, deletedAt: null },
+      ],
+      sessionMessages: [
+        messageRow({ id: "m1", sessionId: HARNESS_ID }),
+      ],
+    });
+    const repo = makeRepo(db);
+    const out = await repo.listMessages(HARNESS_ID, PID);
+    assert.deepEqual(out.map((row) => row.id), ["m1"]);
+  });
 });
 
 describe("SessionHistoryRepository.appendMessage", () => {
@@ -382,8 +441,7 @@ describe("SessionHistoryRepository.appendMessage", () => {
     const repo = makeRepo(db);
     const row = {
       id: "m1",
-      sessionId: "ses_a",
-      projectId: PID,
+      sessionId: HARNESS_ID,
       userId: UID,
       role: "user" as const,
       text: "hi",
@@ -413,7 +471,6 @@ describe("SessionHistoryRepository.appendMessage", () => {
     await repo.appendMessage({
       id: "m1",
       sessionId: HARNESS_ID,
-      projectId: PID,
       userId: UID,
       role: "user" as const,
       text: "hi",
@@ -432,7 +489,7 @@ describe("SessionHistoryRepository.appendMessage", () => {
     );
   });
 
-  it("ses_* sessionId is a no-op (no update, no throw)", async () => {
+  it("stores no project_id (chain: scope via project_sessions JOIN, RESTRICT)", async () => {
     const db = makeDb({
       projectSessions: [
         {
@@ -446,18 +503,21 @@ describe("SessionHistoryRepository.appendMessage", () => {
     const repo = makeRepo(db);
     await repo.appendMessage({
       id: "m1",
-      sessionId: "ses_upstream",
-      projectId: PID,
+      sessionId: HARNESS_ID,
       userId: UID,
       role: "user" as const,
       text: "hi",
     });
+    assert.equal(db.state.sessionMessages.length, 1, "the message row itself is still stored");
+    assert.ok(
+      !("projectId" in db.state.sessionMessages[0]),
+      "message rows must not carry projectId (0009 dropped the column)",
+    );
     assert.equal(
       db.ops.filter((op) => op.kind === "update").length,
-      0,
-      "upstream ses_* ids must not touch project_sessions",
+      1,
+      "uuid session always bumps its parent registry row (no ses_* no-op branch)",
     );
-    assert.equal(db.state.sessionMessages.length, 1, "the message row itself is still stored");
   });
 });
 
@@ -465,12 +525,12 @@ describe("SessionHistoryRepository agents", () => {
   it("setAgent upserts and getAgent reads the stored id", async () => {
     const db = makeDb();
     const repo = makeRepo(db);
-    assert.equal(await repo.getAgent("ses_a"), undefined);
-    await repo.setAgent("ses_a", PID, "ask");
-    assert.equal(await repo.getAgent("ses_a"), "ask");
-    await repo.setAgent("ses_a", PID, "auto");
+    assert.equal(await repo.getAgent(HARNESS_ID), undefined);
+    await repo.setAgent(HARNESS_ID, PID, "ask");
+    assert.equal(await repo.getAgent(HARNESS_ID), "ask");
+    await repo.setAgent(HARNESS_ID, PID, "auto");
     assert.equal(db.state.sessionAgents.length, 1, "sessionAgents must stay one row per session");
-    assert.equal(await repo.getAgent("ses_a"), "auto");
+    assert.equal(await repo.getAgent(HARNESS_ID), "auto");
     assert.ok(
       db.ops.some((op) => op.kind === "insert" && op.conflict === "update"),
       "setAgent must honour onConflictDoUpdate",
@@ -622,6 +682,90 @@ describe("SessionHistoryRepository.listLocalSessions", () => {
     );
     const empty = makeDb();
     assert.deepEqual(await makeRepo(empty).listLocalSessions(PID), [], "empty project must be []");
+  });
+});
+
+describe("SessionHistoryRepository branches", () => {
+  const t0 = new Date("2026-01-01T00:00:00.000Z");
+  const t1 = new Date("2026-01-01T00:00:01.000Z");
+  const t2 = new Date("2026-01-01T00:00:02.000Z");
+  const t3 = new Date("2026-01-01T00:00:03.000Z");
+
+  it("orderByParentChain keeps every row on 1 parent → N children (no fallback)", async () => {
+    const rows = [
+      { id: "root", parentId: null, createdAt: t0 },
+      { id: "b", parentId: "root", createdAt: t1 },
+      { id: "c", parentId: "root", createdAt: t2 },
+      { id: "d", parentId: "b", createdAt: t3 },
+    ];
+    const out = orderByParentChain(rows);
+    assert.deepEqual(
+      out.map((row) => row.id).sort(),
+      ["b", "c", "d", "root"],
+      "branches must not drop rows",
+    );
+    assert.equal(out[0]?.id, "root", "the root stays first");
+  });
+
+  it("listActiveChain walks leaf → root (siblings out)", async () => {
+    const db = makeDb({
+      sessionMessages: [
+        messageRow({ id: "root", parentId: null, createdAt: t0 }),
+        messageRow({ id: "b", parentId: "root", createdAt: t1 }),
+        messageRow({ id: "c", parentId: "root", createdAt: t2 }),
+      ],
+    });
+    const repo = makeRepo(db);
+    const chain = await repo.listActiveChain(HARNESS_ID, "c");
+    assert.deepEqual(chain.map((row) => row.id), ["root", "c"]);
+  });
+
+  it("listVariants lists children time-ordered with previews", async () => {
+    const db = makeDb({
+      sessionMessages: [
+        messageRow({ id: "root", parentId: null, createdAt: t0, text: "root text" }),
+        messageRow({ id: "b", parentId: "root", createdAt: t2, text: "second answer here" }),
+        messageRow({ id: "c", parentId: "root", createdAt: t1, text: "first answer here" }),
+      ],
+    });
+    const repo = makeRepo(db);
+    const variants = await repo.listVariants(HARNESS_ID, "root");
+    assert.deepEqual(variants.map((row) => row.childId), ["c", "b"]);
+    assert.ok(variants.every((row) => row.preview.length > 0));
+  });
+
+  it("revertMessages soft-deletes the boundary + descendants and answers the parent", async () => {
+    const db = makeDb({
+      sessionMessages: [
+        messageRow({ id: "root", parentId: null, createdAt: t0 }),
+        messageRow({ id: "b", parentId: "root", createdAt: t1 }),
+        messageRow({ id: "d", parentId: "b", createdAt: t2 }),
+        messageRow({ id: "c", parentId: "root", createdAt: t3 }),
+      ],
+    });
+    const repo = makeRepo(db);
+    const activeLeaf = await repo.revertMessages(HARNESS_ID, "b");
+    assert.equal(activeLeaf, "root");
+    const remaining = await repo.listMessages(HARNESS_ID);
+    assert.deepEqual(remaining.map((row) => row.id).sort(), ["c", "root"]);
+  });
+
+  it("revertMessages on an unknown boundary answers undefined (service maps 404)", async () => {
+    const db = makeDb({ sessionMessages: [messageRow({ id: "root" })] });
+    const repo = makeRepo(db);
+    assert.equal(await repo.revertMessages(HARNESS_ID, "nope"), undefined);
+  });
+
+  it("revertMessages on the root answers null (empty thread)", async () => {
+    const db = makeDb({
+      sessionMessages: [
+        messageRow({ id: "root", parentId: null, createdAt: t0 }),
+        messageRow({ id: "b", parentId: "root", createdAt: t1 }),
+      ],
+    });
+    const repo = makeRepo(db);
+    assert.equal(await repo.revertMessages(HARNESS_ID, "root"), null);
+    assert.deepEqual(await repo.listMessages(HARNESS_ID), []);
   });
 });
 

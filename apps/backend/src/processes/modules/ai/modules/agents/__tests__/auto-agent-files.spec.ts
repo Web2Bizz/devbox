@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { AutoAgent, AUTO_FILES_REQUIREMENT, UNCLEAR_REQUEST_MESSAGE, parseSteps } from "../auto.agent";
+import { WorkflowsService } from "../../workflows/workflows.service";
 import { BACKEND_SYSTEM } from "../backend.agent";
 import { FRONTEND_SYSTEM } from "../frontend.agent";
 import { FULLSTACK_SYSTEM } from "../fullstack.agent";
@@ -93,6 +94,7 @@ const checks: Array<{ name: string; run: () => Promise<void> }> = [
         boom("fullstack") as never,
         jev as never,
         boom("ask") as never,
+        new WorkflowsService(fakeLogger([]) as never),
         fakeLogger([]) as never,
       );
       const res = await auto.ask("напиши Hello World на NodeJS", "u1", "cid-files");
@@ -132,6 +134,7 @@ const checks: Array<{ name: string; run: () => Promise<void> }> = [
         boom("fullstack") as never,
         jev as never,
         askAgent as never,
+        new WorkflowsService(fakeLogger([]) as never),
         fakeLogger([]) as never,
       );
       const res = await auto.ask("объясни что такое Hello World", "u2", "cid-ask");
@@ -185,6 +188,7 @@ const checks: Array<{ name: string; run: () => Promise<void> }> = [
         boom("fullstack") as never,
         jev as never,
         boom("ask") as never,
+        new WorkflowsService(fakeLogger([]) as never),
         fakeLogger([]) as never,
       );
       const res = await auto.ask("сделай что-нибудь", "u3", "cid-fallback");
@@ -213,6 +217,7 @@ const checks: Array<{ name: string; run: () => Promise<void> }> = [
         boom("fullstack") as never,
         jev as never,
         boom("ask") as never,
+        new WorkflowsService(fakeLogger([]) as never),
         fakeLogger([]) as never,
       );
       await assert.rejects(auto.ask("сделай", "u4", "cid-step-fail"), /step-boom/);
@@ -236,6 +241,7 @@ const checks: Array<{ name: string; run: () => Promise<void> }> = [
         boom("fullstack") as never,
         jev as never,
         boom("ask") as never,
+        new WorkflowsService(fakeLogger([]) as never),
         fakeLogger([]) as never,
       );
       await assert.rejects(auto.ask("сделай фронт", "u5", "cid-decompose-fail"), /decompose-boom/);
@@ -259,6 +265,7 @@ const checks: Array<{ name: string; run: () => Promise<void> }> = [
         executor as never,
         jev as never,
         boom("ask") as never,
+        new WorkflowsService(fakeLogger([]) as never),
         fakeLogger([]) as never,
       );
       const res = await auto.ask("абырвалг", "u6", "cid-unclear");
@@ -285,6 +292,7 @@ const checks: Array<{ name: string; run: () => Promise<void> }> = [
         boom("fullstack") as never,
         jev as never,
         boom("ask") as never,
+        new WorkflowsService(fakeLogger([]) as never),
         fakeLogger([]) as never,
       );
       const res = await auto.ask("сделай", "u7", "cid-weird");
@@ -311,6 +319,7 @@ const checks: Array<{ name: string; run: () => Promise<void> }> = [
         boom("fullstack") as never,
         jev as never,
         boom("ask") as never,
+        new WorkflowsService(fakeLogger([]) as never),
         fakeLogger([]) as never,
       );
       const first = await auto.ask("напиши Hello World на NodeJS", "u8", "cid-r1");
@@ -341,6 +350,7 @@ const checks: Array<{ name: string; run: () => Promise<void> }> = [
         boom("fullstack") as never,
         jev as never,
         boom("ask") as never,
+        new WorkflowsService(fakeLogger([]) as never),
         fakeLogger([]) as never,
       );
       const res = await auto.ask("сделай большое", "u9", "cid-huge-ctx");

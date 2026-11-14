@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
 import type { AppLogger } from '../../logger';
-import { HEARTBEAT_MS, isAbortError, relaySse, type SseRelayParams, type SseSubscription } from '../sse-relay';
+import { HEARTBEAT_MS, isSseAbort, relaySse, type SseRelayParams, type SseSubscription } from '../sse-relay';
 
 type Case = { name: string; run: () => Promise<void> | void };
 
@@ -594,14 +594,14 @@ describe('relaySse C0 wire contract (heartbeat/id/stream.error)', () => {
   });
 });
 
-describe('isAbortError hostile inputs', () => {
+describe('isSseAbort hostile inputs', () => {
   it('matches name/code/cause shapes, rejects everything else', () => {
     const abort = new Error('x');
     abort.name = 'AbortError';
-    assert.equal(isAbortError(abort), true);
-    assert.equal(isAbortError({ code: 20 }), true);
-    assert.equal(isAbortError({ cause: { name: 'AbortError' } }), true);
-    assert.equal(isAbortError({ cause: { code: 20 } }), true);
+    assert.equal(isSseAbort(abort), true);
+    assert.equal(isSseAbort({ code: 20 }), true);
+    assert.equal(isSseAbort({ cause: { name: 'AbortError' } }), true);
+    assert.equal(isSseAbort({ cause: { code: 20 } }), true);
     for (const hostile of [
       null,
       undefined,
@@ -617,7 +617,7 @@ describe('isAbortError hostile inputs', () => {
       { cause: null },
       { cause: 'AbortError' },
     ]) {
-      assert.equal(isAbortError(hostile), false, `must reject ${JSON.stringify(hostile)}`);
+      assert.equal(isSseAbort(hostile), false, `must reject ${JSON.stringify(hostile)}`);
     }
   });
 });

@@ -10,10 +10,11 @@ import {
 import { ToolRegistryService } from '../../../../tool-registry/tool-registry.service';
 import type { ToolContext } from '../../../../tool-runtime/tool-runtime.types';
 import { SessionTurnRunnerService, type StepExecutor } from '../../runner/runner.service';
+import { MaxStepsExceededError } from '../../runner/max-steps';
 import type { LoopStep } from '../../runner/loop';
 import { SessionFrameBufferService } from '../../events/session-frame-buffer.service';
 import { SessionRuntimeStateService } from '../../state/session-runtime-state.service';
-import { InProcessTurnService } from '../in-process-turn.service';
+import { InProcessTurnService, IN_PROCESS_FAILED_MESSAGE } from '../in-process-turn.service';
 
 /**
  * InProcessTurnService — the `auto` turn executed by rush-code itself.
@@ -45,7 +46,7 @@ const SID = '123e4567-e89b-12d3-a456-426614174002';
 const PID = '123e4567-e89b-12d3-a456-426614174003';
 const DIR = '/tmp/repos/orgs/u/projects/p/content';
 
-type AppendedRow = { id: string; role: string; text: string };
+type AppendedRow = { id: string; role: string; text: string | null; kind?: string; name?: string; status?: string; parentId?: string | null };
 
 type Harness = {
   service: InProcessTurnService;
@@ -108,8 +109,8 @@ function harness(step: StepExecutor): Harness {
   const buffer = new SessionFrameBufferService();
   const history = {
     async setAgent(): Promise<void> {},
-    async appendMessage(row: AppendedRow & { role: 'user' | 'assistant' }): Promise<void> {
-      appended.push({ id: row.id, role: row.role, text: row.text });
+    async appendMessage(row: AppendedRow & { role: 'user' | 'assistant' | 'tool' | 'reasoning' }): Promise<void> {
+      appended.push({ id: row.id, role: row.role, text: row.text ?? '', kind: row.kind, name: row.name, status: row.status, parentId: row.parentId ?? null });
     },
     async discardMessage(id: string): Promise<void> {
       discarded.push(id);
@@ -180,9 +181,14 @@ describe('InProcessTurnService', () => {
     assert.equal(receipt.type, 'user');
     assert.deepEqual(
       h.appended.map((row) => row.role),
-      ['user', 'assistant'],
+      ['user', 'tool', 'assistant'],
     );
-    assert.equal(h.appended[1]?.text, 'готово');
+    assert.equal(h.appended[1]?.text, 'file content');
+    assert.equal(h.appended[1]?.kind, 'tool');
+    assert.equal(h.appended[1]?.name, 'read');
+    assert.equal(h.appended[2]?.text, 'готово');
+    assert.equal(h.appended[1]?.parentId, receipt.id);
+    assert.equal(h.appended[2]?.parentId, h.appended[1]?.id);
     assert.equal(h.readCalls(), 1);
 
     const types = h.buffer.list().map((frame) => frame.type);
@@ -285,6 +291,78 @@ describe('InProcessTurnService', () => {
     assert.ok(!types.includes('session.text.ended'));
     assert.ok(!types.includes('session.execution.succeeded'));
     assert.ok(!types.includes('session.idle'));
+    assert.equal(h.state.isBusy(SID), false);
+  });
+
+  it('failure: a step throw buffers failed + idle with the fixed secret-free text', async () => {
+    const h = harness(async (): Promise<LoopStep> => {
+      throw new Error('boom-secret-should-never-surface');
+    });
+
+    await assert.rejects(
+      h.service.send({
+        userId: UID,
+        sessionId: SID,
+        body: body('auto'),
+        directory: DIR,
+        agentId: 'auto',
+        correlationId: 'cid-fail',
+      }),
+    );
+
+    assert.deepEqual(
+      h.appended.map((row) => row.role),
+      ['user'],
+    );
+    const frames = h.buffer.list();
+    const types = frames.map((frame) => frame.type);
+    assert.ok(types.includes('session.execution.failed'));
+    assert.ok(types.includes('session.step.failed'));
+    assert.equal(types.at(-1), 'session.idle');
+    const failed = frames.filter(
+      (frame) => frame.type === 'session.execution.failed' || frame.type === 'session.step.failed',
+    );
+    assert.equal(failed.length, 2);
+    for (const frame of failed) {
+      assert.equal(frame.data.message, IN_PROCESS_FAILED_MESSAGE);
+      assert.equal(frame.data.code, 'in-process-failed');
+      assert.ok(!String(frame.data.message).includes('boom'));
+    }
+    assert.equal(h.state.isBusy(SID), false);
+  });
+
+  it('failure: MaxStepsExceeded maps typed with the fixed text + code (partial stays buffered)', async () => {
+    const h = harness(async (): Promise<LoopStep> => {
+      throw new MaxStepsExceededError(1, {
+        steps: 1,
+        usage: { input: 10, output: 5 },
+        partialText: '',
+      });
+    });
+
+    await assert.rejects(
+      h.service.send({
+        userId: UID,
+        sessionId: SID,
+        body: body('auto'),
+        directory: DIR,
+        agentId: 'auto',
+        correlationId: 'cid-maxsteps',
+      }),
+    );
+
+    const frames = h.buffer.list();
+    const types = frames.map((frame) => frame.type);
+    assert.ok(types.includes('session.execution.failed'));
+    assert.ok(types.includes('session.step.failed'));
+    assert.equal(types.at(-1), 'session.idle');
+    const failed = frames.filter(
+      (frame) => frame.type === 'session.execution.failed' || frame.type === 'session.step.failed',
+    );
+    for (const frame of failed) {
+      assert.equal(frame.data.message, IN_PROCESS_FAILED_MESSAGE);
+      assert.equal(frame.data.code, 'max-steps-exceeded');
+    }
     assert.equal(h.state.isBusy(SID), false);
   });
 });

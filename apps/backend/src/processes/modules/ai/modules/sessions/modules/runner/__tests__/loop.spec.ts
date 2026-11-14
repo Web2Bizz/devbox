@@ -118,6 +118,17 @@ describe("max-steps", () => {
     assert.throws(() => assertStepBudget(2, 2), (err: unknown) => err instanceof MaxStepsExceededError);
     assert.doesNotThrow(() => assertStepBudget(1, 2));
   });
+
+  it("carries typed steps/usage/partial details without inventing text", () => {
+    const err = new MaxStepsExceededError(2, {
+      steps: 2,
+      usage: { input: 10, output: 5 },
+      partialText: "partial",
+    });
+    assert.equal(err.maxSteps, 2);
+    assert.deepEqual(err.details, { steps: 2, usage: { input: 10, output: 5 }, partialText: "partial" });
+    assert.match(err.message, /max-steps-exceeded:2/);
+  });
 });
 
 describe("withRetry", () => {

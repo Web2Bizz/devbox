@@ -12,6 +12,7 @@
  */
 import assert from "node:assert/strict";
 import { AutoAgent } from "../auto.agent";
+import { WorkflowsService } from "../../workflows/workflows.service";
 
 type LogEntry = { level: string; message: string };
 
@@ -57,6 +58,7 @@ function makeAuto(
     boom("fullstack") as never,
     jev as never,
     askAgent as never,
+    new WorkflowsService(fakeLogger(entries) as never),
     fakeLogger(entries) as never,
   );
 }

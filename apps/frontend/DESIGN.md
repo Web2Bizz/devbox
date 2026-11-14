@@ -127,7 +127,7 @@ frontend. Новый компонент **не считается зарегис
 
 ### 3.2 Компоненты (`src/components/`)
 
-- `AgentSelector`
+- `ModeSelector`
 - `AuthHeader`
 - `ChatInput`
 - `ChatLiveStatus`

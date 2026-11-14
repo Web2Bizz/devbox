@@ -76,13 +76,13 @@ src/
 ├─ hooks/ — useSessions, useSessionMessages, useSessionEvents, useChat (стриминг-исключение:
 │   useEffect+domain SSE, финал session.step.ended, stop() глушит кадры), useAiProviders,
 │   useProjects/useProject/useOrganizations/... ; query-keys.ts — ЕДИНСТВЕННЫЙ источник ключей
-├─ components/chat/ — папки компонентов: `chat-thread/`, `chat-thinking-row/`,
-│   `chat-streaming-row/`, `chat-thread-empty/`, `chat-thread-loading/`,
-│   `chat-tool-timeline/`, `chat-live-status/`, `chat-input/`, `chat-message/`,
-│   `agent-selector/`
-│   (в каждой `<Имя>.tsx` + `types.ts` + `index.ts`; плоских `chat-*.tsx`
-│   в корне `chat/` нет; агентный dropdown — единый `AgentSelector` из
-│   GET /api/v1/agents, без provider-селектора)
+├─ components/chat/ — папки компонентов: `mode-selector/`, `chat-input/`,
+│   `chat-message/`, `chat-thread/`, `chat-thinking-row/`, `chat-thread-empty/`,
+│   `chat-thread-loading/`, `chat-tool-row/`, `chat-live-status/`
+│   (в каждой `<Имя>.tsx` + `types.ts` + `index.ts`, в `chat-tool-row/` +
+│   `utils.ts` (форматеры); плоских `chat-*.tsx`
+│   в корне `chat/` нет; dropdown режимов — единый `ModeSelector` из
+│   GET /api/v1/agents (backend-контракт agents), без provider-селектора)
 ├─ features/ — плоско: `chat-section.tsx` (тонкая сборка useChat+kit),
 │   `chat-fork-dialog.tsx`, `chat-revert-dialog.tsx`, `usage-section.tsx`
 │   (без подпапок — см. `CODE_OF_CONDUCT.md` §1)

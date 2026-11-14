@@ -92,6 +92,11 @@ src/
     в src+app+package.json (включая комментарии), ассерт покрытия против «молча проверяет 0»
 ```
 
+Статика — только `public/assets/` (единственное место: `logo.png`,
+`favicon.ico`, `icon.png`, `apple-icon.png`). File-конвенции в корне
+`app/` не использовать — иконки заданы явными `icons.url` (`/assets/*`)
+в `app/layout.tsx`; `app/assets/` не заводить.
+
 ### Цепочка чата
 
 `send` → `POST /api/v1/sessions/:id/messages` (queued) → дельты по `events` SSE (scope по

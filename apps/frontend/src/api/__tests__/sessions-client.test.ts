@@ -48,8 +48,11 @@ import { ApiClientError, SEND_TIMEOUT_MS } from '../client';
 const {
   interruptSession,
   listAgents,
+  listSessionMessages,
   listSessionProviders,
   listSessions,
+  listSessionVariants,
+  revertSessionMessages,
   sendSessionMessage,
   sessionEventStream,
 } = await import('../sessions-client');
@@ -208,6 +211,41 @@ describe('sessions-client domain boundary', () => {
     await sendSessionMessage(PROJECT, 'ses_1', 'hi', { agentId: 'ask' });
     const init = calls[0]?.init as RequestInit;
     expect(JSON.parse(String(init.body))).toEqual({ projectId: PROJECT, text: 'hi', agentId: 'ask' });
+  });
+
+  test('listSessionMessages: ?leafId scopes the active chain (?parentId stays absent here)', async () => {
+    stubs = [{ status: 200, body: [] }];
+    await listSessionMessages(PROJECT, 'ses_1', { leafId: 'd' });
+    expect(calls[0]?.url).toContain('/api/v1/sessions/ses_1/messages?');
+    expect(new URL(calls[0]?.url).searchParams.get('leafId')).toBe('d');
+    expect(new URL(calls[0]?.url).searchParams.get('projectId')).toBe(PROJECT);
+
+    stubs = [{ status: 200, body: [] }];
+    calls.length = 0;
+    await listSessionMessages(PROJECT, 'ses_1');
+    expect(new URL(calls[0]?.url).searchParams.get('leafId')).toBeNull();
+  });
+
+  test('listSessionVariants: ?parentId scopes the switcher (absent = roots)', async () => {
+    stubs = [{ status: 200, body: [] }];
+    await listSessionVariants(PROJECT, 'ses_1', { parentId: 'b' });
+    expect(calls[0]?.url).toContain('/api/v1/sessions/ses_1/variants?');
+    expect(new URL(calls[0]?.url).searchParams.get('parentId')).toBe('b');
+
+    stubs = [{ status: 200, body: [] }];
+    calls.length = 0;
+    await listSessionVariants(PROJECT, 'ses_1', { parentId: null });
+    expect(new URL(calls[0]?.url).searchParams.get('parentId')).toBeNull();
+  });
+
+  test('revertSessionMessages: body is exactly {projectId,messageID} (revert scope)', async () => {
+    stubs = [{ status: 200, body: { activeLeaf: 'b' } }];
+    const res = await revertSessionMessages(PROJECT, 'ses_1', 'd');
+    expect(res).toEqual({ activeLeaf: 'b' });
+    const init = calls[0]?.init as RequestInit;
+    expect(init.method).toBe('POST');
+    expect(calls[0]?.url).toContain('/api/v1/sessions/ses_1/messages/revert');
+    expect(JSON.parse(String(init.body))).toEqual({ projectId: PROJECT, messageID: 'd' });
   });
 
   test('sendSessionMessage: long default timeout (whole-turn wait), custom override forwards', async () => {

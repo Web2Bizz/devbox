@@ -45,12 +45,21 @@ let sendImpl: (projectId: string, sessionId: string, text: string, opts?: unknow
     text,
   });
 const sendMock = mock((p: string, s: string, text: string, opts?: unknown) => sendImpl(p, s, text, opts));
-const messagesImplHolder: { fn: (projectId: string, sessionId: string) => Promise<unknown[]> } = {
+const messagesImplHolder: {
+  fn: (projectId: string, sessionId: string, opts?: unknown) => Promise<unknown[]>;
+} = {
   fn: async () => [],
 };
-const messagesMock = mock((p: string, s: string) => messagesImplHolder.fn(p, s));
+const messagesMock = mock((p: string, s: string, opts?: unknown) => messagesImplHolder.fn(p, s, opts));
+const variantsCalls: Array<{ projectId: string; sessionId: string; opts?: unknown }> = [];
+const variantsMock = mock(async (p: string, s: string, opts?: unknown) => {
+  variantsCalls.push({ projectId: p, sessionId: s, opts });
+  return [];
+});
 // Domain interrupt answer per the artifact SessionInterruptResponse.
 const abortMock = mock(async (_projectId: string, _sessionId: string) => ({ interrupted: true }));
+const revertHolder: { leaf: string | null } = { leaf: null };
+const revertMock = mock(async (_p: string, _s: string, _m: string) => ({ activeLeaf: revertHolder.leaf }));
 
 // A live-bus stand-in: the generator starts at mount and blocks until
 // frames arrive (pushed by the test after send()), mirroring a real SSE —
@@ -84,15 +93,23 @@ mock.module('../../api/sessions-client', () => ({
   createSession: (body: unknown, opts?: unknown) => createMock(body, opts),
   sendSessionMessage: (p: string, s: string, text: string, opts?: unknown) =>
     sendMock(p, s, text, opts),
-  listSessionMessages: (p: string, s: string) => messagesMock(p, s),
+  listSessionMessages: (p: string, s: string, opts?: unknown) => messagesMock(p, s, opts),
+  listSessionVariants: (p: string, s: string, opts?: unknown) => variantsMock(p, s, opts),
+  revertSessionMessages: (p: string, s: string, m: string) => revertMock(p, s, m),
   interruptSession: (p: string, s: string) => abortMock(p, s),
   sessionEventStream: (projectId: string, signal: AbortSignal, opts?: StreamOpts) =>
     streamMock(projectId, signal, opts),
   toErrorMessage: (e: unknown) => {
-    if (typeof e === 'string') return e;
-    if (e instanceof Error) return e.message;
-    if (e && typeof e === 'object' && 'message' in (e as Record<string, unknown>)) {
-      return String((e as Record<string, unknown>).message);
+    if (e === undefined || e === null) return 'Unexpected error';
+    if (typeof e === 'string') return e || 'Unexpected error';
+    if (e instanceof Error) return e.message || 'Unexpected error';
+    if (typeof e === 'object') {
+      const obj = e as Record<string, unknown>;
+      const data = obj.data as Record<string, unknown> | undefined;
+      if (data && typeof data.message === 'string' && data.message) return data.message;
+      if (data && typeof data.code === 'string' && data.code) return data.code;
+      if (typeof obj.message === 'string' && obj.message) return obj.message;
+      if (typeof obj.code === 'string' && obj.code) return obj.code;
     }
     return 'Unexpected error';
   },
@@ -100,6 +117,7 @@ mock.module('../../api/sessions-client', () => ({
 
 const { cleanup, renderHook, act } = await import('@testing-library/react');
 const { useChat } = await import('../useChat');
+const { toChatEntries, toChatMessages } = await import('../../lib/chat-chain');
 
 const delta = (session: string, text: string, partId = 'prt-1') => ({
   id: `evt-${text}-${partId}`,
@@ -172,6 +190,16 @@ const settle = async (rounds = 8) => {
   });
 };
 
+// Grace finalize runs on a real 1500ms timer (no injectable clock in the
+// hook), so wait just past it — the assertions are about behavior, not the
+// exact boundary. Real timers keep the SSE bus polling untouched.
+const GRACE_WAIT_MS = 1700;
+const waitGrace = async (): Promise<void> => {
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, GRACE_WAIT_MS));
+  });
+};
+
 afterEach(() => {
   cleanup();
   queue.length = 0;
@@ -180,6 +208,8 @@ afterEach(() => {
   createMock.mockClear();
   sendMock.mockClear();
   messagesMock.mockClear();
+  variantsMock.mockClear();
+  variantsCalls.length = 0;
   abortMock.mockClear();
   streamMock.mockClear();
   sendImpl = async (_p, _s, text) => ({
@@ -189,6 +219,8 @@ afterEach(() => {
     text,
   });
   messagesImplHolder.fn = async () => [];
+  revertHolder.leaf = null;
+  revertMock.mockClear();
 });
 
 describe('useChat (domain)', () => {
@@ -211,6 +243,17 @@ describe('useChat (domain)', () => {
     expect(result.current.messages.length).toBe(2);
     expect(result.current.messages[0]).toMatchObject({ role: 'user', text: 'hello' });
     expect(result.current.messages[1]).toMatchObject({ role: 'assistant', text: 'hello back' });
+    // Optimistic rows carry their own clock (ISO createdAt on the chain entries).
+    const optimisticTexts = result.current.entries.filter((e) => e.kind === 'text');
+    expect(optimisticTexts.length).toBe(2);
+    const optimisticAt0 = Date.parse(
+      (optimisticTexts[0] as { createdAt?: string }).createdAt ?? '',
+    );
+    const optimisticAt1 = Date.parse(
+      (optimisticTexts[1] as { createdAt?: string }).createdAt ?? '',
+    );
+    expect(Number.isNaN(optimisticAt0)).toBe(false);
+    expect(optimisticAt1).toBeGreaterThanOrEqual(optimisticAt0);
     expect(result.current.isEmpty).toBe(false);
   });
 
@@ -321,6 +364,41 @@ describe('useChat (domain)', () => {
       role: 'assistant',
       text: 'scoped hello back',
     });
+    // Flat-chronology clock lives on the chain entries (createdAt passthrough).
+    const historyTexts = result.current.entries.filter((e) => e.kind === 'text');
+    expect(historyTexts.map((e) => (e as { createdAt?: string }).createdAt)).toEqual([
+      new Date(1700000000000).toISOString(),
+      new Date(1700000001000).toISOString(),
+    ]);
+  });
+
+  test('toChatMessages: text entries project without at, text:null variants skipped', () => {
+    const entries = toChatEntries([
+      {
+        id: 'm1',
+        type: 'user',
+        createdAt: new Date(1700000000000).toISOString(),
+        text: 'hi',
+      },
+      {
+        id: 'm2',
+        type: 'shell',
+        createdAt: new Date(1700000000500).toISOString(),
+        text: null,
+      },
+      {
+        id: 'm3',
+        type: 'assistant',
+        createdAt: new Date(1700000001000).toISOString(),
+        text: 'back',
+      },
+    ] as unknown as Parameters<typeof toChatEntries>[0]);
+    expect(entries.map((e) => e.id)).toEqual(['m1', 'm3']);
+    const mapped = toChatMessages(entries);
+    expect(mapped).toEqual([
+      { id: 'm1', role: 'user', text: 'hi' },
+      { id: 'm3', role: 'assistant', text: 'back' },
+    ]);
   });
 
   test('stop-abort: stop() commits the partial stream and fires the best-effort interrupt', async () => {
@@ -522,7 +600,7 @@ const stepFailed = (session: string, message?: string) => ({
     // The thread is preserved: user row stays, no phantom assistant commit.
     expect(result.current.messages.length).toBe(1);
     expect(result.current.messages[0]).toMatchObject({ role: 'user', text: 'hello' });
-    expect(result.current.streamingText).toBe('');
+    expect(result.current.entries.filter((e) => e.kind === 'text').length).toBe(1);
   });
 
   test('terminal stream.error without a message falls back to the unexpected-error copy', async () => {
@@ -553,7 +631,7 @@ const stepFailed = (session: string, message?: string) => ({
 
     expect(result.current.error).toBe('ход не выполнен');
     expect(result.current.sending).toBe(false);
-    expect(result.current.streamingText).toBe('');
+    expect(result.current.entries.filter((e) => e.kind === 'text').length).toBe(2);
     expect(result.current.activeToolName).toBeNull();
     expect(result.current.messages.length).toBe(2);
     expect(result.current.messages[1]).toMatchObject({
@@ -592,6 +670,36 @@ const stepFailed = (session: string, message?: string) => ({
     expect(result.current.messages[1]).toMatchObject({ role: 'assistant', text: 'once' });
     expect(result.current.error).toBe('boom');
     expect(result.current.sending).toBe(false);
+  });
+
+  test('execution.failed with code-only data falls back to unexpected (failTerminal is message-only)', async () => {
+    const { result } = renderHook(() => useChat({ ...PROJECT }));
+    await settle();
+
+    act(() => {
+      void result.current.send('hello');
+    });
+    pushFrames([
+      delta('ses-1', 'partial answer'),
+      {
+        id: 'evt-execfailed-code-ses-1',
+        type: 'session.execution.failed',
+        data: { sessionID: 'ses-1', code: 'max-steps-exceeded' },
+        session: 'ses-1',
+      },
+    ]);
+    await settle(16);
+
+    // src failTerminal reads only data.message, so code-only → t.errors.unexpected.
+    // The mocked toErrorMessage above stays code-first (mirrors sessions-client),
+    // but the failed-frame path does not route through it.
+    expect(result.current.error).toBe('Unexpected error');
+    expect(result.current.sending).toBe(false);
+    expect(result.current.messages.length).toBe(2);
+    expect(result.current.messages[1]).toMatchObject({
+      role: 'assistant',
+      text: 'partial answer',
+    });
   });
 
   test('stream.error of a foreign session never touches this chat', async () => {
@@ -651,7 +759,7 @@ const stepFailed = (session: string, message?: string) => ({
     // Still sending: the foreign terminator is not our commit signal.
     expect(result.current.sending).toBe(true);
     expect(result.current.messages.length).toBe(1);
-    expect(result.current.streamingText).toBe('');
+    expect(result.current.entries.filter((e) => e.kind === 'text').length).toBe(1);
 
     pushFrames([delta('ses-1', 'mine'), idle('ses-1')]);
     await settle(16);
@@ -817,7 +925,7 @@ const stepFailed = (session: string, message?: string) => ({
     session,
   });
 
-  test('tool.called → activeToolName + additive tool trace, streamingText stays empty', async () => {
+  test('tool.called → activeToolName + additive chain tool, messages stay clean', async () => {
     const { result } = renderHook(() => useChat({ ...PROJECT }));
     await settle();
 
@@ -828,10 +936,16 @@ const stepFailed = (session: string, message?: string) => ({
     await settle(16);
 
     expect(result.current.activeToolName).toBe('bash');
-    expect(result.current.streamingText).toBe('');
-    const tools = result.current.toolTrace.filter((e) => e.kind === 'tool');
+    expect(result.current.entries.filter((e) => e.kind === 'text').length).toBe(1);
+    const tools = result.current.entries.filter((e) => e.kind === 'tool');
     expect(tools.length).toBe(1);
-    expect(tools[0]).toMatchObject({ kind: 'tool', label: 'bash' });
+    expect(tools[0]).toMatchObject({ kind: 'tool', name: 'bash' });
+    // Unified chain: the same live tool lands as a `tool` entry (leaf follows
+    // the tool so `buildThreadRows(...).chain` keeps it for rendering).
+    const chainTools = result.current.entries.filter((e) => e.kind === 'tool');
+    expect(chainTools.length).toBe(1);
+    expect(chainTools[0]).toMatchObject({ kind: 'tool', name: 'bash', status: 'called' });
+    expect(result.current.leafId).toBe(chainTools[0]?.id);
     // Tool payload never becomes a chat row while the turn is live.
     expect(result.current.messages.length).toBe(1);
     expect(result.current.messages[0]).toMatchObject({ role: 'user' });
@@ -856,12 +970,18 @@ const stepFailed = (session: string, message?: string) => ({
     ]);
     await settle(16);
 
-    const tools = result.current.toolTrace.filter((e) => e.kind === 'tool');
+    const tools = result.current.entries.filter((e) => e.kind === 'tool');
     expect(tools.length).toBe(2);
-    expect(tools[0]).toMatchObject({ label: 'bash' });
+    expect(tools[0]).toMatchObject({ name: 'bash' });
     // Only the first progress payload is kept (later frames throttled).
-    expect(tools[1]).toMatchObject({ label: 'bash', detail: 'step one' });
-    expect(result.current.streamingText).toBe('');
+    expect(tools[1]).toMatchObject({ name: 'bash', detail: 'step one' });
+    expect(result.current.entries.filter((e) => e.kind === 'text').length).toBe(1);
+    // Unified chain mirrors the throttled trace: called + first progress land
+    // as `tool` entries, later progress bursts dedup.
+    const chainTools = result.current.entries.filter((e) => e.kind === 'tool');
+    expect(chainTools.length).toBe(2);
+    expect(chainTools[0]).toMatchObject({ name: 'bash', status: 'called' });
+    expect(chainTools[1]).toMatchObject({ name: 'bash', status: 'progress' });
 
     pushFrames([idle('ses-1')]);
     await settle(16);
@@ -884,15 +1004,20 @@ const stepFailed = (session: string, message?: string) => ({
     ]);
     await settle(16);
 
-    const tools = result.current.toolTrace.filter((e) => e.kind === 'tool');
-    const doneBash = tools.filter((e) => e.label === 'bash' && e.detail === 'done');
-    const failedEdit = tools.filter((e) => e.label === 'edit' && e.detail === 'boom');
+    const tools = result.current.entries.filter((e) => e.kind === 'tool');
+    const doneBash = tools.filter((e) => e.kind === 'tool' && e.name === 'bash' && e.status === 'done');
+    const failedEdit = tools.filter((e) => e.kind === 'tool' && e.name === 'edit' && e.status === 'failed');
     expect(doneBash.length).toBe(1);
     expect(failedEdit.length).toBe(1);
     // called-once-per-tool still holds alongside done-once-per-tool.
-    expect(tools.filter((e) => e.label === 'bash').length).toBe(2);
-    expect(tools.filter((e) => e.label === 'edit').length).toBe(2);
+    expect(tools.filter((e) => e.kind === 'tool' && e.name === 'bash').length).toBe(2);
+    expect(tools.filter((e) => e.kind === 'tool' && e.name === 'edit').length).toBe(2);
     expect(result.current.activeToolName).toBe('edit');
+    // Unified chain: called → done/failed each land once per tool (burst
+    // duplicates ignored, second invocation after done still lands).
+    const chainTools = result.current.entries.filter((e) => e.kind === 'tool');
+    expect(chainTools.filter((e) => e.kind === 'tool' && e.name === 'bash' && e.status === 'done').length).toBe(1);
+    expect(chainTools.filter((e) => e.kind === 'tool' && e.name === 'edit' && e.status === 'failed').length).toBe(1);
 
     pushFrames([idle('ses-1')]);
     await settle(16);
@@ -908,11 +1033,11 @@ const stepFailed = (session: string, message?: string) => ({
     pushFrames([toolInputStarted('ses-1', 'grep'), toolInputStarted('ses-1', 'grep')]);
     await settle(16);
 
-    const tools = result.current.toolTrace.filter((e) => e.kind === 'tool');
+    const tools = result.current.entries.filter((e) => e.kind === 'tool');
     expect(tools.length).toBe(1);
-    expect(tools[0]).toMatchObject({ label: 'grep' });
+    expect(tools[0]).toMatchObject({ name: 'grep' });
     expect(result.current.activeToolName).toBe('grep');
-    expect(result.current.streamingText).toBe('');
+    expect(result.current.entries.filter((e) => e.kind === 'text').length).toBe(1);
 
     pushFrames([idle('ses-1')]);
     await settle(16);
@@ -933,10 +1058,10 @@ const stepFailed = (session: string, message?: string) => ({
     ]);
     await settle(16);
 
-    // Legacy non-text part still surfaces as live tool status + trace.
-    const tools = result.current.toolTrace.filter((e) => e.kind === 'tool');
+    // Legacy non-text part still surfaces as live tool status + chain entry.
+    const tools = result.current.entries.filter((e) => e.kind === 'tool');
     expect(tools.length).toBe(1);
-    expect(tools[0]).toMatchObject({ label: 'bash' });
+    expect(tools[0]).toMatchObject({ name: 'bash' });
     // Text snapshots keep the growth-only behavior (no duplication).
     expect(result.current.messages.length).toBe(2);
     expect(result.current.messages[1]).toMatchObject({
@@ -955,7 +1080,7 @@ const stepFailed = (session: string, message?: string) => ({
     pushFrames([updated('ses-1', 'just text', 'prt-1'), idle('ses-1')]);
     await settle(16);
 
-    expect(result.current.toolTrace.filter((e) => e.kind === 'tool').length).toBe(0);
+    expect(result.current.entries.filter((e) => e.kind === 'tool').length).toBe(0);
     expect(result.current.messages[1]).toMatchObject({ role: 'assistant', text: 'just text' });
   });
 
@@ -970,10 +1095,11 @@ const stepFailed = (session: string, message?: string) => ({
     await settle(16);
 
     expect(result.current.activeToolName).toBeNull();
-    expect(result.current.streamingText).toBe('');
-    expect(result.current.reasoningText).toContain('THINKING-NOT-CHAT');
-    expect(result.current.toolTrace.filter((e) => e.kind === 'tool').length).toBe(0);
-    expect(result.current.toolTrace.filter((e) => e.kind === 'reasoning').length).toBe(1);
+    expect(result.current.entries.filter((e) => e.kind === 'text').length).toBe(1);
+    const reasoningTools = result.current.entries.filter((e) => e.kind === 'tool' && e.name === 'reasoning');
+    expect(reasoningTools.length).toBe(1);
+    expect(reasoningTools[0]).toMatchObject({ name: 'reasoning' });
+    expect(result.current.entries.filter((e) => e.kind === 'tool' && e.name !== 'reasoning').length).toBe(0);
     expect(result.current.messages.length).toBe(1);
     expect(result.current.sending).toBe(true);
 
@@ -981,7 +1107,7 @@ const stepFailed = (session: string, message?: string) => ({
     await settle(16);
   });
 
-  test('tool frames never land in messages/streaming (payload isolation)', async () => {
+  test('tool frames never land in messages (payload isolation)', async () => {
     const { result } = renderHook(() => useChat({ ...PROJECT }));
     await settle();
 
@@ -1005,11 +1131,11 @@ const stepFailed = (session: string, message?: string) => ({
     expect(result.current.messages[1]).toMatchObject({ role: 'assistant', text: 'hello world' });
     expect(result.current.messages[1]?.text).not.toContain('SHOULD-NOT-RENDER');
     expect(result.current.messages[1]?.text).not.toContain('bash');
-    expect(result.current.streamingText).toBe('');
-    expect(result.current.toolTrace.filter((e) => e.kind === 'tool').length).toBeGreaterThan(0);
+    expect(result.current.entries.filter((e) => e.kind === 'text').length).toBe(2);
+    expect(result.current.entries.filter((e) => e.kind === 'tool').length).toBeGreaterThan(0);
   });
 
-  test('hostile tool frames without a name are dropped (no status, no trace, no crash)', async () => {
+  test('hostile tool frames without a name are dropped (no status, no chain row, no crash)', async () => {
     const { result } = renderHook(() => useChat({ ...PROJECT }));
     await settle();
 
@@ -1039,15 +1165,14 @@ const stepFailed = (session: string, message?: string) => ({
     await settle(16);
 
     expect(result.current.activeToolName).toBeNull();
-    expect(result.current.streamingText).toBe('');
-    expect(result.current.toolTrace.filter((e) => e.kind === 'tool').length).toBe(0);
+    expect(result.current.entries.filter((e) => e.kind === 'tool').length).toBe(0);
     expect(result.current.error).toBeNull();
 
     pushFrames([idle('ses-1')]);
     await settle(16);
   });
 
-  test('internal transport trace preserved in state for debugging (UI hides it)', async () => {
+  test('chain owns user-visible tool rows (entries single source)', async () => {
     const { result } = renderHook(() => useChat({ ...PROJECT }));
     await settle();
 
@@ -1057,14 +1182,376 @@ const stepFailed = (session: string, message?: string) => ({
     pushFrames([toolCalled('ses-1', 'bash')]);
     await settle(16);
 
-    // Full trace stays append-only: internal auth/prompt rows exist for the
-    // debug `<details>`, the timeline UI filters them (see chat-thread tests).
-    const kinds = result.current.toolTrace.map((e) => e.kind);
-    expect(kinds).toContain('auth');
-    expect(kinds).toContain('prompt');
+    // Chain is the single source: user-visible tool rows live in entries
+    // (durable text + live tool sidecar share one type).
+    const kinds = result.current.entries.map((e) => e.kind);
     expect(kinds).toContain('tool');
 
     pushFrames([idle('ses-1')]);
     await settle(16);
+  });
+
+  // ---- grace finalize safety net (complete text block, lost terminator) ---
+  // Live sidecar accumulates the full block; finalize owns
+  // idle/succeeded/step.ended/failed. A lost terminator therefore leaves
+  // the turn open (stuck-sending watchdog covers it via REST, 90s — out
+  // of scope for this unit test).
+  // terminator therefore leaves the turn open (stuck-sending watchdog covers
+  // it via REST, 90s — out of scope for this unit test).
+  test('grace: text.ended without a terminator leaves the turn open (no auto-commit)', async () => {
+    const { result } = renderHook(() => useChat({ ...PROJECT }));
+    await settle();
+
+    act(() => {
+      void result.current.send('hello');
+    });
+    // The lazy SSE stream stays unscoped (no redial on create — effect deps
+    // are [nonce, projectId]); frames are filtered by sessionIdRef, so no
+    // extra settle for a redial is needed.
+    await settle(16);
+    pushFrames([textDelta('ses-1', 'hello'), textEnded('ses-1', 'hello')]);
+    await settle(16);
+
+    // text.ended carries a complete block but is NOT a terminator: the turn
+    // is still open (tools/next steps may follow).
+    expect(result.current.sending).toBe(true);
+    expect(result.current.entries.filter((e) => e.kind === 'text').length).toBe(1);
+
+    await waitGrace();
+
+    // No grace-finalize in src: still open, no assistant commit yet.
+    expect(result.current.sending).toBe(true);
+    expect(result.current.messages.length).toBe(1);
+    expect(result.current.messages[0]).toMatchObject({ role: 'user', text: 'hello' });
+    expect(result.current.entries.filter((e) => e.kind === 'text').length).toBe(1);
+  });
+
+  test('grace: a real terminator before the window commits once (no duplicate)', async () => {
+    const { result } = renderHook(() => useChat({ ...PROJECT }));
+    await settle();
+
+    act(() => {
+      void result.current.send('hello');
+    });
+    // Let the lazy create + SSE redial (Fix 3) settle before frames arrive.
+    await settle(16);
+    pushFrames([textDelta('ses-1', 'hello'), textEnded('ses-1', 'hello'), execSucceeded('ses-1')]);
+    await settle(16);
+
+    expect(result.current.sending).toBe(false);
+    expect(result.current.messages.length).toBe(2);
+
+    await waitGrace();
+
+    // The terminator cancelled the grace timer — no second assistant row.
+    expect(result.current.messages.length).toBe(2);
+    expect(result.current.messages[1]).toMatchObject({ role: 'assistant', text: 'hello' });
+  });
+
+  test('grace: stop() cancels the pending grace (no second commit)', async () => {
+    const { result } = renderHook(() => useChat({ ...PROJECT }));
+    await settle();
+
+    act(() => {
+      void result.current.send('long task');
+    });
+    // Let the lazy create + SSE redial (Fix 3) settle before frames arrive.
+    await settle(16);
+    pushFrames([textDelta('ses-1', 'half'), textEnded('ses-1', 'half')]);
+    await settle(16);
+
+    act(() => {
+      result.current.stop();
+    });
+    await settle();
+    expect(result.current.messages.length).toBe(2);
+
+    await waitGrace();
+
+    expect(result.current.sending).toBe(false);
+    expect(result.current.messages.length).toBe(2);
+    expect(result.current.messages[1]).toMatchObject({ role: 'assistant', text: 'half' });
+  });
+
+  test('grace: a foreign session frame never arms or commits this chat', async () => {
+    const { result } = renderHook(() => useChat({ sessionId: 'ses-1', ...PROJECT }));
+    await settle();
+
+    await act(async () => {
+      await result.current.send('go');
+    });
+    pushFrames([textEnded('ses-other', 'NOT MINE')]);
+    await settle(16);
+    expect(result.current.entries.filter((e) => e.kind === 'text').length).toBe(1);
+
+    await waitGrace();
+
+    // No grace was armed for a foreign frame: the turn stays open.
+    expect(result.current.sending).toBe(true);
+    expect(result.current.messages.length).toBe(1);
+  });
+
+  // ---- lazy SSE scope (session created after mount) ----------------------
+  // src SSE effect deps are [nonce, projectId]: ensureSession sets
+  // sessionIdRef but never bumps nonce, so no redial happens. The single
+  // unscoped stream keeps serving; frames are filtered by sessionIdRef.
+  test('lazy SSE: creating the session keeps the unscoped stream (no redial)', async () => {
+    const { result } = renderHook(() => useChat({ ...PROJECT }));
+    await settle();
+    // Mount-time subscription: no session yet, so no ?session=.
+    expect(seenStreamOpts.at(-1)?.sessionId).toBeUndefined();
+
+    await act(async () => {
+      void result.current.send('hello');
+    });
+    await settle(16);
+
+    expect(createMock).toHaveBeenCalledTimes(1);
+    // No redial on lazy create — the wire stays unscoped; sessionIdRef owns scope.
+    expect(seenStreamOpts.at(-1)?.sessionId).toBeUndefined();
+  });
+
+  test('branch switcher: selectLeaf moves the active leaf locally (chain oracle, no refetch)', async () => {
+    messagesImplHolder.fn = async () => [
+      {
+        id: 'root',
+        type: 'user',
+        createdAt: new Date(1700000000000).toISOString(),
+        text: 'root',
+        parentId: null,
+      },
+      {
+        id: 'b',
+        type: 'assistant',
+        createdAt: new Date(1700000001000).toISOString(),
+        text: 'first',
+        parentId: 'root',
+      },
+      {
+        id: 'd',
+        type: 'assistant',
+        createdAt: new Date(1700000002000).toISOString(),
+        text: 'deep',
+        parentId: 'b',
+      },
+    ];
+    const { result } = renderHook(() => useChat({ sessionId: 'ses-99', ...PROJECT }));
+    await settle();
+    expect(result.current.messages.map((row) => row.id)).toEqual(['root', 'b', 'd']);
+
+    variantsCalls.length = 0;
+    variantsMock.mockClear();
+    messagesMock.mockClear();
+    await act(async () => {
+      result.current.selectLeaf('b');
+    });
+    await settle();
+
+    // Pure chain oracle: leaf b → chain root→b, no REST refetch, no variants fetch.
+    expect(result.current.leafId).toBe('b');
+    expect(result.current.activeLeaf?.id).toBe('b');
+    expect(result.current.messages.map((row) => row.id)).toEqual(['root', 'b']);
+    expect(messagesMock).not.toHaveBeenCalled();
+    expect(variantsMock).not.toHaveBeenCalled();
+  });
+
+  test('branch tip: send() after selectLeaf parents the prompt at the active leaf', async () => {
+    messagesImplHolder.fn = async () => [
+      {
+        id: 'root',
+        type: 'user',
+        createdAt: new Date(1700000000000).toISOString(),
+        text: 'root',
+        parentId: null,
+      },
+      {
+        id: 'b',
+        type: 'assistant',
+        createdAt: new Date(1700000001000).toISOString(),
+        text: 'first',
+        parentId: 'root',
+      },
+      {
+        id: 'd',
+        type: 'assistant',
+        createdAt: new Date(1700000002000).toISOString(),
+        text: 'deep',
+        parentId: 'b',
+      },
+    ];
+    const { result } = renderHook(() => useChat({ sessionId: 'ses-99', ...PROJECT }));
+    await settle();
+
+    await act(async () => {
+      result.current.selectLeaf('d');
+    });
+    await settle();
+    expect(result.current.leafId).toBe('d');
+    expect(result.current.activeLeaf?.id).toBe('d');
+
+    sendMock.mockClear();
+    await act(async () => {
+      void result.current.send('follow-up');
+    });
+    await settle();
+
+    // Prompt parents locally at the branch tip (user entry parentId:'d');
+    // the POST itself carries only (projectId, sid, text, {signal, agentId}) —
+    // src does not forward parentId, the server resolves the tail.
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    expect(sendMock.mock.calls.at(-1)?.[0]).toBe(PROJECT.projectId);
+    expect(sendMock.mock.calls.at(-1)?.[1]).toBe('ses-99');
+    expect(sendMock.mock.calls.at(-1)?.[2]).toBe('follow-up');
+    expect(sendMock.mock.calls.at(-1)?.[3]).toMatchObject({ agentId: 'ask' });
+    expect((sendMock.mock.calls.at(-1)?.[3] as Record<string, unknown>)?.parentId).toBeUndefined();
+  });
+
+  test('branch scope: resync refreshes history quietly, leaf follows the durable tip', async () => {
+    messagesImplHolder.fn = async () => [
+      {
+        id: 'root',
+        type: 'user',
+        createdAt: new Date(1700000000000).toISOString(),
+        text: 'root',
+        parentId: null,
+      },
+      {
+        id: 'b',
+        type: 'assistant',
+        createdAt: new Date(1700000001000).toISOString(),
+        text: 'first',
+        parentId: 'root',
+      },
+      {
+        id: 'd',
+        type: 'assistant',
+        createdAt: new Date(1700000002000).toISOString(),
+        text: 'deep',
+        parentId: 'b',
+      },
+    ];
+    const { result } = renderHook(() => useChat({ sessionId: 'ses-99', ...PROJECT }));
+    await settle();
+    await act(async () => {
+      result.current.selectLeaf('d');
+    });
+    await settle();
+
+    variantsCalls.length = 0;
+    variantsMock.mockClear();
+    messagesMock.mockClear();
+    await act(async () => {
+      window.dispatchEvent(new Event('online'));
+    });
+    await settle();
+
+    expect(messagesMock).toHaveBeenCalled();
+    expect(messagesMock.mock.calls.at(-1)?.[1]).toBe('ses-99');
+    expect(result.current.leafId).toBe('d');
+    expect(result.current.messages.map((row) => row.id)).toEqual(['root', 'b', 'd']);
+    expect(variantsMock).not.toHaveBeenCalled();
+  });
+
+  test('branch scope: stale leaf falls back to full on 404 (resync never blanks)', async () => {
+    messagesImplHolder.fn = async () => [
+      {
+        id: 'root',
+        type: 'user',
+        createdAt: new Date(1700000000000).toISOString(),
+        text: 'root',
+        parentId: null,
+      },
+    ];
+    const { result } = renderHook(() => useChat({ sessionId: 'ses-99', ...PROJECT }));
+    await settle();
+    await act(async () => {
+      result.current.selectLeaf('ghost');
+    });
+    await settle();
+    // Unknown leaf keeps the full thread locally (frontend fallback) while the
+    // backend would 404 the same leaf — the thread never blanks.
+    expect(result.current.messages.map((row) => row.id)).toEqual(['root']);
+  });
+
+  test('branch scope: reload refetches history, leaf follows the durable tip', async () => {
+    messagesImplHolder.fn = async () => [
+      {
+        id: 'root',
+        type: 'user',
+        createdAt: new Date(1700000000000).toISOString(),
+        text: 'root',
+        parentId: null,
+      },
+      {
+        id: 'b',
+        type: 'assistant',
+        createdAt: new Date(1700000001000).toISOString(),
+        text: 'first',
+        parentId: 'root',
+      },
+    ];
+    const { result } = renderHook(() => useChat({ sessionId: 'ses-99', ...PROJECT }));
+    await settle();
+    await act(async () => {
+      result.current.selectLeaf('b');
+    });
+    await settle();
+
+    variantsMock.mockClear();
+    messagesMock.mockClear();
+    await act(async () => {
+      result.current.reload();
+    });
+    await settle();
+
+    expect(messagesMock).toHaveBeenCalled();
+    expect(messagesMock.mock.calls.at(-1)?.[1]).toBe('ses-99');
+    expect(result.current.leafId).toBe('b');
+    expect(result.current.messages.map((row) => row.id)).toEqual(['root', 'b']);
+    expect(variantsMock).not.toHaveBeenCalled();
+  });
+
+  test('branch scope: revertTo moves the leaf to the target parent (Forward-Only, no delete)', async () => {
+    messagesImplHolder.fn = async () => [
+      {
+        id: 'root',
+        type: 'user',
+        createdAt: new Date(1700000000000).toISOString(),
+        text: 'root',
+        parentId: null,
+      },
+      {
+        id: 'b',
+        type: 'assistant',
+        createdAt: new Date(1700000001000).toISOString(),
+        text: 'kept',
+        parentId: 'root',
+      },
+      {
+        id: 'd',
+        type: 'assistant',
+        createdAt: new Date(1700000002000).toISOString(),
+        text: 'tail',
+        parentId: 'b',
+      },
+    ];
+    const { result } = renderHook(() => useChat({ sessionId: 'ses-99', ...PROJECT }));
+    await settle();
+    expect(result.current.messages.map((row) => row.id)).toEqual(['root', 'b', 'd']);
+
+    variantsMock.mockClear();
+    messagesMock.mockClear();
+    revertMock.mockClear();
+    await act(async () => {
+      result.current.revertTo('d');
+    });
+    await settle();
+
+    expect(revertMock).not.toHaveBeenCalled();
+    expect(messagesMock).not.toHaveBeenCalled();
+    expect(result.current.messages.map((row) => row.id)).toEqual(['root', 'b']);
+    expect(result.current.leafId).toBe('b');
+    expect(result.current.activeLeaf?.id).toBe('b');
+    expect(variantsMock).not.toHaveBeenCalled();
   });
 });

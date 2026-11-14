@@ -1,28 +1,19 @@
 /**
- * ChatThread + ChatInput — kit 0.26.3 adapters (MessageScroller/Message/
- * Bubble/Marker/ShimmerText/PromptInput).
+ * ChatThread + ChatInput — kit 0.26.4 adapters (MessageScroller/Message/
+ * Bubble/ToolCall/PromptInput).
  *
- * Mapping under test (see chat-thread/*):
- * - ChatThread → kit `MessageScroller` (Provider autoScroll +
+ * Mapping under test (see chat-thread/* + lib/chat-chain):
+ * - ChatThread — kit `MessageScroller` (Provider autoScroll +
  *   defaultScrollPosition="end", Viewport, Content role=log, Items keyed by
  *   message id), height comes from the route layout via `className`
  *   (no viewport-bound height of its own).
- * - ChatMessageRow{role,text} → Message align (user=end/assistant=start) +
- *   Bubble (secondary/ghost transparent) + MessageText,
- *   code-fences stay local <pre><code>.
- * - ChatInput outward props unchanged → kit PromptInput composer
- *   (PromptInputTextarea + PromptInputSubmit that becomes Stop while
- *   streaming).
- *
- * Covers: empty (EmptyState), loading (Skeleton), error (C6 policy: banner
- * above a live thread with retry, full ErrorState only on an empty thread),
- * thread (kit rows + code-fence + no role badges + ghost assistant bubble),
- * scroller roles + height contract (layout-owned, no dvh),
- * streaming (ghost bubble + ShimmerText status below text + cursor), thinking
- * (sending && !streamingText bare ShimmerText line with rotating phrases),
- * timeline (toolTrace/liveToolName inside MessageScrollerContent as an
- * ordinary item without scrollAnchor), send (Enter/button via onSend, clears, disabled while sending, custom
- * placeholder), className passthrough (no own geometry).
+ * - Unified chain: `entries` + `leafId` own the order via
+ *   `buildThreadRows(entries, leafId).chain`; legacy `messages` stay as a
+ *   fallback projection. `messages` are derived via `toChatMessages` useMemo.
+ * - Live tools merge via `mergeTextAndLiveTools` (durable text + live sidecar).
+ * - Retry lives only in the user-bubble footer (ChatMessageRow onRetry);
+ *   the branch switcher is removed from the default flow (variants render
+ *   only when explicitly passed with onSelectLeaf).
  */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { GlobalRegistrator } from '@happy-dom/global-registrator';
@@ -62,45 +53,43 @@ describe('ChatThread', () => {
     expect(container.querySelector('[aria-busy="true"]')).not.toBeNull();
   });
 
-  test('error: shows the message with a retry action', async () => {
-    const onRetry = mock(() => {});
-    const user = userEvent.setup();
-    renderThread({ error: 'boom', onRetry });
+  test('error: shows the message with NO top retry (retry lives only in user footer)', async () => {
+    renderThread({ error: 'boom' });
     expect(await screen.findByText('boom')).toBeDefined();
-    await user.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 
-  test('error: banner above a live thread preserves messages + streaming (C6 policy)', async () => {
-    const onRetry = mock(() => {});
-    const user = userEvent.setup();
+  test('error: banner above a live thread preserves messages + streaming, no top Retry without onRetry', async () => {
     const { container } = renderThread({
       messages: [{ id: 'u1', role: 'user', text: 'hello' }],
       streamingText: 'partial…',
+      sending: true,
       error: 'boom',
-      onRetry,
     });
-    // Terminal failure never replaces the thread: banner + thread coexist.
     expect(await screen.findByText('boom')).toBeDefined();
     expect(await screen.findByText('hello')).toBeDefined();
     expect(await screen.findByTestId('chat-streaming')).toBeDefined();
-    // The banner sits ABOVE the thread in the DOM.
     const banner = screen.getByText('boom');
     const threadRow = screen.getByText('hello');
     expect(
       banner.compareDocumentPosition(threadRow) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(container.querySelector('[data-testid="chat-streaming"]')).not.toBeNull();
-    await user.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 
-  test('error: empty thread renders the full ErrorState (nothing to preserve)', async () => {
+  test('error: empty thread renders the ErrorState text with NO retry button (nothing to preserve)', async () => {
+    renderThread({ error: 'boom' });
+    expect(await screen.findByText('boom')).toBeDefined();
+    expect(screen.queryByText('Start a conversation')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+  });
+
+  test('error: onRetry wires the banner Retry button', async () => {
     const onRetry = mock(() => {});
     const user = userEvent.setup();
     renderThread({ error: 'boom', onRetry });
     expect(await screen.findByText('boom')).toBeDefined();
-    expect(screen.queryByText('Start a conversation')).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Retry' }));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
@@ -122,6 +111,36 @@ describe('ChatThread', () => {
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 
+  test('revert: assistant footer exposes onRevert, user has none of the assistant controls', async () => {
+    const onRevert = mock((_id: string) => {});
+    const user = userEvent.setup();
+    renderThread({
+      messages: [
+        { id: 'u1', role: 'user', text: 'hello' },
+        { id: 'a1', role: 'assistant', text: 'hi there' },
+      ],
+      onRevert,
+    });
+    expect(await screen.findByText('hello')).toBeDefined();
+    expect(await screen.findByText('hi there')).toBeDefined();
+    // Only the assistant row carries the revert control.
+    expect(screen.getAllByTestId('chat-message-revert').length).toBe(1);
+    await user.click(screen.getByTestId('chat-message-revert'));
+    expect(onRevert).toHaveBeenCalledWith('a1');
+  });
+
+  test('fork: onFork wires the assistant footer control', async () => {
+    const onFork = mock((_id: string) => {});
+    const user = userEvent.setup();
+    renderThread({
+      messages: [{ id: 'a1', role: 'assistant', text: 'hi there' }],
+      onFork,
+    });
+    expect(await screen.findByText('hi there')).toBeDefined();
+    await user.click(screen.getByTestId('chat-message-fork'));
+    expect(onFork).toHaveBeenCalledWith('a1');
+  });
+
   test('thread: renders kit user/assistant rows', async () => {
     renderThread({
       messages: [
@@ -131,10 +150,8 @@ describe('ChatThread', () => {
     });
     expect(await screen.findByText('hello')).toBeDefined();
     expect(await screen.findByText('hi there')).toBeDefined();
-    // Adapter testids preserved through the kit Message wrapper.
     expect(screen.getByTestId('chat-message-user')).toBeDefined();
     expect(screen.getByTestId('chat-message-assistant')).toBeDefined();
-    // No role badges anymore.
     expect(screen.queryByText('You')).toBeNull();
     expect(screen.queryByText('Assistant')).toBeNull();
   });
@@ -198,23 +215,35 @@ describe('ChatThread', () => {
     expect(pre?.textContent).toContain('const a = 1;');
   });
 
+  test('entries: unified chain renders via buildThreadRows(entries, leafId)', async () => {
+    renderThread({
+      entries: [
+        { id: 'root', kind: 'text', role: 'user', text: 'root', parentId: null },
+        { id: 'b', kind: 'text', role: 'assistant', text: 'b', parentId: 'root' },
+        { id: 'c', kind: 'text', role: 'assistant', text: 'c', parentId: 'root' },
+      ],
+      leafId: 'c',
+    });
+    expect(await screen.findByText('root')).toBeDefined();
+    expect(await screen.findByText('c')).toBeDefined();
+    expect(screen.queryByText('b')).toBeNull();
+  });
+
   test('scroller: kit MessageScroller roles + layout-owned height (no dvh)', () => {
     const { container } = renderThread({
       messages: [{ id: 'u1', role: 'user', text: 'go' }],
     });
-    // Kit Viewport = role=region, Content = role=log (aria-relevant add).
     expect(container.querySelector('[role="region"]')).not.toBeNull();
     const log = container.querySelector('[role="log"]') as HTMLElement;
     expect(log).not.toBeNull();
     expect(log.getAttribute('aria-live')).toBe('polite');
     expect(log.getAttribute('aria-relevant')).toBe('additions');
-    // Items carry the kit scroll metadata.
     const item = container.querySelector('[data-message-id="u1"]') as HTMLElement;
     expect(item).not.toBeNull();
-    // Thread fills the layout column: no viewport-bound dvh of its own.
     const scroller = container.querySelector('[data-slot="message-scroller"]') as HTMLElement;
     expect(scroller.className).not.toContain('100dvh');
-    expect(scroller.className).toContain('min-h-[20rem]');
+    expect(scroller.className).toContain('h-full');
+    expect(scroller.className).toContain('min-h-0');
   });
 
   test('className: layout geometry passes through without own dvh/absolute', () => {
@@ -231,25 +260,43 @@ describe('ChatThread', () => {
   test('streaming: ghost bubble + ShimmerText status below the text', async () => {
     const { container } = renderThread({
       messages: [{ id: 'u1', role: 'user', text: 'go' }],
+      sending: true,
       streamingText: 'partial…',
     });
     expect(await screen.findByTestId('chat-streaming')).toBeDefined();
     expect(await screen.findByText(/partial/)).toBeDefined();
     expect(await screen.findByText('Streaming…')).toBeDefined();
-    // Closes the thread: the live answer is the kit scroll anchor.
     const anchor = container.querySelector('[data-scroll-anchor="true"]') as HTMLElement;
     expect(anchor).not.toBeNull();
     expect(anchor.getAttribute('data-message-id')).toBe('chat-streaming');
     const cursor = container.querySelector('[data-testid="chat-streaming"] .chat-cursor');
     expect(cursor).not.toBeNull();
     expect(cursor?.textContent).toContain('▍');
-    // The shimmer status sits AFTER the streamed text in the DOM.
     const status = container.querySelector('[data-testid="chat-streaming-status"]') as HTMLElement;
     const text = cursor as HTMLElement;
     expect(status).not.toBeNull();
     expect(
       text.compareDocumentPosition(status) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+
+  test('streaming: a stale streamingText on a closed turn renders no live row', async () => {
+    const { container } = renderThread({
+      messages: [
+        { id: 'u1', role: 'user', text: 'go' },
+        { id: 'a1', role: 'assistant', text: 'committed answer' },
+      ],
+      sending: false,
+      streamingText: 'committed answer',
+    });
+    // Closed turn: live row is gated by `sending && streamingText`, so stale
+    // text alone must NOT render a streaming row. The committed answer stays
+    // in the thread, no empty stub takes over.
+    expect(await screen.findByText('committed answer')).toBeDefined();
+    expect(container.querySelector('[data-testid="chat-streaming"]')).toBeNull();
+    expect(screen.queryByTestId('chat-streaming')).toBeNull();
+    expect(screen.queryByTestId('chat-thinking')).toBeNull();
+    expect(screen.queryByText('Start a conversation')).toBeNull();
   });
 
   test('thinking: a bare ShimmerText status closes the thread, no badge', async () => {
@@ -260,10 +307,8 @@ describe('ChatThread', () => {
     const thinking = await screen.findByTestId('chat-thinking');
     expect(thinking).toBeDefined();
     expect(thinking.getAttribute('aria-busy')).toBe('true');
-    // First rotating phrase lives in the kit ShimmerText; no role badge.
     expect(await screen.findByText('Thinking…')).toBeDefined();
     expect(screen.queryByText('Assistant')).toBeNull();
-    // The live placeholder closes the thread as the kit scroll anchor.
     const anchor = container.querySelector('[data-scroll-anchor="true"]') as HTMLElement;
     expect(anchor).not.toBeNull();
     expect(anchor.getAttribute('data-message-id')).toBe('chat-thinking');
@@ -285,103 +330,51 @@ describe('ChatThread', () => {
     expect(screen.queryByTestId('chat-thinking')).toBeNull();
   });
 
-  test('timeline: tool calls render INSIDE the scroller as an ordinary item (no scrollAnchor)', async () => {
+  test('timeline: a tool step renders inside the unified tools timeline', async () => {
     const { container } = renderThread({
       messages: [{ id: 'u1', role: 'user', text: 'go' }],
-      toolTrace: [{ id: 't1', at: 1700000000000, kind: 'tool', label: 'bash' }],
+      toolTrace: [{ id: 't1', at: 1700000000500, kind: 'tool', label: 'bash', detail: 'called' }],
     });
     const timeline = await screen.findByTestId('chat-tools-timeline');
     expect(timeline).toBeDefined();
-    // Inside the kit Content (role=log), not outside the scroller.
     const log = container.querySelector('[role="log"]') as HTMLElement;
-    expect(log).not.toBeNull();
     expect(log.contains(timeline)).toBe(true);
-    const item = container.querySelector('[data-message-id="chat-tools-timeline"]') as HTMLElement;
-    expect(item).not.toBeNull();
-    // Ordinary thread item: must NOT steal the auto-follow anchor.
-    expect(item.getAttribute('data-scroll-anchor')).not.toBe('true');
+    const rows = container.querySelectorAll('[data-testid="chat-tool-call"]');
+    expect(rows.length).toBe(1);
+    const row = timeline.querySelector('[data-testid="chat-tool-call"]') as HTMLElement;
+    expect(row.getAttribute('data-kind')).toBe('tool');
+    expect(row.getAttribute('data-status')).toBe('pending');
+    expect(row.textContent).toContain('bash');
+    expect(row.textContent).not.toContain('Auto');
   });
 
-  test('timeline: live tool name renders inside the thread with ShimmerText while thinking keeps the anchor', async () => {
+  test('timeline: messages render before the tools block (single unified block)', async () => {
     const { container } = renderThread({
-      messages: [{ id: 'u1', role: 'user', text: 'go' }],
-      sending: true,
-      activeToolName: 'bash',
-      toolTrace: [],
+      messages: [
+        { id: 'u1', role: 'user', text: 'first' },
+        { id: 'a1', role: 'assistant', text: 'second' },
+      ],
+      toolTrace: [
+        { id: 't1', at: 1700000001000, kind: 'tool', label: 'bash', detail: 'called' },
+        { id: 't2', at: 1700000002000, kind: 'reasoning', label: 'reasoning', detail: 'started' },
+      ],
     });
+    expect(await screen.findByText('first')).toBeDefined();
+    expect(await screen.findByText('second')).toBeDefined();
     const timeline = await screen.findByTestId('chat-tools-timeline');
     expect(timeline).toBeDefined();
-    expect(await screen.findByText('bash')).toBeDefined();
-    // Thinking stays the scroll anchor; the timeline item does not.
-    const thinkingAnchor = container.querySelector('[data-message-id="chat-thinking"]') as HTMLElement;
-    expect(thinkingAnchor.getAttribute('data-scroll-anchor')).toBe('true');
-    const timelineItem = container.querySelector(
+    const itemU1 = container.querySelector('[data-message-id="u1"]') as HTMLElement;
+    const itemTimeline = container.querySelector(
       '[data-message-id="chat-tools-timeline"]',
     ) as HTMLElement;
-    expect(timelineItem.getAttribute('data-scroll-anchor')).not.toBe('true');
-    // Timeline sits in the thread before the thinking row.
+    expect(itemU1).not.toBeNull();
+    expect(itemTimeline).not.toBeNull();
     expect(
-      timelineItem.compareDocumentPosition(thinkingAnchor) & Node.DOCUMENT_POSITION_FOLLOWING,
+      itemU1.compareDocumentPosition(itemTimeline) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 
-  test('timeline: hidden on empty/loading/error-empty threads (only a real thread shows it)', async () => {
-    const trace = [{ id: 't1', at: 1700000000000, kind: 'tool' as const, label: 'bash' }];
-    cleanup();
-    renderThread({ toolTrace: trace });
-    expect(screen.queryByTestId('chat-tools-timeline')).toBeNull();
-
-    cleanup();
-    renderThread({ loading: true, toolTrace: trace });
-    expect(screen.queryByTestId('chat-tools-timeline')).toBeNull();
-
-    cleanup();
-    renderThread({ error: 'boom', toolTrace: trace });
-    expect(screen.queryByTestId('chat-tools-timeline')).toBeNull();
-  });
-
-  test('thinking: empty reasoning shows the last timeline line instead of a mute shimmer', async () => {
-    renderThread({
-      messages: [{ id: 'u1', role: 'user', text: 'go' }],
-      sending: true,
-      reasoningText: '',
-      toolTrace: [
-        { id: 't1', at: 1700000000000, kind: 'sse' as const, label: 'SSE /api/v1/sessions/events connected' },
-        { id: 't2', at: 1700000001000, kind: 'reasoning' as const, label: 'reasoning', detail: 'started' },
-      ],
-    });
-    expect(await screen.findByTestId('chat-thinking')).toBeDefined();
-    expect(await screen.findByTestId('chat-reasoning-fallback')).toBeDefined();
-    // Human label via t.chat (Thinking/Думает), never the raw `reasoning` transport label.
-    expect(screen.getByTestId('chat-reasoning-fallback').textContent).toContain('Thinking');
-    expect(screen.queryByTestId('chat-reasoning')).toBeNull();
-  });
-
-  test('thinking: non-empty reasoning keeps the real preview, no fallback', async () => {
-    renderThread({
-      messages: [{ id: 'u1', role: 'user', text: 'go' }],
-      sending: true,
-      reasoningText: 'THINKING-TRACE',
-      toolTrace: [{ id: 't1', at: 1700000000000, kind: 'sse' as const, label: 'SSE connected' }],
-    });
-    expect(await screen.findByTestId('chat-reasoning')).toBeDefined();
-    expect(screen.queryByTestId('chat-reasoning-fallback')).toBeNull();
-  });
-
-  test('streaming: empty reasoning shows the last timeline line under the ghost bubble', async () => {
-    renderThread({
-      messages: [{ id: 'u1', role: 'user', text: 'go' }],
-      streamingText: 'partial…',
-      reasoningText: '',
-      toolTrace: [{ id: 't1', at: 1700000000000, kind: 'tool' as const, label: 'bash', detail: 'called' }],
-    });
-    expect(await screen.findByTestId('chat-streaming')).toBeDefined();
-    expect(await screen.findByTestId('chat-reasoning-fallback')).toBeDefined();
-    expect(screen.getByTestId('chat-reasoning-fallback').textContent).toContain('bash');
-  });
-
   test('timeline: internal transport kinds hidden, tool/reasoning shown with human labels', async () => {
-    const user = userEvent.setup();
     renderThread({
       messages: [{ id: 'u1', role: 'user', text: 'go' }],
       toolTrace: [
@@ -409,22 +402,17 @@ describe('ChatThread', () => {
         },
       ],
     });
-    const timeline = await screen.findByTestId('chat-tools-timeline');
-    expect(timeline).toBeDefined();
-    // Open the collapsible to reveal user rows + debug details.
-    await user.click(screen.getByText('Tools used'));
-    // Raw transport never renders as user rows.
-    expect(screen.queryByText('POST /api/v1/sessions/ses-1/messages', { selector: '[data-testid="chat-tool-event"] *' })).toBeNull();
-    const rows = screen.getAllByTestId('chat-tool-event');
+    expect(screen.queryByText(/POST \/api\/v1\/sessions\/ses-1\/messages/)).toBeNull();
+    const rows = await screen.findAllByTestId('chat-tool-call');
     expect(rows.length).toBe(2);
-    expect(timeline.textContent).toContain('bash');
-    expect(timeline.textContent).toContain('Thinking');
-    // Full technical trace preserved for debugging in the collapsed details.
-    const details = screen.getByTestId('chat-tools-details');
-    expect(details.textContent).toContain('POST /api/v1/sessions/ses-1/messages');
+    expect(rows[0]?.getAttribute('data-kind')).toBe('tool');
+    expect(rows[0]?.getAttribute('data-status')).toBe('pending');
+    expect(rows[0]?.textContent).toContain('bash');
+    expect(rows[1]?.getAttribute('data-kind')).toBe('reasoning');
+    expect(rows[1]?.textContent).toContain('started');
   });
 
-  test('timeline: only internal transport hides the timeline (no user steps yet)', async () => {
+  test('timeline: only internal transport renders no timeline block', async () => {
     renderThread({
       messages: [{ id: 'u1', role: 'user', text: 'go' }],
       toolTrace: [
@@ -443,8 +431,87 @@ describe('ChatThread', () => {
         },
       ],
     });
+    expect(await screen.findByText('go')).toBeDefined();
     expect(screen.queryByTestId('chat-tools-timeline')).toBeNull();
-    expect(screen.queryByText('POST /api/v1/sessions/ses-1/messages')).toBeNull();
+    expect(screen.queryByTestId('chat-tool-live')).toBeNull();
+    expect(screen.queryByText(/POST \/api\/v1\/sessions\/ses-1\/messages/)).toBeNull();
+  });
+
+  test('timeline: hidden on empty/loading/error-empty threads (only a real thread shows steps)', async () => {
+    const trace = [{ id: 't1', at: 1700000000000, kind: 'tool' as const, label: 'bash' }];
+    cleanup();
+    renderThread({ toolTrace: trace });
+    expect(screen.queryByTestId('chat-tools-timeline')).toBeNull();
+
+    cleanup();
+    renderThread({ loading: true, toolTrace: trace });
+    expect(screen.queryByTestId('chat-tools-timeline')).toBeNull();
+
+    cleanup();
+    renderThread({ error: 'boom', toolTrace: trace });
+    expect(screen.queryByTestId('chat-tools-timeline')).toBeNull();
+  });
+
+  test('thinking: empty reasoning shows the last timeline line instead of a mute shimmer', async () => {
+    renderThread({
+      messages: [{ id: 'u1', role: 'user', text: 'go' }],
+      sending: true,
+      reasoningText: '',
+      toolTrace: [
+        { id: 't1', at: 1700000000000, kind: 'tool' as const, label: 'bash', detail: 'called' },
+        { id: 't2', at: 1700000001000, kind: 'reasoning' as const, label: 'reasoning', detail: 'started' },
+      ],
+    });
+    expect(await screen.findByTestId('chat-thinking')).toBeDefined();
+    expect(await screen.findByTestId('chat-reasoning-fallback')).toBeDefined();
+    expect(screen.getByTestId('chat-reasoning-fallback').textContent).toContain('Thinking');
+    expect(screen.queryByTestId('chat-reasoning')).toBeNull();
+  });
+
+  test('thinking: non-empty reasoning keeps the real preview, no fallback', async () => {
+    renderThread({
+      messages: [{ id: 'u1', role: 'user', text: 'go' }],
+      sending: true,
+      reasoningText: 'THINKING-TRACE',
+      toolTrace: [{ id: 't1', at: 1700000000000, kind: 'tool' as const, label: 'bash', detail: 'called' }],
+    });
+    expect(await screen.findByTestId('chat-reasoning')).toBeDefined();
+    expect(screen.queryByTestId('chat-reasoning-fallback')).toBeNull();
+  });
+
+  test('streaming: empty reasoning shows the last timeline line under the ghost bubble', async () => {
+    renderThread({
+      messages: [{ id: 'u1', role: 'user', text: 'go' }],
+      sending: true,
+      streamingText: 'partial…',
+      reasoningText: '',
+      toolTrace: [{ id: 't1', at: 1700000000000, kind: 'tool' as const, label: 'bash', detail: 'called' }],
+    });
+    expect(await screen.findByTestId('chat-streaming')).toBeDefined();
+    expect(await screen.findByTestId('chat-reasoning-fallback')).toBeDefined();
+    expect(screen.getByTestId('chat-reasoning-fallback').textContent).toContain('bash');
+  });
+
+  test('live: activeToolName renders as the running row inside the timeline', async () => {
+    renderThread({
+      messages: [{ id: 'u1', role: 'user', text: 'go' }],
+      sending: true,
+      activeToolName: 'bash',
+      toolTrace: [],
+    });
+    const live = await screen.findByTestId('chat-tool-live');
+    expect(live).toBeDefined();
+    expect(live.getAttribute('aria-busy')).toBe('true');
+    expect(live.getAttribute('data-status')).toBe('running');
+    expect(live.textContent).toContain('bash');
+  });
+
+  test('switcher: no switcher without explicit variants (removed from default flow)', async () => {
+    renderThread({
+      messages: [{ id: 'u1', role: 'user', text: 'go' }],
+    });
+    expect(await screen.findByText('go')).toBeDefined();
+    expect(screen.queryByTestId('chat-branch-switcher')).toBeNull();
   });
 });
 
@@ -489,7 +556,6 @@ describe('ChatInput', () => {
     const left = form.querySelector('[data-slot="slot-left"]') as HTMLElement;
     expect(left).not.toBeNull();
     expect(left.textContent).toContain('runner picker');
-    // The picker sits inside the composer card, before the submit action.
     const submit = form.querySelector('[data-slot="prompt-input-submit"]') as HTMLElement;
     expect(submit).not.toBeNull();
     expect(

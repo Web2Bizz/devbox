@@ -53,10 +53,12 @@ const setAgentCalls: Array<string> = [];
 mock.module('../../hooks/useChat', () => ({
   useChat: () => ({
     messages: [],
-    streamingText: '',
+    entries: [],
+    leafId: null,
     loading: false,
     sending: false,
     error: null,
+    isEmpty: true,
     sessionId: chatHolder.sessionId,
     agentId: chatHolder.agentId,
     setAgentId: (id: string) => {
@@ -64,10 +66,16 @@ mock.module('../../hooks/useChat', () => ({
     },
     activeAgentId: null,
     activeToolName: null,
+    activeLeaf: null,
+    variants: [],
+    variantIndex: 0,
+    variantCount: 0,
+    selectLeaf: () => {},
+    revertTo: () => {},
+    revertMessages: async () => {},
     send: async () => {},
     stop: () => {},
     reload: () => {},
-    toolTrace: [],
   }),
 }));
 

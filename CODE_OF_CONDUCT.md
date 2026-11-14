@@ -402,3 +402,160 @@ rg -g '*.ts' -g '!**/*.spec.ts' -g '!**/*.e2e.ts' -g '!**/__tests__/**' \
   '\[0-9a-f\]\{8\}-\[0-9a-f\]\{4\}' \
   apps/backend/src packages/contracts/src apps/frontend apps/cli/src apps/mobile/src
 ```
+
+---
+
+## 8. types-ts-pure-types
+
+### Scope
+
+Whole monorepo — `packages/contracts/src/**`, `apps/backend/src/**`,
+`apps/frontend/src/**`, `apps/frontend/app/**`, `apps/cli/src/**`,
+`apps/mobile/src/**`. Mandatory for all new and changed files named `types.ts`.
+
+### Rule
+
+`types.ts` files contain only types — `export type` / local `type`,
+plus `import type` to express them. No functions in any form: forbidden are
+`function` declarations/expressions, arrow functions as values,
+`export const x = (...) => ...` and `export const x: (...args) => ... = ...`,
+`export function`, methods. No runtime code: forbidden are value constants,
+classes, enum values, calls. A `types.ts` file is a pure type-level module.
+
+```ts
+// do
+import type { UserId } from './user-id.js';
+
+export type ProjectMember = {
+  userId: UserId;
+  role: string;
+};
+
+export type ProjectMembers = {
+  members: Array<ProjectMember>;
+};
+```
+
+```ts
+// don't — move to a neighbouring utils.ts / guards.ts / <domain>.ts
+export function isProjectMember(value: unknown): boolean {
+  return typeof value === 'object' && value !== null;
+}
+
+export const parseProjectMember = (value: unknown): ProjectMember => {
+  return value as ProjectMember;
+};
+```
+
+### Exceptions (require justification in the PR)
+
+- `declare module` shims where upstream requires exactly `types.ts` — only
+  with a comment pointing at the upstream API that mandates it.
+- `declare global` — already covered by §1, must not be duplicated
+  in `types.ts` without justification.
+
+### Control
+
+```sh
+# must print nothing outside the exceptions above
+rg -g '*types.ts' '^\s*(export\s+)?(async\s+)?function\b' \
+  packages/contracts/src apps/backend/src apps/frontend/src apps/frontend/app apps/cli/src apps/mobile/src
+
+# candidates for review — => inside types.ts is allowed only within type
+# annotations, never as a value (triage: keep function-type annotations, move arrow-value code out)
+rg -g '*types.ts' '=>' \
+  packages/contracts/src apps/backend/src apps/frontend/src apps/frontend/app apps/cli/src apps/mobile/src
+```
+
+---
+
+## 9. if-chain-to-switch
+
+### Scope
+
+Whole monorepo — same paths as §3. Mandatory for new code with 3+ branches.
+
+### Rule
+
+A chain of 3+ `if` with `===` / `||` on ONE expression is replaced by a
+single `switch` with `case` grouping (fallthrough).
+
+```ts
+// don't — цепочка if по одному выражению (3+ ветки)
+if (trimmed === 'called' || trimmed === 'started') return 'pending';
+if (trimmed === 'progress' || trimmed === 'thinking') return 'running';
+if (trimmed === 'done') return 'success';
+if (trimmed === 'failed') return 'error';
+```
+
+```ts
+// do — один switch с группировкой case
+switch (trimmed) {
+  case 'called':
+  case 'started':
+    return 'pending';
+  case 'progress':
+  case 'thinking':
+    return 'running';
+  case 'done':
+    return 'success';
+  case 'failed':
+    return 'error';
+}
+```
+
+### Exceptions (require justification in the PR)
+
+- Different expressions in the conditions.
+- Complex compound conditions (not only `===` / `||`).
+- `if`/`else` with different branch logic where `switch` does not express the meaning.
+- Early `return` with side effects between branches.
+
+### Control
+
+```sh
+# candidates for review — 3+ if с === по одному выражению, кандидат на switch
+rg -g '*.ts' -g '*.tsx' -U 'if\s*\(.*===[\s\S]{0,400}?if\s*\(.*===.*if\s*\(' apps/backend/src apps/frontend/src apps/cli/src packages/contracts/src apps/mobile/src
+```
+
+---
+
+## 10. props-spread
+
+### Scope
+
+Whole monorepo — same paths as §3. Mandatory for new JSX/TSX where props
+can be extracted into an object.
+
+### Rule
+
+Apply the spread operator wherever it can be applied — any extractable
+inline prop list is collected into a meaningfully named object +
+`<Component {...props} />`. No numeric threshold: any extractable case
+qualifies. Name the object by meaning (`spreadProps` / `chatThreadProps`,
+never the `sprededProps` typo).
+
+```tsx
+// don't — длинный inline-список (21 проп, обрезано для читаемости)
+<ChatThread entries={entries} leafId={leafId} variants={variants} /* ... */ composerHeight={composerHeight} />
+```
+
+```tsx
+// do — осмысленный объект + спред
+<ChatThread {...chatThreadProps} />
+```
+
+### Exceptions (require justification in the PR)
+
+- 1-2 props where an object adds no meaning.
+- Props with diverging conditional logic where inline stays more readable.
+- Places where spread hides required props and breaks explicitness
+  (coordinate with §5).
+- Upstream API requiring inline props.
+
+### Control
+
+```sh
+# candidates for review — длинные JSX-теги, кандидаты на спред (триаж вручную)
+rg -g '*.tsx' -U '<[A-Z][A-Za-z0-9_]*(\s+[a-zA-Z][a-zA-Z0-9_]*=\{[^}]*\}){5,}' apps/frontend/src apps/frontend/app apps/mobile/src apps/cli/src
+```

@@ -6,7 +6,10 @@
  * - unauth: guests-only (`/login` + reserved `/register`, `/restore` —
  *   today login/register share one page with a mode switch; the reserved
  *   prefixes keep the matrix stable if split out later). Authed → `/projects`.
- * - public: everything else (`/`, assets, backend API) — untouched by guards.
+ * - public: everything else (`/`, `/assets/*` — единственное место
+ *   статики, см. AGENTS.md — вариант B, file-конвенций в `app/` нет,
+ *   иконки заданы явными `icons.url` в `app/layout.tsx`, backend API) —
+ *   untouched by guards.
  *
  * Readers of the guard (edge `proxy.ts`, server group layouts) decide from
  * the readable marker cookie `rush-code-auth=1` alone (set by the backend on

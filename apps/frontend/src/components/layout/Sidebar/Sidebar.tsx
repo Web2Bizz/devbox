@@ -29,7 +29,7 @@ export function SidebarBrand() {
   return (
     <div className="flex items-center gap-3.5">
       <Image
-        src="/logo.png"
+        src="/assets/logo.png"
         alt="Rush Code"
         width={36}
         height={36}

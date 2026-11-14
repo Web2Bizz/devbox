@@ -32,9 +32,20 @@ describe('resolveAuthRedirect matrix', () => {
     { path: '/restore', authed: true, want: '/organizations' },
     // guest on unauth → render
     { path: '/login', authed: false, want: null },
-    // public → null either way
+    // public → null either way (вариант B: статика только /assets/*)
+    { path: '/assets/logo.png', authed: false, want: null },
+    { path: '/assets/logo.png', authed: true, want: null },
+    { path: '/assets/icon.png', authed: false, want: null },
+    { path: '/assets/icon.png', authed: true, want: null },
+    { path: '/assets/favicon.ico', authed: false, want: null },
+    { path: '/assets/apple-icon.png', authed: true, want: null },
+    // регресс убранных корней: старых URL больше нет в статике (404 на
+    // уровне отдачи), но гард их по-прежнему не трогает — редиректа нет
     { path: '/icon.png', authed: false, want: null },
     { path: '/icon.png', authed: true, want: null },
+    { path: '/favicon.ico', authed: false, want: null },
+    { path: '/apple-icon.png', authed: true, want: null },
+    { path: '/logo.png', authed: false, want: null },
     { path: '/_next/static/chunk.js', authed: false, want: null },
     { path: '/unknown', authed: false, want: null },
     { path: '/unknown', authed: true, want: null },

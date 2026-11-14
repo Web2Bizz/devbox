@@ -74,10 +74,10 @@ never by hand-editing the version). Mobile uses the sibling package
   write the secret file with `printf '%s'`, a trailing newline breaks auth
   with HTTP 400). Details: `docs/npm-registry.md`.
 - Wiring (App Router): `@web2bizz/ui/styles.css` imported once in
-  `app/layout.tsx`, `<ThemeProvider defaultTheme="system"
-  storageKey="rush-code-frontend-theme">` via `src/providers.tsx`
-  (mount-guarded — the kit reads `localStorage` in its initializer, which
-  throws during SSR prerender). Page UI uses modular imports
+  `app/layout.tsx` (no `ThemeProvider` — the kit provider is NOT SSR-safe:
+  it reads `localStorage` in its initializer with no guard → ReferenceError
+  during prerender, and the mount-guard workaround is banned). Page UI uses
+  modular imports
   (`@web2bizz/ui/components`, `@web2bizz/ui/features`) and semantic tokens —
   no hardcoded colors, no local `cn()`, no `npx shadcn add` in the app.
 - Kit API ground truth lives in the package after install:
@@ -89,8 +89,9 @@ never by hand-editing the version). Mobile uses the sibling package
   `leadingSlot`, actions/user + `LanguageSwitcher compact` +
   `ThemeToggleDefault` → `trailingSlot`, drawer trigger → `menuToggleSlot`.
   Shell stays `div.app-shell` + `div.app-main` + drawer (`Sidebar open/onClose`);
-  i18n `en/ru` cookie-only (`rush-code-locale`), brand tokens + `light/dark` via
-  `globals.css` + `ThemeProvider` (`rush-code-frontend-theme`), flat URLs
+  i18n `en/ru` cookie-only (`rush-code-locale`), brand tokens via
+  `globals.css` (no theme context — dark-mode toggling unavailable until an
+  SSR-safe provider lands), flat URLs
   `/login /projects /secrets /profile /ai-providers`, Next `16.3.6` +
   Turbopack + React `19.3.0`.
 

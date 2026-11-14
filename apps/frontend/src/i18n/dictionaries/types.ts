@@ -281,6 +281,8 @@ export type Dictionary = {
     emptyTitle: string;
     emptyDesc: string;
     retry: string;
+    /** Accessible name of the per-message retry button (user prompt resend). */
+    retryMessage: string;
     streaming: string;
     you: string;
     assistant: string;
@@ -296,7 +298,7 @@ export type Dictionary = {
     agentDefault: string;
     /** Jump-to-latest action of the kit MessageScroller. */
     scrollToEnd: string;
-    /** Rotating "agent is working" phrases while sending && !streamingText. */
+    /** Rotating "agent is working" phrases while sending (live turn open). */
     thinking: string[];
     /** Accessible name of the assistant-message like toggle. */
     like: string;
@@ -337,6 +339,8 @@ export type Dictionary = {
     forkEmpty: string;
     /** Revert action label. */
     revert: string;
+    /** Accessible name of the messages-revert button (soft-delete tail). */
+    revertMessages: string;
     revertTitle: string;
     revertDesc: string;
     revertStage: string;
@@ -346,6 +350,10 @@ export type Dictionary = {
     revertSuccess: string;
     revertCleared: string;
     dialogClose: string;
+    /** Approval gate of a parked long-session turn (banner title). */
+    approvalTitle: string;
+    /** Approval gate continue action (approve resumes the same thread). */
+    approvalContinue: string;
   };
   language: {
     label: string;

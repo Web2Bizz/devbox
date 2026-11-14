@@ -2,12 +2,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChatInput, AgentSelector } from '../components/chat';
 import { ChatThread } from '../components/chat/chat-thread';
-import { DEFAULT_AGENT_ID, listAgents } from '../api/sessions-client';
+import { DEFAULT_AGENT_ID, listAgents, resolveSessionApproval, toErrorMessage } from '../api/sessions-client';
 import { useChat } from '../hooks/useChat';
-import { agentsQueryKey } from '../hooks/query-keys';
+import { agentsQueryKey, sessionStatusQueryKey, sessionsQueryKey } from '../hooks/query-keys';
 import { useI18n } from '../i18n';
 import { ChatForkDialog } from './chat-fork-dialog';
 import { ChatRevertDialog } from './chat-revert-dialog';
@@ -61,9 +61,12 @@ export function ChatSection({ sessionId, projectId, className, composerClassName
   const [revertMessageId, setRevertMessageId] = useState<string | null>(null);
   const chat = useChat({ sessionId, projectId });
   const {
-    messages,
-    streamingText,
-    reasoningText,
+    entries,
+    leafId,
+    variants,
+    variantIndex,
+    variantCount,
+    selectLeaf,
     loading,
     sending,
     error,
@@ -72,11 +75,41 @@ export function ChatSection({ sessionId, projectId, className, composerClassName
     setAgentId,
     activeAgentId,
     activeToolName,
+    approval,
     send,
     stop,
-    reload,
-    toolTrace,
   } = chat;
+
+  // Approval gate (WEB-20 / D2): the parked long-session turn resolves via
+  // POST /api/v1/sessions/{id}/approval (approve resumes the same thread,
+  // reject parks on paused). The gate itself clears via SSE
+  // (`session.approval.resolved` in useSseConnection) — here we only fire
+  // the decision and invalidate the status/list caches; the thread stays
+  // untouched on both paths (no optimistic history edits).
+  const queryClient = useQueryClient();
+  const [approvalPending, setApprovalPending] = useState(false);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
+
+  const handleApproval = (decision: 'approve' | 'reject') => {
+    if (!projectId || !activeSessionId || !approval || approvalPending) return;
+    setApprovalPending(true);
+    setApprovalError(null);
+    resolveSessionApproval(projectId, activeSessionId, decision)
+      .then(() => {
+        void queryClient.invalidateQueries({ queryKey: sessionsQueryKey(projectId) });
+        void queryClient.invalidateQueries({ queryKey: sessionStatusQueryKey(projectId) });
+      })
+      .catch((e: unknown) => {
+        setApprovalError(toErrorMessage(e));
+      })
+      .finally(() => {
+        setApprovalPending(false);
+      });
+  };
+
+  const handleApprove = () => handleApproval('approve');
+
+  const handleReject = () => handleApproval('reject');
 
   // Display name of the live agent — same cache entry as the selector, so no
   // extra request; the raw registry id is the honest fallback.
@@ -152,16 +185,21 @@ export function ChatSection({ sessionId, projectId, className, composerClassName
   return (
     <section aria-label={t.chat.title} className={className ? `grid min-h-0 gap-2 ${className}` : 'grid min-h-0 gap-2'}>
       <ChatThread
-        messages={messages}
-        streamingText={streamingText}
-        reasoningText={reasoningText}
+        entries={entries}
+        leafId={leafId}
+        variants={variants}
+        variantIndex={variantIndex}
+        variantCount={variantCount}
+        onSelectLeaf={selectLeaf}
         loading={loading}
         sending={sending}
-        error={error}
-        onRetry={reload}
-        toolTrace={toolTrace}
+        error={approvalError ?? error}
         activeAgentName={activeAgentName}
         activeToolName={activeToolName ?? undefined}
+        approval={approval}
+        onApprove={handleApprove}
+        onReject={handleReject}
+        approvalPending={approvalPending}
         onFork={setForkMessageId}
         onRevert={setRevertMessageId}
         className={className}

@@ -5,10 +5,13 @@ import type {
   AgentInfo,
   CreateSessionRequest,
   RevertInfo,
+  RevertMessagesResult,
+  SessionApprovalDecision,
   SessionForkResponse,
   SessionInfo,
   SessionInterruptResult,
   SessionMessage,
+  SessionMessageVariant,
   SessionRunStatusMap,
   SessionRunnerProvider,
   SessionModel,
@@ -95,9 +98,25 @@ export function createSession(
 export function listSessionMessages(
   projectId: string,
   sessionId: string,
-  opts?: { limit?: number; cursor?: string; signal?: AbortSignal },
+  opts?: { limit?: number; cursor?: string; leafId?: string; signal?: AbortSignal },
 ): Promise<Array<SessionMessage>> {
   return withAuth((token) => api.listSessionMessages(token, sessionId, projectId, opts));
+}
+
+export function listSessionVariants(
+  projectId: string,
+  sessionId: string,
+  opts?: { parentId?: string | null; signal?: AbortSignal },
+): Promise<Array<SessionMessageVariant>> {
+  return withAuth((token) => api.listSessionVariants(token, sessionId, projectId, opts));
+}
+
+export function revertSessionMessages(
+  projectId: string,
+  sessionId: string,
+  messageID: string,
+): Promise<RevertMessagesResult> {
+  return withAuth((token) => api.revertSessionMessages(token, sessionId, { projectId, messageID }));
 }
 
 /**
@@ -113,13 +132,15 @@ export function sendSessionMessage(
   projectId: string,
   sessionId: string,
   text: string,
-  opts?: { signal?: AbortSignal; agentId?: string; timeoutMs?: number },
+  opts?: { signal?: AbortSignal; agentId?: string; parentId?: string | null; timeoutMs?: number },
 ): Promise<SessionMessage> {
   return withAuth((token) =>
     api.sendSessionMessage(
       token,
       sessionId,
-      opts?.agentId ? { projectId, text, agentId: opts.agentId } : { projectId, text },
+      opts?.agentId
+        ? { projectId, text, agentId: opts.agentId, ...(opts?.parentId ? { parentId: opts.parentId } : {}) }
+        : { projectId, text, ...(opts?.parentId ? { parentId: opts.parentId } : {}) },
       {
         ...(opts?.signal ? { signal: opts.signal } : {}),
         timeoutMs: opts?.timeoutMs ?? SEND_TIMEOUT_MS,
@@ -139,6 +160,29 @@ export function interruptSession(
   sessionId: string,
 ): Promise<SessionInterruptResult> {
   return withAuth((token) => api.interruptSession(token, sessionId, { projectId }));
+}
+
+/**
+ * Human decision for a turn parked on `awaiting_approval`
+ * (POST /api/v1/sessions/{id}/approval). `approve` resumes the same
+ * checkpoint thread (answer {status: running}), `reject` parks it on paused
+ * without resuming. The gate clears via SSE (`session.approval.resolved`),
+ * the POST only resolves — the thread stays untouched on both paths.
+ */
+export function resolveSessionApproval(
+  projectId: string,
+  sessionId: string,
+  decision: SessionApprovalDecision,
+  opts?: { reason?: string; signal?: AbortSignal },
+): Promise<{ status: 'running' | 'paused' }> {
+  return withAuth((token) =>
+    api.resolveSessionApproval(
+      token,
+      sessionId,
+      opts?.reason ? { projectId, decision, reason: opts.reason } : { projectId, decision },
+      { ...(opts?.signal ? { signal: opts.signal } : {}) },
+    ),
+  );
 }
 
 /**
@@ -360,7 +404,9 @@ export function toErrorMessage(error: unknown): string {
     const obj = error as Record<string, unknown>;
     const data = obj.data as Record<string, unknown> | undefined;
     if (data && typeof data.message === 'string' && data.message) return data.message;
+    if (data && typeof data.code === 'string' && data.code) return data.code;
     if (typeof obj.message === 'string' && obj.message) return obj.message;
+    if (typeof obj.code === 'string' && obj.code) return obj.code;
     if (typeof obj.name === 'string' && obj.name) return obj.name;
   }
   return 'Unexpected error';

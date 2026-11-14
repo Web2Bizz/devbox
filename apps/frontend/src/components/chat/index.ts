@@ -7,4 +7,5 @@ export * from './chat-streaming-row';
 export * from './chat-thread-empty';
 export * from './chat-thread-loading';
 export * from './chat-tool-timeline';
+export * from './chat-tool-row';
 export * from './chat-live-status';

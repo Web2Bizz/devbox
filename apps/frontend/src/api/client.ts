@@ -31,12 +31,14 @@ import type {
 import {
   agentInfoListSchema,
   revertInfoSchema,
+  revertMessagesResultSchema,
   sessionForkResponseSchema,
   sessionInfoListSchema,
   sessionInfoSchema,
   sessionInterruptResultSchema,
   sessionMessageListSchema,
   sessionMessageSchema,
+  sessionMessageVariantListSchema,
   sessionRunStatusMapSchema,
   sessionRunnerProviderListSchema,
   sessionModelListSchema,
@@ -49,12 +51,15 @@ import type {
   CreateSessionRequest,
   InterruptSessionRequest,
   RevertInfo,
+  RevertMessagesResult,
   RevertStageRequest,
+  SessionApprovalRequest,
   SessionForkRequest,
   SessionForkResponse,
   SessionInfo,
   SessionInterruptResult,
   SessionMessage,
+  SessionMessageVariant,
   SessionRunStatusMap,
   SessionRunnerProvider,
   SessionModel,
@@ -280,11 +285,12 @@ export const api = {
     accessToken: string,
     sessionId: string,
     projectId: string,
-    opts?: { limit?: number; cursor?: string; signal?: AbortSignal },
+    opts?: { limit?: number; cursor?: string; leafId?: string; signal?: AbortSignal },
   ): Promise<SessionMessage[]> => {
     const q = new URLSearchParams({ projectId });
     if (opts?.limit !== undefined) q.set('limit', String(opts.limit));
     if (opts?.cursor) q.set('cursor', opts.cursor);
+    if (opts?.leafId) q.set('leafId', opts.leafId);
     return parseBoundary(
       'GET /api/v1/sessions/:id/messages',
       sessionMessageListSchema,
@@ -297,6 +303,40 @@ export const api = {
       ),
     );
   },
+  listSessionVariants: async (
+    accessToken: string,
+    sessionId: string,
+    projectId: string,
+    opts?: { parentId?: string | null; signal?: AbortSignal },
+  ): Promise<SessionMessageVariant[]> => {
+    const q = new URLSearchParams({ projectId });
+    if (opts?.parentId) q.set('parentId', opts.parentId);
+    return parseBoundary(
+      'GET /api/v1/sessions/:id/variants',
+      sessionMessageVariantListSchema,
+      await request<unknown>(
+        `/api/v1/sessions/${encodeURIComponent(sessionId)}/variants?${q.toString()}`,
+        {
+          headers: { authorization: `Bearer ${accessToken}` },
+          ...(opts?.signal ? { signal: opts.signal } : {}),
+        },
+      ),
+    );
+  },
+  revertSessionMessages: async (
+    accessToken: string,
+    sessionId: string,
+    body: { projectId: string; messageID: string },
+  ): Promise<RevertMessagesResult> =>
+    parseBoundary(
+      'POST /api/v1/sessions/:id/messages/revert',
+      revertMessagesResultSchema,
+      await request<unknown>(`/api/v1/sessions/${encodeURIComponent(sessionId)}/messages/revert`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify(body),
+      }),
+    ),
   sendSessionMessage: async (
     accessToken: string,
     sessionId: string,
@@ -376,6 +416,41 @@ export const api = {
         method: 'POST',
         headers: { authorization: `Bearer ${accessToken}` },
         body: JSON.stringify(body),
+      }),
+    ),
+  // ── Approval (WEB-20 / D2): POST /api/v1/sessions/:id/approval resolves a
+  // turn parked on `awaiting_approval` (approve resumes the same checkpoint
+  // thread, reject parks it on paused). Same C4 gate in the body as
+  // interrupt/fork; the answer {status: running|paused} is boundary-parsed
+  // with a narrow inline shape (contracts has the request, no result schema
+  // yet — the inline parse keeps the drift loud without a new contract).
+  // `reason` rides the body only as a human note, never secrets.
+  resolveSessionApproval: async (
+    accessToken: string,
+    sessionId: string,
+    body: SessionApprovalRequest,
+    opts?: { signal?: AbortSignal },
+  ): Promise<{ status: 'running' | 'paused' }> =>
+    parseBoundary(
+      'POST /api/v1/sessions/:id/approval',
+      {
+        parse(value: unknown): { status: 'running' | 'paused' } {
+          const record = value as { status?: unknown };
+          if (
+            record !== null &&
+            typeof record === 'object' &&
+            (record.status === 'running' || record.status === 'paused')
+          ) {
+            return { status: record.status };
+          }
+          throw new Error('contract mismatch on POST /api/v1/sessions/:id/approval: status');
+        },
+      },
+      await request<unknown>(`/api/v1/sessions/${encodeURIComponent(sessionId)}/approval`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify(body),
+        ...(opts?.signal ? { signal: opts.signal } : {}),
       }),
     ),
   // ── Fork / revert / snapshot diff (D1 domain contract). Same stance: the

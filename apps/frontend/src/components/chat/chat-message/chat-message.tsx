@@ -10,7 +10,7 @@ import {
   MessageFooter,
   MessageText,
 } from '@web2bizz/ui/widgets';
-import { GitFork, History } from 'lucide-react';
+import { GitFork, History, RotateCcw } from 'lucide-react';
 import { useState } from 'react';
 import { useI18n } from '../../../i18n';
 import type { ChatMessageRowProps } from './types';
@@ -83,6 +83,8 @@ export function ChatMessageRow({
   message,
   onFork,
   onRevert,
+  onRevertMessages,
+  onRetry,
 }: ChatMessageRowProps) {
   const isUser = message.role === 'user';
   const { t } = useI18n();
@@ -226,7 +228,7 @@ export function ChatMessageRow({
             <GitFork size={16} aria-hidden="true" />
           </Button>
         ) : null}
-        {onRevert ? (
+        {!isUser && onRevert ? (
           <Button
             type="button"
             variant="ghost"
@@ -236,6 +238,34 @@ export function ChatMessageRow({
             title={t.chat.revert}
             data-testid="chat-message-revert"
             onClick={() => onRevert(message.id)}
+          >
+            <History size={16} aria-hidden="true" />
+          </Button>
+        ) : null}
+        {isUser && onRetry ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className={`h-7 px-2 text-xs ${FOOTER_ACTION_HOVER_CLASS}`}
+            aria-label={t.chat.retryMessage}
+            title={t.chat.retryMessage}
+            data-testid="chat-message-retry"
+            onClick={() => onRetry(message.id)}
+          >
+            <RotateCcw size={16} aria-hidden="true" />
+          </Button>
+        ) : null}
+        {onRevertMessages ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className={`h-7 px-2 text-xs ${FOOTER_ACTION_HOVER_CLASS}`}
+            aria-label={t.chat.revertMessages}
+            title={t.chat.revertMessages}
+            data-testid="chat-message-revert-messages"
+            onClick={() => onRevertMessages(message.id)}
           >
             <History size={16} aria-hidden="true" />
           </Button>

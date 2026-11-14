@@ -6,19 +6,20 @@ import { useI18n } from '../../../i18n';
 import type { ChatLiveStatusProps } from './types';
 
 /**
- * Rotating "agent is working" status for the sending gap
- * (`sending && !streamingText`).
+ * Rotating "agent is working" status for the sending gap (`sending`).
  *
- * Live status first: when the turn reports an agent/tool, the line is the
- * flat `agent [· tool]` pair (no extra chrome, ShimmerText only). Reasoning
- * (`session.reasoning.*`, live-only, never durable) keeps the same line —
- * the thinking trace itself renders in `ChatThinkingRow`/`ChatStreamingRow`
- * and the timeline, never in this status. Without agent/tool data it falls
- * back to cycling `t.chat.thinking` every ~1.6s — the rotation is a
- * fallback, not the primary status. Language switch (`t` identity) resets
- * the index to the first phrase.
+ * Live status first: when the turn reports an agent, the line is the flat
+ * agent name (no extra chrome, ShimmerText only). The active tool is NOT
+ * joined here anymore — it renders as its own `ChatToolRow` line in the flat
+ * thread chronology, so `agent · tool` never appears as one fused status.
+ * Reasoning (`session.reasoning.*`, live sidecar in entries, never durable
+ * text) keeps the same line — the thinking trace itself renders in
+ * `ChatThinkingRow` and as `reasoning` chain rows, never in this status.
+ * Without agent data it falls back to cycling `t.chat.thinking`
+ * every ~1.6s — the rotation is a fallback, not the primary status. Language
+ * switch (`t` identity) resets the index to the first phrase.
  */
-export function ChatLiveStatus({ activeAgentName, activeToolName, reasoningActive = false }: ChatLiveStatusProps) {
+export function ChatLiveStatus({ activeAgentName, reasoningActive = false }: ChatLiveStatusProps) {
   const { t } = useI18n();
   const phrases = t.chat.thinking;
   const [index, setIndex] = useState(0);
@@ -35,11 +36,8 @@ export function ChatLiveStatus({ activeAgentName, activeToolName, reasoningActiv
     return () => clearInterval(id);
   }, [phrases.length]);
 
-  const live = [activeAgentName, activeToolName].filter(
-    (part): part is string => typeof part === 'string' && part.length > 0,
-  );
-  if (live.length > 0) {
-    return <ShimmerText>{live.join(' · ')}</ShimmerText>;
+  if (typeof activeAgentName === 'string' && activeAgentName.length > 0) {
+    return <ShimmerText>{activeAgentName}</ShimmerText>;
   }
   if (reasoningActive) {
     return <ShimmerText>{phrases[0] ?? ''}</ShimmerText>;

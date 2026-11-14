@@ -50,7 +50,7 @@ export function ChatForkDialog({
         </DialogHeader>
 
         {fork.error ? (
-          <ErrorState message={toErrorMessage(fork.error)} retryLabel={t.chat.retry} />
+          <ErrorState message={toErrorMessage(fork.error)} />
         ) : fork.data ? (
           <p className="text-sm text-muted-foreground">
             {t.chat.forkSuccess}: <span className="font-mono text-xs">{fork.data.session.id}</span>

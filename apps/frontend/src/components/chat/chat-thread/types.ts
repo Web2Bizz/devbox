@@ -1,16 +1,27 @@
-import type { ChatMessage, ChatToolEvent } from '../../../hooks/useChat';
+import type { ChatEntry } from '../../../lib/chat-chain';
+import type { ChatApprovalState } from '../../../hooks/useChatTypes';
 
 export type ChatThreadProps = {
-  messages: Array<ChatMessage>;
-  streamingText: string;
-  reasoningText?: string;
+  /** Unified chain (required): entries own the order via chain-index. */
+  entries: Array<ChatEntry>;
+  leafId?: string | null;
+  variants?: Array<ChatEntry>;
+  variantIndex?: number;
+  variantCount?: number;
+  onSelectLeaf?: (id: string) => void;
   loading?: boolean;
   sending?: boolean;
   error?: string | null;
-  onRetry?: () => void;
-  toolTrace?: Array<ChatToolEvent>;
+  /** Live tool name with no chain row yet (in-flight SSE sidecar). */
   activeAgentName?: string;
   activeToolName?: string;
+  /** Approval gate of the parked long-session turn (null when no turn awaits). */
+  approval?: ChatApprovalState | null;
+  /** Resolve the parked turn (approve resumes, reject parks on paused). */
+  onApprove?: () => void;
+  onReject?: () => void;
+  /** POST /approval in flight — both actions stay disabled. */
+  approvalPending?: boolean;
   onFork?: (messageId: string) => void;
   onRevert?: (messageId: string) => void;
   className?: string;

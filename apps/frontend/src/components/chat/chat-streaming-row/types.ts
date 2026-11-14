@@ -1,8 +1,11 @@
 export type ChatStreamingRowProps = {
   streamingText: string;
   activeAgentName?: string;
-  activeToolName?: string;
+  /**
+   * Deprecated (single thinking source lives in `ChatThinkingRow`): kept
+   * for call-site compat, never rendered here — no second Thinking.
+   */
   reasoningText?: string;
-  /** Last timeline line shown when reasoningText is empty (no mute shimmer). */
+  /** Deprecated: ignored, see `reasoningText`. */
   fallbackText?: string | null;
 };

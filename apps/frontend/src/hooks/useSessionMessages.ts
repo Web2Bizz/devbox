@@ -45,6 +45,11 @@ function describeError(error: unknown, sessionExpired: string, unexpected: strin
  * so the mutation only invalidates the thread; live text does not come
  * from this hook.
  *
+ * Chain 0009: sessionId is the harness uuid (project_sessions.id);
+ * projectId stays the C4 gate (scope resolves via JOIN project_sessions —
+ * messages carry no project_id). Tool-calling/reasoning frames stay
+ * live-only SSE detail and are never filtered out here.
+ *
  * `projectId` is the C4 gate: without it no request goes out and the
  * honest PROJECT_REQUIRED error is surfaced (never masked). No live
  * callers yet (the chat feature composes useChat); the signature stays

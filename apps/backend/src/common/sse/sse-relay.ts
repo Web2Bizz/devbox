@@ -1,5 +1,6 @@
 import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
 import type { AppLogger } from '../logger';
+import type { CauseChainLink, CauseWithoutCause } from '../exceptions/app-error';
 
 /**
  * Shared SSE re-stream mechanics (was the private relaySse of the removed
@@ -62,22 +63,75 @@ type StreamErrorFrame = {
 /** Interval between SSE heartbeat comments (transport-level, not a frame). */
 export const HEARTBEAT_MS: number = 15_000;
 
-/** True for AbortError shapes (name/code/20, incl. wrapped in cause). */
-export function isAbortError(error: unknown): boolean {
+/** True for AbortError shapes (name/code/20, incl. wrapped in cause).
+ * SSE-транспортный предикат — ТОЛЬКО для внутреннего употребления relaySse.
+ * Уже глобального isAbortLike (common/exceptions/app-error): числовой код 20
+ * — да, строковый '20' — нет (DOMException AbortError несёт number).
+ * Правило выбора: фильтр (api-error.filter) и process-level fate (main.ts) —
+ * всегда isAbortLike; внутри sse-relay — всегда isSseAbort. */
+export function isSseAbort(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
-  const errorLike: { name?: unknown; code?: unknown; cause?: unknown } =
-    error as { name?: unknown; code?: unknown; cause?: unknown };
+  const errorLike: CauseChainLink = error as CauseChainLink;
   if (errorLike.name === 'AbortError') return true;
   if (errorLike.code === 20) return true;
   // DOMException AbortError may be wrapped (e.g. in cause)
   if (errorLike.cause && typeof errorLike.cause === 'object') {
-    const causeLike: { name?: unknown; code?: unknown } = errorLike.cause as {
-      name?: unknown;
-      code?: unknown;
-    };
+    const causeLike: CauseWithoutCause = errorLike.cause as CauseWithoutCause;
     if (causeLike.name === 'AbortError' || causeLike.code === 20) return true;
   }
   return false;
+}
+
+/**
+ * Back-compat alias — новые использования должны идти через isSseAbort.
+ * @deprecated use isSseAbort instead.
+ */
+export const isAbortError: typeof isSseAbort = isSseAbort;
+
+/**
+ * Frame-id options of `withSseFrameIds`.
+ */
+export type SseFrameIdOptions = {
+  /** Prefix of generated ids (`frame` → `frame-0`, `frame-1`, …). */
+  prefix?: string;
+  /** First counter value (default 0). */
+  startAt?: number;
+};
+
+/**
+ * Assigns transport ids to id-less frames (e.g. domain `TurnFrame` streams
+ * produced by the LangChain `streamEvents` bridge): object frames without a
+ * non-empty string `id` are shallow-copied with `${prefix}-${counter}`,
+ * frames that already carry an `id` and non-object values pass through
+ * untouched (never rewritten, never re-encoded).
+ *
+ * Generic on purpose: `common/` must not know domain frame shapes (the scope
+ * arrow points down), so the helper works on `unknown` and the streaming
+ * bridge applies it to its frame iterable before handing the subscription to
+ * `relaySse` — the `id:` line then carries Last-Event-ID redial for streams
+ * whose frames never had ids.
+ */
+export async function* withSseFrameIds(
+  stream: AsyncIterable<unknown>,
+  options: SseFrameIdOptions = {},
+): AsyncGenerator<unknown> {
+  const prefix: string = options.prefix ?? 'frame';
+  let counter: number = options.startAt ?? 0;
+  for await (const value of stream) {
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      const candidate: { id?: unknown } = value as { id?: unknown };
+      if (typeof candidate.id === 'string' && candidate.id.length > 0) {
+        yield value;
+        continue;
+      }
+      const framed: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+      framed.id = `${prefix}-${counter}`;
+      counter += 1;
+      yield framed;
+      continue;
+    }
+    yield value;
+  }
 }
 
 /**
@@ -119,7 +173,7 @@ export async function relaySse(params: SseRelayParams): Promise<void> {
   } catch (error) {
     // Client went away before subscribe resolved: upstream.abort()
     // surfaces here as AbortError — штатный disconnect, не 503.
-    if (isAbortError(error)) {
+    if (isSseAbort(error)) {
       logger.debug(`${prefix} client disconnected before subscribe`, correlationId);
       return;
     }
@@ -216,7 +270,7 @@ export async function relaySse(params: SseRelayParams): Promise<void> {
     );
   };
   // Terminal error frame (C0): mid-stream failure is NOT silent — the client
-  // distinguishes terminal (ErrorState + retry) from transient (quiet redial).
+  // distinguishes terminal (ErrorState banner without retry + user-bubble retry via onRetryMessage) from transient (quiet redial).
   // AbortError/disconnect stays quiet (debug only, no frame).
   const writeStreamError: (error: unknown) => void = (error: unknown): void => {
     if (closed || request.destroyed || response.writableEnded || response.destroyed) {
@@ -246,7 +300,7 @@ export async function relaySse(params: SseRelayParams): Promise<void> {
       } catch (error) {
         // AbortError from the sdk generator on downstream disconnect —
         // штатный disconnect, выходим молча без stack.
-        if (isAbortError(error) || closed) {
+        if (isSseAbort(error) || closed) {
           logger.debug(`${prefix} client disconnected`, correlationId);
           break;
         }
@@ -262,7 +316,7 @@ export async function relaySse(params: SseRelayParams): Promise<void> {
         writeFrame(frame);
       } catch (error) {
         // Write after downstream close — то же, что disconnect.
-        if (isAbortError(error) || closed || request.destroyed) {
+        if (isSseAbort(error) || closed || request.destroyed) {
           logger.debug(`${prefix} client disconnected`, correlationId);
           break;
         }
@@ -273,7 +327,7 @@ export async function relaySse(params: SseRelayParams): Promise<void> {
     // Mid-stream failure: status is already 200, so the terminal error frame
     // + end() is the only signal (message only, never secrets). AbortError —
     // штатный disconnect (debug, no frame).
-    if (isAbortError(error)) {
+    if (isSseAbort(error)) {
       logger.debug(`${prefix} client disconnected`, correlationId);
     } else {
       logger.debug(`${prefix} stream.error ${errorMessage(error)}`, correlationId);
@@ -306,7 +360,7 @@ export async function relaySse(params: SseRelayParams): Promise<void> {
         try {
           await subscription.stream.return?.(undefined);
         } catch (error) {
-          if (!isAbortError(error)) {
+          if (!isSseAbort(error)) {
             /* non-abort cleanup errors are also best-effort — noop */
           }
         }
@@ -318,7 +372,7 @@ export async function relaySse(params: SseRelayParams): Promise<void> {
     try {
       response.end();
     } catch (error) {
-      if (!isAbortError(error)) {
+      if (!isSseAbort(error)) {
         logger.debug(
           `${prefix} event stream end failed: ${(error as Error).message}`,
           correlationId,

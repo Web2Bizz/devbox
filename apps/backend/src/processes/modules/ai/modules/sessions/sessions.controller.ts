@@ -24,19 +24,26 @@ import { ApiErrorDto } from '@common/http/api/api.dto';
 import {
   createSessionRequestSchema,
   interruptSessionRequestSchema,
+  revertMessagesRequestSchema,
   revertStageRequestSchema,
   sendMessageRequestSchema,
+  sessionApprovalRequestSchema,
   sessionForkRequestSchema,
   type CreateSessionInput,
   type InterruptSessionInput,
   type RevertInfo,
+  type RevertMessagesRequest,
+  type RevertMessagesResult,
   type RevertStageRequest,
   type SendMessageInput,
+  type SessionApprovalInput,
+  type SessionCheckpointStatus,
   type SessionForkRequest,
   type SessionForkResponse,
   type SessionInfo,
   type SessionInterruptResult,
   type SessionMessage,
+  type SessionMessageVariant,
   type SessionModel,
   type SessionRunStatusMap,
   type SessionRunnerProvider,
@@ -151,7 +158,7 @@ export class SessionsController {
   @ApiOperation({ summary: 'List session messages (normalized domain rows; text projection of the runtime message union)' })
   @ApiResponse({ status: 200, description: 'normalized messages (always an array; empty when the session has none)' })
   @ApiResponse({ status: 400, description: 'missing projectId (PROJECT_REQUIRED, the C4 gate), invalid query (bad_request — our limit validation) or the session runner rejected the request shape (EXTERNAL_BAD_REQUEST) — no Retry-After', type: ApiErrorDto })
-  @ApiResponse({ status: 404, description: 'unknown project for this caller (not_found, no existence leak — the C4 gate) or session/message absent upstream (EXTERNAL_NOT_FOUND) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 404, description: 'unknown project for this caller (not_found, no existence leak — the C4 gate) or unknown leaf (MessageNotFound) — no Retry-After', type: ApiErrorDto })
   @ApiResponse({ status: 503, description: 'session runner unreachable (EXTERNAL_UNAVAILABLE, Retry-After) or it refused our credentials (EXTERNAL_UNAUTHORIZED, no Retry-After)', type: ApiErrorDto })
   async messages(
     @ReqUser() identity: RequestIdentity,
@@ -159,9 +166,40 @@ export class SessionsController {
     @Query('projectId') projectId?: string,
     @Query('limit') limit?: string,
     @Query('cursor') cursor?: string,
+    @Query('leafId') leafId?: string,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<Array<SessionMessage>> {
-    return this.sessions.listMessages(identity.id, id, projectId, limit, cursor, correlationId ?? '');
+    return this.sessions.listMessages(identity.id, id, projectId, limit, cursor, correlationId ?? '', leafId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get(':id/variants')
+  @ApiOperation({ summary: 'List branch children of one parent message (branch switcher)' })
+  @ApiResponse({ status: 200, description: 'branch children (always an array; empty when the parent is a leaf)' })
+  @ApiResponse({ status: 404, description: 'unknown project or parent message absent (MessageNotFound) — no Retry-After', type: ApiErrorDto })
+  async variants(
+    @ReqUser() identity: RequestIdentity,
+    @Param('id') id: string,
+    @Query('projectId') projectId?: string,
+    @Query('parentId') parentId?: string,
+    @Headers('x-correlation-id') correlationId?: string,
+  ): Promise<Array<SessionMessageVariant>> {
+    return this.sessions.listVariants(identity.id, id, projectId, parentId ?? null, correlationId ?? '');
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/messages/revert')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Revert the durable message tail from a boundary (messages only, files untouched)' })
+  @ApiResponse({ status: 200, description: 'new leaf cursor after the soft-delete (null when the root was reverted)' })
+  @ApiResponse({ status: 404, description: 'unknown project or boundary message absent (MessageNotFound) — no Retry-After', type: ApiErrorDto })
+  async revertMessages(
+    @ReqUser() identity: RequestIdentity,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(revertMessagesRequestSchema)) body: RevertMessagesRequest,
+    @Headers('x-correlation-id') correlationId?: string,
+  ): Promise<RevertMessagesResult> {
+    return this.sessions.revertMessages(identity.id, id, body.projectId, body.messageID, correlationId ?? '');
   }
 
   @UseGuards(JwtAuthGuard)
@@ -196,6 +234,24 @@ export class SessionsController {
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<SessionInterruptResult> {
     return this.sessions.interrupt(identity.id, id, body, correlationId ?? '');
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/approval')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Resolve a turn parked on awaiting_approval (approve resumes the same checkpoint thread, reject parks it on paused)' })
+  @ApiResponse({ status: 200, description: 'approval resolution (running = resumed on the same thread_id, paused = parked without resuming)' })
+  @ApiResponse({ status: 400, description: 'missing projectId (PROJECT_REQUIRED, the C4 gate) or invalid body (bad_request — our zod) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 404, description: 'unknown project for this caller (not_found, no existence leak — the C4 gate) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 409, description: 'no turn awaiting approval (ApprovalNotPending) or the resumed turn is already running (ApprovalTurnBusy) — no Retry-After', type: ApiErrorDto })
+  @ApiResponse({ status: 503, description: 'session runner or durable store unreachable (EXTERNAL_UNAVAILABLE, Retry-After) — no Retry-After for credential refusal', type: ApiErrorDto })
+  async approval(
+    @ReqUser() identity: RequestIdentity,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(sessionApprovalRequestSchema)) body: SessionApprovalInput,
+    @Headers('x-correlation-id') correlationId?: string,
+  ): Promise<{ status: SessionCheckpointStatus }> {
+    return this.sessions.approval(identity.id, id, body, correlationId ?? '');
   }
 
   @UseGuards(JwtAuthGuard)

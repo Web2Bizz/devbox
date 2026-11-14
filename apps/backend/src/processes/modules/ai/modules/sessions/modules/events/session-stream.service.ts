@@ -21,12 +21,16 @@ import { SessionFrameBufferService } from './session-frame-buffer.service';
  *
  * The C4 gate decides WHO may stream; the bus is process-global, so frames
  * are filtered to sessions of the gated project (our uuids). Durable vs live
- * (explicit): the durable thread (Postgres `session_messages`, text only)
- * survives reload via REST history; reasoning (`session.reasoning.*`) and tool
- * lifecycle (`session.tool.*`) are live-only SSE detail — project-scoped like
- * text, replayed only from the bounded frame buffer when present there,
- * otherwise live from the host bus and gone after redial. The resume cursor
- * covers buffered frame ids; host live frames carry their own ids forward.
+ * (explicit): the durable thread (Postgres `session_messages`) keeps user /
+ * assistant text bubbles AND tool/reasoning chain links
+ * (`session.tool.called/progress/tool input success/failed`,
+ * `session.reasoning.*`, parent=tip) so reload refetches the same chain via
+ * REST history; only turn markers without stable call identity stay
+ * live-only SSE detail (`session.text.started`, `session.step.*`,
+ * `session.execution.*`), project-scoped like text, replayed only from the
+ * bounded frame buffer when present there, otherwise live from the host bus
+ * and gone after redial. The resume cursor covers buffered frame ids; host
+ * live frames carry their own ids forward.
  *
  * The stream ends on downstream close (relaySse aborts the signal), on the
  * idle timeout (no busy direct turn AND no new local/host frame), or on the
@@ -51,10 +55,14 @@ export class SessionStreamService {
    * session uuid via `resolve`; `session` is hoisted from data.sessionID.
    * Upstream top-level extras are dropped; data stays variant-owned.
    *
-   * Reasoning (`session.reasoning.*`) and tool lifecycle (`session.tool.*`)
-   * pass through untouched (no truncation, no persist): the project-scoped
-   * `filterFrame` below admits them like text frames, so the chat sees every
-   * step without loss. Durable history stays text-only (see recordHostEvent).
+   * Reasoning (`session.reasoning.*`) and tool lifecycle
+   * (`session.tool.called/progress/tool input success/failed`) pass through
+   * untouched (no truncation, no persist here — the recorder persists every
+   * broadcast immediately as a kind=tool/reasoning row, parent=tip): the
+   * project-scoped `filterFrame` below admits them like text frames, so the
+   * chat sees every step without loss. Only markers without stable call
+   * identity (`session.text.started`, `session.step.*`, `session.execution.*`)
+   * stay live-only.
    */
   private toStreamFrame(
     value: unknown,
@@ -197,11 +205,33 @@ export class SessionStreamService {
         let liveCursor: number = frames.length;
         const live: AsyncIterable<unknown> = await this.host.subscribeEvents(signal);
         let liveIterator: AsyncIterator<unknown> | null = live[Symbol.asyncIterator]();
+        // Single-flight live pull: at most ONE `next()` may be in flight.
+        // A timed-out poll keeps the same promise pending instead of starting
+        // a second one — otherwise the async iterator would hand the next
+        // event to the abandoned reader and the frame (including terminal
+        // `session.idle`/`execution.succeeded`) would be lost.
+        let pendingNext: Promise<IteratorResult<unknown>> | null = null;
         const startedAt: number = Date.now();
         let lastActivityAt: number = Date.now();
         const LOCAL_IDLE_MS: number = 30_000;
         const STREAM_CAP_MS: number = 300_000;
         const POLL_MS: number = 250;
+        // Bounded poll of the pending pull: resolves `null` on timeout (the
+        // pending promise stays alive for the next loop turn), always clears
+        // its timer so polls never accumulate.
+        const raceIdle = async (
+          pending: Promise<IteratorResult<unknown>>,
+        ): Promise<IteratorResult<unknown> | null> => {
+          const idleRef: { timer: ReturnType<typeof setTimeout> | null } = { timer: null };
+          const idle: Promise<null> = new Promise<null>((resolveIdle) => {
+            idleRef.timer = setTimeout(() => resolveIdle(null), POLL_MS);
+          });
+          try {
+            return await Promise.race([pending, idle]);
+          } finally {
+            if (idleRef.timer !== null) clearTimeout(idleRef.timer);
+          }
+        };
         // Captured for the generator (a plain function, so it has its own
         // `this` — the state service method must stay bound to its instance).
         const state: SessionRuntimeStateService = this.state;
@@ -222,19 +252,18 @@ export class SessionStreamService {
                   yield frame;
                 }
               }
+              if (liveIterator !== null && pendingNext === null) {
+                pendingNext = liveIterator.next();
+              }
               const next: IteratorResult<unknown> | null =
-                liveIterator === null
-                  ? null
-                  : await Promise.race([
-                      liveIterator.next(),
-                      new Promise<null>((resolveIdle) => {
-                        setTimeout(() => resolveIdle(null), POLL_MS);
-                      }),
-                    ]);
+                pendingNext === null ? null : await raceIdle(pendingNext);
               if (signal.aborted) return;
               if (next !== null && next.done) {
+                // The pull settled: no reader is outstanding any more.
+                pendingNext = null;
                 liveIterator = null;
               } else if (next !== null) {
+                pendingNext = null;
                 lastActivityAt = Date.now();
                 yield next.value;
               }
@@ -258,6 +287,12 @@ export class SessionStreamService {
             // iterator (and its reader) attached to this client forever.
             const iterator: AsyncIterator<unknown> | null = liveIterator;
             liveIterator = null;
+            // A timed-out pull may still settle during teardown — attach a
+            // handler so it can never surface as an unhandled rejection.
+            if (pendingNext !== null) {
+              void pendingNext.catch(() => undefined);
+              pendingNext = null;
+            }
             try {
               await iterator?.return?.(undefined);
             } catch {

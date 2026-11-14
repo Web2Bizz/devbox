@@ -86,20 +86,26 @@ export class FileCommandTurnService {
       type: 'user',
       createdAt: new Date().toISOString(),
       text: body.text,
+      parentId: await this.history.resolveAppendParent(sessionId, body.parentId),
     };
     await this.history.appendMessage({
       id: receipt.id,
       sessionId,
-      projectId: body.projectId,
       userId,
       role: 'user',
       agentId,
       text: body.text,
       createdAt: receipt.createdAt,
+      parentId: receipt.parentId ?? null,
     });
     await this.workspace.captureBeforeTurn(directory, sessionId, receipt.id, correlationId);
     this.state.markBusy(sessionId);
-    this.bufferDirectLifecycleStart(sessionId, agentId);
+    // Real deterministic tool behind this turn (registry names, never the
+    // agent id): create → `write`, read → `read` (readonly), shell → `shell`.
+    // The lifecycle frames below carry exactly this name so the chat timeline
+    // shows the real call — a `tool: '<agentId>'` frame would be a fake.
+    const toolName: string = created ? 'write' : readCommand ? 'read' : 'shell';
+    this.bufferDirectLifecycleStart(sessionId, toolName, receipt.id);
     try {
       let answer: string;
       if (created && createdAbsolutePath) {
@@ -130,24 +136,43 @@ export class FileCommandTurnService {
         answer = formatShellOutput(shellOutput).slice(0, ANSWER_MAX_CHARS) || '(без вывода)';
         this.logger.info('[sessions] shell executed', correlationId);
       }
+      // Durable chain (0012): one kind=tool link (real registry name) with
+      // parent=receipt, the assistant text closes the chain on the tool.
+      // Detail is a redacted single-line 500-char snippet, never secrets.
+      const toolId: string = Bun.randomUUIDv7();
       const assistant: SessionMessage = {
         id: Bun.randomUUIDv7(),
         type: 'assistant',
         createdAt: new Date().toISOString(),
         text: answer,
+        parentId: toolId,
       };
+      await this.history.appendMessage({
+        id: toolId,
+        sessionId,
+        userId,
+        role: 'tool',
+        agentId,
+        text: answer.slice(0, 2000) || null,
+        createdAt: new Date().toISOString(),
+        parentId: receipt.id,
+        kind: 'tool',
+        name: toolName,
+        status: 'done',
+        detail: this.toSafeDetail(answer),
+      });
       await this.history.appendMessage({
         id: assistant.id,
         sessionId,
-        projectId: body.projectId,
         userId,
         role: 'assistant',
         agentId,
         text: answer,
         createdAt: assistant.createdAt,
+        parentId: toolId,
       });
       this.bufferDirectFrames(sessionId, assistant);
-      this.bufferDirectLifecycleEnd(sessionId, agentId);
+      this.bufferDirectLifecycleEnd(sessionId, toolName, receipt.id);
       this.bufferDirectIdle(sessionId);
       return receipt;
     } finally {
@@ -170,26 +195,51 @@ export class FileCommandTurnService {
   }
 
   /**
-   * Live-only lifecycle markers for the deterministic turn: the direct
-   * transport has no host tool bus, so without these a turn would stream text
-   * with no reasoning/tool steps and the chat would show a mute shimmer.
-   * Markers ride the same bounded frame buffer (project-scoped via
-   * data.sessionID, filtered by streamEvents like text), never durable.
+   * Live-only lifecycle markers for the deterministic turn: one reasoning
+   * pair plus the REAL tool call (`write`/`read`/`shell` — the registry name
+   * of the command that actually ran, never the agent id). Markers ride the
+   * same bounded frame buffer (project-scoped via data.sessionID, filtered
+   * by streamEvents like text), never durable. The readonly `read` call is
+   * the ask-mode-visible proof that real readonly tools keep their real
+   * names end-to-end (text answer untouched — tool payloads never enter the
+   * text frames below).
    */
-  private bufferDirectLifecycleStart(sessionId: string, agentId: string): void {
-    this.buffer.push('session.reasoning.started', { sessionID: sessionId });
-    this.buffer.push('session.tool.called', { sessionID: sessionId, tool: agentId });
+  private bufferDirectLifecycleStart(
+    sessionId: string,
+    toolName: string,
+    parentId?: string | null,
+  ): void {
+    this.buffer.push('session.reasoning.started', {
+      sessionID: sessionId,
+      ...(parentId ? { parentId } : {}),
+    });
+    this.buffer.push('session.tool.called', {
+      sessionID: sessionId,
+      tool: toolName,
+      ...(parentId ? { parentId } : {}),
+    });
   }
 
   /**
    * Closing markers for a completed turn (live-only, same scope as the start
-   * markers above): tool success + reasoning end, before the terminal
+   * markers above): real tool success + reasoning end, before the terminal
    * session.idle. Never durable, never chat text — the frontend projects them
    * to activeToolName + additive tool/reasoning trace rows.
    */
-  private bufferDirectLifecycleEnd(sessionId: string, agentId: string): void {
-    this.buffer.push('session.tool.success', { sessionID: sessionId, tool: agentId });
-    this.buffer.push('session.reasoning.ended', { sessionID: sessionId });
+  private bufferDirectLifecycleEnd(
+    sessionId: string,
+    toolName: string,
+    parentId?: string | null,
+  ): void {
+    this.buffer.push('session.tool.success', {
+      sessionID: sessionId,
+      tool: toolName,
+      ...(parentId ? { parentId } : {}),
+    });
+    this.buffer.push('session.reasoning.ended', {
+      sessionID: sessionId,
+      ...(parentId ? { parentId } : {}),
+    });
   }
 
   /**
@@ -209,6 +259,7 @@ export class FileCommandTurnService {
     const text: string = assistant.text ?? '';
     if (!text) return;
     const partID: string = `prt_${assistant.id}`;
+    const parentId: string | null | undefined = assistant.parentId ?? undefined;
     for (let index: number = 0; index < text.length; index += SSE_CHUNK) {
       this.buffer.push('message.part.delta', {
         sessionID: sessionId,
@@ -216,11 +267,34 @@ export class FileCommandTurnService {
         partID,
         field: 'text',
         delta: text.slice(index, index + SSE_CHUNK),
+        ...(parentId ? { parentId } : {}),
       });
     }
     this.buffer.push('message.part.updated', {
       sessionID: sessionId,
+      ...(parentId ? { parentId } : {}),
       part: { id: partID, type: 'text', text },
     });
+  }
+
+  /**
+   * Redacted single-line 500-char detail (turns-local copy, no shared util —
+   * no new files per CoC). Shell/file output may echo secrets; key=value and
+   * token prefixes collapse to `[redacted]`.
+   */
+  private toSafeDetail(raw: unknown): string | null {
+    if (raw === null || raw === undefined) return null;
+    const text: string =
+      typeof raw === 'string' ? raw : typeof raw === 'object' ? JSON.stringify(raw) : String(raw);
+    if (text.length === 0) return null;
+    const single: string = text.replace(/\s+/g, ' ').trim().slice(0, 500);
+    if (single.length === 0) return null;
+    return single
+      .replace(
+        /(api[_-]?key|token|secret|password|passwd|pwd|authorization|bearer|cookie|session[_-]?id)\s*[:=]\s*("[^"]*"|'[^']*'|\S+)/gi,
+        '$1=[redacted]',
+      )
+      .replace(/\bsk-[A-Za-z0-9-_]{10,}\b/g, '[redacted]')
+      .replace(/\bghp_[A-Za-z0-9]{10,}\b/g, '[redacted]');
   }
 }

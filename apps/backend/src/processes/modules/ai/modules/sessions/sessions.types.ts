@@ -43,6 +43,14 @@ export type TurnMeta = {
   projectId: string;
   agentId: string;
   mode?: 'auto' | 'ask';
+  /**
+   * Host-owned user receipt of the current turn (HostTurnService sets it
+   * right after sessionPrompt). The recorder parents the turn's durable
+   * chain to this id — the first tool/reasoning link, then the assistant
+   * closing on the last link — never to findTailId at flush time (which
+   * could already be the next turn's user row).
+   */
+  receiptId?: string;
 };
 
 /** Buffered harness-owned SSE frame (live transport only, never durable). */

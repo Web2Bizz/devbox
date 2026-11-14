@@ -52,29 +52,31 @@ export class DirectTurnService {
     if (!agents) throw new Error('AgentsService is not wired');
     await this.history.setAgent(sessionId, body.projectId, agentId);
     void body.model;
+    const userParent: string | null = await this.history.resolveAppendParent(sessionId, body.parentId);
     const receipt: SessionMessage = {
       id: Bun.randomUUIDv7(),
       type: 'user',
       createdAt: new Date().toISOString(),
       text: body.text,
+      parentId: userParent,
     };
     // Persist the user turn BEFORE the agent runs: an interrupt drops the
     // answer but the question already belongs to the durable thread.
     await this.history.appendMessage({
       id: receipt.id,
       sessionId,
-      projectId: body.projectId,
       userId,
       role: 'user',
       agentId,
       text: body.text,
       createdAt: receipt.createdAt,
+      parentId: userParent,
     });
     // Pre-turn tree for revert: the boundary message id keys it, so a later
     // stage() can restore exactly the state the turn started from.
     await this.workspace.captureBeforeTurn(directory, sessionId, receipt.id, correlationId);
     this.state.markBusy(sessionId);
-    this.bufferDirectLifecycleStart(sessionId, agentId);
+    this.bufferDirectLifecycleStart(sessionId, receipt.id);
     const assistantId: string = Bun.randomUUIDv7();
     try {
       const answer: string = await agents.askQuestion(agentId, body.text, userId, correlationId);
@@ -87,19 +89,20 @@ export class DirectTurnService {
         type: 'assistant',
         createdAt: new Date().toISOString(),
         text: answer,
+        parentId: receipt.id,
       };
       await this.history.appendMessage({
         id: assistant.id,
         sessionId,
-        projectId: body.projectId,
         userId,
         role: 'assistant',
         agentId,
         text: answer,
         createdAt: assistant.createdAt,
+        parentId: receipt.id,
       });
       this.bufferDirectFrames(sessionId, assistant);
-      this.bufferDirectLifecycleEnd(sessionId, agentId);
+      this.bufferDirectLifecycleEnd(sessionId, receipt.id);
       this.bufferDirectIdle(sessionId);
       this.logger.info('[sessions] prompt answered directly', correlationId);
       return receipt;
@@ -113,6 +116,9 @@ export class DirectTurnService {
       if (error instanceof ExternalServiceError && error.service === 'db') throw error;
       this.logger.warn('[sessions] direct prompt failed', correlationId);
       this.logger.debug((error as Error).message, correlationId);
+      // Terminal frames so the SSE `sending` gate clears (same fixed text as
+      // the in-process turn) — without them a failed direct turn hangs.
+      this.bufferDirectFailed(sessionId);
       if (error instanceof HttpException) throw error;
       throw fromUnknown('zen', 'sessionPromptDirect', error);
     } finally {
@@ -120,28 +126,44 @@ export class DirectTurnService {
     }
   }
 
-  /**
-   * Live-only lifecycle markers for the direct runner (ask/text-only path):
-   * the direct transport has no host tool bus, so without these a direct turn
-   * would stream text with no reasoning/tool steps and the chat would show a
-   * mute shimmer. Markers ride the same bounded frame buffer (project-scoped
-   * via data.sessionID, filtered by streamEvents like text), never durable
-   * history.
-   */
-  private bufferDirectLifecycleStart(sessionId: string, agentId: string): void {
-    this.buffer.push('session.reasoning.started', { sessionID: sessionId });
-    this.buffer.push('session.tool.called', { sessionID: sessionId, tool: agentId });
+  /** Terminal failure frames for a died direct turn (fixed text, then idle). */
+  private bufferDirectFailed(sessionId: string): void {
+    const message: string = 'не удалось выполнить ход, повторите позже';
+    this.buffer.push('session.execution.failed', { sessionID: sessionId, message });
+    this.buffer.push('session.step.failed', { sessionID: sessionId, message });
+    this.buffer.pushIdle(sessionId);
   }
 
   /**
-   * Closing markers for a completed direct turn (live-only, same scope as the
-   * start markers above): tool success + reasoning end, before the terminal
-   * session.idle. Never durable, never chat text — the frontend projects them
-   * to activeToolName + additive tool/reasoning trace rows.
+   * Live-only reasoning markers for the direct runner (ask/text-only path):
+   * Ask is an answer mode, NOT a tool — so this path emits NO
+   * `session.tool.*` frames here (a `tool: '<agentId>'` frame would be a fake
+   * tool call and would surface as `ask called/done` in the chat timeline).
+   * The markers ride the same bounded frame buffer (project-scoped via
+   * data.sessionID, filtered by streamEvents like text), never durable
+   * history. Real readonly tool frames — when Ask gains bound tools — flow
+   * through the same buffer with their REAL names (never the agent id) and
+   * must stay visible; the text answer below is untouched by them.
    */
-  private bufferDirectLifecycleEnd(sessionId: string, agentId: string): void {
-    this.buffer.push('session.tool.success', { sessionID: sessionId, tool: agentId });
-    this.buffer.push('session.reasoning.ended', { sessionID: sessionId });
+  private bufferDirectLifecycleStart(sessionId: string, parentId?: string | null): void {
+    this.buffer.push('session.reasoning.started', {
+      sessionID: sessionId,
+      ...(parentId ? { parentId } : {}),
+    });
+  }
+
+  /**
+   * Closing marker for a completed direct turn (live-only, same scope as the
+   * start marker above): reasoning end, before the terminal session.idle.
+   * No `session.tool.*` here — see the start marker above. Never durable,
+   * never chat text — the frontend projects reasoning to the live thinking
+   * trace (thinking lives only until the text arrives).
+   */
+  private bufferDirectLifecycleEnd(sessionId: string, parentId?: string | null): void {
+    this.buffer.push('session.reasoning.ended', {
+      sessionID: sessionId,
+      ...(parentId ? { parentId } : {}),
+    });
   }
 
   /**
@@ -161,6 +183,7 @@ export class DirectTurnService {
     const text: string = assistant.text ?? '';
     if (!text) return;
     const partID: string = `prt_${assistant.id}`;
+    const parentId: string | null | undefined = assistant.parentId ?? undefined;
     for (let index: number = 0; index < text.length; index += SSE_CHUNK) {
       this.buffer.push('message.part.delta', {
         sessionID: sessionId,
@@ -168,10 +191,12 @@ export class DirectTurnService {
         partID,
         field: 'text',
         delta: text.slice(index, index + SSE_CHUNK),
+        ...(parentId ? { parentId } : {}),
       });
     }
     this.buffer.push('message.part.updated', {
       sessionID: sessionId,
+      ...(parentId ? { parentId } : {}),
       part: { id: partID, type: 'text', text },
     });
   }

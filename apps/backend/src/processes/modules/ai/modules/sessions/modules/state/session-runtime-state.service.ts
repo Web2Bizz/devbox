@@ -27,6 +27,24 @@ export class SessionRuntimeStateService {
   /** Owner/agent of the in-flight turn keyed by OUR session uuid. */
   private readonly turns: Map<string, TurnMeta> = new Map<string, TurnMeta>();
 
+  /**
+   * Server-side cancel flags keyed by OUR session uuid (WEB-24 / E3).
+   * Armed by `requestCancel` (the interrupt endpoint), read by the runner's
+   * segment-boundary `shouldInterrupt` hook, cleared when the turn settles.
+   * A separate set (never the `busy` set itself): interrupt clears `busy`
+   * to drop the late answer while the flag must survive until the boundary
+   * observes it. Idle sessions never carry a flag (no stale cancels).
+   */
+  private readonly cancelled: Set<string> = new Set<string>();
+
+  /**
+   * AbortControllers of the in-flight turns (WEB-24 / E3): `track` creates
+   * one per turn (its signal rides `RunTurnRequest.signal`), `requestCancel`
+   * aborts it, `untrack` drops it on settle. Abort never throws — the runner
+   * only READS `signal.aborted` on a segment boundary, never mid-segment.
+   */
+  private readonly controllers: Map<string, AbortController> = new Map<string, AbortController>();
+
   markBusy(id: string): void {
     this.busy.add(id);
   }
@@ -38,6 +56,50 @@ export class SessionRuntimeStateService {
 
   isBusy(id: string): boolean {
     return this.busy.has(id);
+  }
+
+  /**
+   * Signal of the in-flight turn (WEB-24 / E3): creates the turn controller
+   * on first call (idempotent — the same signal answers every call until
+   * `untrack`). The runner forwards it to the segment boundary where an
+   * abort reads as `cancelled` (server-side only — the client already
+   * stopped its own stream, no stream handling here).
+   */
+  track(id: string): AbortSignal {
+    let controller: AbortController | undefined = this.controllers.get(id);
+    if (!controller) {
+      controller = new AbortController();
+      this.controllers.set(id, controller);
+    }
+    return controller.signal;
+  }
+
+  /** Drops the turn controller (settle path — never aborts, see `requestCancel`). */
+  untrack(id: string): void {
+    this.controllers.delete(id);
+  }
+
+  /**
+   * Server-side cancel (WEB-24 / E3, the interrupt endpoint arms it): aborts
+   * the turn signal and sets the boundary flag the runner's `shouldInterrupt`
+   * hook reads. Answers whether a turn was in flight — idle sessions answer
+   * false and leave NO flag (a stale flag would cancel the NEXT turn).
+   */
+  requestCancel(id: string): boolean {
+    if (!this.busy.has(id)) return false;
+    this.controllers.get(id)?.abort();
+    this.cancelled.add(id);
+    return true;
+  }
+
+  /** Boundary flag of a server-side cancel (read by `shouldInterrupt`). */
+  isCancelled(id: string): boolean {
+    return this.cancelled.has(id);
+  }
+
+  /** Clears the cancel flag (turn settle — the boundary already observed it). */
+  clearCancelled(id: string): void {
+    this.cancelled.delete(id);
   }
 
   busyIds(): Iterable<string> {

@@ -1,13 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { DbService, dbUnavailable } from '@common/db/db.service';
 import {
   projectSessions,
   sessionAgents,
   sessionMessages,
+  agentCheckpoints,
 } from '@common/db/schema';
+import type { AgentCheckpointRow } from '@common/db/schema';
 import { AppLogger } from '@common/logger';
-import { uuidSchema } from '@common/validation';
 import type { SessionInfo, SessionMessage } from './sessions.dto';
 
 /** Durable registry row joined with the stored agent (list read shape). */
@@ -27,23 +28,26 @@ type SessionMetadataRow = { metadata: Record<string, unknown> | null };
  * Durable session history — the ONLY place the sessions domain touches
  * drizzle.
  *
- * Durable vs live (explicit): this repository stores ONLY the durable chat
- * thread — user receipts and assistant text answers (`role` user/assistant,
- * `text` non-empty). Reasoning (`session.reasoning.*`) and tool lifecycle
- * (`session.tool.*`) are live-only SSE detail: they stream project-scoped
- * via SessionStreamService.streamEvents, are never appended here, and do
- * not survive reload. Reload refetches this durable thread (REST) while the
- * live trace restarts empty — an explicit product decision, not a loss.
+ * Durable chain (0012): this repository stores the FULL chat thread —
+ * user/assistant text bubbles AND tool/reasoning chain links
+ * (`session.tool.called/progress/tool input success/failed`,
+ * `session.reasoning.*`).
+ * Tool/reasoning rows are parentId chain links (kind=tool/reasoning,
+ * name/status/detail hints), ordered by orderByParentChain and returned by
+ * listMessages/listActiveChain. Reload refetches the same chain (REST) —
+ * no live-only loss. Old clients ignore the additive keys.
  *
- * Why a separate `session_messages` table instead of reusing
- * `project_sessions`: a project_sessions.id is a uuid, while chat messages
- * are addressed by the DOMAIN session id — upstream `ses_*` values are not
- * uuids. The message table therefore keys on a text session_id and carries
- * project_id for the C4 gate scope (a project can never read another
- * project's history). `project_sessions` stays the durable registry of
- * harness-created sessions (origin='harness'), so no parallel registry is
- * introduced. `session_agents` persists the per-session agent choice so a
- * backend restart no longer drops it.
+ * Chain (migration 0009, extended by 0010/0011/0012): projects 1:N project_sessions
+ * 1:N session_messages. session_messages.session_id is the harness uuid FK
+ * -> project_sessions.id (RESTRICT); session_agents.session_id is the same
+ * uuid FK -> project_sessions.id (RESTRICT, 0010 — ses_* orphans dropped
+ * before the cast). Project scope resolves via JOIN project_sessions —
+ * messages carry NO project_id (the direct session_messages -> projects
+ * link is gone, orphans dropped by the migration). 0011 adds the linked-list
+ * thread: parent_id (parent domain id, root NULL, index
+ * (session_id, parent_id)); 0012 adds kind/name/status/detail + text
+ * nullable/default '' (tool rows carry no bubble). listMessages walks the
+ * chain with a createdAt fallback, appendMessage parents new rows at the tail.
  *
  * Every method maps Postgres failures through `dbUnavailable` (503
  * EXTERNAL_UNAVAILABLE, logged once with the caller correlationId) — there is no
@@ -60,40 +64,51 @@ export class SessionHistoryRepository {
   async appendMessage(row: {
     id: string;
     sessionId: string;
-    projectId: string;
     userId: string;
-    role: 'user' | 'assistant';
+    role: 'user' | 'assistant' | 'tool' | 'reasoning';
     agentId?: string | null;
-    text: string;
+    text?: string | null;
     createdAt?: string;
+    /** Parent domain id; NULL = root. Undefined = resolve to the session tail. */
+    parentId?: string | null;
+    /** Additive chain kind (unified ChatEntry) — absent reads as text. */
+    kind?: 'text' | 'tool' | 'reasoning' | null;
+    /** Additive tool/reasoning name (registry tool id). */
+    name?: string | null;
+    /** Additive lifecycle status (called/progress/done/failed, started/delta/ended). */
+    status?: string | null;
+    /** Additive single-line detail (never secrets). */
+    detail?: string | null;
   }): Promise<void> {
     try {
+      let parentId: string | null | undefined = row.parentId;
+      if (parentId === undefined) {
+        parentId = await this.findTailId(row.sessionId);
+      }
       await this.db.client
         .insert(sessionMessages)
         .values({
-          id: row.id,
+          domainId: row.id,
           sessionId: row.sessionId,
-          projectId: row.projectId,
           userId: row.userId,
           role: row.role,
           agentId: row.agentId ?? null,
-          text: row.text,
+          text: row.text ?? null,
+          ...(parentId !== null && parentId !== undefined ? { parentId } : {}),
+          ...(row.kind !== undefined && row.kind !== null ? { kind: row.kind } : {}),
+          ...(row.name !== undefined && row.name !== null ? { name: row.name } : {}),
+          ...(row.status !== undefined && row.status !== null ? { status: row.status } : {}),
+          ...(row.detail !== undefined && row.detail !== null ? { detail: row.detail } : {}),
           ...(row.createdAt !== undefined ? { createdAt: new Date(row.createdAt) } : {}),
         })
-        .onConflictDoNothing({ target: sessionMessages.id });
-      // Bump "last activity" on our durable row after a successful (or
-      // replay-deduplicated) append. `session_messages.session_id` is a text
-      // domain id and may be an upstream `ses_*` value, while
-      // `project_sessions.id` is a uuid column: feeding a non-uuid value to
-      // it makes Postgres raise 22P02, which `dbUnavailable` would surface as
-      // a 503. Non-uuid ids are therefore a deliberate no-op (nothing to bump
-      // — upstream sessions have no local registry row).
-      if (uuidSchema.safeParse(row.sessionId).success) {
-        await this.db.client
-          .update(projectSessions)
-          .set({ updatedAt: new Date() })
-          .where(eq(projectSessions.id, row.sessionId));
-      }
+        .onConflictDoNothing({ target: sessionMessages.domainId });
+      // Bump "last activity" on the owning registry row. session_id is now a
+      // uuid FK -> project_sessions.id (RESTRICT), so every appended row has a
+      // parent — no ses_* no-op branch anymore (orphans were dropped by 0009).
+      await this.db.client
+        .update(projectSessions)
+        .set({ updatedAt: new Date() })
+        .where(eq(projectSessions.id, row.sessionId));
     } catch (error) {
       dbUnavailable('sessionMessagesAppend', error, this.logger);
     }
@@ -105,37 +120,192 @@ export class SessionHistoryRepository {
       await this.db.client
         .update(sessionMessages)
         .set({ deletedAt: new Date() })
-        .where(eq(sessionMessages.id, id));
+        .where(eq(sessionMessages.domainId, id));
     } catch (error) {
       dbUnavailable('sessionMessagesDiscard', error, this.logger);
     }
   }
 
-  /** Live messages of one session, oldest first (soft-deleted rows hidden). */
-  async listMessages(sessionId: string): Promise<Array<SessionMessage>> {
+  /** Live messages of one session, chain order (branches allowed, see orderByParentChain). */
+  async listMessages(sessionId: string, projectId?: string): Promise<Array<SessionMessage>> {
+    const rows: Array<RawHistoryRow> = await this.fetchRows(sessionId, projectId);
+    const ordered: Array<RawHistoryRow> = orderByParentChain(rows);
+    return ordered.map(toSessionMessage);
+  }
+
+  /**
+   * Active chain root → leafId by walking parent links backwards (branches
+   * allowed: only the ancestors of the leaf answer, siblings stay out).
+   * Empty array when the leaf is unknown (the service maps it to 404).
+   */
+  async listActiveChain(
+    sessionId: string,
+    leafId: string,
+    projectId?: string,
+  ): Promise<Array<SessionMessage>> {
     try {
-      const rows: Array<{ id: string; role: string; createdAt: Date; text: string }> =
-        await this.db.client
-          .select({
-            id: sessionMessages.id,
-            role: sessionMessages.role,
-            createdAt: sessionMessages.createdAt,
-            text: sessionMessages.text,
-          })
-          .from(sessionMessages)
-          .where(
-            and(eq(sessionMessages.sessionId, sessionId), isNull(sessionMessages.deletedAt)),
-          )
-          .orderBy(asc(sessionMessages.createdAt));
-      return rows.map((row) => ({
-        id: row.id,
-        type: row.role,
-        createdAt: row.createdAt.toISOString(),
-        text: row.text,
-      }));
+      const rows: Array<RawHistoryRow> = await this.fetchRows(sessionId, projectId);
+      const byId: Map<string, RawHistoryRow> = new Map(rows.map((row) => [row.id, row]));
+      const leaf: RawHistoryRow | undefined = byId.get(leafId);
+      if (!leaf) return [];
+      const chain: Array<RawHistoryRow> = [];
+      const seen: Set<string> = new Set();
+      let current: RawHistoryRow | undefined = leaf;
+      while (current && !seen.has(current.id)) {
+        chain.push(current);
+        seen.add(current.id);
+        const parent: string | null | undefined = current.parentId;
+        current = parent === null || parent === undefined ? undefined : byId.get(parent);
+      }
+      chain.reverse();
+      return chain.map(toSessionMessage);
     } catch (error) {
-      dbUnavailable('sessionMessagesList', error, this.logger);
+      dbUnavailable('sessionMessagesActiveChain', error, this.logger);
     }
+  }
+
+  /**
+   * Branch children of one parent: [{childId, createdAt, preview}].
+   * Empty parentId (null) lists the roots (normally one). Ordered by
+   * (createdAt ASC, id ASC) — the branch switcher order.
+   */
+  async listVariants(
+    sessionId: string,
+    parentId: string | null,
+    projectId?: string,
+  ): Promise<Array<{ childId: string; createdAt: string; preview: string }>> {
+    try {
+      const rows: Array<RawHistoryRow> = await this.fetchRows(sessionId, projectId);
+      return rows
+        .filter((row) => (row.parentId ?? null) === parentId)
+        .sort((a, b) => {
+          const at: number = a.createdAt.getTime() - b.createdAt.getTime();
+          if (at !== 0) return at;
+          return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+        })
+        .map((row) => ({
+          childId: row.id,
+          createdAt: row.createdAt.toISOString(),
+          preview: toPreview(row.text),
+        }));
+    } catch (error) {
+      dbUnavailable('sessionMessagesVariants', error, this.logger);
+    }
+  }
+
+  /**
+   * Durable tail revert from one boundary (messages only, files untouched —
+   * the staged file revert lives in TurnWorkspaceService and is never
+   * touched here). Soft-deletes the boundary + all its descendants (forward
+   * reachable via parent links, every branch below the point). Answers the
+   * new leaf: the boundary parent (null when the root was reverted).
+   * Null when the boundary is unknown (the service maps it to 404).
+   */
+  async revertMessages(
+    sessionId: string,
+    messageId: string,
+    projectId?: string,
+  ): Promise<string | null | undefined> {
+    try {
+      const rows: Array<RawHistoryRow> = await this.fetchRows(sessionId, projectId);
+      const byId: Map<string, RawHistoryRow> = new Map(rows.map((row) => [row.id, row]));
+      const boundary: RawHistoryRow | undefined = byId.get(messageId);
+      if (!boundary) return undefined;
+      const children: Map<string, Array<string>> = new Map();
+      for (const row of rows) {
+        if (row.parentId === null || row.parentId === undefined) continue;
+        const list: Array<string> = children.get(row.parentId) ?? [];
+        list.push(row.id);
+        children.set(row.parentId, list);
+      }
+      const doomed: Array<string> = [];
+      const stack: Array<string> = [messageId];
+      const seen: Set<string> = new Set();
+      while (stack.length > 0) {
+        const next: string = stack.pop() as string;
+        if (seen.has(next)) continue;
+        seen.add(next);
+        doomed.push(next);
+        for (const child of children.get(next) ?? []) stack.push(child);
+      }
+      await this.db.client
+        .update(sessionMessages)
+        .set({ deletedAt: new Date() })
+        .where(
+          and(eq(sessionMessages.sessionId, sessionId), inArray(sessionMessages.domainId, doomed)),
+        );
+      return boundary.parentId ?? null;
+    } catch (error) {
+      dbUnavailable('sessionMessagesRevert', error, this.logger);
+    }
+  }
+
+  /** Raw live rows of one session (project-scoped when projectId travels). */
+  private async fetchRows(sessionId: string, projectId?: string): Promise<Array<RawHistoryRow>> {
+    const base = this.db.client
+      .select({
+        id: sessionMessages.domainId,
+        role: sessionMessages.role,
+        createdAt: sessionMessages.createdAt,
+        text: sessionMessages.text,
+        parentId: sessionMessages.parentId,
+        kind: sessionMessages.kind,
+        name: sessionMessages.name,
+        status: sessionMessages.status,
+        detail: sessionMessages.detail,
+      })
+      .from(sessionMessages);
+    if (projectId === undefined) {
+      return base
+        .where(and(eq(sessionMessages.sessionId, sessionId), isNull(sessionMessages.deletedAt)))
+        .orderBy(asc(sessionMessages.createdAt));
+    }
+    return base
+      .innerJoin(projectSessions, eq(projectSessions.id, sessionMessages.sessionId))
+      .where(
+        and(
+          eq(sessionMessages.sessionId, sessionId),
+          eq(projectSessions.projectId, projectId),
+          isNull(sessionMessages.deletedAt),
+          isNull(projectSessions.deletedAt),
+        ),
+      )
+      .orderBy(asc(sessionMessages.createdAt));
+  }
+
+  /**
+   * Tail of the durable chain (newest live row by createdAt) — the LINEAR
+   * default parent for the next append (single-root thread, no branch cursor).
+   * Branched appends must pass the active-leaf tip explicitly
+   * (`body.parentId`, the branch tip the client renders) and never rely on
+   * this clock tip: on a fork the newest row by time is a sibling, not the
+   * active tip. NULL when the session has no messages yet.
+   */
+  async findTailId(sessionId: string): Promise<string | null> {
+    try {
+      const rows: Array<{ domainId: string }> = await this.db.client
+        .select({ domainId: sessionMessages.domainId })
+        .from(sessionMessages)
+        .where(and(eq(sessionMessages.sessionId, sessionId), isNull(sessionMessages.deletedAt)))
+        .orderBy(desc(sessionMessages.createdAt))
+        .limit(1);
+      const tail: unknown = (rows[0] as Record<string, unknown> | undefined)?.domainId ??
+        (rows[0] as Record<string, unknown> | undefined)?.id;
+      return typeof tail === 'string' ? tail : null;
+    } catch (error) {
+      dbUnavailable('sessionMessagesTail', error, this.logger);
+    }
+  }
+
+  /**
+   * Tip for one append: explicit branch parent wins (activeLeaf tip the
+   * client already renders, null = explicit root); only an omitted parent
+   * (undefined) falls back to the linear clock tail above. Keeps
+   * `null ?? tail` from resurrecting a deleted sibling as the parent.
+   */
+  async resolveAppendParent(sessionId: string, parentId: string | null | undefined): Promise<string | null> {
+    if (parentId !== undefined) return parentId;
+    return this.findTailId(sessionId);
   }
 
   /** Upserts the agent answering a session (create or explicit per-turn choice). */
@@ -358,9 +528,9 @@ export class SessionHistoryRepository {
           agentId: sessionAgents.agentId,
         })
         .from(projectSessions)
-        // project_sessions.id is a uuid; session_agents.session_id is text
-        // (upstream `ses_*` ids never fit a uuid column) — cast the uuid side.
-        .leftJoin(sessionAgents, sql`${sessionAgents.sessionId} = ${projectSessions.id}::text`)
+        // 0010: session_agents.session_id is a uuid FK -> project_sessions.id
+        // (RESTRICT) — direct uuid JOIN, no ::text cast.
+        .leftJoin(sessionAgents, eq(sessionAgents.sessionId, projectSessions.id))
         .where(
           and(
             eq(projectSessions.projectId, projectId),
@@ -381,15 +551,148 @@ export class SessionHistoryRepository {
       const rows: Array<{ sessionId: string }> = await this.db.client
         .selectDistinct({ sessionId: sessionMessages.sessionId })
         .from(sessionMessages)
+        .innerJoin(projectSessions, eq(projectSessions.id, sessionMessages.sessionId))
         .where(
           and(
-            eq(sessionMessages.projectId, projectId),
+            eq(projectSessions.projectId, projectId),
             isNull(sessionMessages.deletedAt),
+            isNull(projectSessions.deletedAt),
           ),
         );
       return rows.map((row) => row.sessionId);
     } catch (error) {
       dbUnavailable('sessionMessagesSessionIds', error, this.logger);
+    }
+  }
+
+  /**
+   * Durable checkpoint write (WEB-13 / B2 seam): one row per
+   * (session_id, segment_index), upserted — the runner (B2/C2) calls this
+   * BETWEEN segments, never mid-segment. Status mirrors the contract
+   * `SessionCheckpointStatus` (plain text, no CHECK — the contract owns it).
+   */
+  async saveCheckpoint(row: {
+    sessionId: string;
+    threadId: string;
+    segmentIndex: number;
+    stepsUsed: number;
+    totalSteps: number;
+    status: string;
+    pauseReason?: string | null;
+    state?: Record<string, unknown> | null;
+    tokensUsed: number;
+  }): Promise<void> {
+    try {
+      await this.db.client
+        .insert(agentCheckpoints)
+        .values({
+          sessionId: row.sessionId,
+          threadId: row.threadId,
+          segmentIndex: row.segmentIndex,
+          stepsUsed: row.stepsUsed,
+          totalSteps: row.totalSteps,
+          status: row.status,
+          ...(row.pauseReason !== undefined && row.pauseReason !== null
+            ? { pauseReason: row.pauseReason }
+            : {}),
+          ...(row.state !== undefined && row.state !== null ? { state: row.state } : {}),
+          tokensUsed: row.tokensUsed,
+        })
+        .onConflictDoUpdate({
+          target: [agentCheckpoints.sessionId, agentCheckpoints.segmentIndex],
+          set: {
+            threadId: row.threadId,
+            stepsUsed: row.stepsUsed,
+            totalSteps: row.totalSteps,
+            status: row.status,
+            ...(row.pauseReason !== undefined && row.pauseReason !== null
+              ? { pauseReason: row.pauseReason }
+              : { pauseReason: null }),
+            ...(row.state !== undefined && row.state !== null ? { state: row.state } : {}),
+            tokensUsed: row.tokensUsed,
+          },
+        });
+    } catch (error) {
+      dbUnavailable('sessionCheckpointsSave', error, this.logger);
+    }
+  }
+
+  /**
+   * Latest durable checkpoint of one session (segmentIndex DESC) — the
+   * approval resume (WEB-17 / C3) reads the parked `awaiting_approval` row
+   * and resumes with the SAME thread_id. Undefined when the session never
+   * checkpointed.
+   */
+  async findLatestCheckpoint(
+    sessionId: string,
+  ): Promise<
+    | {
+        sessionId: string;
+        threadId: string | null;
+        segmentIndex: number;
+        stepsUsed: number;
+        totalSteps: number;
+        status: string;
+        pauseReason: string | null;
+        tokensUsed: number;
+      }
+    | undefined
+  > {
+    try {
+      const rows: Array<AgentCheckpointRow> = await this.db.client
+        .select()
+        .from(agentCheckpoints)
+        .where(eq(agentCheckpoints.sessionId, sessionId))
+        .orderBy(desc(agentCheckpoints.segmentIndex))
+        .limit(1);
+      const row: AgentCheckpointRow | undefined = rows[0];
+      if (!row) return undefined;
+      return {
+        sessionId: row.sessionId,
+        threadId: row.threadId,
+        segmentIndex: row.segmentIndex,
+        stepsUsed: row.stepsUsed,
+        totalSteps: row.totalSteps,
+        status: row.status,
+        pauseReason: row.pauseReason,
+        tokensUsed: row.tokensUsed,
+      };
+    } catch (error) {
+      dbUnavailable('sessionCheckpointsLatest', error, this.logger);
+    }
+  }
+
+  /**
+   * Every checkpoint row still `running` (a previous process died mid-turn)
+   * — the boot pause (WEB-22 / E1) re-saves each as `paused`/`restart`.
+   * Ordered by session for deterministic boot logs.
+   */
+  async listRunningCheckpoints(): Promise<
+    Array<{
+      sessionId: string;
+      threadId: string | null;
+      segmentIndex: number;
+      stepsUsed: number;
+      totalSteps: number;
+      tokensUsed: number;
+    }>
+  > {
+    try {
+      const rows: Array<AgentCheckpointRow> = await this.db.client
+        .select()
+        .from(agentCheckpoints)
+        .where(eq(agentCheckpoints.status, 'running'))
+        .orderBy(asc(agentCheckpoints.sessionId));
+      return rows.map((row) => ({
+        sessionId: row.sessionId,
+        threadId: row.threadId,
+        segmentIndex: row.segmentIndex,
+        stepsUsed: row.stepsUsed,
+        totalSteps: row.totalSteps,
+        tokensUsed: row.tokensUsed,
+      }));
+    } catch (error) {
+      dbUnavailable('sessionCheckpointsRunning', error, this.logger);
     }
   }
 
@@ -408,4 +711,105 @@ export class SessionHistoryRepository {
       status: (metadata.status ?? { type: 'idle' }) as SessionInfo['status'],
     };
   }
+}
+
+/** Chain row for the parentId validator (message-only links). */
+type ChainRow = {
+  id: string;
+  parentId: string | null | undefined;
+  createdAt: Date;
+};
+
+/** Raw durable row shape shared by listMessages/listActiveChain/listVariants. */
+type RawHistoryRow = {
+  id: string;
+  role: string;
+  createdAt: Date;
+  text: string | null;
+  parentId: string | null | undefined;
+  kind?: string | null;
+  name?: string | null;
+  status?: string | null;
+  detail?: string | null;
+};
+
+function toSessionMessage(row: RawHistoryRow): SessionMessage {
+  const kind: SessionMessage['kind'] =
+    row.kind === 'tool' || row.kind === 'reasoning' ? row.kind : row.text !== null ? 'text' : undefined;
+  return {
+    id: row.id,
+    type: row.role,
+    createdAt: row.createdAt.toISOString(),
+    text: row.text,
+    parentId: row.parentId ?? null,
+    ...(kind !== undefined ? { kind } : {}),
+    ...(typeof row.name === 'string' && row.name.length > 0 ? { name: row.name } : {}),
+    ...(typeof row.status === 'string' && row.status.length > 0 ? { status: row.status } : {}),
+    ...(typeof row.detail === 'string' && row.detail.length > 0 ? { detail: row.detail } : {}),
+  };
+}
+
+function toPreview(text: string | null): string {
+  if (text === null) return '';
+  const single: string = text.replace(/\s+/g, ' ').trim();
+  return single.length > 120 ? `${single.slice(0, 117)}…` : single;
+}
+
+/**
+ * Orders durable rows by the parentId chain (root → tail). Branches allowed:
+ * 1 parent → N children (the branch switcher lists them via listVariants).
+ * Children visit in (createdAt ASC, id ASC) order (depth-first pre-order),
+ * so the default thread is deterministic without dropping rows.
+ *
+ * Tool/reasoning decision (0012): tool/reasoning rows ARE durable chain
+ * links (kind=tool/reasoning, parentId=tip/receipt), so the chain links
+ * message AND tool rows in one order. Zero/multiple roots, dangling parents
+ * and cycles still fall back to (createdAt ASC, id ASC). No throw: the API
+ * always answers an array.
+ */
+export function orderByParentChain<T extends ChainRow>(rows: Array<T>): Array<T> {
+  if (rows.length <= 1) return [...rows];
+  const byId: Map<string, T> = new Map(rows.map((row) => [row.id, row]));
+  const children: Map<string, Array<T>> = new Map();
+  for (const row of rows) {
+    if (row.parentId === null || row.parentId === undefined) continue;
+    if (!byId.has(row.parentId)) return fallbackOrder(rows);
+    const list: Array<T> = children.get(row.parentId) ?? [];
+    list.push(row);
+    children.set(row.parentId, list);
+  }
+  const roots: Array<T> = rows.filter(
+    (row) => row.parentId === null || row.parentId === undefined,
+  );
+  if (roots.length !== 1) return fallbackOrder(rows);
+  for (const list of children.values()) {
+    list.sort((a, b) => {
+      const at: number = a.createdAt.getTime() - b.createdAt.getTime();
+      if (at !== 0) return at;
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    });
+  }
+  const ordered: Array<T> = [];
+  const seen: Set<string> = new Set();
+  const stack: Array<T> = [roots[0] as T];
+  while (stack.length > 0) {
+    const current: T = stack.pop() as T;
+    if (seen.has(current.id)) return fallbackOrder(rows);
+    seen.add(current.id);
+    ordered.push(current);
+    const next: Array<T> = children.get(current.id) ?? [];
+    for (let index: number = next.length - 1; index >= 0; index -= 1) {
+      stack.push(next[index] as T);
+    }
+  }
+  if (ordered.length !== rows.length) return fallbackOrder(rows);
+  return ordered;
+}
+
+function fallbackOrder<T extends ChainRow>(rows: Array<T>): Array<T> {
+  return [...rows].sort((a, b) => {
+    const at: number = a.createdAt.getTime() - b.createdAt.getTime();
+    if (at !== 0) return at;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
 }

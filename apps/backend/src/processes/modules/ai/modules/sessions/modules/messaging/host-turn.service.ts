@@ -51,6 +51,10 @@ export class HostTurnService {
       localSessionId: sessionId,
       userId,
     });
+    // Busy covers the whole streamed answer (the POST returns the receipt
+    // immediately): the recorder clears it on the terminal execution frame,
+    // statusMap/stream stay honest while the host bus streams.
+    this.state.markBusy(sessionId);
     this.state.setTurnMeta(sessionId, {
       userId,
       projectId: body.projectId,
@@ -64,8 +68,27 @@ export class HostTurnService {
     // Capture BEFORE the prompt: the host owns the user receipt id, so the
     // pre-turn tree is keyed to it once the prompt answers.
     const preTurn: string | undefined = await this.workspace.capture(directory, correlationId);
-    const receipt: HostPromptReceipt = await this.host.sessionPrompt(hostSessionId, body.text);
+    let receipt: HostPromptReceipt;
+    try {
+      receipt = await this.host.sessionPrompt(hostSessionId, body.text);
+    } catch (error) {
+      // Prompt never started — drop the busy marker so status/stream do not
+      // hang; the POST error itself clears the frontend `sending` gate.
+      this.state.clearBusy(sessionId);
+      throw error;
+    }
     if (preTurn) this.workspace.recordTurnStart(sessionId, receipt.id, preTurn);
+    this.state.setTurnMeta(sessionId, {
+      userId,
+      projectId: body.projectId,
+      agentId,
+      // Host-owned user receipt: the recorder parents the assistant answer
+      // to THIS id (current turn), never to findTailId at flush time (which
+      // could already be the next turn's user row).
+      receiptId: receipt.id,
+      ...(body.mode !== undefined ? { mode: body.mode } : {}),
+    });
+    const userParent: string | null = await this.history.resolveAppendParent(sessionId, body.parentId);
     const mapped: SessionMessage = {
       id: receipt.id,
       type: receipt.type,
@@ -74,16 +97,17 @@ export class HostTurnService {
         typeof receipt.payload.text === 'string' && receipt.payload.text.length > 0
           ? receipt.payload.text
           : null,
+      parentId: userParent,
     };
     await this.history.appendMessage({
       id: mapped.id,
       sessionId,
-      projectId: body.projectId,
       userId,
       role: 'user',
       agentId,
       text: body.text,
       createdAt: mapped.createdAt,
+      parentId: userParent,
     });
     this.logger.info('[sessions] prompt accepted', correlationId);
     return mapped;

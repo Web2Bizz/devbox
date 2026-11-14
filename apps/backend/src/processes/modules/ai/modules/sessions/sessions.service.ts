@@ -20,13 +20,17 @@ import type {
   CreateSessionInput,
   InterruptSessionInput,
   RevertInfo,
+  RevertMessagesResult,
   RevertStageRequest,
   SendMessageInput,
+  SessionApprovalInput,
+  SessionCheckpointStatus,
   SessionForkRequest,
   SessionForkResponse,
   SessionInfo,
   SessionInterruptResult,
   SessionMessage,
+  SessionMessageVariant,
   SessionRunStatusMap,
   SessionModel,
   SessionRunnerProvider,
@@ -38,6 +42,8 @@ import { SessionFrameBufferService } from './modules/events/session-frame-buffer
 import { SessionStreamService } from './modules/events/session-stream.service';
 import { SessionInventoryService } from './modules/inventory/session-inventory.service';
 import { SessionMessagingService } from './modules/messaging/session-messaging.service';
+import { InProcessTurnService } from './modules/messaging/in-process-turn.service';
+import { resolveTurnThreadId } from './modules/runner/runner.service';
 import { SessionRuntimeStateService } from './modules/state/session-runtime-state.service';
 import { TurnWorkspaceService } from './modules/workspace/turn-workspace.service';
 
@@ -73,6 +79,7 @@ export class SessionsService {
     private readonly state: SessionRuntimeStateService,
     private readonly buffer: SessionFrameBufferService,
     @Optional() private readonly agents?: AgentsService,
+    @Optional() private readonly inProcess?: InProcessTurnService,
     private readonly logger: AppLogger = new AppLogger(SessionsService.name),
   ) {}
 
@@ -230,6 +237,8 @@ export class SessionsService {
    * GET /api/v1/sessions/{id}/messages — durable Postgres thread only.
    * `limit` keeps its validation contract (400 on garbage) but the durable
    * read has no cursor semantics; an unknown session is an honest empty array.
+   * `leafId` narrows to the active chain root → leaf (branch siblings out);
+   * unknown leaf answers 404 MessageNotFound.
    */
   async listMessages(
     userId: string,
@@ -238,11 +247,101 @@ export class SessionsService {
     limitRaw: string | undefined,
     _cursor: string | undefined,
     correlationId: string,
+    leafId?: string,
   ): Promise<Array<SessionMessage>> {
     this.auth.assertServeUser(userId, correlationId);
-    await this.access.resolveProjectDirectory(projectId, userId, correlationId);
+    const project: GatedProjectScope = await this.access.resolveProjectDirectory(
+      projectId,
+      userId,
+      correlationId,
+    );
     this.parseLimit(limitRaw);
-    return this.history.listMessages(sessionId);
+    if (leafId !== undefined && leafId.length > 0) {
+      const chain: Array<SessionMessage> = await this.history.listActiveChain(
+        sessionId,
+        leafId,
+        project.projectId,
+      );
+      if (chain.length === 0) {
+        throw new NotFoundException({
+          code: 'MessageNotFound',
+          message: `Message '${leafId}' not found in session`,
+        });
+      }
+      return chain;
+    }
+    return this.history.listMessages(sessionId, project.projectId);
+  }
+
+  /**
+   * GET /api/v1/sessions/{id}/variants — branch children of one parent
+   * ([{childId, createdAt, preview}], time-ordered for the branch switcher).
+   * Null parentId lists the roots (normally one). Unknown parent answers 404.
+   */
+  async listVariants(
+    userId: string,
+    sessionId: string,
+    projectId: string | undefined,
+    parentId: string | null | undefined,
+    correlationId: string,
+  ): Promise<Array<SessionMessageVariant>> {
+    this.auth.assertServeUser(userId, correlationId);
+    const project: GatedProjectScope = await this.access.resolveProjectDirectory(
+      projectId,
+      userId,
+      correlationId,
+    );
+    if (parentId !== null && parentId !== undefined) {
+      const thread: Array<SessionMessage> = await this.history.listMessages(
+        sessionId,
+        project.projectId,
+      );
+      if (!thread.some((message) => message.id === parentId)) {
+        throw new NotFoundException({
+          code: 'MessageNotFound',
+          message: `Message '${parentId}' not found in session`,
+        });
+      }
+    }
+    return this.history.listVariants(sessionId, parentId ?? null, project.projectId);
+  }
+
+  /**
+   * POST /api/v1/sessions/{id}/messages/revert — durable tail revert from a
+   * boundary (messages only, files untouched). Soft-deletes the boundary +
+   * descendants; answers the new leaf (boundary parent, null for root).
+   */
+  async revertMessages(
+    userId: string,
+    sessionId: string,
+    projectId: string,
+    messageId: string,
+    correlationId: string,
+  ): Promise<RevertMessagesResult> {
+    this.auth.assertServeUser(userId, correlationId);
+    const project: GatedProjectScope = await this.access.resolveProjectDirectory(
+      projectId,
+      userId,
+      correlationId,
+    );
+    const activeLeaf: string | null | undefined = await this.history.revertMessages(
+      sessionId,
+      messageId,
+      project.projectId,
+    );
+    if (activeLeaf === undefined) {
+      throw new NotFoundException({
+        code: 'MessageNotFound',
+        message: `Message '${messageId}' not found in session`,
+      });
+    }
+    this.buffer.push('session.reverted', {
+      sessionID: sessionId,
+      messageID: messageId,
+      ...(activeLeaf ? { parentId: activeLeaf, leafId: activeLeaf } : {}),
+    });
+    this.logger.info('[sessions] messages reverted', correlationId);
+    return { activeLeaf };
   }
 
   /**
@@ -299,6 +398,11 @@ export class SessionsService {
   ): Promise<SessionInterruptResult> {
     this.auth.assertServeUser(userId, correlationId);
     await this.access.resolveProjectDirectory(body.projectId, userId, correlationId);
+    // WEB-24 / E3 server-side cancel: arm the boundary flag + abort the turn
+    // signal BEFORE clearing busy — the runner's next segment boundary reads
+    // it as `cancelled` while the cleared marker drops the late answer.
+    // Idle sessions arm nothing (no stale flag for the next turn).
+    this.state.requestCancel(sessionId);
     const localInterrupted: boolean = this.state.clearBusy(sessionId);
     // Guarantee the hanging client sending flag clears even if the terminal
     // session.idle was lost.
@@ -332,6 +436,98 @@ export class SessionsService {
       }
       throw mapped;
     }
+  }
+
+  /**
+   * POST /api/v1/sessions/{id}/approval — human decision for a turn parked
+   * on `awaiting_approval` (WEB-17 / C3, DTO C1, gate C4).
+   *
+   * `reject` parks the turn on `paused` (durable checkpoint row + resolved
+   * frame + idle, never a resume). `approve` consumes the parked row (a
+   * `running` marker on the next segment) and resumes the SAME checkpoint
+   * thread via the in-process turn wiring (B2 `CheckpointStore` over
+   * `agent_checkpoints` + C2 `shouldInterrupt` segment-boundary hook the E3
+   * server-side cancel flips (read here from the runtime cancel flag — a
+   * resumed turn cancelled via interrupt closes `cancelled` on the next
+   * boundary). A turn with no `awaiting_approval` row answers 409
+   * ApprovalNotPending (honest, non-retryable, no Retry-After).
+   */
+  async approval(
+    userId: string,
+    sessionId: string,
+    body: SessionApprovalInput,
+    correlationId: string,
+  ): Promise<{ status: SessionCheckpointStatus }> {
+    this.auth.assertServeUser(userId, correlationId);
+    const project: GatedProjectScope = await this.access.resolveProjectDirectory(
+      body.projectId,
+      userId,
+      correlationId,
+    );
+    const parked = await this.history.findLatestCheckpoint(sessionId);
+    if (!parked || parked.status !== 'awaiting_approval') {
+      throw new ConflictException({
+        code: 'ApprovalNotPending',
+        message: `Session '${sessionId}' has no turn awaiting approval`,
+      });
+    }
+    const threadId: string =
+      parked.threadId && parked.threadId.length > 0
+        ? parked.threadId
+        : resolveTurnThreadId({ sessionId, correlationId });
+    if (body.decision === 'reject') {
+      await this.history.saveCheckpoint({
+        sessionId,
+        threadId,
+        segmentIndex: parked.segmentIndex + 1,
+        stepsUsed: 0,
+        totalSteps: parked.totalSteps,
+        status: 'paused',
+        pauseReason: body.reason ?? 'rejected',
+        tokensUsed: parked.tokensUsed,
+      });
+      this.buffer.push('session.approval.resolved', {
+        sessionID: sessionId,
+        decision: 'reject',
+        ...(body.reason !== undefined ? { reason: body.reason } : {}),
+      });
+      this.buffer.pushIdle(sessionId);
+      this.logger.info(`[sessions] approval rejected steps=${parked.totalSteps}`, correlationId);
+      return { status: 'paused' };
+    }
+    await this.history.saveCheckpoint({
+      sessionId,
+      threadId,
+      segmentIndex: parked.segmentIndex + 1,
+      stepsUsed: 0,
+      totalSteps: parked.totalSteps,
+      status: 'running',
+      pauseReason: body.reason ?? 'approved',
+      tokensUsed: parked.tokensUsed,
+    });
+    this.buffer.push('session.approval.resolved', {
+      sessionID: sessionId,
+      decision: 'approve',
+      ...(body.reason !== undefined ? { reason: body.reason } : {}),
+    });
+    this.logger.info(
+      `[sessions] approval resumed thread=${threadId} steps=${parked.totalSteps}`,
+      correlationId,
+    );
+    const agentId: string = (await this.history.getAgent(sessionId)) ?? 'auto';
+    const inProcess: InProcessTurnService | undefined = this.inProcess;
+    if (!inProcess) throw new Error('InProcessTurnService is not wired');
+    await inProcess.resume({
+      userId,
+      sessionId,
+      directory: project.directory,
+      projectId: project.projectId,
+      agentId,
+      threadId,
+      correlationId,
+      shouldInterrupt: (): boolean => this.state.isCancelled(sessionId),
+    });
+    return { status: 'running' };
   }
 
   /**
@@ -391,7 +587,10 @@ export class SessionsService {
       userId,
       correlationId,
     );
-    const messages: Array<SessionMessage> = await this.history.listMessages(sessionId);
+    const messages: Array<SessionMessage> = await this.history.listMessages(
+      sessionId,
+      project.projectId,
+    );
     const last: SessionMessage | undefined = messages[messages.length - 1];
     if (!last) {
       throw new ConflictException({
@@ -429,17 +628,37 @@ export class SessionsService {
       },
       correlationId,
     );
+    // Preserve the linked-list thread: old domain id → new domain id, so
+    // parent links survive the copy in chain order (listMessages is already
+    // chain-ordered, so the walk below rebuilds the same shape).
+    const idMap: Map<string, string> = new Map();
     for (const message of copied) {
+      const nextId: string = Bun.randomUUIDv7();
+      const parentDomain: string | null = message.parentId ?? null;
+      const parentNext: string | null =
+        parentDomain !== null ? (idMap.get(parentDomain) ?? null) : null;
       await this.history.appendMessage({
-        id: Bun.randomUUIDv7(),
+        id: nextId,
         sessionId: created.id,
-        projectId: project.projectId,
         userId,
-        role: message.type === 'assistant' ? 'assistant' : 'user',
+        role:
+          message.type === 'assistant'
+            ? 'assistant'
+            : message.type === 'tool'
+              ? 'tool'
+              : message.type === 'reasoning'
+                ? 'reasoning'
+                : 'user',
         agentId,
-        text: message.text ?? '',
+        text: message.text ?? null,
         createdAt: message.createdAt,
+        parentId: parentNext,
+        ...(message.kind !== undefined ? { kind: message.kind } : {}),
+        ...(message.name !== undefined ? { name: message.name } : {}),
+        ...(message.status !== undefined ? { status: message.status } : {}),
+        ...(message.detail !== undefined ? { detail: message.detail } : {}),
       });
+      idMap.set(message.id, nextId);
     }
     this.buffer.push('session.forked', {
       sessionID: created.id,
@@ -469,6 +688,7 @@ export class SessionsService {
         directory: project.directory,
         messageID: body.messageID,
         ...(body.files !== undefined ? { files: body.files } : {}),
+        projectId: project.projectId,
       },
       correlationId,
     );

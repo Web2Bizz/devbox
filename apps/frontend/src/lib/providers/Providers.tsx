@@ -3,15 +3,15 @@
 import type { ReactNode } from 'react';
 import dynamic from 'next/dynamic';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { I18nProvider } from './i18n';
+import { I18nProvider } from '@/i18n';
 import { ThemeProvider } from '@web2bizz/ui/features';
-import { getQueryClient } from './lib/query-client';
+import { getQueryClient } from '@/lib/query-client';
 
 /**
  * Client-side providers for the Next.js App Router.
  *
  * Pure JSX composition with no branching, no state, no effects:
- * `ThemeProvider > QueryClientProvider > I18nProvider > children`.
+ * `ThemeProvider > I18nProvider > QueryClientProvider > children`.
  *
  * Theme is the kit SSR-safe `ThemeProvider`/`ThemeScript`
  * (`@web2bizz/ui/features`, 1:1 props `defaultTheme="system"`
@@ -49,12 +49,14 @@ export function Providers({ children }: { children: ReactNode }) {
 
   return (
     <ThemeProvider defaultTheme="system" storageKey="theme">
-      <QueryClientProvider client={queryClient}>
-        <I18nProvider>{children}</I18nProvider>
-        {process.env.NODE_ENV === 'development' && (
-          <ReactQueryDevtools initialIsOpen={false} buttonPosition="bottom-right" />
-        )}
-      </QueryClientProvider>
+      <I18nProvider>
+        <QueryClientProvider client={queryClient}>
+          {children}
+          {process.env.NODE_ENV === 'development' && (
+            <ReactQueryDevtools initialIsOpen={false} buttonPosition="bottom-right" />
+          )}
+        </QueryClientProvider>
+      </I18nProvider>
     </ThemeProvider>
   );
 }

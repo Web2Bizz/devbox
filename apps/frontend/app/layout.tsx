@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { cookies } from 'next/headers';
 import '@web2bizz/ui/styles.css';
 import './globals.css';
-import { Providers } from '@/providers';
+import { Providers } from '@/lib/providers';
 import { ToasterHost } from '@/components/toaster-host';
 import { ThemeScript } from '@/components/theme-script';
 import { en } from '@/i18n/dictionaries/en';

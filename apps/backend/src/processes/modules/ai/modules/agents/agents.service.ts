@@ -1,22 +1,26 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { AskAgent } from './ask.agent';
 import { AutoAgent } from './auto.agent';
 import type { AgentDto } from './agents.dto';
-import { AgentRegistry } from './agents.registry';
+import { AgentsRegistryService } from '../agents-registry/agents-registry.service';
+import { ModesService } from '../modes/modes.service';
+import type { ModeSelection } from '../modes/modes.types';
 
 /**
- * Registry of visible AI agent modes (Ask = single-answer mode, Auto =
- * router mode). Backend/Frontend/Fullstack stay hidden executors: their
- * classes remain provided in AgentsModule for Auto's direct injection
- * (no cycle through this service), but they are never listed here and
- * never answered directly — Ask and Auto are the only callable ids.
+ * AgentsService — facade of the EXECUTORS layer (AskAgent + AutoAgent answer
+ * directly; Backend/Frontend/Fullstack stay hidden executors provided here
+ * for Auto's direct injection). The MODE → WORKFLOW choice lives in
+ * ModesService (sibling ../modes/): 'ask' mode → 'single-answer' workflow
+ * (AskAgent), 'auto' mode → 'routed-chain' workflow (AutoAgent via
+ * WorkflowsService). Unknown ids throw the honest 404 from ModesService.
  */
 @Injectable()
 export class AgentsService {
   constructor(
+    private readonly modes: ModesService,
     private readonly ask: AskAgent,
     private readonly auto: AutoAgent,
-    private readonly registry: AgentRegistry,
+    private readonly registry: AgentsRegistryService,
   ) {}
 
   list(): Array<AgentDto> {
@@ -33,12 +37,10 @@ export class AgentsService {
     userId: string,
     correlationId?: string,
   ): Promise<string> {
-    if (agentId === this.ask.id) {
+    const selection: ModeSelection = this.modes.resolve(agentId, correlationId);
+    if (selection.workflow === 'single-answer') {
       return this.ask.ask(question, userId, correlationId);
     }
-    if (agentId === this.auto.id) {
-      return this.auto.ask(question, userId, correlationId);
-    }
-    throw new NotFoundException(`Agent '${agentId}' not found`);
+    return this.auto.ask(question, userId, correlationId);
   }
 }

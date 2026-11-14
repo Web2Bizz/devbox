@@ -1,9 +1,10 @@
 import { AppLogger } from "../logger";
-import { ExternalServiceError } from "../external/external-error";
+import {
+  STORAGE_UNAVAILABLE_MESSAGE,
+  StorageUnavailableError,
+} from "../exceptions/storage-unavailable.error";
 
-/** Fixed 503 message for unconfigured storage (mirrors dbUnavailable). */
-export const STORAGE_UNAVAILABLE_MESSAGE: string =
-  "сервис временно недоступен, повторите позже";
+export { STORAGE_UNAVAILABLE_MESSAGE };
 
 /**
  * storageUnavailable — unified deny for the single REPOS_ROOT catalog.
@@ -36,14 +37,7 @@ export function storageUnavailable(
   } catch {
     // Logging must never mask the deny.
   }
-  throw new ExternalServiceError({
-    code: "EXTERNAL_UNAVAILABLE",
-    service: "storage",
-    operation,
-    message: STORAGE_UNAVAILABLE_MESSAGE,
-    isRetryable: true,
-    cause,
-  });
+  throw new StorageUnavailableError(operation, cause);
 }
 
 /**
@@ -52,11 +46,5 @@ export function storageUnavailable(
  * throw propagate straight to ApiErrorFilter for the same 503 envelope).
  */
 export function throwStorageNotConfigured(operation: string): never {
-  throw new ExternalServiceError({
-    code: "EXTERNAL_UNAVAILABLE",
-    service: "storage",
-    operation,
-    message: STORAGE_UNAVAILABLE_MESSAGE,
-    isRetryable: true,
-  });
+  throw new StorageUnavailableError(operation);
 }

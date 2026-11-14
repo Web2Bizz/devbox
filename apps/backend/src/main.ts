@@ -5,6 +5,7 @@ import { NestFactory } from '@nestjs/core';
 import { type INestApplication } from '@nestjs/common';
 import { AppModule } from '@app/app.module';
 import { AppLogger, nestLogLevels } from '@common/logger';
+import { resolveProcessFate, type ProcessFate } from './common/exceptions/process-error';
 import { configureApp, setupSwagger } from '@app/app.setup';
 import { validateEnvWithWarnings } from '@common/env/env';
 
@@ -13,26 +14,12 @@ import { validateEnvWithWarnings } from '@common/env/env';
 const dotenvResult: dotenv.DotenvConfigOutput = dotenv.config();
 expand(dotenvResult);
 
-/** Shape probed for abort-like failures (DOMException / Node errno 20). */
-type AbortLike = {
-  name?: string;
-  code?: unknown;
-  cause?: { name?: string; code?: unknown };
-};
-
-function isAbortLike(error: unknown): boolean {
-  const value: AbortLike | null = error as AbortLike | null;
-  if (!value || typeof value !== 'object') return false;
-  return (
-    value?.name === 'AbortError' ||
-    value?.code === 20 ||
-    value?.cause?.name === 'AbortError' ||
-    value?.cause?.code === 20
-  );
-}
-
 // Process-level logger: usable before DI exists; sanitizes + respects
 // LOG_LEVEL like every other AppLogger (never raw console.* in runtime code).
+// Fate решает ЕДИНСТВЕННЫЙ resolveProcessFate из common/exceptions
+// (abort → тихо, pg-transient/db-outage → keep-alive, остальное → fatal).
+// NEVER `throw` из этих хендлеров: throw из uncaughtException всегда роняет
+// процесс. Дубли предикатов здесь запрещены — вся классификация в exceptions/.
 const PROCESS_CONTEXT: string = 'Process';
 const processLogger: AppLogger = new AppLogger(PROCESS_CONTEXT);
 
@@ -44,21 +31,61 @@ const processLogger: AppLogger = new AppLogger(PROCESS_CONTEXT);
 // swallowed here. Only the SSE relay signal abort is expected; anything
 // else is logged as error below.
 process.on('unhandledRejection', (reason: unknown) => {
-  if (isAbortLike(reason)) {
+  const fate: ProcessFate = resolveProcessFate(reason);
+  if (fate.reason === 'abort') {
     processLogger.debug(`[unhandledRejection] AbortError ignored ${String(reason).slice(0, 200)}`);
     return;
   }
-  processLogger.error(
-    `[unhandledRejection] ${reason instanceof Error ? reason.message : String(reason).slice(0, 500)}`,
+  // Transient outage (pg-transient / db-outage) already answered 503 at the
+  // request boundary — log and stay up, same as uncaughtException keep-alive.
+  // Anything else is fatal: logger.fatal + exit(1) so the supervisor
+  // restarts a known-clean process instead of running half-broken.
+  if (fate.keepAlive) {
+    const text: string = reason instanceof Error ? reason.message : String(reason);
+    processLogger.error(
+      `[unhandledRejection] ${fate.reason} kept alive (${text.slice(0, 200)})`,
+      reason instanceof Error ? (reason.stack ?? undefined) : undefined,
+    );
+    return;
+  }
+  const text: string = reason instanceof Error ? reason.message : String(reason);
+  processLogger.fatal(
+    `[unhandledRejection] fatal (${text.slice(0, 500)})`,
     reason instanceof Error ? (reason.stack ?? undefined) : undefined,
   );
+  process.exit(1);
 });
 process.on('uncaughtException', (error: unknown) => {
-  if (isAbortLike(error)) {
+  const fate: ProcessFate = resolveProcessFate(error);
+  if (fate.reason === 'abort') {
     processLogger.debug(`[uncaughtException] AbortError ignored ${String(error).slice(0, 200)}`);
     return;
   }
-  throw error;
+  // A dropped pg socket (codeless `Connection terminated unexpectedly`,
+  // ECONNRESET/ETIMEDOUT/EPIPE, SQLSTATE 57P01/57P02…) can surface outside
+  // any request context (pool 'error' races, in-flight query after a PG
+  // restart) — this class is transient by definition, so log it and stay up
+  // (the DAL breaker already short-circuits new reads to 503 + Retry-After;
+  // the next half-open probe recovers without a restart). An already-mapped
+  // db EXTERNAL_UNAVAILABLE escaping to the process level is the same outage
+  // surfacing twice (the request itself already answered 503 via
+  // ApiErrorFilter) — also kept alive.
+  // ONLY these two classes are kept alive — anything else logs fatal and
+  // exits(1) so the supervisor restarts a known-clean process.
+  if (fate.keepAlive) {
+    const text: string = error instanceof Error ? error.message : String(error);
+    processLogger.error(
+      `[uncaughtException] ${fate.reason} kept alive (${text.slice(0, 200)})`,
+      error instanceof Error ? (error.stack ?? undefined) : undefined,
+    );
+    return;
+  }
+  const text: string = error instanceof Error ? error.message : String(error);
+  processLogger.fatal(
+    `[uncaughtException] fatal (${text.slice(0, 500)})`,
+    error instanceof Error ? (error.stack ?? undefined) : undefined,
+  );
+  process.exit(1);
 });
 
 async function bootstrap(): Promise<void> {

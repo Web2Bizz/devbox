@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { AppLogger } from "@common/logger";
-import { dbUnavailable } from "@common/db/db.service";
+import { dbUnavailable, type DbReadOptions } from "@common/db/db.service";
 import { hashPassword } from "./utils/password";
 import type {
   CreateLocalInput,
@@ -73,9 +73,10 @@ export class UsersService {
   async findByEmail(
     email: string,
     correlationId?: string,
+    readOptions: DbReadOptions = {},
   ): Promise<StoredUser | null> {
     try {
-      return await this.usersRepository.findByEmail(email);
+      return await this.usersRepository.findByEmail(email, correlationId, readOptions);
     } catch (error) {
       dbUnavailable("users.findByEmail", error, this.logger, correlationId);
     }
@@ -84,9 +85,10 @@ export class UsersService {
   async findById(
     id: string,
     correlationId?: string,
+    readOptions: DbReadOptions = {},
   ): Promise<StoredUser | null> {
     try {
-      return await this.usersRepository.findById(id);
+      return await this.usersRepository.findById(id, correlationId, readOptions);
     } catch (error) {
       dbUnavailable("users.findById", error, this.logger, correlationId);
     }

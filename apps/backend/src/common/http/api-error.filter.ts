@@ -8,7 +8,8 @@ import {
 import { randomUUID } from 'node:crypto';
 import type { ApiError } from '@rush-code/contracts';
 import { AppLogger, serializeCause } from '../logger';
-import { ExternalServiceError } from '../external/external-error';
+import { isAbortLike, isAppError } from '../exceptions/app-error';
+import { isPgTransientConnectionError } from '../db/exceptions/pg-transient';
 
 /** Minimal response surface the filter writes the envelope through. */
 type FilterResponse = {
@@ -35,28 +36,6 @@ type RawResponseState = {
 
 /** ArgumentsHost HTTP view (exported by the framework only via internal.d.ts). */
 type HttpContext = ReturnType<ArgumentsHost['switchToHttp']>;
-
-function isAbortError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const errorLike: { name?: unknown; code?: unknown; cause?: unknown } =
-    error as { name?: unknown; code?: unknown; cause?: unknown };
-  if (errorLike.name === 'AbortError') return true;
-  if (errorLike.code === 20 || errorLike.code === '20') return true;
-  if (errorLike.cause && typeof errorLike.cause === 'object') {
-    const causeLike: { name?: unknown; code?: unknown } = errorLike.cause as {
-      name?: unknown;
-      code?: unknown;
-    };
-    if (
-      causeLike.name === 'AbortError' ||
-      causeLike.code === 20 ||
-      causeLike.code === '20'
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
 
 function statusToCode(status: number): string {
   if (status === 400) return 'bad_request';
@@ -90,7 +69,7 @@ export class ApiErrorFilter implements ExceptionFilter {
     // соединении (напр. fetch-таймаут opencode → EXTERNAL_TIMEOUT) —
     // НЕ глотаем: пропускаем дальше как internal_error/ExternalServiceError
     // чтобы фронт получил 503/504, а не зависший 200 undefined.
-    if (isAbortError(exception)) {
+    if (isAbortLike(exception)) {
       const rawResponse: RawResponseState = httpResponse as unknown as RawResponseState;
       const gone: boolean =
         httpRequest.destroyed === true ||
@@ -112,7 +91,10 @@ export class ApiErrorFilter implements ExceptionFilter {
       // headers already sent — ignore
     }
 
-    if (exception instanceof ExternalServiceError) {
+    if (isAppError(exception)) {
+      // Typed failure — единый глобальный класс AppError (ExternalServiceError
+      // — наследник для back-compat; DbUnavailableError / StorageUnavailable /
+      // ValidationError — тот же путь). Wire-контракт неизменен:
       // Typed upstream failure — same { code, message, correlationId } envelope
       // (no breaking change); the machine code is the EXTERNAL_*/GITHUB_AUTH
       // code verbatim so clients can distinguish retryable upstreams.
@@ -167,6 +149,43 @@ export class ApiErrorFilter implements ExceptionFilter {
         correlationId,
       };
       httpResponse.status(exception.httpStatus).json(body);
+      return;
+    }
+
+    // Сырой PG/drizzle-сбой, не замапленный модулем (забытый dbUnavailable):
+    // глобальный scope отвечает тем же 503 EXTERNAL_UNAVAILABLE + Retry-After,
+    // а не generic 500. Маппинг в одном месте — модули предикаты не дублируют.
+    // operation намеренно остаётся `unknown`: единственный кандидат из
+    // request-контекста — req.url/route, а URL несёт query (риск секретов/PII
+    // в логе), имя хендлера через host.getHandler() нестабильно между
+    // транспортами и отсутствует в минимальном FilterRequest-контракте.
+    // Настоящая операция уже залогирована на DAL-границе (throwDbUnavailable
+    // пишет `[db] unavailable operation=<op>` до проброса сюда), так что
+    // `unknown` здесь — маркер «модуль забыл dbUnavailable», а не потеря данных.
+    if (isPgTransientConnectionError(exception)) {
+      try {
+        httpResponse.setHeader('Retry-After', '30');
+      } catch {
+        // headers already sent — ignore
+      }
+      try {
+        this.logger.error(
+          '[http] handled service=db operation=unknown status=503 code=EXTERNAL_UNAVAILABLE',
+          correlationId,
+        );
+        this.logger.debug(
+          `[http] cause service=db operation=unknown code=EXTERNAL_UNAVAILABLE detail=${serializeCause(exception).slice(0, 2000)}`,
+          correlationId,
+        );
+      } catch {
+        // ignore logging failures
+      }
+      const body: ApiError = {
+        code: 'EXTERNAL_UNAVAILABLE',
+        message: 'сервис временно недоступен, повторите позже',
+        correlationId,
+      };
+      httpResponse.status(503).json(body);
       return;
     }
 

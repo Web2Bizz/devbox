@@ -57,6 +57,7 @@ export class TurnWorkspaceService {
       directory: input.directory,
       messageID: input.messageID,
       ...(input.files !== undefined ? { files: input.files } : {}),
+      ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
     });
     this.logger.info(`[sessions] revert staged files=${info.files.length}`, correlationId);
     return info;

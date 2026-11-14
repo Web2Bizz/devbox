@@ -10,6 +10,8 @@
  * Messages are fixed per code and never embed upstream bodies, URLs, tokens
  * or keys (never-log-secrets: only service/operation/attempt/status reach logs).
  */
+import { AppError, httpStatusForAppCode } from '../exceptions/app-error';
+
 export type ExternalErrorCode =
   | 'EXTERNAL_TIMEOUT'
   | 'EXTERNAL_UNAVAILABLE'
@@ -60,66 +62,64 @@ const FIXED_MESSAGES: Record<ExternalErrorCode, string> = {
   GITHUB_AUTH: 'GitHub authorization failed',
 };
 
-/** HTTP status the filter answers with for each code (upstream 5xx passes through when known). */
+/** HTTP status the filter answers with for each code.
+ * Дефолты — канонические из httpStatusForAppCode (единственный маппинг
+ * AppErrorCode → HTTP status в репо); здесь только upstream-passthrough
+ * поверх канона (5xx/GITHUB_AUTH/422 честно пропускают известный статус). */
 export function httpStatusFor(code: ExternalErrorCode, upstreamStatus?: number): number {
-  switch (code) {
-    case 'EXTERNAL_RATE_LIMITED':
-      return 429;
-    case 'EXTERNAL_TIMEOUT':
-      return 504;
-    case 'EXTERNAL_UPSTREAM_5XX':
-      return upstreamStatus !== undefined &&
-        Number.isInteger(upstreamStatus) &&
-        upstreamStatus >= 500 &&
-        upstreamStatus <= 599
-        ? upstreamStatus
-        : 502;
-    case 'GITHUB_AUTH':
-      return upstreamStatus === 401 || upstreamStatus === 403 ? upstreamStatus : 401;
-    case 'EXTERNAL_UNAUTHORIZED':
-      // 503, NOT 401: the frontend treats ANY 401 as "our session expired"
-      // (refresh → logout, see useUsage / useProfile / useOpencodeSessions),
-      // so a 401 here would kick the user out of the app. Our 401 means "the
-      // upstream refused the credentials we sent" — a config defect on our
-      // side, not the caller's session. 503 keeps it out of the refresh path.
-      return 503;
-    case 'EXTERNAL_BAD_REQUEST':
-      // Honest 4xx passthrough (400 or 422): the upstream rejected THIS
-      // request shape — neither an outage nor a caller-session problem, and
-      // the filter never puts Retry-After on <500 answers.
-      return upstreamStatus === 422 ? 422 : 400;
-    case 'EXTERNAL_NOT_FOUND':
-      // Honest 404: the upstream knows this resource is absent. Retry-After
-      // would be a lie — repeating the same request finds the same 404.
-      return 404;
-    case 'EXTERNAL_UNAVAILABLE':
-    default:
-      return 503;
+  if (code === 'EXTERNAL_UPSTREAM_5XX') {
+    return upstreamStatus !== undefined &&
+      Number.isInteger(upstreamStatus) &&
+      upstreamStatus >= 500 &&
+      upstreamStatus <= 599
+      ? upstreamStatus
+      : httpStatusForAppCode(code);
   }
+  if (code === 'GITHUB_AUTH') {
+    return upstreamStatus === 401 || upstreamStatus === 403
+      ? upstreamStatus
+      : httpStatusForAppCode(code);
+  }
+  if (code === 'EXTERNAL_BAD_REQUEST') {
+    // Honest 4xx passthrough (400 or 422): the upstream rejected THIS
+    // request shape — neither an outage nor a caller-session problem, and
+    // the filter never puts Retry-After on <500 answers.
+    return upstreamStatus === 422 ? upstreamStatus : httpStatusForAppCode(code);
+  }
+  // EXTERNAL_UNAUTHORIZED → 503, NOT 401: the frontend treats ANY 401 as "our
+  // session expired" (refresh → logout), so a 401 here would kick the user
+  // out of the app. Our 401 means "the upstream refused the credentials we
+  // sent" — a config defect on our side, not the caller's session. 503 keeps
+  // it out of the refresh path.
+  // EXTERNAL_NOT_FOUND → honest 404: the upstream knows this resource is
+  // absent. Retry-After would be a lie — repeating the same request finds
+  // the same 404.
+  return httpStatusForAppCode(code);
 }
 
-export class ExternalServiceError extends Error {
-  readonly code: ExternalErrorCode;
-  readonly service: string;
-  readonly operation: string;
+export class ExternalServiceError extends AppError {
   readonly status?: number;
   /** 1-based attempt that produced this error (restamped by the retry loop). */
   attempt: number;
-  readonly isRetryable: boolean;
-  readonly httpStatus: number;
-  readonly cause?: unknown;
 
   constructor(options: ExternalErrorOptions) {
-    super(options.message);
+    super({
+      code: options.code,
+      service: options.service,
+      operation: options.operation,
+      message: options.message,
+      httpStatus: httpStatusFor(options.code, options.status),
+      retryable: options.isRetryable ?? defaultRetryable(options.code),
+      transient: options.isRetryable ?? defaultRetryable(options.code),
+      cause: options.cause,
+    });
     this.name = 'ExternalServiceError';
-    this.code = options.code;
-    this.service = options.service;
-    this.operation = options.operation;
     this.attempt = options.attempt ?? 1;
     this.status = options.status;
-    this.isRetryable = options.isRetryable ?? defaultRetryable(options.code);
-    this.httpStatus = httpStatusFor(options.code, options.status);
-    if (options.cause !== undefined) this.cause = options.cause;
+  }
+
+  override get isRetryable(): boolean {
+    return this.retryable;
   }
 }
 

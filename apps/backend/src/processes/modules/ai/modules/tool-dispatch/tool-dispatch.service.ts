@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AppLogger } from '@common/logger';
+import { shellCommandRejection } from '../tools/shell.tool';
 import type { ToolCall, ToolContext, ToolHandler, ToolSettlement } from '../tool-runtime/tool-runtime.types';
 import { ToolRegistryService } from '../tool-registry/tool-registry.service';
 
@@ -166,6 +167,20 @@ export class ToolDispatchService {
     } catch {
       this.logger.warn(`[tools] invalid json name=${call.name}`);
       return errorResult(call, 'invalid JSON arguments, retry with valid JSON');
+    }
+    // Shell-batch assembly never reaches the handler: `shell` spawns with
+    // `shell: false`, so chaining (`;`, `|`, `&`), `cd` and `KEY=value`
+    // env-prefixes cannot execute and would only burn steps until max-steps.
+    // Fail-fast here (before execute) with a retryable hint instead.
+    if (bareToolName(call.name) === 'shell') {
+      const command: unknown = (input as { command?: unknown }).command;
+      if (typeof command === 'string') {
+        const rejection: string | null = shellCommandRejection(command);
+        if (rejection) {
+          this.logger.warn(`[tools] shell batch rejected name=${call.name}`);
+          return errorResult(call, rejection.replace(/^error:\s*/, ''));
+        }
+      }
     }
     try {
       const result: string = await tool.execute(input, context);

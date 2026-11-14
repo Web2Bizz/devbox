@@ -79,13 +79,63 @@ export function parseArgv(command: string): Array<string> | null {
   return argv.length > 0 ? argv : null;
 }
 
+/** Hint shared by every shell-batch rejection (fail-fast, retryable as two calls). */
+const SHELL_SINGLE_CALL_HINT: string =
+  'one shell call = one command (no &&/;/|/&/cd/env-prefix/background); split checks into steps, pass leading-dash grep patterns via -- or -e, keep commands under 15s';
+
+/**
+ * Fail-fast rejection of shell-batch assembly (no shell/PTY here).
+ *
+ * `ShellTool` spawns with `shell: false`, so chaining (`;`, `|`, `&`),
+ * newlines (two commands in one call), `cd` and `KEY=value` env-prefixes
+ * never execute — the model would only burn steps until max-steps. Returns
+ * the `error: …` hint for the model, or null when the line is a single call.
+ * Quote-aware: metachars inside `"…"`/`'…'` (grep patterns, paths) are kept.
+ */
+export function shellCommandRejection(command: string): string | null {
+  let quote: '"' | "'" | null = null;
+  for (const char of command) {
+    if (quote) {
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (
+      char === ';' ||
+      char === '|' ||
+      char === '&' ||
+      char === '>' ||
+      char === '<' ||
+      char === '`' ||
+      char === '\n' ||
+      char === '\r'
+    ) {
+      return `error: shell chaining is not supported (${SHELL_SINGLE_CALL_HINT})`;
+    }
+  }
+  const argv: Array<string> | null = parseArgv(command);
+  if (!argv) return `error: invalid command line (${SHELL_SINGLE_CALL_HINT})`;
+  const binary: string = argv[0] as string;
+  if (binary === 'cd') {
+    return `error: "cd" is not allowed, the working directory is fixed (${SHELL_SINGLE_CALL_HINT})`;
+  }
+  if (binary.includes('=')) {
+    return `error: env-prefix is not supported (${SHELL_SINGLE_CALL_HINT})`;
+  }
+  return null;
+}
+
 /** shell — allowlisted argv exec in the project dir, bounded timeout/output. */
 @Injectable()
 export class ShellTool implements ToolHandler {
   readonly fullName: string = 'shell';
   readonly definition: ToolDefinition = {
     name: 'shell',
-    description: 'Run one allowlisted command (git/ls/cat/rg/bun/…) in the project directory.',
+    description:
+      'Run ONE allowlisted command per call in the project directory (git/ls/cat/rg/bun/…). No chaining: &&/;/|/&/cd/env-prefix/background are rejected — split checks into steps. Grep patterns starting with - via -- or -e. Keep commands under 15s, no servers/watch.',
     inputSchema: {
       type: 'object',
       required: ['command'],
@@ -96,6 +146,8 @@ export class ShellTool implements ToolHandler {
   async execute(input: unknown, context: ToolContext): Promise<string> {
     const parsed: z.ZodSafeParseResult<{ command: string }> = inputSchema.safeParse(input);
     if (!parsed.success) return 'error: invalid input, expected { command: string }';
+    const rejection: string | null = shellCommandRejection(parsed.data.command);
+    if (rejection) return rejection;
     const argv: Array<string> | null = parseArgv(parsed.data.command);
     if (!argv) return 'error: invalid command line';
     const binary: string = argv[0] as string;

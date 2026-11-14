@@ -9,7 +9,7 @@ import {
 import { and, eq, isNull } from "drizzle-orm";
 import { readIdentity, type RequestIdentity } from "../auth/identity.service";
 import { AppLogger } from "@common/logger";
-import { DbService, dbUnavailable, type DbClient } from "@common/db/db.service";
+import { DbService, dbUnavailable, type DbClient, type DbReadOptions } from "@common/db/db.service";
 import {
   organizationMembers,
   organizations,
@@ -90,13 +90,22 @@ export class OrganizationsGuard implements CanActivate {
   async orgRowOrThrow(
     orgId: string,
     correlationId?: string,
+    readOptions: DbReadOptions = {},
   ): Promise<OrganizationRow> {
     try {
-      const rows: Array<OrganizationRow> = await this.client()
-        .select()
-        .from(organizations)
-        .where(and(eq(organizations.id, orgId), isNull(organizations.deletedAt)))
-        .limit(1);
+      // Idempotent SELECT — resilient path (breaker + 5-attempt retry on
+      // pg ECONNRESET/ETIMEDOUT/EPIPE); outage → raw throw, funneled below
+      // to 503 EXTERNAL_UNAVAILABLE (Retry-After 30, contract unchanged).
+      const rows: Array<OrganizationRow> = await this.db.executeRead(
+        "organizations.get",
+        () =>
+          this.client()
+            .select()
+            .from(organizations)
+            .where(and(eq(organizations.id, orgId), isNull(organizations.deletedAt)))
+            .limit(1),
+        { ...readOptions, correlationId: correlationId ?? readOptions.correlationId },
+      );
       if (rows.length === 0)
         throw new NotFoundException(`Organization ${orgId} not found`);
       return rows[0];
@@ -110,26 +119,33 @@ export class OrganizationsGuard implements CanActivate {
     orgId: string,
     userId: string,
     correlationId?: string,
+    readOptions: DbReadOptions = {},
   ): Promise<OrgRole | null> {
     try {
       // Join the org row: a member row alone must not authorize an org that
       // was soft-deleted (its projects are cascaded at removal, but a direct
-      // getRole/repos lookup must fail closed too).
-      const rows: Array<{ role: string }> = await this.client()
-        .select({ role: organizationMembers.role })
-        .from(organizationMembers)
-        .innerJoin(
-          organizations,
-          eq(organizationMembers.orgId, organizations.id),
-        )
-        .where(
-          and(
-            eq(organizationMembers.orgId, orgId),
-            eq(organizationMembers.userId, userId),
-            isNull(organizations.deletedAt),
-          ),
-        )
-        .limit(1);
+      // getRole/repos lookup must fail closed too). Idempotent SELECT — same
+      // resilient path as orgRowOrThrow.
+      const rows: Array<{ role: string }> = await this.db.executeRead(
+        "organizations.roleOf",
+        () =>
+          this.client()
+            .select({ role: organizationMembers.role })
+            .from(organizationMembers)
+            .innerJoin(
+              organizations,
+              eq(organizationMembers.orgId, organizations.id),
+            )
+            .where(
+              and(
+                eq(organizationMembers.orgId, orgId),
+                eq(organizationMembers.userId, userId),
+                isNull(organizations.deletedAt),
+              ),
+            )
+            .limit(1),
+        { ...readOptions, correlationId: correlationId ?? readOptions.correlationId },
+      );
       return rows.length > 0 ? (rows[0].role as OrgRole) : null;
     } catch (error) {
       dbUnavailable("organizations.roleOf", error, this.logger, correlationId);
@@ -141,9 +157,10 @@ export class OrganizationsGuard implements CanActivate {
     orgId: string,
     requesterId: string,
     correlationId?: string,
+    readOptions: DbReadOptions = {},
   ): Promise<{ org: OrganizationRow; role: OrgRole }> {
-    const org: OrganizationRow = await this.orgRowOrThrow(orgId, correlationId);
-    const role: OrgRole | null = await this.roleOf(orgId, requesterId, correlationId);
+    const org: OrganizationRow = await this.orgRowOrThrow(orgId, correlationId, readOptions);
+    const role: OrgRole | null = await this.roleOf(orgId, requesterId, correlationId, readOptions);
     if (!role) throw new NotFoundException(`Organization ${orgId} not found`);
     return { org, role };
   }
@@ -153,11 +170,13 @@ export class OrganizationsGuard implements CanActivate {
     orgId: string,
     requesterId: string,
     correlationId?: string,
+    readOptions: DbReadOptions = {},
   ): Promise<{ org: OrganizationRow; role: OrgRole }> {
     const found: { org: OrganizationRow; role: OrgRole } = await this.memberRowOrThrow(
       orgId,
       requesterId,
       correlationId,
+      readOptions,
     );
     if (found.role !== "maintainer") {
       throw new ForbiddenException("Only organization maintainers can do this");
@@ -168,17 +187,24 @@ export class OrganizationsGuard implements CanActivate {
   async maintainerCount(
     orgId: string,
     correlationId?: string,
+    readOptions: DbReadOptions = {},
   ): Promise<number> {
     try {
-      const rows: Array<OrganizationMemberRow> = await this.client()
-        .select()
-        .from(organizationMembers)
-        .where(
-          and(
-            eq(organizationMembers.orgId, orgId),
-            eq(organizationMembers.role, "maintainer"),
-          ),
-        );
+      // Idempotent SELECT — same resilient path as orgRowOrThrow.
+      const rows: Array<OrganizationMemberRow> = await this.db.executeRead(
+        "organizations.maintainerCount",
+        () =>
+          this.client()
+            .select()
+            .from(organizationMembers)
+            .where(
+              and(
+                eq(organizationMembers.orgId, orgId),
+                eq(organizationMembers.role, "maintainer"),
+              ),
+            ),
+        { ...readOptions, correlationId: correlationId ?? readOptions.correlationId },
+      );
       return rows.length;
     } catch (error) {
       dbUnavailable(
@@ -195,7 +221,8 @@ export class OrganizationsGuard implements CanActivate {
     orgId: string,
     userId: string,
     correlationId?: string,
+    readOptions: DbReadOptions = {},
   ): Promise<OrgRole | null> {
-    return this.roleOf(orgId, userId, correlationId);
+    return this.roleOf(orgId, userId, correlationId, readOptions);
   }
 }

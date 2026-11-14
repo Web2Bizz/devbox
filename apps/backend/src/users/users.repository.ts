@@ -1,6 +1,10 @@
 import { Injectable } from "@nestjs/common";
 import { and, eq, sql } from "drizzle-orm";
-import { DbService, type DbClient } from "@common/db/db.service";
+import {
+  DbService,
+  type DbClient,
+  type DbReadOptions,
+} from "@common/db/db.service";
 import { users, vaultSecrets, type UserRow } from "@common/db/schema";
 import { uuidSchema } from "@common/validation";
 import type { AuthProviderId, StoredUser } from "./users.types";
@@ -74,22 +78,45 @@ export class UsersRepository {
     }
   }
 
-  async findByEmail(email: string): Promise<StoredUser | null> {
-    const rows: Array<UserRow> = await this.client()
-      .select()
-      .from(users)
-      .where(sql`lower(${users.email}) = lower(${email})`)
-      .limit(1);
+  async findByEmail(
+    email: string,
+    correlationId?: string,
+    readOptions: DbReadOptions = {},
+  ): Promise<StoredUser | null> {
+    // Idempotent SELECT — resilient path (breaker + 5-attempt retry on
+    // pg ECONNRESET/ETIMEDOUT/EPIPE); outage → raw throw, the service maps
+    // it to 503 EXTERNAL_UNAVAILABLE (Retry-After 30, contract unchanged).
+    const rows: Array<UserRow> = await this.databaseService.executeRead(
+      "users.findByEmail",
+      () =>
+        this.client()
+          .select()
+          .from(users)
+          .where(sql`lower(${users.email}) = lower(${email})`)
+          .limit(1),
+      { ...readOptions, correlationId: correlationId ?? readOptions.correlationId },
+    );
     return rows.length > 0 ? toStoredUser(rows[0]) : null;
   }
 
-  async findById(id: string): Promise<StoredUser | null> {
+  async findById(
+    id: string,
+    correlationId?: string,
+    readOptions: DbReadOptions = {},
+  ): Promise<StoredUser | null> {
     if (!uuidSchema.safeParse(id).success) return null;
-    const rows: Array<UserRow> = await this.client()
-      .select()
-      .from(users)
-      .where(eq(users.id, id))
-      .limit(1);
+    // Idempotent SELECT — same resilient path as findByEmail (an ECONNRESET
+    // mid-flight retries here instead of surfacing as a 500/crash).
+    const rows: Array<UserRow> = await this.databaseService.executeRead(
+      "users.findById",
+      () =>
+        this.client()
+          .select()
+          .from(users)
+          .where(eq(users.id, id))
+          .limit(1),
+      { ...readOptions, correlationId: correlationId ?? readOptions.correlationId },
+    );
     return rows.length > 0 ? toStoredUser(rows[0]) : null;
   }
 

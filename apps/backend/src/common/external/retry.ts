@@ -14,10 +14,11 @@
  *   resolveRetryDefaults(); callers may override per call.
  */
 import {
-  ExternalServiceError,
   isRetryableStatus,
   isTimeoutError,
 } from './external-error';
+import { isNetworkLikeError } from '../db/exceptions/pg-transient';
+import { isAppError } from '../exceptions/app-error';
 
 export const DEFAULT_MAX_ATTEMPTS: number = 3;
 export const DEFAULT_BASE_DELAY_MS: number = 200;
@@ -115,12 +116,18 @@ export function resolveRetryOptions(
 
 /**
  * True when the failure is worth another attempt on an idempotent operation:
- * ExternalServiceError.isRetryable, timeouts, HTTP 429/5xx carried as
- * `{ status }` (Octokit-style), or network-ish messages (fetch failed,
- * ECONNREFUSED, ENOTFOUND, socket hang up …). 4xx (except 429) → false.
+ * AppError.retryable (ExternalServiceError.isRetryable — единый базовый
+ * класс), timeouts, HTTP 429/5xx carried as `{ status }` (Octokit-style),
+ * pg transient drops + network-ish messages via единый
+ * common/db/exceptions/pg-transient (isNetworkLikeError — коды, SQLSTATE
+ * 08xxx/57P0x/53300, "connection terminated" через drizzle `.cause`-цепочку,
+ * fetch failed/ENOTFOUND/socket hang up). 4xx (except 429) → false.
  */
 export function isRetryableError(error: unknown): boolean {
-  if (error instanceof ExternalServiceError) return error.isRetryable;
+  // Единый базовый класс: ExternalServiceError — наследник AppError, а
+  // isRetryable-геттер возвращает то же retryable (отдельный instanceof-бранч
+  // был дублем предиката — удалён, поведение то же).
+  if (isAppError(error)) return error.retryable;
   if (isTimeoutError(error)) return true;
   if (typeof error === 'object' && error !== null && 'status' in error) {
     const status: number = Number((error as { status?: unknown }).status);
@@ -129,21 +136,7 @@ export function isRetryableError(error: unknown): boolean {
       if (status >= 400 && status <= 499) return false;
     }
   }
-  if (error instanceof Error) {
-    const message: string = error.message.toLowerCase();
-    if (
-      message.includes('fetch failed') ||
-      message.includes('econnrefused') ||
-      message.includes('enotfound') ||
-      message.includes('eai_again') ||
-      message.includes('etimedout') ||
-      message.includes('socket hang up') ||
-      message.includes('network')
-    ) {
-      return true;
-    }
-  }
-  return false;
+  return isNetworkLikeError(error);
 }
 
 /**

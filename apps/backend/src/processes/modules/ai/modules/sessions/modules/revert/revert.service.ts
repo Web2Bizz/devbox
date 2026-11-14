@@ -11,6 +11,8 @@ export type RevertStageCommand = {
   directory: string;
   messageID: string;
   files?: Array<string>;
+  /** Gated project uuid — scopes the boundary lookup via project_sessions JOIN. */
+  projectId?: string;
 };
 
 type StagedRevert = {
@@ -55,7 +57,10 @@ export class RevertService {
     snapshot: string | null;
     files: Array<SnapshotDiff>;
   }> {
-    const messages: Array<{ id: string }> = await this.history.listMessages(command.sessionId);
+    const messages: Array<{ id: string }> = await this.history.listMessages(
+      command.sessionId,
+      command.projectId,
+    );
     const index: number = messages.findIndex((message) => message.id === command.messageID);
     if (index < 0) {
       throw new NotFoundException({

@@ -9,6 +9,7 @@ import {
   DbService,
   dbUnavailable,
   type DbClient,
+  type DbReadOptions,
 } from "@common/db/db.service";
 import {
   WorkspacePathService,
@@ -59,14 +60,23 @@ export class ProjectAccessService {
   async orgIdsForProject(
     projectId: string,
     correlationId?: string,
+    readOptions: DbReadOptions = {},
   ): Promise<Array<string>> {
     try {
       const { projects } = await import("../../../../../common/db/schema");
       const { eq: eqOp } = await import("drizzle-orm");
-      const rows: Array<{ orgId: string | null }> = await this.client()
-        .select({ orgId: projects.orgId })
-        .from(projects)
-        .where(eqOp(projects.id, projectId));
+      // Idempotent SELECT — resilient path (breaker + 5-attempt retry on
+      // pg ECONNRESET/ETIMEDOUT/EPIPE); outage → raw throw, funneled below
+      // to 503 EXTERNAL_UNAVAILABLE (Retry-After 30, contract unchanged).
+      const rows: Array<{ orgId: string | null }> = await this.db.executeRead(
+        "organizations.orgIdsForProject",
+        () =>
+          this.client()
+            .select({ orgId: projects.orgId })
+            .from(projects)
+            .where(eqOp(projects.id, projectId)),
+        { ...readOptions, correlationId: correlationId ?? readOptions.correlationId },
+      );
       const orgId: string | null | undefined = rows[0]?.orgId;
       return orgId ? [orgId] : [];
     } catch (error) {
@@ -84,8 +94,9 @@ export class ProjectAccessService {
     orgId: string,
     userId: string,
     correlationId?: string,
+    readOptions: DbReadOptions = {},
   ): Promise<OrgRole | null> {
-    return this.guard.getRole(orgId, userId, correlationId);
+    return this.guard.getRole(orgId, userId, correlationId, readOptions);
   }
 
   /**
@@ -99,16 +110,23 @@ export class ProjectAccessService {
   async projectAccessRow(
     projectId: string,
     correlationId?: string,
+    readOptions: DbReadOptions = {},
   ): Promise<ProjectAccessRow> {
     try {
       const { projects } = await import("../../../../../common/db/schema");
       const { and: andOp, eq: eqOp, isNull: isNullOp } = await import("drizzle-orm");
-      const rows: Array<ProjectAccessRow> = await this.client()
-        .select({ orgId: projects.orgId, ownerId: projects.ownerId })
-        .from(projects)
-        .where(
-          andOp(eqOp(projects.id, projectId), isNullOp(projects.deletedAt)),
-        );
+      // Idempotent SELECT — same resilient path as orgIdsForProject.
+      const rows: Array<ProjectAccessRow> = await this.db.executeRead(
+        "organizations.projectAccessRow",
+        () =>
+          this.client()
+            .select({ orgId: projects.orgId, ownerId: projects.ownerId })
+            .from(projects)
+            .where(
+              andOp(eqOp(projects.id, projectId), isNullOp(projects.deletedAt)),
+            ),
+        { ...readOptions, correlationId: correlationId ?? readOptions.correlationId },
+      );
       if (rows.length === 0)
         throw new NotFoundException(`Project ${projectId} not found`);
       return {
@@ -139,13 +157,15 @@ export class ProjectAccessService {
     projectId: string,
     userId: string,
     correlationId?: string,
+    readOptions: DbReadOptions = {},
   ): Promise<{ ownerId: string | null; orgIds: Array<string> }> {
-    const row: ProjectAccessRow = await this.projectAccessRow(projectId, correlationId);
+    const row: ProjectAccessRow = await this.projectAccessRow(projectId, correlationId, readOptions);
     await this.assertProjectAccess(
       projectId,
       row.ownerId,
       userId,
       correlationId,
+      readOptions,
     );
     return { ownerId: row.ownerId, orgIds: row.orgId ? [row.orgId] : [] };
   }
@@ -170,6 +190,7 @@ export class ProjectAccessService {
     projectId: string | undefined,
     userId: string,
     correlationId?: string,
+    readOptions: DbReadOptions = {},
   ): Promise<{ projectId: string; directory: string }> {
     if (!projectId || projectId.trim() === "") {
       throw new BadRequestException({
@@ -182,6 +203,7 @@ export class ProjectAccessService {
       projectId,
       userId,
       correlationId,
+      readOptions,
     );
     const orgId: string | undefined = orgIds[0];
     if (!orgId) {
@@ -226,22 +248,23 @@ export class ProjectAccessService {
     _ownerId: string | null,
     userId: string,
     correlationId?: string,
+    readOptions: DbReadOptions = {},
   ): Promise<void> {
     void _ownerId;
-    const orgIds: Array<string> = await this.orgIdsForProject(projectId, correlationId);
+    const orgIds: Array<string> = await this.orgIdsForProject(projectId, correlationId, readOptions);
     if (orgIds.length === 0) {
       throw new NotFoundException(`Project ${projectId} not found`);
     }
     for (const orgId of orgIds) {
       try {
-        await this.guard.orgRowOrThrow(orgId, correlationId);
+        await this.guard.orgRowOrThrow(orgId, correlationId, readOptions);
       } catch (error) {
         if (error instanceof NotFoundException)
           throw new NotFoundException(`Project ${projectId} not found`);
         throw error;
       }
       if (uuidSchema.safeParse(userId).success) {
-        const role: OrgRole | null = await this.getRole(orgId, userId, correlationId);
+        const role: OrgRole | null = await this.getRole(orgId, userId, correlationId, readOptions);
         if (role) return;
       }
     }

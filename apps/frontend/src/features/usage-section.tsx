@@ -3,11 +3,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, Progress, Skeleton } from '@web2bizz/ui/components';
 import { toast } from '@web2bizz/ui/widgets';
-import { EmptyState } from '../../components/states';
+import { EmptyState } from '../components/states';
 import type { OpencodeLimitBucket } from '@rush-code/contracts';
-import { useI18n } from '../../i18n';
-import { useUsage } from '../../hooks/useUsage';
-import { ApiKeyDialog } from './api-key-dialog';
+import { useI18n } from '../i18n';
+import { useUsage } from '../hooks/useUsage';
+import { ApiKeyDialog } from './usage-api-key-dialog';
 
 function isUsableBucket(bucket: OpencodeLimitBucket | undefined): bucket is OpencodeLimitBucket {
   return (
@@ -19,7 +19,7 @@ function isUsableBucket(bucket: OpencodeLimitBucket | undefined): bucket is Open
 }
 
 function toPercent(used: number, limit: number): number {
-  const raw = (used / limit) * 100;
+  const raw: number = (used / limit) * 100;
   if (!Number.isFinite(raw)) return 0;
   return Math.min(100, Math.max(0, Math.round(raw)));
 }
@@ -34,7 +34,7 @@ function toneClass(pct: number): string {
 export function UsageSection() {
   const { t } = useI18n();
   const { usage, loading, isFetching, status, reload, refetch } = useUsage();
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState<boolean>(false);
 
   const openDialog = () => setDialogOpen(true);
 
@@ -75,74 +75,87 @@ export function UsageSection() {
 
   if (loading) {
     body = skeleton;
-  } else if (status.kind === 'missing-key') {
-    body = (
-      <EmptyState
-        title={t.limits.empty}
-        description={t.limits.hint}
-        actionLabel={t.limits.addKey}
-        onAction={openDialog}
-      />
-    );
-  } else if (status.kind === 'invalid-key') {
-    body = (
-      <EmptyState
-        title={t.limits.invalidTitle}
-        description={t.limits.invalidDesc}
-        actionLabel={t.limits.addKey}
-        onAction={openDialog}
-      />
-    );
-  } else if (status.kind === 'session-expired' || status.kind === 'failed') {
-    body = (
-      <div className="grid gap-1">
-        <p className="text-muted-foreground text-sm">{status.message}</p>
-        {status.kind === 'failed' && status.shortId && (
-          <p className="text-muted-foreground text-xs">
-            {t.errors.diagnosticId}: {status.shortId}
-          </p>
-        )}
-      </div>
-    );
-  } else if (!usage) {
-    body = (
-      <EmptyState
-        title={t.limits.empty}
-        description={t.limits.hint}
-        actionLabel={t.limits.addKey}
-        onAction={openDialog}
-      />
-    );
   } else {
-    const rows = [
-      { key: 'rolling', label: t.limits.rolling, bucket: usage.rolling },
-      { key: 'daily', label: t.limits.daily, bucket: usage.daily },
-      { key: 'weekly', label: t.limits.weekly, bucket: usage.weekly },
-      { key: 'monthly', label: t.limits.monthly, bucket: usage.monthly },
-    ].filter((row): row is { key: string; label: string; bucket: OpencodeLimitBucket } =>
-      isUsableBucket(row.bucket),
-    );
-    if (rows.length === 0) {
-      body = <EmptyState title={t.limits.empty} description={t.limits.hint} />;
-    } else {
-      body = (
-        <ul className="grid gap-2">
-          {rows.map((row) => {
-            const pct = toPercent(row.bucket.used, row.bucket.limit);
-            return (
-              <li key={row.key} className="grid gap-1 rounded-[var(--radius-sm)] py-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm">{row.label}</span>
-                  <span className="text-muted-foreground text-sm">
-                    {row.bucket.used}/{row.bucket.limit}
-                  </span>
-                </div>
-                <Progress value={pct} className={toneClass(pct)} aria-label={row.label} />
-              </li>
+    // Branches share only the `status.kind` discriminant (not the logic):
+    // missing/invalid-key render distinct EmptyStates, session-expired/failed
+    // share the error body — so they are grouped cases, not a merged branch.
+    switch (status.kind) {
+      case 'missing-key':
+        body = (
+          <EmptyState
+            title={t.limits.empty}
+            description={t.limits.hint}
+            actionLabel={t.limits.addKey}
+            onAction={openDialog}
+          />
+        );
+        break;
+      case 'invalid-key':
+        body = (
+          <EmptyState
+            title={t.limits.invalidTitle}
+            description={t.limits.invalidDesc}
+            actionLabel={t.limits.addKey}
+            onAction={openDialog}
+          />
+        );
+        break;
+      case 'session-expired':
+      case 'failed':
+        body = (
+          <div className="grid gap-1">
+            <p className="text-muted-foreground text-sm">{status.message}</p>
+            {status.kind === 'failed' && status.shortId && (
+              <p className="text-muted-foreground text-xs">
+                {t.errors.diagnosticId}: {status.shortId}
+              </p>
+            )}
+          </div>
+        );
+        break;
+      default:
+        if (!usage) {
+          body = (
+            <EmptyState
+              title={t.limits.empty}
+              description={t.limits.hint}
+              actionLabel={t.limits.addKey}
+              onAction={openDialog}
+            />
+          );
+        } else {
+          const rows = [
+            { key: 'rolling', label: t.limits.rolling, bucket: usage.rolling },
+            { key: 'daily', label: t.limits.daily, bucket: usage.daily },
+            { key: 'weekly', label: t.limits.weekly, bucket: usage.weekly },
+            { key: 'monthly', label: t.limits.monthly, bucket: usage.monthly },
+          ].filter((row): row is { key: string; label: string; bucket: OpencodeLimitBucket } =>
+            isUsableBucket(row.bucket),
+          );
+          if (rows.length === 0) {
+            body = <EmptyState title={t.limits.empty} description={t.limits.hint} />;
+          } else {
+            body = (
+              <ul className="grid gap-2">
+                {rows.map((row) => {
+                  const pct = toPercent(row.bucket.used, row.bucket.limit);
+                  return (
+                    <li key={row.key} className="grid gap-1 rounded-[var(--radius-sm)] py-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm">{row.label}</span>
+                        <span className="text-muted-foreground text-sm">
+                          {row.bucket.used}/{row.bucket.limit}
+                        </span>
+                      </div>
+                      <Progress value={pct} className={toneClass(pct)} aria-label={row.label} />
+                    </li>
+                  );
+                })}
+              </ul>
             );
-          })}
-        </ul>
-      );
+          }
+        }
+        break;
     }
   }
 

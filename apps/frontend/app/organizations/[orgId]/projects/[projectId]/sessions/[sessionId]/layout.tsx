@@ -10,7 +10,7 @@ import type { ReactNode } from 'react';
  */
 export const SESSION_THREAD_CLASSNAME = 'h-full min-h-0 min-w-0';
 export const SESSION_COMPOSER_CLASSNAME =
-  'absolute right-0 bottom-2 left-0 z-20 mx-auto w-[60%] bg-background';
+  'absolute right-0 bottom-2 left-0 z-20 mx-auto w-[60%]';
 
 export default function SessionChatLayout({ children }: { children: ReactNode }) {
   return (

@@ -56,34 +56,48 @@ export type UseChatOptions = {
   projectId?: string;
 };
 
-export type UseChatResult = {
-  messages: Array<ChatMessage>;
+/**
+ * Canonical thread state (single source): the 11 fields the thread owns.
+ * Lives here (domain) so `useChat` and `ChatThreadProps` both derive from
+ * it via type utils — no field copy-paste.
+ */
+export type ChatThreadState = {
   /** Unified chain: durable text (REST) + live tool (SSE) in one homogeneous array. */
   entries: Array<ChatEntry>;
   /** Active branch tip (scoped: SSE finalize parents to it, thread renders its chain). */
   leafId: string | null;
-  activeLeaf: ChatEntry | null;
   variants: Array<ChatEntry>;
   variantIndex: number;
   variantCount: number;
-  selectLeaf: (id: string) => void;
-  revertTo: (messageId: string) => void;
   loading: boolean;
   sending: boolean;
   error: string | null;
-  isEmpty: boolean;
   /** Active session id (initial option or lazily created). */
   sessionId: string | null;
-  /** Agent answering the next prompt (registry id; default 'ask', survives reload). */
-  agentId: string;
-  setAgentId: (agentId: string) => void;
-  /** Agent id that owns the in-flight turn (null when idle). */
-  activeAgentId: string | null;
   /** Live sidecar: tool name of the in-flight turn (null when idle/text-only). */
   activeToolName: string | null;
   /** Approval gate of the parked turn (null when no turn awaits approval). */
   approval: ChatApprovalState | null;
-  send: (text: string, opts?: { agentId?: string }) => Promise<void>;
+};
+
+export type UseChatResult = ChatThreadState & {
+  messages: Array<ChatMessage>;
+  activeLeaf: ChatEntry | null;
+  selectLeaf: (leafId: string) => void;
+  revertTo: (messageId: string) => void;
+  isEmpty: boolean;
+  /** Режим работы, отвечающий на следующий промпт (registry id; default 'ask', survives reload). */
+  modeId: string;
+  setModeId: (modeId: string) => void;
+  /** @deprecated UI-алиас modeId; wire-совместимость с backend (agentId). */
+  agentId: string;
+  /** @deprecated UI-алиас setModeId; wire-совместимость с backend (agentId). */
+  setAgentId: (agentId: string) => void;
+  /** Режим работы, владеющий in-flight turn (null when idle). */
+  activeModeId: string | null;
+  /** @deprecated UI-алиас activeModeId; wire-совместимость с backend (agentId). */
+  activeAgentId: string | null;
+  send: (text: string, opts?: { modeId?: string; agentId?: string }) => Promise<void>;
   stop: () => void;
   reload: () => void;
 };

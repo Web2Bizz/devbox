@@ -12,7 +12,7 @@ import {
   Separator,
 } from '@web2bizz/ui/components';
 import { ErrorState, ProjectDetailSkeleton } from '@/components/states';
-import { UsageSection } from '@/features/usage/usage-section';
+import { UsageSection } from '@/features/usage-section';
 import { useProfile } from '@/hooks/useProfile';
 import { useI18n } from '@/i18n';
 
@@ -21,7 +21,7 @@ import { useI18n } from '@/i18n';
  * Real API: GET/PATCH /api/v1/auth/me via useProfile. Email is read-only
  * (backend PATCH accepts only firstName/lastName) — displayed as text
  * plus a disabled input with a hint, never sent.
- * Limits live in the usage feature module (`src/features/usage/`:
+ * Limits live in the usage feature module (`src/features/usage-*`:
  * `useUsage` + `UsageSection` + `ApiKeyDialog`) — this page only composes
  * `<UsageSection />` and owns no usage business logic.
  */

@@ -558,7 +558,9 @@ export const api = {
         },
       ),
     ),
-  // Agent registry (GET /api/v1/agents) — the chat AgentSelector inventory.
+  // backend-контракт: agents; UI-название: режимы работы.
+  // Mode registry (backend: /agents) for the chat mode picker inventory
+  // (GET /api/v1/agents) — the chat ModeSelector inventory.
   // URI-versioned v1 (same canonical prefix as the domain session routes),
   // same boundary-parse stance: a wire drift fails fast as shape_mismatch,
   // never a silent cast.

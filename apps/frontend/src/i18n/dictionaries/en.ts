@@ -289,7 +289,11 @@ export const en: Dictionary = {
     modelDefault: 'Runner default',
     modelClear: 'Clear',
     modelActive: 'Active model',
-    agentLabel: 'Agent',
+    modeLabel: 'Mode',
+    modeDefault: 'Ask',
+    /** @deprecated Use modeLabel — kept for selector compat (пачка B). */
+    agentLabel: 'Mode',
+    /** @deprecated Use modeDefault — kept for selector compat (пачка B). */
     agentDefault: 'Ask',
     scrollToEnd: 'Jump to latest',
     thinking: [
@@ -311,7 +315,7 @@ export const en: Dictionary = {
     reasoningStarted: 'started',
     reasoningThinking: 'thinking',
     reasoningDone: 'done',
-    activeAgent: 'Agent',
+    activeMode: 'Mode',
     activeTool: 'Tool',
     idle: 'Idle',
     busy: 'Working…',

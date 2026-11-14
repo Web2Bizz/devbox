@@ -1,5 +1,5 @@
 export type ChatThinkingRowProps = {
-  activeAgentName?: string;
+  activeModeName?: string;
   reasoningText?: string;
   /** Explicit live status when thinking trace is empty (timeline fallback). */
   reasoningActive?: boolean;

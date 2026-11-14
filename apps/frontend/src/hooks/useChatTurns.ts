@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import {
-  DEFAULT_AGENT_ID,
+  DEFAULT_AGENT_ID as DEFAULT_MODE_ID,
   createSession,
   ensureSessionAuth,
   interruptSession,
@@ -45,9 +45,11 @@ function freshTraceFlags(): TurnTraceFlags {
 export type UseChatTurns = {
   sessionId: string | null;
   sessionIdRef: MutableRefObject<string | null>;
-  agentId: string;
-  setAgentId: Dispatch<SetStateAction<string>>;
-  activeAgentId: string | null;
+  /** UI: режим работы (состояние пикера). */
+  modeId: string;
+  setModeId: Dispatch<SetStateAction<string>>;
+  /** UI: режим работы, владеющий in-flight turn (null when idle). */
+  activeModeId: string | null;
   activeToolName: string | null;
   /** Approval gate of the parked turn (null when no turn awaits approval). */
   approval: ChatApprovalState | null;
@@ -68,8 +70,8 @@ export type UseChatTurns = {
   live: ChatLiveAccumulators;
   pushTrace: (kind: ChatToolEvent['kind'], label: string, detail?: string) => void;
   resetTraceFlags: () => void;
-  ensureSession: (agentOverride?: string) => Promise<string>;
-  send: (text: string, opts?: { agentId?: string }) => Promise<void>;
+  ensureSession: (modeOverride?: string) => Promise<string>;
+  send: (text: string, opts?: { modeId?: string; agentId?: string }) => Promise<void>;
   stop: () => void;
   reload: () => void;
   finalize: () => void;
@@ -78,6 +80,15 @@ export type UseChatTurns = {
   setLoading: Dispatch<SetStateAction<boolean>>;
   setError: Dispatch<SetStateAction<string | null>>;
   setSending: Dispatch<SetStateAction<boolean>>;
+  setModeId: Dispatch<SetStateAction<string>>;
+  /** @deprecated UI-алиас setModeId; wire-совместимость с внешними потребителями. */
+  setAgentId: Dispatch<SetStateAction<string>>;
+  /** UI: режим работы (состояние пикера, deprecated-алиас modeId). */
+  agentId: string;
+  /** UI: режим работы in-flight turn (deprecated-алиас activeModeId). */
+  activeAgentId: string | null;
+  setActiveModeId: Dispatch<SetStateAction<string | null>>;
+  /** @deprecated UI-алиас setActiveModeId. */
   setActiveAgentId: Dispatch<SetStateAction<string | null>>;
   setActiveToolName: Dispatch<SetStateAction<string | null>>;
   setApproval: Dispatch<SetStateAction<ChatApprovalState | null>>;
@@ -93,8 +104,8 @@ export function useChatTurns(params: {
   const live = useChatLiveAccumulators();
 
   const [sessionId, setSessionId] = useState<string | null>(initialSessionId ?? null);
-  const [agentId, setAgentId] = useState<string>(DEFAULT_AGENT_ID);
-  const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
+  const [modeId, setModeId] = useState<string>(DEFAULT_MODE_ID);
+  const [activeModeId, setActiveModeId] = useState<string | null>(null);
   const [activeToolName, setActiveToolName] = useState<string | null>(null);
   const [approval, setApproval] = useState<ChatApprovalState | null>(null);
   const [sending, setSending] = useState(false);
@@ -148,7 +159,7 @@ export function useChatTurns(params: {
     sendingRef.current = false;
     sendingSinceRef.current = null;
     setSending(false);
-    setActiveAgentId(null);
+    setActiveModeId(null);
     setActiveToolName(null);
     traceFlagsRef.current.reasoningStarted = false;
   }, [chain.appendAssistantPartial, live.resetLive]);
@@ -173,7 +184,7 @@ export function useChatTurns(params: {
       sendingRef.current = false;
       sendingSinceRef.current = null;
       setSending(false);
-      setActiveAgentId(null);
+      setActiveModeId(null);
       setActiveToolName(null);
       setApproval(null);
       traceFlagsRef.current.reasoningStarted = false;
@@ -202,10 +213,11 @@ export function useChatTurns(params: {
   );
 
   const ensureSession = useCallback(
-    async (agentOverride?: string): Promise<string> => {
+    async (modeOverride?: string): Promise<string> => {
       if (sessionIdRef.current) return sessionIdRef.current;
       if (!projectId) throw buildProjectGateError();
-      const effective = agentOverride ?? agentId;
+      const effective = modeOverride ?? modeId;
+      // UI: режим работы; wire: agentId для совместимости с backend
       const created = await createSession({ projectId, agentId: effective });
       pushTrace('create-session', 'POST /api/v1/sessions');
       sessionIdRef.current = created.id;
@@ -215,24 +227,25 @@ export function useChatTurns(params: {
       live.resetLive();
       return created.id;
     },
-    [projectId, agentId, pushTrace, live.resetLive],
+    [projectId, modeId, pushTrace, live.resetLive],
   );
 
   const send = useCallback(
-    async (text: string, opts?: { agentId?: string }) => {
+    async (text: string, opts?: { modeId?: string; agentId?: string }) => {
       const trimmed = text.trim();
       if (!trimmed || sendingRef.current) return;
       if (!projectId) {
         setError(formatChatError(buildProjectGateError(), t.errors.unexpected));
         return;
       }
-      const effective = opts?.agentId ?? agentId;
+      // UI: режим работы; wire: agentId для совместимости с backend
+      const effective = opts?.modeId ?? opts?.agentId ?? modeId;
       sendingRef.current = true;
       abortedTurnRef.current = false;
       sendingSinceRef.current = Date.now();
       setSending(true);
       setError(null);
-      setActiveAgentId(effective);
+      setActiveModeId(effective);
       setActiveToolName(null);
       setApproval(null);
       live.resetLive();
@@ -261,6 +274,7 @@ export function useChatTurns(params: {
         pushTrace('prompt', `POST /api/v1/sessions/${sid}/messages`, effective);
         await sendSessionMessage(projectId, sid, trimmed, {
           signal: ctrl.signal,
+          // UI: режим работы; wire: agentId для совместимости с backend
           agentId: effective,
         });
       } catch (e: unknown) {
@@ -273,7 +287,7 @@ export function useChatTurns(params: {
         promptCtrlRef.current = null;
       }
     },
-    [projectId, ensureSession, live.resetLive, t, agentId, pushTrace, chain.appendUserText],
+    [projectId, ensureSession, live.resetLive, t, modeId, pushTrace, chain.appendUserText],
   );
 
   const stop = useCallback(() => {
@@ -298,7 +312,7 @@ export function useChatTurns(params: {
     sendingRef.current = false;
     sendingSinceRef.current = null;
     setSending(false);
-    setActiveAgentId(null);
+    setActiveModeId(null);
     setActiveToolName(null);
     setApproval(null);
     traceFlagsRef.current.approval = false;
@@ -399,9 +413,14 @@ export function useChatTurns(params: {
   return {
     sessionId,
     sessionIdRef,
-    agentId,
-    setAgentId,
-    activeAgentId,
+    modeId,
+    setModeId,
+    // UI: режим работы; wire: agentId для совместимости с backend
+    agentId: modeId,
+    setAgentId: setModeId,
+    activeModeId,
+    // UI: режим работы; wire: agentId для совместимости с backend
+    activeAgentId: activeModeId,
     activeToolName,
     approval,
     sending,
@@ -431,7 +450,9 @@ export function useChatTurns(params: {
     setLoading,
     setError,
     setSending,
-    setActiveAgentId,
+    setActiveModeId,
+    // UI: режим работы; wire: agentId для совместимости с backend
+    setActiveAgentId: setActiveModeId,
     setActiveToolName,
     setApproval,
   };

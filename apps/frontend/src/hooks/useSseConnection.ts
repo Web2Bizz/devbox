@@ -162,7 +162,7 @@ export function useSseConnection(params: {
         turns.sendingRef.current = false;
         turns.sendingSinceRef.current = null;
         turns.setSending(false);
-        turns.setActiveAgentId(null);
+        turns.setActiveModeId(null);
         turns.setActiveToolName(null);
         turns.traceFlagsRef.current.reasoningStarted = false;
       } catch {
@@ -525,7 +525,7 @@ export function useSseConnection(params: {
     turns.failTurn,
     turns.redialConnection,
     turns.live.resetLive,
-    turns.setActiveAgentId,
+    turns.setActiveModeId,
     turns.setActiveToolName,
     turns.setSending,
     turns.setApproval,

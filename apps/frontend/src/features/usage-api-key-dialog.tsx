@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import type { ComponentProps } from 'react';
 import {
   Button,
   Dialog,
@@ -15,12 +16,14 @@ import {
   FieldLabel,
   Input,
 } from '@web2bizz/ui/components';
-import { ApiClientError, api } from '../../api/client';
-import { getValidAccessToken, refreshAccessToken } from '../../lib/auth-store';
-import { useI18n } from '../../i18n';
+import { ApiClientError, api } from '../api/client';
+import { getValidAccessToken, refreshAccessToken } from '../lib/auth-store';
+import { useI18n } from '../i18n';
 import { SessionExpiredError, mapUsageStatus } from './usage-status';
 
 const MIN_KEY_LENGTH = 20;
+
+type ApiKeyInputProps = ComponentProps<typeof Input>;
 
 async function upsertApiKey(token: string, rawKey: string): Promise<void> {
   const list = await api.listVaultSecrets(token);
@@ -37,14 +40,14 @@ async function saveApiKey(rawKey: string): Promise<void> {
   if (!token) throw new SessionExpiredError();
   try {
     await upsertApiKey(token, rawKey);
-  } catch (err) {
-    if (err instanceof ApiClientError && err.status === 401) {
+  } catch (error) {
+    if (error instanceof ApiClientError && error.status === 401) {
       const retryToken = await refreshAccessToken();
       if (!retryToken) throw new SessionExpiredError();
       await upsertApiKey(retryToken, rawKey);
       return;
     }
-    throw err;
+    throw error;
   }
 }
 
@@ -58,10 +61,10 @@ export function ApiKeyDialog({
   onSaved: () => void;
 }) {
   const { t } = useI18n();
-  const [apiKey, setApiKey] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [apiKey, setApiKey] = useState<string>('');
+  const [saving, setSaving] = useState<boolean>(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [saveShortId, setSaveShortId] = useState('');
+  const [saveShortId, setSaveShortId] = useState<string>('');
 
   useEffect(() => {
     if (open) {
@@ -96,8 +99,8 @@ export function ApiKeyDialog({
       setApiKey('');
       onOpenChange(false);
       onSaved();
-    } catch (err) {
-      const status = mapUsageStatus(err, {
+    } catch (error) {
+      const status = mapUsageStatus(error, {
         sessionExpired: t.errors.sessionExpired,
         unexpected: t.errors.unexpected,
       });
@@ -109,6 +112,19 @@ export function ApiKeyDialog({
     } finally {
       setSaving(false);
     }
+  };
+
+  const apiKeyInputProps: ApiKeyInputProps = {
+    id: 'limits-api-key',
+    type: 'password',
+    autoComplete: 'new-password',
+    autoFocus: true,
+    placeholder: t.limits.keyPlaceholder,
+    'aria-describedby': saveError ? 'limits-key-error' : 'limits-key-hint',
+    'aria-invalid': !!saveError,
+    disabled: saving,
+    value: apiKey,
+    onChange: (e) => setApiKey(e.target.value),
   };
 
   return (
@@ -127,18 +143,7 @@ export function ApiKeyDialog({
         <form id="limits-key-form" onSubmit={submit} className="grid gap-4">
           <Field>
             <FieldLabel htmlFor="limits-api-key">{t.limits.keyLabel}</FieldLabel>
-            <Input
-              id="limits-api-key"
-              type="password"
-              autoComplete="new-password"
-              autoFocus
-              placeholder={t.limits.keyPlaceholder}
-              aria-describedby={saveError ? 'limits-key-error' : 'limits-key-hint'}
-              aria-invalid={!!saveError}
-              disabled={saving}
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-            />
+            <Input {...apiKeyInputProps} />
             <FieldDescription id="limits-key-hint">{t.limits.keyHint}</FieldDescription>
             {saveError && (
               <FieldError id="limits-key-error">

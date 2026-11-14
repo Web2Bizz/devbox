@@ -3,10 +3,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChatInput, AgentSelector } from '../components/chat';
+import { ChatInput, ModeSelector } from '../components/chat';
 import { ChatThread } from '../components/chat/chat-thread';
 import { DEFAULT_AGENT_ID, listAgents, resolveSessionApproval, toErrorMessage } from '../api/sessions-client';
 import { useChat } from '../hooks/useChat';
+import type { UseChatResult } from '../hooks/useChat';
 import { agentsQueryKey, sessionStatusQueryKey, sessionsQueryKey } from '../hooks/query-keys';
 import { useI18n } from '../i18n';
 import { ChatForkDialog } from './chat-fork-dialog';
@@ -42,8 +43,8 @@ export type ChatSectionProps = {
  */
 export function ChatSection({ sessionId, projectId, className, composerClassName }: ChatSectionProps) {
   const { t } = useI18n();
-  const [aborting, setAborting] = useState(false);
-  const [composerHeight, setComposerHeight] = useState(0);
+  const [aborting, setAborting] = useState<boolean>(false);
+  const [composerHeight, setComposerHeight] = useState<number>(0);
   const composerRef = useRef<HTMLDivElement | null>(null);
 
   // The jump button lives in the thread but must clear the composer, whose
@@ -59,27 +60,7 @@ export function ChatSection({ sessionId, projectId, className, composerClassName
   }, []);
   const [forkMessageId, setForkMessageId] = useState<string | null>(null);
   const [revertMessageId, setRevertMessageId] = useState<string | null>(null);
-  const chat = useChat({ sessionId, projectId });
-  const {
-    entries,
-    leafId,
-    variants,
-    variantIndex,
-    variantCount,
-    selectLeaf,
-    loading,
-    sending,
-    error,
-    sessionId: activeSessionId,
-    agentId,
-    setAgentId,
-    activeAgentId,
-    activeToolName,
-    approval,
-    send,
-    stop,
-    reload,
-  } = chat;
+  const chat: UseChatResult = useChat({ sessionId, projectId });
 
   // Approval gate (WEB-20 / D2): the parked long-session turn resolves via
   // POST /api/v1/sessions/{id}/approval (approve resumes the same thread,
@@ -88,14 +69,14 @@ export function ChatSection({ sessionId, projectId, className, composerClassName
   // the decision and invalidate the status/list caches; the thread stays
   // untouched on both paths (no optimistic history edits).
   const queryClient = useQueryClient();
-  const [approvalPending, setApprovalPending] = useState(false);
+  const [approvalPending, setApprovalPending] = useState<boolean>(false);
   const [approvalError, setApprovalError] = useState<string | null>(null);
 
-  const handleApproval = (decision: 'approve' | 'reject') => {
-    if (!projectId || !activeSessionId || !approval || approvalPending) return;
+  const handleApproval = (decision: 'approve' | 'reject'): void => {
+    if (!projectId || !chat.sessionId || !chat.approval || approvalPending) return;
     setApprovalPending(true);
     setApprovalError(null);
-    resolveSessionApproval(projectId, activeSessionId, decision)
+    resolveSessionApproval(projectId, chat.sessionId, decision)
       .then(() => {
         void queryClient.invalidateQueries({ queryKey: sessionsQueryKey(projectId) });
         void queryClient.invalidateQueries({ queryKey: sessionStatusQueryKey(projectId) });
@@ -108,37 +89,38 @@ export function ChatSection({ sessionId, projectId, className, composerClassName
       });
   };
 
-  const handleApprove = () => handleApproval('approve');
+  const handleApprove = (): void => handleApproval('approve');
 
-  const handleReject = () => handleApproval('reject');
+  const handleReject = (): void => handleApproval('reject');
 
-  // Display name of the live agent — same cache entry as the selector, so no
+  // Display name of the live mode — same cache entry as the selector, so no
   // extra request; the raw registry id is the honest fallback.
-  const { data: agents = [] } = useQuery({
+  const { data: modes = [] } = useQuery({
     queryKey: agentsQueryKey,
     queryFn: ({ signal }) => listAgents({ signal }),
   });
-  const activeAgentName =
-    activeAgentId === null
+  const activeModeName: string | undefined =
+    chat.activeModeId === null
       ? undefined
-      : (agents.find((agent) => agent.id === activeAgentId)?.name ?? activeAgentId);
+      : (modes.find((mode) => mode.id === chat.activeModeId)?.name ?? chat.activeModeId);
 
-  const handleSend = (text: string) => send(text);
+  const handleSend = async (text: string): Promise<void> => await chat.send(text);
 
-  const handleStop = () => {
+  const handleStop = (): void => {
     setAborting(true);
     try {
-      stop();
+      chat.stop();
     } finally {
       setAborting(false);
     }
   };
 
   // Persist (C5): path `sessions/[sessionId]` stays the sessionId source;
-  // `?agent=` carries the agent picker. Both survive F5; the hook itself
-  // stays router-free (testable without Next) — sync lives here. Only
-  // `usePathname`/`useRouter` are used (no `useSearchParams`, so no Suspense
-  // boundary is required); the query string is read from window.location.
+  // `?mode=` carries the mode picker (режим работы). Legacy `?agent=` stays
+  // readable for old bookmarks — `?mode=` wins when both travel. Both survive
+  // F5; the hook itself stays router-free (testable without Next) — sync lives
+  // here. Only `usePathname`/`useRouter` are used (no `useSearchParams`, so no
+  // Suspense boundary is required); the query string is read from window.location.
   const router = useRouter();
   const pathname = usePathname();
   const readUrlQuery = (): string => {
@@ -146,60 +128,64 @@ export function ChatSection({ sessionId, projectId, className, composerClassName
     return window.location.search.startsWith('?') ? window.location.search.slice(1) : '';
   };
 
-  // Init: `?agent=` → picker state (fallback DEFAULT_AGENT_ID in the hook).
+  // Init: `?mode=` (canonical) → picker state, legacy `?agent=` as fallback
+  // for old bookmarks (mode wins; fallback DEFAULT_AGENT_ID in the hook).
   useEffect(() => {
-    const agent = new URLSearchParams(readUrlQuery()).get('agent');
-    if (agent && agent !== agentId) setAgentId(agent);
+    const qs = new URLSearchParams(readUrlQuery());
+    // Совместимость: старый `?agent=` остаётся рабочим, новый `?mode=` в приоритете.
+    const mode = qs.get('mode') || qs.get('agent');
+    if (mode && mode !== chat.modeId) chat.setModeId(mode);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // `setAgentId` → `?agent=` (replace, no scroll, no history spam).
+  // `setModeId` → `?mode=` (replace, no scroll, no history spam; legacy
+  // `?agent=` is dropped on write so the URL canonicalizes to `?mode=`).
   useEffect(() => {
     if (!pathname || typeof window === 'undefined') return;
     const next = new URLSearchParams(readUrlQuery());
-    if (agentId === (next.get('agent') ?? DEFAULT_AGENT_ID)) return;
-    if (agentId === DEFAULT_AGENT_ID) next.delete('agent');
-    else next.set('agent', agentId);
+    const current = next.get('mode') ?? next.get('agent') ?? DEFAULT_AGENT_ID;
+    if (chat.modeId === current) return;
+    if (chat.modeId === DEFAULT_AGENT_ID) {
+      next.delete('mode');
+      next.delete('agent');
+    } else {
+      next.set('mode', chat.modeId);
+      // Совместимость записи: каноника — `?mode=`, старый `?agent=` удаляем,
+      // чтобы не плодить расходящиеся дубли.
+      next.delete('agent');
+    }
     const qs = next.toString();
     router.replace(pathname + (qs ? `?${qs}` : ''), { scroll: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentId, pathname]);
+  }, [chat.modeId, pathname]);
 
   // Lazy-created session → `.../sessions/[newId]` (replace, history kept in
   // the hook — no page reload, no lost draft).
   useEffect(() => {
-    if (!activeSessionId || !pathname || typeof window === 'undefined') return;
-    if (pathname.endsWith(`/${activeSessionId}`)) return;
+    if (!chat.sessionId || !pathname || typeof window === 'undefined') return;
+    if (pathname.endsWith(`/${chat.sessionId}`)) return;
     const qs = readUrlQuery();
     const suffix = qs ? `?${qs}` : '';
     if (pathname.endsWith('/sessions')) {
-      router.replace(`${pathname}/${activeSessionId}${suffix}`, { scroll: false });
+      router.replace(`${pathname}/${chat.sessionId}${suffix}`, { scroll: false });
       return;
     }
-    const replaced = pathname.replace(/\/sessions\/[^/]+$/, `/sessions/${activeSessionId}`);
+    const replaced = pathname.replace(/\/sessions\/[^/]+$/, `/sessions/${chat.sessionId}`);
     if (replaced !== pathname) {
       router.replace(`${replaced}${suffix}`, { scroll: false });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSessionId, pathname]);
+  }, [chat.sessionId, pathname]);
 
   return (
     <section aria-label={t.chat.title} className={className ? `grid min-h-0 gap-2 ${className}` : 'grid min-h-0 gap-2'}>
+      {/* overrides: handlers not in chat + error gate */}
       <ChatThread
-        entries={entries}
-        leafId={leafId}
-        variants={variants}
-        variantIndex={variantIndex}
-        variantCount={variantCount}
-        onSelectLeaf={selectLeaf}
-        loading={loading}
-        sending={sending}
-        error={approvalError ?? error}
-        sessionId={activeSessionId}
-        onRetry={reload}
-        activeAgentName={activeAgentName}
-        activeToolName={activeToolName ?? undefined}
-        approval={approval}
+        {...chat}
+        onSelectLeaf={chat.selectLeaf}
+        error={approvalError ?? chat.error}
+        onRetry={chat.reload}
+        activeModeName={activeModeName}
         onApprove={handleApprove}
         onReject={handleReject}
         approvalPending={approvalPending}
@@ -212,12 +198,12 @@ export function ChatSection({ sessionId, projectId, className, composerClassName
         <ChatInput
           onSend={handleSend}
           onStop={handleStop}
-          sending={sending || aborting}
+          sending={chat.sending || aborting}
           leftSlot={
-            <AgentSelector
-              agentId={agentId}
-              onChange={setAgentId}
-              disabled={sending}
+            <ModeSelector
+              modeId={chat.modeId}
+              onChange={chat.setModeId}
+              disabled={chat.sending}
             />
           }
         />
@@ -227,7 +213,7 @@ export function ChatSection({ sessionId, projectId, className, composerClassName
         onOpenChange={(open) => {
           if (!open) setForkMessageId(null);
         }}
-        sessionId={activeSessionId}
+        sessionId={chat.sessionId}
         projectId={projectId}
         messageId={forkMessageId}
       />
@@ -236,7 +222,7 @@ export function ChatSection({ sessionId, projectId, className, composerClassName
         onOpenChange={(open) => {
           if (!open) setRevertMessageId(null);
         }}
-        sessionId={activeSessionId}
+        sessionId={chat.sessionId}
         projectId={projectId}
         messageId={revertMessageId}
       />

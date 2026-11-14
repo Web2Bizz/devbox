@@ -6,7 +6,7 @@ import { useSseConnection } from './useSseConnection';
 import { useChatTurns } from './useChatTurns';
 import type { UseChatOptions, UseChatResult } from './useChatTypes';
 
-export type { ChatApprovalState, ChatMessage, ChatToolEvent, FrameApproval, FrameReasoning, FrameText, UseChatOptions, UseChatResult } from './useChatTypes';
+export type { ChatApprovalState, ChatMessage, ChatThreadState, ChatToolEvent, FrameApproval, FrameReasoning, FrameText, UseChatOptions, UseChatResult } from './useChatTypes';
 
 /**
  * Chat over the domain contract (`/api/v1/sessions*`, api/sessions-client) —
@@ -88,9 +88,14 @@ export function useChat(options?: UseChatOptions): UseChatResult {
     error: turns.error,
     isEmpty,
     sessionId: turns.sessionId,
-    agentId: turns.agentId,
-    setAgentId: turns.setAgentId,
-    activeAgentId: turns.activeAgentId,
+    modeId: turns.modeId,
+    setModeId: turns.setModeId,
+    // UI: режим работы; wire: agentId для совместимости с backend
+    agentId: turns.modeId,
+    setAgentId: turns.setModeId,
+    activeModeId: turns.activeModeId,
+    // UI: режим работы; wire: agentId для совместимости с backend
+    activeAgentId: turns.activeModeId,
     activeToolName: turns.activeToolName,
     approval: turns.approval,
     send: turns.send,

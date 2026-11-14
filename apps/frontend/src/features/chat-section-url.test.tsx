@@ -1,13 +1,16 @@
 /**
- * ChatSection URL persist (C5): sessionId lives in the path, `?agent=`
- * carries the agent picker. The hook stays router-free — all URL sync
- * lives here, so these tests mock `useChat` + `next/navigation` and assert
- * the sync contract:
- * - init: `?agent=<id>` → setAgentId(id); absent/empty → default, no call;
- * - sync: agentId change → router.replace(path + ?agent=, {scroll:false});
- * - default agent → the param is dropped, never `?agent=ask` spam;
+ * ChatSection URL persist (C5): sessionId lives in the path, `?mode=`
+ * carries the mode picker (режим работы). Legacy `?agent=` stays readable
+ * for old bookmarks — `?mode=` wins when both travel. The hook stays
+ * router-free — all URL sync lives here, so these tests mock `useChat` +
+ * `next/navigation` and assert the sync contract:
+ * - init: `?mode=<id>` (or legacy `?agent=<id>`) → setAgentId(id);
+ *   absent/empty → default, no call; `?mode=` wins over `?agent=`;
+ * - sync: agentId change → router.replace(path + ?mode=, {scroll:false});
+ *   legacy `?agent=` is dropped on write (canonical `?mode=`);
+ * - default mode → both params are dropped, never `?mode=ask` spam;
  * - hostile values pass through raw (no client-side validation — the
- *   backend answers an honest 404 on unknown agents).
+ *   backend answers an honest 404 on unknown modes).
  */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { GlobalRegistrator } from '@happy-dom/global-registrator';
@@ -38,7 +41,7 @@ mock.module('next/navigation', () => ({
 }));
 
 // ---- domain client mock (registry only; the hook is mocked below) ----------
-mock.module('../../api/sessions-client', () => ({
+mock.module('../api/sessions-client', () => ({
   DEFAULT_AGENT_ID: 'ask',
   listAgents: async () => [],
 }));
@@ -50,7 +53,7 @@ const chatHolder: { agentId: string; sessionId: string | null } = {
 };
 const setAgentCalls: Array<string> = [];
 
-mock.module('../../hooks/useChat', () => ({
+mock.module('../hooks/useChat', () => ({
   useChat: () => ({
     messages: [],
     entries: [],
@@ -80,17 +83,17 @@ mock.module('../../hooks/useChat', () => ({
 }));
 
 // ---- fork/revert dialogs (heavy, irrelevant when closed) --------------------
-mock.module('../chat-fork-dialog', () => ({
+mock.module('./chat-fork-dialog', () => ({
   ChatForkDialog: () => null,
 }));
-mock.module('../chat-revert-dialog', () => ({
+mock.module('./chat-revert-dialog', () => ({
   ChatRevertDialog: () => null,
 }));
 
 const { cleanup, render } = await import('@testing-library/react');
 const { QueryClient, QueryClientProvider } = await import('@tanstack/react-query');
-const { I18nProvider } = await import('../../i18n');
-const { ChatSection } = await import('../chat-section');
+const { I18nProvider } = await import('../i18n');
+const { ChatSection } = await import('./chat-section');
 
 function setQuery(qs: string): void {
   window.history.replaceState({}, '', qs ? `${PATHNAME}${qs}` : PATHNAME);
@@ -116,9 +119,27 @@ afterEach(() => {
   setQuery('');
 });
 
-describe('ChatSection ?agent= persist', () => {
-  test('init: ?agent= seeds the picker via setAgentId', async () => {
+describe('ChatSection ?mode= persist (legacy ?agent= compat)', () => {
+  test('init: ?agent= seeds the picker via setAgentId (legacy compat)', async () => {
     setQuery('?agent=eva');
+    renderSection();
+    expect(setAgentCalls).toEqual(['eva']);
+  });
+
+  test('init: ?mode= seeds the picker via setAgentId (canonical)', async () => {
+    setQuery('?mode=eva');
+    renderSection();
+    expect(setAgentCalls).toEqual(['eva']);
+  });
+
+  test('init: ?mode= wins over legacy ?agent= (mode priority)', async () => {
+    setQuery('?mode=coach&agent=eva');
+    renderSection();
+    expect(setAgentCalls).toEqual(['coach']);
+  });
+
+  test('init: empty ?mode= falls back to legacy ?agent=', async () => {
+    setQuery('?mode=&agent=eva');
     renderSection();
     expect(setAgentCalls).toEqual(['eva']);
   });
@@ -135,33 +156,61 @@ describe('ChatSection ?agent= persist', () => {
     expect(setAgentCalls).toEqual([]);
   });
 
-  test('init: hostile ?agent= passes through raw (validation is the backend gate)', async () => {
+  test('init: hostile ?agent= passes through raw (legacy compat, backend gate)', async () => {
     setQuery('?agent=a%20b%2Fc');
     renderSection();
     expect(setAgentCalls).toEqual(['a b/c']);
   });
 
-  test('sync: non-default agentId writes ?agent= via replace (no scroll)', async () => {
+  test('init: hostile ?mode= passes through raw (validation is the backend gate)', async () => {
+    setQuery('?mode=a%20b%2Fc');
+    renderSection();
+    expect(setAgentCalls).toEqual(['a b/c']);
+  });
+
+  test('sync: non-default agentId writes ?mode= via replace (no scroll)', async () => {
     setQuery('');
     chatHolder.agentId = 'eva';
     renderSection();
     expect(replaced.length).toBe(1);
-    expect(replaced[0]?.url).toBe(`${PATHNAME}?agent=eva`);
+    expect(replaced[0]?.url).toBe(`${PATHNAME}?mode=eva`);
     expect(replaced[0]?.opts).toMatchObject({ scroll: false });
   });
 
-  test('sync: default agentId drops ?agent= instead of spamming ?agent=ask', async () => {
+  test('sync: legacy ?agent= migrates to canonical ?mode= on write', async () => {
+    setQuery('?agent=eva');
+    chatHolder.agentId = 'coach';
+    renderSection();
+    // Init offers the legacy value first…
+    expect(setAgentCalls).toEqual(['eva']);
+    // …but the stored non-default canonicalizes the URL to `?mode=`.
+    expect(replaced.length).toBe(1);
+    const url = replaced[0]?.url ?? '';
+    expect(url).toContain('mode=coach');
+    expect(url).not.toContain('agent=');
+  });
+
+  test('sync: default agentId drops ?mode=/?agent= instead of spamming ?mode=ask', async () => {
     setQuery('?agent=custom');
     chatHolder.agentId = 'ask';
     renderSection();
     // Init still offers the URL value to the picker…
     expect(setAgentCalls).toEqual(['custom']);
-    // …but the stored default cleans the param (replace without query).
+    // …but the stored default cleans both params (replace without query).
     expect(replaced.length).toBe(1);
     expect(replaced[0]?.url).toBe(PATHNAME);
   });
 
-  test('sync: already-matching ?agent= never replaces (no loop)', async () => {
+  test('sync: default agentId drops canonical ?mode= as well', async () => {
+    setQuery('?mode=custom');
+    chatHolder.agentId = 'ask';
+    renderSection();
+    expect(setAgentCalls).toEqual(['custom']);
+    expect(replaced.length).toBe(1);
+    expect(replaced[0]?.url).toBe(PATHNAME);
+  });
+
+  test('sync: already-matching legacy ?agent= never replaces (no loop)', async () => {
     setQuery('?agent=eva');
     chatHolder.agentId = 'eva';
     renderSection();
@@ -170,13 +219,34 @@ describe('ChatSection ?agent= persist', () => {
     expect(replaced).toEqual([]);
   });
 
-  test('sync: unrelated query params survive the agent write', async () => {
+  test('sync: already-matching ?mode= never replaces (no loop)', async () => {
+    setQuery('?mode=eva');
+    chatHolder.agentId = 'eva';
+    renderSection();
+    // Init is a no-op (equal), sync guard matches — zero replaces.
+    expect(setAgentCalls).toEqual([]);
+    expect(replaced).toEqual([]);
+  });
+
+  test('sync: unrelated query params survive the mode write', async () => {
     setQuery('?tab=info');
     chatHolder.agentId = 'eva';
     renderSection();
     expect(replaced.length).toBe(1);
     const url = replaced[0]?.url ?? '';
-    expect(url).toContain('agent=eva');
+    expect(url).toContain('mode=eva');
     expect(url).toContain('tab=info');
+  });
+
+  test('sync: unrelated params survive the legacy ?agent=→?mode= migration', async () => {
+    setQuery('?tab=info&agent=eva');
+    chatHolder.agentId = 'coach';
+    renderSection();
+    expect(setAgentCalls).toEqual(['eva']);
+    expect(replaced.length).toBe(1);
+    const url = replaced[0]?.url ?? '';
+    expect(url).toContain('mode=coach');
+    expect(url).toContain('tab=info');
+    expect(url).not.toContain('agent=');
   });
 });

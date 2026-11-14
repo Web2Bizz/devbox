@@ -208,19 +208,27 @@ export function listSessionModels(
 }
 
 /**
- * Agent registry for the chat picker (GET /api/v1/agents) — domain
- * AgentInfo rows, boundary-parsed in ./client. Project-independent (the
- * registry is global), so no projectId travels.
+ * backend-контракт: agents; UI-название: режимы работы.
+ * Mode registry (backend: /agents) for the chat mode picker
+ * (GET /api/v1/agents) — domain AgentInfo rows, boundary-parsed in
+ * ./client. Project-independent (the registry is global), so no projectId
+ * travels. Wire names (GET /api/v1/agents, AgentInfo, listAgents,
+ * agentsQueryKey) stay for compatibility.
  */
 export function listAgents(opts?: { signal?: AbortSignal }): Promise<Array<AgentInfo>> {
   return withAuth((token) => api.listAgents(token, opts));
 }
 
+// UI-alias: режимы работы. listAgents stays as the compat wire name.
+// listModes is the UI-facing alias (same wire: GET /api/v1/agents).
+export const listModes = listAgents;
+
 /**
- * Default agent answering chat turns (registry id of the Ask agent). Shared
- * by `useChat` (initial state) and the `AgentSelector` (fallback value) —
+ * Default mode (backend agent id 'ask') answering chat turns (registry id
+ * of the Ask agent). Shared
+ * by `useChat` (initial state) and the `ModeSelector` (fallback value) —
  * the server applies the same default when no agentId travels, so the three
- * never disagree.
+ * never disagree. Wire name agentId in body/opts stays for compatibility.
  */
 export const DEFAULT_AGENT_ID = 'ask';
 

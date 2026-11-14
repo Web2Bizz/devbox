@@ -294,11 +294,15 @@ export type Dictionary = {
     modelDefault: string;
     modelClear: string;
     modelActive: string;
+    modeLabel: string;
+    modeDefault: string;
+    /** @deprecated Use modeLabel — kept for selector compat (пачка B). */
     agentLabel: string;
+    /** @deprecated Use modeDefault — kept for selector compat (пачка B). */
     agentDefault: string;
     /** Jump-to-latest action of the kit MessageScroller. */
     scrollToEnd: string;
-    /** Rotating "agent is working" phrases while sending (live turn open). */
+    /** Rotating "mode is working" phrases while sending (live turn open). */
     thinking: string[];
     /** Accessible name of the assistant-message like toggle. */
     like: string;
@@ -310,7 +314,7 @@ export type Dictionary = {
     toolsEmpty: string;
     /** Collapsed debug block with the raw technical trace (never user-facing). */
     toolsDetails: string;
-    /** Human label of a reasoning step (agent thinking, never a raw URL). */
+    /** Human label of a reasoning step (mode thinking, never a raw URL). */
     reasoningLabel: string;
     /** Tool lifecycle statuses (human words for the timeline, via t.chat). */
     toolCalled: string;
@@ -321,8 +325,8 @@ export type Dictionary = {
     reasoningStarted: string;
     reasoningThinking: string;
     reasoningDone: string;
-    /** Label of the agent currently owning the in-flight turn. */
-    activeAgent: string;
+    /** Label of the mode currently owning the in-flight turn. */
+    activeMode: string;
     /** Label of the tool currently reported by the live part frames. */
     activeTool: string;
     /** Idle status hint (nothing running). */

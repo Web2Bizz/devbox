@@ -13,7 +13,7 @@ import {
   isRejectedKeyError,
   mapUsageStatus,
   type UsageStatus,
-} from '../features/usage/usage-status';
+} from '../features/usage-status';
 
 export type UseUsageResult = {
   usage: OpencodeUsage | null;

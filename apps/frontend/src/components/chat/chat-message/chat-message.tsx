@@ -5,9 +5,12 @@ import {
   Bubble,
   BubbleContent,
   CopyButton,
+  Marker,
+  MarkerContent,
   Message,
   MessageContent,
   MessageFooter,
+  MessageHeader,
   MessageText,
 } from '@web2bizz/ui/widgets';
 import { GitFork, History, RotateCcw } from 'lucide-react';
@@ -77,6 +80,9 @@ const FEEDBACK_TOGGLE_CLASS = `bg-transparent ${FOOTER_ACTION_HOVER_CLASS}`;
  * Assistant rows get a `MessageFooter` with like/dislike toggles. Feedback is
  * local UI state only: there is no server-side feedback endpoint, so nothing
  * is sent anywhere and the choice resets on reload.
+ * Role/model line: a kit `Marker` (0.26.5 `widgets`) in `MessageHeader` —
+ * the ONLY `Marker` in this row (role today; the wire carries no per-message
+ * model, so no model token is invented). No role badges elsewhere.
  * Linear row — no Card wrapper (DESIGN §7: kit tokens only, no hex).
  */
 export function ChatMessageRow({
@@ -96,6 +102,11 @@ export function ChatMessageRow({
       className="py-3"
       data-testid={`chat-message-${message.role}`}
     >
+      <MessageHeader>
+        <Marker>
+          <MarkerContent>{isUser ? t.chat.you : t.chat.assistant}</MarkerContent>
+        </Marker>
+      </MessageHeader>
       <MessageContent>
         <Bubble variant={isUser ? 'secondary' : 'ghost'} align={isUser ? 'end' : 'start'}>
           <BubbleContent>

@@ -14,7 +14,7 @@ import { Alert, AlertDescription, AlertTitle, Button } from '@web2bizz/ui/compon
 import { useI18n } from '../../../i18n';
 import { ChatMessageRow } from '../chat-message';
 import { ChatToolRow } from '../chat-tool-row';
-import { formatVisibleFallback } from '../chat-tool-timeline';
+import { formatVisibleFallback } from '../chat-tool-row';
 import { ChatThinkingRow } from '../chat-thinking-row';
 import { ChatThreadEmpty } from '../chat-thread-empty';
 import { ChatThreadLoading } from '../chat-thread-loading';
@@ -28,7 +28,8 @@ import type { ChatThreadProps } from './types';
  * parity: the same `ChatEntry` type renders identically before/after).
  * Message/tool rows interleave in parentId order — no separate timeline block.
  * Live terminator: the thinking row closes the chain as the kit scroll
- * anchor while `sending` (live SSE sidecar: `activeToolName` has no chain
+ * anchor while `sending` (live SSE sidecar: `activeToolName` — the tool
+ * of the active mode — has no chain
  * row yet). Thinking has ONE source (`ChatThinkingRow`).
  * Branch switcher is navigation-only (prev/next) and renders only with
  * explicit variants + onSelectLeaf.
@@ -44,7 +45,7 @@ export function ChatThread({
   sending = false,
   error = null,
   onRetry,
-  activeAgentName,
+  activeModeName,
   activeToolName,
   approval = null,
   onApprove,
@@ -229,7 +230,7 @@ export function ChatThread({
               {thinking && (
                 <MessageScrollerItem messageId="chat-thinking" scrollAnchor>
                   <div data-testid="chat-chain-terminator">
-                    <ChatThinkingRow activeAgentName={activeAgentName} reasoningActive={reasoningActive} fallbackText={fallbackText} />
+                    <ChatThinkingRow activeModeName={activeModeName} reasoningActive={reasoningActive} fallbackText={fallbackText} />
                   </div>
                 </MessageScrollerItem>
               )}

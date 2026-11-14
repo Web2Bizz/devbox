@@ -6,14 +6,14 @@
  * `code: message` confined to `diagnostic` + `shortId` (never UI text).
  */
 import { describe, expect, test } from 'bun:test';
-import { ApiClientError } from '../../../api/client';
+import { ApiClientError } from '../api/client';
 import {
   SessionExpiredError,
   isMissingKeyError,
   isRejectedKeyError,
   isUpstreamDownError,
   mapUsageStatus,
-} from '../usage-status';
+} from './usage-status';
 
 const STRINGS = { sessionExpired: 'Session expired', unexpected: 'Unexpected error' };
 

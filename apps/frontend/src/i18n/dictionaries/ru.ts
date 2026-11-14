@@ -289,7 +289,11 @@ export const ru: Dictionary = {
     modelDefault: 'Дефолт раннера',
     modelClear: 'Сбросить',
     modelActive: 'Активная модель',
-    agentLabel: 'Агент',
+    modeLabel: 'Режим работы',
+    modeDefault: 'Спросить',
+    /** @deprecated Use modeLabel — kept for selector compat (пачка B). */
+    agentLabel: 'Режим работы',
+    /** @deprecated Use modeDefault — kept for selector compat (пачка B). */
     agentDefault: 'Спросить',
     scrollToEnd: 'К последнему сообщению',
     thinking: [
@@ -311,7 +315,7 @@ export const ru: Dictionary = {
     reasoningStarted: 'начато',
     reasoningThinking: 'думает',
     reasoningDone: 'готово',
-    activeAgent: 'Агент',
+    activeMode: 'Режим работы',
     activeTool: 'Инструмент',
     idle: 'Ожидание',
     busy: 'Работаю…',

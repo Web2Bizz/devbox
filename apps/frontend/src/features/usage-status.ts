@@ -1,8 +1,8 @@
 'use client';
 
-import { ApiClientError } from '../../api/client';
-import { formatApiErrorWithId } from '../../lib/format-error';
-import { SessionExpiredError } from '../../lib/session-expired';
+import { ApiClientError } from '../api/client';
+import { formatApiErrorWithId } from '../lib/format-error';
+import { SessionExpiredError } from '../lib/session-expired';
 
 /**
  * Re-exported from the shared client module (`lib/session-expired.ts`) so

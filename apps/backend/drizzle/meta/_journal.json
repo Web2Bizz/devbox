@@ -64,6 +64,13 @@
       "when": 1794237140259,
       "tag": "0008_vault_secrets",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794593381097,
+      "tag": "0009_squash_chain_tool_agent_checkpoints",
+      "breakpoints": true
     }
   ]
 }

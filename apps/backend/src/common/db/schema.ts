@@ -13,9 +13,10 @@
  *   RESTRICT on project delete, SET NULL on chat delete. `origin` marks who
  *   owns the row: 'upstream' (lives on the opencode serve stand) or
  *   'harness' (created by the harness while the stand was unreachable).
- * - session_messages: durable chat history keyed by the DOMAIN session id
- *   (upstream `ses_*` or a harness uuid) — text column, NOT uuid, because
- *   upstream ids are not uuids. project_id carries the gate scope.
+ * - session_messages: durable chat history keyed by the harness session uuid
+ *   (project_sessions.id) — uuid FK RESTRICT. projects 1:N project_sessions
+ *   1:N session_messages; there is NO direct session_messages -> projects link
+ *   (project scope resolves via the JOIN through project_sessions).
  * - session_agents: the agent chosen for a session (one row per session id).
  * - github_installations: multi-tenant GitHub App installs — one row per
  *   GitHub installation (unique installation_id), linked to our userId
@@ -45,10 +46,13 @@
  * removal sets `deleted_at = now()` on organizations / projects /
  * project_chats / project_sessions / session_messages / run_runs. Reads hide
  * such rows with `isNull(<table>.deletedAt)` (opt-in `includeDeleted` where
- * the API needs history). projects.org_id and the chats/sessions project_id
- * FKs are ON DELETE RESTRICT so hard deletes fail instead of wiping history.
+ * the API needs history). projects.org_id and the chats/sessions FKs are
+ * ON DELETE RESTRICT so hard deletes fail instead of wiping history.
+ * session_messages reaches projects only via
+ * session_messages.session_id -> project_sessions.id -> projects.id
+ * (both RESTRICT).
  */
-import { sql } from "drizzle-orm";
+import { desc, sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
@@ -61,6 +65,7 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 export const projects = pgTable("projects", {
@@ -130,34 +135,73 @@ export const projectSessions = pgTable("project_sessions", {
     .defaultNow()
     .notNull(),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
-});
+}, (t) => [
+  index("project_sessions_project_idx").on(t.projectId),
+  index("project_sessions_project_origin_idx").on(t.projectId, t.origin),
+]);
 
 /**
  * Durable session chat history.
  *
- * Separate from project_sessions because the two id domains differ:
- * project_sessions.id is a uuid, while messages are addressed by the DOMAIN
- * session id (upstream `ses_*` or a harness uuid) — hence a text session_id.
- * project_id keeps every row inside the C4 gate scope (messages are never
- * read across projects) and RESTRICTs a hard project delete, matching the
- * soft-delete rule used by every history table.
+ * Chain: projects 1:N project_sessions 1:N session_messages (both RESTRICT).
+ * session_id is the harness uuid (project_sessions.id); upstream `ses_*`
+ * rows are orphans and were dropped by migration 0009 (no cast possible).
+ * Project scope resolves via JOIN project_sessions (messages carry no
+ * project_id — the direct session_messages -> projects link is gone).
+ *
+ * Surrogate PK (migration 0010, SURROGATE decision): `id` is an internal
+ * uuid PK (defaultRandom) that never leaves the DB; `domain_id` carries the
+ * stable wire message id (upstream `msg_*` / Bun.randomUUIDv7() receipts)
+ * with a UNIQUE constraint. Replay stays idempotent via
+ * onConflictDoNothing(domain_id) — the PK change does not alter the wire
+ * contract (SessionMessage.id is still the domain id).
+ *
+ * Linked list (migration 0011, parentId-only): `parent_id` is the parent
+ * link — TEXT carrying the parent domain id (nullable, root is NULL),
+ * logical FK -> session_messages.domain_id (UNIQUE) with SET NULL on
+ * delete; hard deletes never happen (soft-delete rule), so the FK only
+ * guards the chain shape. Index (session_id, parent_id) scopes the walk.
+ * Invariant: one parent per message, traversal from the root, no branches
+ * (a parent owns at most one child — enforced in the repository
+ * validator, fallback to createdAt order on break).
+ *
+ * Tool/reasoning chain (migration 0012, additive): `kind`/`name`/`status`/
+ * `detail` are nullable chain hints (unified ChatEntry) — 'text' bubbles vs
+ * 'tool' timeline steps vs 'reasoning' traces. `text` is nullable with a
+ * '' default (tool rows carry no bubble). Reads return the full chain
+ * (orderByParentChain), old clients ignore the new keys.
  */
 export const sessionMessages = pgTable(
   "session_messages",
   {
-    id: text("id").primaryKey(),
-    // Domain session id: `ses_*` (upstream) or a uuid (harness) — never a
-    // uuid column, so both id shapes are addressable.
-    sessionId: text("session_id").notNull(),
-    projectId: uuid("project_id")
+    id: uuid("id").primaryKey().defaultRandom(),
+    // Stable wire message id (was the text PK before 0010); UNIQUE so a
+    // replayed append is a no-op instead of a duplicate row.
+    domainId: text("domain_id").notNull().unique(),
+    // Harness session uuid -> project_sessions.id (RESTRICT: history is never
+    // physically deleted, a hard session delete must fail loudly).
+    sessionId: uuid("session_id")
       .notNull()
-      .references(() => projects.id, { onDelete: "restrict" }),
+      .references(() => projectSessions.id, { onDelete: "restrict" }),
     // FK-less text, same convention as projects.owner_id /
     // github_installations.user_id / refresh_tokens.user_id.
     userId: text("user_id").notNull(),
     role: text("role").notNull(),
     agentId: text("agent_id"),
-    text: text("text").notNull(),
+    text: text("text").default(""),
+    // Tool/reasoning chain (0012, additive): kind/name/status/detail are
+    // nullable hints — 'text' bubble vs 'tool' step vs 'reasoning' trace.
+    // Absent kind reads as text; tool rows carry name/status/detail.
+    kind: text("kind").default("text"),
+    name: text("name"),
+    status: text("status"),
+    detail: text("detail"),
+    // Linked list parent link (0011): parent domain id, NULL for the root.
+    // TEXT (not uuid) because domain ids are upstream-owned (`msg_*` receipts
+    // are not uuids); logical FK -> domain_id (UNIQUE), SET NULL on delete.
+    parentId: text("parent_id").references((): AnyPgColumn => sessionMessages.domainId, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -165,17 +209,20 @@ export const sessionMessages = pgTable(
   },
   (t) => [
     index("session_messages_session_idx").on(t.sessionId, t.createdAt),
-    index("session_messages_project_idx").on(t.projectId),
+    index("session_messages_session_parent_idx").on(t.sessionId, t.parentId),
   ],
 );
 
 /**
  * Agent chosen per session (upserted on create/explicit per-turn agentId).
- * session_id is the same text domain id as session_messages.session_id, so
- * the choice survives a backend restart for both upstream and harness rows.
+ * session_id is the harness uuid FK -> project_sessions.id (RESTRICT,
+ * migration 0010; upstream `ses_*` rows were dropped before the cast —
+ * no cast possible, same call as 0009). One row per session id.
  */
 export const sessionAgents = pgTable("session_agents", {
-  sessionId: text("session_id").primaryKey(),
+  sessionId: uuid("session_id")
+    .primaryKey()
+    .references(() => projectSessions.id, { onDelete: "restrict" }),
   projectId: uuid("project_id")
     .notNull()
     .references(() => projects.id, { onDelete: "restrict" }),
@@ -183,7 +230,9 @@ export const sessionAgents = pgTable("session_agents", {
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
-});
+}, (t) => [
+  index("session_agents_project_idx").on(t.projectId),
+]);
 
 export type ProjectRow = typeof projects.$inferSelect;
 export type ProjectChatRow = typeof projectChats.$inferSelect;
@@ -550,8 +599,55 @@ export const runLeases = pgTable("run_leases", {
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
 });
 
+/**
+ * Agent checkpoints — durable pause/resume slices of a session turn
+ * (WEB-12 / B1). One row per (session_id, segment_index): a turn is cut
+ * into segments of `CHECKPOINT_SEGMENT_STEPS` model steps
+ * (`processes/.../sessions/modules/runner/max-steps.ts`, single home of the
+ * segment config) up to the `CHECKPOINT_MAX_TOTAL_STEPS` ceiling.
+ *
+ * `session_id` is the harness uuid FK -> project_sessions.id with CASCADE:
+ * checkpoints are disposable runtime state (like run_leases), not history
+ * under the soft-delete rule, so they die with the session. `status`
+ * (running/paused/awaiting_approval/limit_reached/cancelled/completed/
+ * failed) and `pause_reason` (limit/loop/timeout/approval/cancelled/
+ * restart) are plain text with no CHECK — the contract owns the enums
+ * (same call as run_runs.status). `state` carries the opaque agent snapshot.
+ */
+export const agentCheckpoints = pgTable(
+  "agent_checkpoints",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => projectSessions.id, { onDelete: "cascade" }),
+    threadId: text("thread_id"),
+    segmentIndex: integer("segment_index").notNull(),
+    stepsUsed: integer("steps_used").notNull(),
+    totalSteps: integer("total_steps").notNull(),
+    status: text("status").notNull().default("running"),
+    pauseReason: text("pause_reason"),
+    state: jsonb("state").$type<Record<string, unknown> | null>(),
+    tokensUsed: integer("tokens_used").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    uniqueIndex("agent_checkpoints_session_segment_idx").on(
+      t.sessionId,
+      t.segmentIndex,
+    ),
+    index("agent_checkpoints_session_created_idx").on(
+      t.sessionId,
+      desc(t.createdAt),
+    ),
+  ],
+);
+
 export type RunRow = typeof runRuns.$inferSelect;
 export type RunStepRow = typeof runSteps.$inferSelect;
 export type RunEventRow = typeof runEvents.$inferSelect;
 export type RunLeaseRow = typeof runLeases.$inferSelect;
+export type AgentCheckpointRow = typeof agentCheckpoints.$inferSelect;
 

@@ -262,7 +262,7 @@ route-agnostic). Отличия РОВНО два, все остальные с�
 ## 6. Бренд
 
 `SidebarBrand` (`src/components/layout/Sidebar/Sidebar.tsx`: `Image`
-`/logo.png` 36 `priority`, `Rush Code` в
+`/assets/logo.png` 36 `priority`, `Rush Code` в
 `.text-gradient-brand`, `t.nav.console`) — единый источник.
 
 - Header `leadingSlot`: `<SidebarBrand />` + (title/breadcrumbs, если есть).

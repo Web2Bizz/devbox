@@ -88,7 +88,7 @@ export function ChatToolRow({ entry, liveToolName }: ChatToolRowProps) {
         data-kind="tool"
         data-status="running"
         aria-busy="true"
-        className="px-1 py-0.5"
+        className="max-w-[80%] py-0.5"
       >
         <ToolCall name={liveToolName ?? ''} status="running" summary={t.chat.toolProgress} />
       </div>
@@ -106,7 +106,7 @@ export function ChatToolRow({ entry, liveToolName }: ChatToolRowProps) {
       data-kind={kind}
       data-status={rowStatus}
       title={formatRawToolEventLine(resolvedEvent)}
-      className="px-1 py-0.5"
+      className="max-w-[80%] py-0.5"
     >
       <ToolCall
         name={name}

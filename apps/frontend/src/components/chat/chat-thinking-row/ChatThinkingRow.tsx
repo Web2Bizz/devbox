@@ -25,7 +25,7 @@ export function ChatThinkingRow({ activeModeName, reasoningText = '', reasoningA
   const fallback = typeof fallbackText === 'string' && fallbackText.trim().length > 0 ? fallbackText.slice(0, 500) : null;
   const stepStatus = liveReasoningActive ? 'active' : hasReasoning ? 'done' : 'pending';
   return (
-    <div data-testid="chat-thinking" aria-busy="true" className="flex flex-wrap items-center gap-2 py-2">
+    <div data-testid="chat-thinking" aria-busy="true" className="max-w-[80%] flex flex-wrap items-center gap-2 py-2">
       <ThoughtChain>
         <ThoughtChainStep status={stepStatus} defaultOpen={hasReasoning || fallback !== null}>
           <ThoughtChainTrigger>

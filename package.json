@@ -34,7 +34,8 @@
     "restart": "bun run stop && bun run dev",
     "stop": "bun scripts/dev/stop.ts",
     "test": "bunx nx run-many -t test",
-    "test:affected": "bunx nx affected -t test"
+    "test:affected": "bunx nx affected -t test",
+    "typecheck": "bunx nx run-many -t lint"
   },
   "workspaces": [
     "apps/backend",

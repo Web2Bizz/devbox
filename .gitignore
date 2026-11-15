@@ -1,5 +1,6 @@
-# graphify — индексы в проекте (.graphify/ — персистентно, переживает reboot /tmp), в git не отправлять
+# graphify — индексы в проекте (.graphify/ — персистентно, переживает reboot /tmp; graphify-out/ — граф знаний и кеш), в git не отправлять
 .graphify/
+graphify-out/
 .tmp/
 tmp/opencode/
 .opencode/.cache/
@@ -68,6 +69,7 @@ apps/backend/repos/**
 apps/mobile/.supervisor/
 apps/mobile/.autopilot/
 apps/mobile/.playwright-mcp/
+.playwright-mcp/
 
 # Tavily research captures (local cache, not repo content)
 .tavily/**

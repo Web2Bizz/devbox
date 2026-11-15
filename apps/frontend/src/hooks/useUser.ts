@@ -5,12 +5,12 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiClientError, api } from '../api/client';
 import { formatApiError } from '../lib/format-error';
 import { getValidAccessToken } from '../lib/auth-store';
-import type { AuthUser } from '../api/types';
+import type { AuthUser } from '@rush-code/contracts';
 import { useI18n } from '../i18n';
 
 export const userQueryKey = (id: string) => ['user', id] as const;
 
-export interface UseUserResult {
+export type UseUserResult = {
   user: AuthUser | null;
   loading: boolean;
   error: string | null;
@@ -18,11 +18,11 @@ export interface UseUserResult {
   /** True when the backend refused with 403 (someone else's profile — never indexed). */
   forbidden: boolean;
   reload: () => void;
-}
+};
 
 /**
  * Single-user hook — GET /api/v1/users/:id (own profile only).
- * - 403 ( чужой id) → forbidden + ErrorState «доступ запрещён», no retry
+ * - 403 ( чужой id) → forbidden + error toast «доступ запрещён», no retry
  * - 404 → notFound, no retry
  * - Errors via formatApiError + t. No list fetching — single id only.
  */

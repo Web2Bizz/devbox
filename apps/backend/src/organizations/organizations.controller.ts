@@ -11,42 +11,38 @@ import {
   Req,
   UseGuards,
   UseInterceptors,
-  Version,
 } from "@nestjs/common";
-import { ApiBearerAuth, ApiResponse, ApiTags } from "@nestjs/swagger";
-import { JwtAuthGuard } from "../auth/jwt-auth.guard.js";
-import { ReqUser } from "../auth/req-user.decorator.js";
-import type { RequestIdentity } from "../auth/identity.service.js";
-import { NoIndexInterceptor } from "../common/noindex.interceptor.js";
-import { ZodValidationPipe } from "../common/zod-validation.pipe.js";
-import { V1Endpoint } from "../api/version.js";
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagger";
+import { JwtAuthGuard } from "../auth/jwt-auth.guard";
+import { ReqUser } from "../auth/req-user.decorator";
+import type { RequestIdentity } from "../auth/identity.service";
+import { NoIndexInterceptor } from "@common/http/noindex.interceptor";
+import { ZodValidationPipe } from "@common/validation";
 import {
   OrganizationDto,
-  OrganizationInviteDto,
-  OrganizationMemberDto,
-  acceptInviteSchema,
-  addMemberSchema,
-  createInviteSchema,
   createOrganizationSchema,
-  updateMemberRoleSchema,
   updateOrganizationSchema,
-  type AcceptInviteInput,
-  type AddMemberInput,
-  type CreateInviteInput,
   type CreateOrganizationInput,
-  type UpdateMemberRoleInput,
   type UpdateOrganizationInput,
-} from "./dto.js";
-import { OrganizationsService } from "./organizations.service.js";
+} from "./organizations.dto";
+import { OrganizationsGuard } from "./organizations.guard";
+import { OrganizationsService } from "./organizations.service";
 
 /**
- * Organizations CRUD + membership + single-use invites + project links.
+ * Organizations CRUD — exactly one entity (CoC §1.1). Membership lives in
+ * `modules/members/members.controller.ts`, invites in
+ * `modules/invites/invites.controller.ts` and the project surfaces in
+ * `modules/projects/` (ProjectsController + OrgProjectsController).
  * Global 'api' prefix + URI versioning supply /api/v1 — controller
- * declares only the resource segment. Every route is Bearer-guarded
- * (JwtAuthGuard); the service enforces member-only reads (404 for
- * strangers) and maintainer-only mutations (403 for plain members).
- * Responses are private (`X-Robots-Tag: noindex` via NoIndexInterceptor).
- * Swagger annotations mirror contracts/openapi.yaml (organizations section).
+ * declares only the resource segment, so the URLs are unchanged:
+ * POST/GET /organizations, GET/PATCH/DELETE /organizations/:id.
+ * Every route is Bearer-guarded (JwtAuthGuard); the gated `:id` routes
+ * additionally run OrganizationsGuard (method-level: GET → member,
+ * mutations → maintainer), and the service enforces the same rules again
+ * (defense in depth). Routes without an org id (create, list) are not
+ * gated. Responses are private (`X-Robots-Tag: noindex` via
+ * NoIndexInterceptor). Swagger annotations mirror contracts/openapi.yaml
+ * (organizations section).
  */
 @ApiTags("organizations")
 @Controller("organizations")
@@ -54,11 +50,10 @@ import { OrganizationsService } from "./organizations.service.js";
 @ApiBearerAuth()
 @UseInterceptors(NoIndexInterceptor)
 export class OrganizationsController {
-  constructor(private readonly orgs: OrganizationsService) {}
+  constructor(private readonly organizations: OrganizationsService) {}
 
   @Post()
-  @Version("1")
-  @V1Endpoint("Create organization (caller becomes maintainer)")
+  @ApiOperation({ summary: "Create organization (caller becomes maintainer)" })
   @ApiResponse({ status: 201, type: OrganizationDto })
   @ApiResponse({ status: 400, description: "bad request (validation)" })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
@@ -68,27 +63,26 @@ export class OrganizationsController {
   async create(
     @Body(new ZodValidationPipe(createOrganizationSchema)) body: CreateOrganizationInput,
     @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
+    @Req() request?: { correlationId?: string },
   ): Promise<OrganizationDto> {
-    return (await this.orgs.create(body, identity.id, req?.correlationId)) as OrganizationDto;
+    return (await this.organizations.create(body, identity.id, request?.correlationId)) as OrganizationDto;
   }
 
   @Get()
-  @Version("1")
-  @V1Endpoint("List organizations of the caller (membership-scoped)")
+  @ApiOperation({ summary: "List organizations of the caller (membership-scoped)" })
   @ApiResponse({ status: 200, type: [OrganizationDto] })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
   @ApiResponse({ status: 503, description: "postgres unreachable (EXTERNAL_UNAVAILABLE, Retry-After)" })
   async list(
     @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
-  ): Promise<OrganizationDto[]> {
-    return (await this.orgs.listForUser(identity.id, req?.correlationId)) as OrganizationDto[];
+    @Req() request?: { correlationId?: string },
+  ): Promise<Array<OrganizationDto>> {
+    return (await this.organizations.listForUser(identity.id, request?.correlationId)) as Array<OrganizationDto>;
   }
 
   @Get(":id")
-  @Version("1")
-  @V1Endpoint("Get organization by id (members only)")
+  @UseGuards(OrganizationsGuard)
+  @ApiOperation({ summary: "Get organization by id (members only)" })
   @ApiResponse({ status: 200, type: OrganizationDto })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
   @ApiResponse({ status: 404, description: "not found (or not a member)" })
@@ -96,14 +90,14 @@ export class OrganizationsController {
   async get(
     @Param("id") id: string,
     @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
+    @Req() request?: { correlationId?: string },
   ): Promise<OrganizationDto> {
-    return (await this.orgs.get(id, identity.id, req?.correlationId)) as OrganizationDto;
+    return (await this.organizations.get(id, identity.id, request?.correlationId)) as OrganizationDto;
   }
 
   @Patch(":id")
-  @Version("1")
-  @V1Endpoint("Update organization settings (maintainer only)")
+  @UseGuards(OrganizationsGuard)
+  @ApiOperation({ summary: "Update organization settings (maintainer only)" })
   @ApiResponse({ status: 200, type: OrganizationDto })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
   @ApiResponse({ status: 403, description: "member without the maintainer role" })
@@ -113,15 +107,16 @@ export class OrganizationsController {
     @Param("id") id: string,
     @Body(new ZodValidationPipe(updateOrganizationSchema)) body: UpdateOrganizationInput,
     @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
+    @Req() request?: { correlationId?: string },
   ): Promise<OrganizationDto> {
-    return (await this.orgs.update(id, identity.id, body, req?.correlationId)) as OrganizationDto;
+    return (await this.organizations.update(id, identity.id, body, request?.correlationId)) as OrganizationDto;
   }
 
   @Delete(":id")
-  @Version("1")
-  @V1Endpoint("Delete organization (maintainer only, projects survive)")
+  @UseGuards(OrganizationsGuard)
+  @ApiOperation({ summary: "Delete organization (maintainer only, projects survive)" })
   @ApiResponse({ status: 204 })
+  @ApiResponse({ status: 400, description: "personal organization cannot be deleted" })
   @ApiResponse({ status: 401, description: "missing/invalid bearer" })
   @ApiResponse({ status: 403, description: "member without the maintainer role" })
   @ApiResponse({ status: 404, description: "not found (or not a member)" })
@@ -130,154 +125,8 @@ export class OrganizationsController {
   async remove(
     @Param("id") id: string,
     @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
+    @Req() request?: { correlationId?: string },
   ): Promise<void> {
-    await this.orgs.remove(id, identity.id, req?.correlationId);
-  }
-
-  @Get(":id/members")
-  @Version("1")
-  @V1Endpoint("List organization members (members only)")
-  @ApiResponse({ status: 200, type: [OrganizationMemberDto] })
-  @ApiResponse({ status: 401, description: "missing/invalid bearer" })
-  @ApiResponse({ status: 404, description: "not found (or not a member)" })
-  @ApiResponse({ status: 503, description: "postgres unreachable (EXTERNAL_UNAVAILABLE, Retry-After)" })
-  async members(
-    @Param("id") id: string,
-    @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
-  ): Promise<OrganizationMemberDto[]> {
-    return (await this.orgs.listMembers(id, identity.id, req?.correlationId)) as OrganizationMemberDto[];
-  }
-
-  @Post(":id/members")
-  @Version("1")
-  @V1Endpoint("Add organization member (maintainer only)")
-  @ApiResponse({ status: 201, type: OrganizationMemberDto })
-  @ApiResponse({ status: 400, description: "bad request (validation)" })
-  @ApiResponse({ status: 401, description: "missing/invalid bearer" })
-  @ApiResponse({ status: 403, description: "member without the maintainer role" })
-  @ApiResponse({ status: 404, description: "not found (org, membership, or target user)" })
-  @ApiResponse({ status: 409, description: "already a member, or org already has a maintainer" })
-  @ApiResponse({ status: 503, description: "postgres unreachable (EXTERNAL_UNAVAILABLE, Retry-After)" })
-  async addMember(
-    @Param("id") id: string,
-    @Body(new ZodValidationPipe(addMemberSchema)) body: AddMemberInput,
-    @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
-  ): Promise<OrganizationMemberDto> {
-    return (await this.orgs.addMember(id, identity.id, body, req?.correlationId)) as OrganizationMemberDto;
-  }
-
-  @Patch(":id/members/:userId")
-  @Version("1")
-  @V1Endpoint("Change member role (maintainer only)")
-  @ApiResponse({ status: 200, type: OrganizationMemberDto })
-  @ApiResponse({ status: 400, description: "cannot demote the last maintainer (also validation)" })
-  @ApiResponse({ status: 401, description: "missing/invalid bearer" })
-  @ApiResponse({ status: 403, description: "member without the maintainer role" })
-  @ApiResponse({ status: 404, description: "not found (org, membership, or target member)" })
-  @ApiResponse({ status: 409, description: "org already has a maintainer" })
-  @ApiResponse({ status: 503, description: "postgres unreachable (EXTERNAL_UNAVAILABLE, Retry-After)" })
-  async changeRole(
-    @Param("id") id: string,
-    @Param("userId") userId: string,
-    @Body(new ZodValidationPipe(updateMemberRoleSchema)) body: UpdateMemberRoleInput,
-    @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
-  ): Promise<OrganizationMemberDto> {
-    return (await this.orgs.changeRole(id, identity.id, userId, body, req?.correlationId)) as OrganizationMemberDto;
-  }
-
-  @Delete(":id/members/:userId")
-  @Version("1")
-  @V1Endpoint("Remove organization member (maintainer only, never the last maintainer)")
-  @ApiResponse({ status: 204 })
-  @ApiResponse({ status: 400, description: "cannot remove the last maintainer (also validation)" })
-  @ApiResponse({ status: 401, description: "missing/invalid bearer" })
-  @ApiResponse({ status: 403, description: "member without the maintainer role" })
-  @ApiResponse({ status: 404, description: "not found (org, membership, or target member)" })
-  @ApiResponse({ status: 503, description: "postgres unreachable (EXTERNAL_UNAVAILABLE, Retry-After)" })
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async removeMember(
-    @Param("id") id: string,
-    @Param("userId") userId: string,
-    @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
-  ): Promise<void> {
-    await this.orgs.removeMember(id, identity.id, userId, req?.correlationId);
-  }
-
-  @Post(":id/invites")
-  @Version("1")
-  @V1Endpoint("Mint a single-use invite token (maintainer only)")
-  @ApiResponse({ status: 201, type: OrganizationInviteDto })
-  @ApiResponse({ status: 401, description: "missing/invalid bearer" })
-  @ApiResponse({ status: 403, description: "member without the maintainer role" })
-  @ApiResponse({ status: 404, description: "not found (or not a member)" })
-  @ApiResponse({ status: 409, description: "org already has a maintainer (maintainer-role invite)" })
-  @ApiResponse({ status: 503, description: "postgres unreachable (EXTERNAL_UNAVAILABLE, Retry-After)" })
-  async createInvite(
-    @Param("id") id: string,
-    @Body(new ZodValidationPipe(createInviteSchema)) body: CreateInviteInput,
-    @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
-  ): Promise<OrganizationInviteDto> {
-    return (await this.orgs.createInvite(id, identity.id, body, req?.correlationId)) as OrganizationInviteDto;
-  }
-
-  @Post("invites/accept")
-  @Version("1")
-  @V1Endpoint("Accept a single-use invite token")
-  @ApiResponse({ status: 200, type: OrganizationMemberDto })
-  @ApiResponse({ status: 401, description: "missing/invalid bearer" })
-  @ApiResponse({ status: 404, description: "invite not found or already used" })
-  @ApiResponse({ status: 409, description: "already a member, or org already has a maintainer" })
-  @ApiResponse({ status: 410, description: "invite expired (ORG_INVITE_TTL_SEC window passed)" })
-  @ApiResponse({ status: 503, description: "postgres unreachable (EXTERNAL_UNAVAILABLE, Retry-After)" })
-  @HttpCode(HttpStatus.OK)
-  async acceptInvite(
-    @Body(new ZodValidationPipe(acceptInviteSchema)) body: AcceptInviteInput,
-    @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
-  ): Promise<OrganizationMemberDto> {
-    return (await this.orgs.acceptInvite(body, identity.id, req?.correlationId)) as OrganizationMemberDto;
-  }
-
-  @Post(":id/projects/:projectId")
-  @Version("1")
-  @V1Endpoint("Attach a project to the organization (maintainer only)")
-  @ApiResponse({ status: 204 })
-  @ApiResponse({ status: 401, description: "missing/invalid bearer" })
-  @ApiResponse({ status: 403, description: "member without the maintainer role" })
-  @ApiResponse({ status: 404, description: "not found (org, membership, or project)" })
-  @ApiResponse({ status: 409, description: "project is already linked to this organization" })
-  @ApiResponse({ status: 503, description: "postgres unreachable (EXTERNAL_UNAVAILABLE, Retry-After)" })
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async linkProject(
-    @Param("id") id: string,
-    @Param("projectId") projectId: string,
-    @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
-  ): Promise<void> {
-    await this.orgs.linkProject(id, identity.id, projectId, req?.correlationId);
-  }
-
-  @Delete(":id/projects/:projectId")
-  @Version("1")
-  @V1Endpoint("Detach a project from the organization (maintainer only)")
-  @ApiResponse({ status: 204 })
-  @ApiResponse({ status: 401, description: "missing/invalid bearer" })
-  @ApiResponse({ status: 403, description: "member without the maintainer role" })
-  @ApiResponse({ status: 404, description: "not found (org, membership, or link row)" })
-  @ApiResponse({ status: 503, description: "postgres unreachable (EXTERNAL_UNAVAILABLE, Retry-After)" })
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async unlinkProject(
-    @Param("id") id: string,
-    @Param("projectId") projectId: string,
-    @ReqUser() identity: RequestIdentity,
-    @Req() req?: { correlationId?: string },
-  ): Promise<void> {
-    await this.orgs.unlinkProject(id, identity.id, projectId, req?.correlationId);
+    await this.organizations.remove(id, identity.id, request?.correlationId);
   }
 }

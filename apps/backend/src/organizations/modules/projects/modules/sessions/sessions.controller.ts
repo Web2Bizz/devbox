@@ -1,0 +1,108 @@
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+  UseInterceptors,
+} from "@nestjs/common";
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagger";
+import { JwtAuthGuard } from "../../../../../auth/jwt-auth.guard";
+import { ReqUser } from "../../../../../auth/req-user.decorator";
+import type { RequestIdentity } from "../../../../../auth/identity.service";
+import { NoIndexInterceptor } from "@common/http/noindex.interceptor";
+import { ZodValidationPipe } from "@common/validation";
+import { SessionsService } from "./sessions.service";
+import {
+  ProjectSessionDto,
+  createSessionSchema,
+  type CreateSessionInput,
+} from "./sessions.dto";
+
+/**
+ * Project sessions — Bearer-guarded (JwtAuthGuard, legacy mock fallback in
+ * dev). Every op scopes through ProjectAccessService.assertProjectAccess
+ * (Card 5): org members pass; strangers get 404 (existence
+ * is not leaked — no 403 enumeration oracle).
+ */
+@ApiTags("project-sessions")
+@Controller("projects/:projectId/sessions")
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth()
+@UseInterceptors(NoIndexInterceptor)
+export class SessionsController {
+  constructor(private readonly sessions: SessionsService) {}
+
+  @Get()
+  @ApiOperation({ summary: "List project sessions" })
+  @ApiResponse({ status: 200, type: [ProjectSessionDto] })
+  @ApiResponse({ status: 404, description: "not found (or no access)" })
+  async list(
+    @Param("projectId") projectId: string,
+    @ReqUser() identity: RequestIdentity,
+    @Headers("x-correlation-id") correlationId?: string,
+  ): Promise<Array<ProjectSessionDto>> {
+    return (await this.sessions.list(
+      projectId,
+      correlationId,
+      identity.id,
+    )) as Array<ProjectSessionDto>;
+  }
+
+  @Post()
+  @ApiOperation({ summary: "Create project session (binds projectId + optional chatId)" })
+  @ApiResponse({ status: 201, type: ProjectSessionDto })
+  @ApiResponse({ status: 404, description: "not found (or no access)" })
+  async create(
+    @Param("projectId") projectId: string,
+    @Body(new ZodValidationPipe(createSessionSchema)) body: CreateSessionInput,
+    @ReqUser() identity: RequestIdentity,
+    @Headers("x-correlation-id") correlationId?: string,
+  ): Promise<ProjectSessionDto> {
+    return (await this.sessions.create(
+      projectId,
+      body,
+      correlationId,
+      identity.id,
+    )) as ProjectSessionDto;
+  }
+
+  @Get(":sessionId")
+  @ApiOperation({ summary: "Get project session" })
+  @ApiResponse({ status: 200, type: ProjectSessionDto })
+  @ApiResponse({ status: 404, description: "not found (or no access)" })
+  async get(
+    @Param("projectId") projectId: string,
+    @Param("sessionId") sessionId: string,
+    @ReqUser() identity: RequestIdentity,
+    @Headers("x-correlation-id") correlationId?: string,
+  ): Promise<ProjectSessionDto> {
+    return (await this.sessions.get(
+      projectId,
+      sessionId,
+      correlationId,
+      identity.id,
+    )) as ProjectSessionDto;
+  }
+
+  @Patch(":sessionId/close")
+  @ApiOperation({ summary: "Close project session" })
+  @ApiResponse({ status: 200, type: ProjectSessionDto })
+  @ApiResponse({ status: 404, description: "not found (or no access)" })
+  async close(
+    @Param("projectId") projectId: string,
+    @Param("sessionId") sessionId: string,
+    @ReqUser() identity: RequestIdentity,
+    @Headers("x-correlation-id") correlationId?: string,
+  ): Promise<ProjectSessionDto> {
+    return (await this.sessions.close(
+      projectId,
+      sessionId,
+      correlationId,
+      identity.id,
+    )) as ProjectSessionDto;
+  }
+}

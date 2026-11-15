@@ -7,9 +7,9 @@ import {
   EmptyState,
   ErrorState,
   ProjectDetailSkeleton,
-} from '../../../../src/components/states';
-import { useUser } from '../../../../src/hooks/useUser';
-import { useI18n } from '../../../../src/i18n';
+} from '@/components/states';
+import { useUser } from '@/hooks/useUser';
+import { useI18n } from '@/i18n';
 
 /**
  * Route: /users/[id] — private single profile (GET /api/v1/users/:id).
@@ -28,7 +28,7 @@ export default function UserDetailPage() {
     <div>
       <div className="mb-4">
         <h1 className="text-2xl font-semibold">
-          {t.users.titleA} <span className="text-gradient-brand">{t.users.titleB}</span>
+          {t.users.titleA} <span className="text-foreground">{t.users.titleB}</span>
         </h1>
         <p className="text-muted-foreground text-sm">{t.users.subtitle}</p>
       </div>

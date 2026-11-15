@@ -2,9 +2,9 @@ import { useEffect, type ReactNode } from "react"
 import { View, Text, TouchableOpacity, StyleSheet, useColorScheme } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { useTranslation } from "react-i18next"
-import { useAuth } from "../stores/auth"
+import { useAuth } from "@/stores/auth"
 
-interface Props {
+type Props = {
   children: ReactNode
 }
 

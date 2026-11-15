@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "DevBox",
-    "slug": "opencode-mobile",
+    "name": "Rush Code",
+    "slug": "rush-code",
     "version": "0.6.2",
     "orientation": "portrait",
-    "scheme": "opencode",
+    "scheme": "rushcode",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/icon.png",
     "android": {

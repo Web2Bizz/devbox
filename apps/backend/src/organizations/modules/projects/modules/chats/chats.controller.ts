@@ -1,0 +1,95 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Headers,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  UseGuards,
+  UseInterceptors,
+} from "@nestjs/common";
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagger";
+import { JwtAuthGuard } from "../../../../../auth/jwt-auth.guard";
+import { ReqUser } from "../../../../../auth/req-user.decorator";
+import type { RequestIdentity } from "../../../../../auth/identity.service";
+import { NoIndexInterceptor } from "@common/http/noindex.interceptor";
+import { ZodValidationPipe } from "@common/validation";
+import { ChatsService } from "./chats.service";
+import { SessionsService } from "../sessions/sessions.service";
+import {
+  ProjectChatDto,
+  createChatSchema,
+  type CreateChatInput,
+} from "./chats.dto";
+
+/**
+ * Project chats — Bearer-guarded (JwtAuthGuard, legacy mock fallback in
+ * dev). User-facing ops scope through
+ * ProjectAccessService.assertProjectAccess (Card 5): org members pass;
+ * strangers get 404 (existence is not leaked).
+ */
+@ApiTags("project-chats")
+@Controller("projects/:projectId/chats")
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth()
+@UseInterceptors(NoIndexInterceptor)
+export class ChatsController {
+  constructor(
+    private readonly chats: ChatsService,
+    private readonly sessions: SessionsService,
+  ) {}
+
+  @Get()
+  @ApiOperation({ summary: "List project chats" })
+  @ApiResponse({ status: 200, type: [ProjectChatDto] })
+  @ApiResponse({ status: 404, description: "not found (or no access)" })
+  async list(
+    @Param("projectId") projectId: string,
+    @ReqUser() identity: RequestIdentity,
+    @Headers("x-correlation-id") correlationId?: string,
+  ): Promise<Array<ProjectChatDto>> {
+    return (await this.chats.list(
+      projectId,
+      correlationId,
+      identity.id,
+    )) as Array<ProjectChatDto>;
+  }
+
+  @Post()
+  @ApiOperation({ summary: "Create project chat" })
+  @ApiResponse({ status: 201, type: ProjectChatDto })
+  @ApiResponse({ status: 404, description: "not found (or no access)" })
+  async create(
+    @Param("projectId") projectId: string,
+    @Body(new ZodValidationPipe(createChatSchema)) body: CreateChatInput,
+    @ReqUser() identity: RequestIdentity,
+    @Headers("x-correlation-id") correlationId?: string,
+  ): Promise<ProjectChatDto> {
+    return (await this.chats.create(
+      projectId,
+      body,
+      correlationId,
+      identity.id,
+    )) as ProjectChatDto;
+  }
+
+  @Delete(":chatId")
+  @ApiOperation({ summary: "Delete project chat" })
+  @ApiResponse({ status: 204 })
+  @ApiResponse({ status: 404, description: "not found (or no access)" })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async remove(
+    @Param("projectId") projectId: string,
+    @Param("chatId") chatId: string,
+    @ReqUser() identity: RequestIdentity,
+    @Headers("x-correlation-id") correlationId?: string,
+  ): Promise<void> {
+    // Sessions survive with chat_id → NULL (FK SET NULL on Postgres;
+    // explicit detach keeps explicit-delete paths consistent).
+    await this.chats.remove(projectId, chatId, correlationId, identity.id);
+    await this.sessions.detachChat(chatId, correlationId);
+  }
+}

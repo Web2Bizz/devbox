@@ -1,4 +1,37 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { z } from 'zod';
+
+/**
+ * Auth DTO — single source of truth is @rush-code/contracts (verbatim trims,
+ * min/max, email regex + error strings; trim-first semantics preserved).
+ * Controllers import from './auth.dto' — the runtime objects are
+ * the package schemas. Swagger body DTOs live in this file.
+ */
+export {
+  loginSchema,
+  refreshSchema,
+  registerSchema,
+  updateMeSchema,
+  type LoginInput,
+  type RefreshInput,
+  type RegisterInput,
+  type UpdateMeInput,
+} from '@rush-code/contracts';
+
+/**
+ * POST /auth/logout body — the refresh token is optional (cookie fallback),
+ * and the whole body is optional (idempotent logout). `.default({})` keeps
+ * bodyless requests working through the zod pipe.
+ */
+export const logoutSchema: z.ZodDefault<
+  z.ZodObject<{ refreshToken: z.ZodOptional<z.ZodString> }>
+> = z
+  .object({
+    refreshToken: z.string().min(1).optional(),
+  })
+  .default({});
+
+export type LogoutInput = z.infer<typeof logoutSchema>;
 
 /** Public user DTO — never carries passwordHash (never logged, never serialized). */
 export class AuthUserDto {
@@ -11,7 +44,7 @@ export class AuthUserDto {
   @ApiProperty({ example: 'Lovelace' })
   lastName!: string;
 
-  @ApiProperty({ example: 'ada@devbox.local' })
+  @ApiProperty({ example: 'ada@rush-code.local' })
   email!: string;
 
   @ApiProperty({ example: 'local', enum: ['local', 'sso-oauth', 'github-app'] })
@@ -49,7 +82,7 @@ export class RegisterBodyDto {
   @ApiProperty({ example: 'Lovelace' })
   lastName!: string;
 
-  @ApiProperty({ example: 'ada@devbox.local' })
+  @ApiProperty({ example: 'ada@rush-code.local' })
   email!: string;
 
   @ApiProperty({ example: 's3cret-p4ss', minLength: 8 })
@@ -57,7 +90,7 @@ export class RegisterBodyDto {
 }
 
 export class LoginBodyDto {
-  @ApiProperty({ example: 'ada@devbox.local' })
+  @ApiProperty({ example: 'ada@rush-code.local' })
   email!: string;
 
   @ApiProperty({ example: 's3cret-p4ss', minLength: 8 })

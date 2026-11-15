@@ -1,8 +1,15 @@
 import { z } from 'zod';
 
 /**
- * Project-name validation — mirrors backend min/max (1..200) but adds
- * charset restriction + UX-aware trimming.
+ * Project-name validation — UX-strict superset of the wire contract.
+ *
+ * Wire source of truth is `@rush-code/contracts` (`createProjectSchema`:
+ * backend-verbatim 1..200, no trim/charset). This local schema stays
+ * intentionally STRICTER (trim + 2..100 + allowed-charset + i18n codes
+ * `project_name_*` mapped in CreateProjectDialog) — replacing it with the
+ * package schema would LOOSEN form validation and break the
+ * `getZodErrorMessage` mapping. Wire shape is frozen, so the local form
+ * schema must remain a subset of what the wire accepts.
  *
  * Разрешённые символы:
  *  - буквы латиницы и кириллицы (A-Za-z, А-Яа-яЁё)

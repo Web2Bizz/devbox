@@ -1,0 +1,22 @@
+/**
+ * API versioning contract — single source of truth.
+ *
+ * URL scheme (see app/app.setup.ts `configureApp`):
+ * - canonical:  /api/v1/* via setGlobalPrefix('api') + URI versioning with
+ *   `defaultVersion: '1'` — every endpoint is v1 unless it opts out
+ * - removed:    unversioned /api/* aliases are gone → 404 { code: 'not_found', … }
+ * - reserved:   /api/v2/* is intentionally unbound → 404 { code: 'not_found', … }
+ * - /health stays VERSION_NEUTRAL at the root (global-prefix excluded; probes
+ *   must not depend on API versioning).
+ *
+ * `@Version(VERSION_NEUTRAL)` is reserved for /health only (probes must not
+ * depend on API versioning); every other controller stays on the default v1
+ * URI version. There is no per-endpoint `Api-Version` request or response
+ * header — the version is encoded in the URI alone.
+ */
+export const DEFAULT_API_VERSION: string = '1';
+
+export const SUPPORTED_API_VERSIONS: ReadonlyArray<string> = ['1'] as const;
+
+/** Canonical v1 prefix (for docs, frontend client, openapi.yaml). */
+export const API_V1_PREFIX: string = '/api/v1';

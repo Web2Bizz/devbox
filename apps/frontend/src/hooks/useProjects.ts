@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { formatApiError } from '../lib/format-error';
 import type { Project } from '../lib/types';
-import type { ProjectApiDto } from '../api/types';
+import type { Project as ProjectApiDto } from '@rush-code/contracts';
 import { useI18n } from '../i18n';
 
 export const PROJECTS_QUERY_KEY = ['projects'] as const;
@@ -13,31 +13,30 @@ export const PROJECTS_QUERY_KEY = ['projects'] as const;
 export function mapApiToProject(dto: ProjectApiDto): Project {
   const repo =
     dto.githubOwner && dto.githubRepo ? `${dto.githubOwner}/${dto.githubRepo}` : undefined;
+  const status = (dto as { status?: string }).status === 'deleted' ? 'archived' : 'active';
   return {
     id: dto.id,
     name: dto.name,
     description: dto.description ?? '',
-    status: 'active',
+    status,
     updatedAt: dto.updatedAt,
     repo,
     // Backend always sends these; default keeps compat with stale caches.
     corrupted: dto.corrupted ?? false,
     corruptedReason: dto.corruptedReason ?? null,
-    // Additive scope passthrough (optional — old DTOs/caches stay valid).
-    ...(dto.scope ? { scope: dto.scope } : {}),
   };
 }
 
-export interface UseProjectsResult {
+export type UseProjectsResult = {
   projects: Project[];
   loading: boolean;
   error: string | null;
   isEmpty: boolean;
   reload: () => void;
-  createProject: (name: string) => Promise<Project>;
+  createProject: (name: string, orgId?: string) => Promise<Project>;
   creating: boolean;
   createError: string | null;
-}
+};
 
 /**
  * Production-ready list hook backed by TanStack Query.
@@ -59,8 +58,8 @@ export function useProjects(): UseProjectsResult {
   } = useQuery({
     queryKey: PROJECTS_QUERY_KEY,
     queryFn: async (): Promise<Project[]> => {
-      const dtos = await api.listProjects();
-      return dtos.map(mapApiToProject);
+      // Legacy global list removed (400 ORG_REQUIRED) — use useOrgProjects(orgId).
+      throw new Error('ORG_REQUIRED — list via useOrgProjects(orgId)');
     },
     // Keep previous data during refetch to avoid skeleton flash
     placeholderData: (prev) => prev,
@@ -80,8 +79,11 @@ export function useProjects(): UseProjectsResult {
   // const reload = useCallback(() => void refetch(), [refetch]);
 
   const mutation = useMutation({
-    mutationFn: async (name: string): Promise<Project> => {
-      const dto = await api.createProject({ name: name.trim() });
+    mutationFn: async ({ name, orgId }: { name: string; orgId?: string }): Promise<Project> => {
+      if (!orgId) {
+        throw new Error('ORG_REQUIRED — create via an organization (useOrgProjects)');
+      }
+      const dto = await api.createProject({ name: name.trim(), orgId });
       return mapApiToProject(dto);
     },
     onSuccess: (created) => {
@@ -95,8 +97,8 @@ export function useProjects(): UseProjectsResult {
   });
 
   const createProject = useCallback(
-    async (name: string): Promise<Project> => {
-      return mutation.mutateAsync(name);
+    async (name: string, orgId?: string): Promise<Project> => {
+      return mutation.mutateAsync({ name, orgId });
     },
     [mutation],
   );

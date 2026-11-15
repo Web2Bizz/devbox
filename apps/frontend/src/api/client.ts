@@ -1,26 +1,71 @@
 import type {
-  AcceptInviteRequest,
-  AddMemberRequest,
+  AcceptInviteInput as AcceptInviteRequest,
+  AddMemberInput as AddMemberRequest,
   ApiError,
   AuthSession,
   AuthTokens,
   AuthUser,
-  CreateInviteRequest,
-  CreateOrganizationRequest,
-  CreateProjectRequest,
+  CreateInviteInput as CreateInviteRequest,
+  CreateOrganizationInput as CreateOrganizationRequest,
+  CreateProjectInput as CreateProjectRequest,
+  CreateRunRequest,
   HealthResponse,
-  InviteDto,
-  MemberDto,
-  MessagesResponse,
+  Organization as OrganizationDto,
+  OrganizationInvite as InviteDto,
+  OrganizationMember as MemberDto,
   NpmRegistryStatusResponse,
-  OrganizationDto,
-  ProjectApiDto,
+  OpencodeUsage,
+  OrgRole,
+  Project as ProjectApiDto,
   RegistryCatalogResponse,
-  SendChatResponse,
-  Session,
-  UpdateMemberRoleRequest,
-  UpdateOrganizationRequest,
-} from './types';
+  RunInfo,
+  RunInfoList,
+  UpdateMemberRoleInput as UpdateMemberRoleRequest,
+  UpdateOrganizationInput as UpdateOrganizationRequest,
+  VaultSecretDeleteResult,
+  VaultSecretInfo,
+  VaultSecretInput,
+  VaultSecretList,
+  VaultSecretUpdateInput,
+} from '@rush-code/contracts';
+import {
+  agentInfoListSchema,
+  revertInfoSchema,
+  revertMessagesResultSchema,
+  sessionForkResponseSchema,
+  sessionInfoListSchema,
+  sessionInfoSchema,
+  sessionInterruptResultSchema,
+  sessionMessageListSchema,
+  sessionMessageSchema,
+  sessionMessageVariantListSchema,
+  sessionRunStatusMapSchema,
+  sessionRunnerProviderListSchema,
+  sessionModelListSchema,
+  snapshotDiffListSchema,
+  runInfoListSchema,
+  runInfoSchema,
+} from '@rush-code/contracts';
+import type {
+  AgentInfo,
+  CreateSessionRequest,
+  InterruptSessionRequest,
+  RevertInfo,
+  RevertMessagesResult,
+  RevertStageRequest,
+  SessionApprovalRequest,
+  SessionForkRequest,
+  SessionForkResponse,
+  SessionInfo,
+  SessionInterruptResult,
+  SessionMessage,
+  SessionMessageVariant,
+  SessionRunStatusMap,
+  SessionRunnerProvider,
+  SessionModel,
+  SendMessageRequest,
+  SnapshotDiffList,
+} from '@rush-code/contracts';
 
 // Base URL resolution (Next.js App Router):
 // - process.env.NEXT_PUBLIC_API_URL is inlined at `next build` time. The literal
@@ -49,6 +94,14 @@ const V1_PREFIX = `/api/${API_VERSION}`;
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
+// Long POST exception: POST /api/v1/sessions/:id/messages returns its receipt
+// only after the whole backend turn (Jev ~10s + an Auto chain of up to 7
+// sequential model calls ~90s each) — the 10s default would abort the wait
+// while the backend keeps computing and streaming frames over SSE. Abort
+// for this call arrives via the caller's AbortSignal (stop()/unmount),
+// never via this timer.
+export const SEND_TIMEOUT_MS = 600_000;
+
 export class ApiClientError extends Error {
   code: string;
   status: number;
@@ -63,12 +116,32 @@ export class ApiClientError extends Error {
 }
 
 async function request<T>(path: string, init: RequestInit = {}, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> {
+  const externalSignal = init.signal as AbortSignal | null | undefined;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   const correlationId = crypto.randomUUID();
+  const onExternalAbort = () => {
+    try {
+      ctrl.abort((externalSignal as AbortSignal).reason);
+    } catch {
+      ctrl.abort();
+    }
+  };
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      clearTimeout(timer);
+      const reason = (externalSignal as AbortSignal).reason;
+      throw reason instanceof Error
+        ? reason
+        : new DOMException('The operation was aborted.', 'AbortError');
+    }
+    externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+  }
   try {
+    const { signal: _externalIgnored, ...restInit } = init;
+    void _externalIgnored;
     const res = await fetch(`${BASE_URL}${path}`, {
-      ...init,
+      ...restInit,
       signal: ctrl.signal,
       headers: {
         'content-type': 'application/json',
@@ -94,6 +167,9 @@ async function request<T>(path: string, init: RequestInit = {}, timeoutMs = DEFA
   } catch (e) {
     if (e instanceof ApiClientError) throw e;
     if ((e as Error).name === 'AbortError') {
+      // React Query cancellation (queryFn signal) must stay an AbortError so
+      // the cancelled query does not surface as a timeout error in the UI.
+      if (externalSignal?.aborted) throw e;
       throw new ApiClientError({
         code: 'timeout',
         message: `Request timed out after ${timeoutMs}ms`,
@@ -109,6 +185,7 @@ async function request<T>(path: string, init: RequestInit = {}, timeoutMs = DEFA
     });
   } finally {
     clearTimeout(timer);
+    externalSignal?.removeEventListener('abort', onExternalAbort);
   }
 }
 
@@ -124,42 +201,484 @@ async function requestV1<T>(
   return request<T>(`${V1_PREFIX}${path}`, init, timeoutMs);
 }
 
+/**
+ * Boundary parse for the domain session contract: answers are checked
+ * against the @rush-code/contracts zod schemas and fail fast as
+ * ApiClientError('shape_mismatch') on a wire drift — the UI never renders
+ * a silently-cast unknown shape and never masks a contract bug.
+ */
+function parseBoundary<T>(path: string, schema: { parse(data: unknown): T }, value: unknown): T {
+  try {
+    return schema.parse(value);
+  } catch (e) {
+    // Only the offending field path goes into the message — never the
+    // received value (a drifted answer may carry upstream payloads we do
+    // not echo into the UI or logs).
+    const issue = (e as { issues?: Array<{ path?: unknown[] }> }).issues?.[0];
+    const where = issue?.path?.length ? `: ${issue.path.join('.')}` : '';
+    throw new ApiClientError({
+      code: 'shape_mismatch',
+      message: `contract mismatch on ${path}${where}`,
+      status: 0,
+      correlationId: 'client',
+    });
+  }
+}
+
 export const api = {
   baseUrl: BASE_URL,
   apiVersion: API_VERSION,
   getHealth: () => request<HealthResponse>('/health'),
-  // Proxy routes: 200 always means live upstream data. When the opencode
-  // server is unreachable the backend answers 503 EXTERNAL_UNAVAILABLE
-  // («сервис временно недоступен, повторите позже») with Retry-After —
-  // surfaced here as ApiClientError (no mock payloads, never 200).
-  getSession: () => requestV1<Session>('/session'),
-  getMessages: (sessionId: string) =>
-    requestV1<MessagesResponse>(`/messages?sessionId=${encodeURIComponent(sessionId)}`),
-  sendChat: (message: string, sessionId?: string) =>
-    requestV1<SendChatResponse>('/chat', {
-      method: 'POST',
-      body: JSON.stringify({ message, sessionId }),
-    }),
+  // ── Domain sessions surface — GET/POST /api/v1/sessions* (card 4 product
+  // contract). URI-versioned v1: the backend serves these routes under the
+  // canonical /api/v1 prefix (NOT VERSION_NEUTRAL). JWT-guarded + C4 gate:
+  // projectId is REQUIRED here (missing → honest 400 PROJECT_REQUIRED
+  // ApiClientError, strangers → 404 not_found, runner outage → 503
+  // EXTERNAL_UNAVAILABLE — never masked, never defaulted). Every answer is
+  // parsed with a @rush-code/contracts boundary schema (parseBoundary):
+  // a wire drift fails fast as ApiClientError('shape_mismatch'), the UI
+  // never renders a silently-cast shape. Auth travels as
+  // `authorization: Bearer` (same contract as api.me), never a runner key.
+  listSessions: async (
+    accessToken: string,
+    projectId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<SessionInfo[]> =>
+    parseBoundary(
+      'GET /api/v1/sessions',
+      sessionInfoListSchema,
+      await request<unknown>(
+        `/api/v1/sessions?projectId=${encodeURIComponent(projectId)}`,
+        {
+          headers: { authorization: `Bearer ${accessToken}` },
+          ...(opts?.signal ? { signal: opts.signal } : {}),
+        },
+      ),
+    ),
+  createSession: async (accessToken: string, body: CreateSessionRequest) =>
+    parseBoundary(
+      'POST /api/v1/sessions',
+      sessionInfoSchema,
+      await request<unknown>('/api/v1/sessions', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify(body),
+      }),
+    ),
+  getSessionStatuses: async (
+    accessToken: string,
+    projectId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<SessionRunStatusMap> =>
+    parseBoundary(
+      'GET /api/v1/sessions/status',
+      sessionRunStatusMapSchema,
+      await request<unknown>(
+        `/api/v1/sessions/status?projectId=${encodeURIComponent(projectId)}`,
+        {
+          headers: { authorization: `Bearer ${accessToken}` },
+          ...(opts?.signal ? { signal: opts.signal } : {}),
+        },
+      ),
+    ),
+  listSessionMessages: async (
+    accessToken: string,
+    sessionId: string,
+    projectId: string,
+    opts?: { limit?: number; cursor?: string; leafId?: string; signal?: AbortSignal },
+  ): Promise<SessionMessage[]> => {
+    const q = new URLSearchParams({ projectId });
+    if (opts?.limit !== undefined) q.set('limit', String(opts.limit));
+    if (opts?.cursor) q.set('cursor', opts.cursor);
+    if (opts?.leafId) q.set('leafId', opts.leafId);
+    return parseBoundary(
+      'GET /api/v1/sessions/:id/messages',
+      sessionMessageListSchema,
+      await request<unknown>(
+        `/api/v1/sessions/${encodeURIComponent(sessionId)}/messages?${q.toString()}`,
+        {
+          headers: { authorization: `Bearer ${accessToken}` },
+          ...(opts?.signal ? { signal: opts.signal } : {}),
+        },
+      ),
+    );
+  },
+  listSessionVariants: async (
+    accessToken: string,
+    sessionId: string,
+    projectId: string,
+    opts?: { parentId?: string | null; signal?: AbortSignal },
+  ): Promise<SessionMessageVariant[]> => {
+    const q = new URLSearchParams({ projectId });
+    if (opts?.parentId) q.set('parentId', opts.parentId);
+    return parseBoundary(
+      'GET /api/v1/sessions/:id/variants',
+      sessionMessageVariantListSchema,
+      await request<unknown>(
+        `/api/v1/sessions/${encodeURIComponent(sessionId)}/variants?${q.toString()}`,
+        {
+          headers: { authorization: `Bearer ${accessToken}` },
+          ...(opts?.signal ? { signal: opts.signal } : {}),
+        },
+      ),
+    );
+  },
+  revertSessionMessages: async (
+    accessToken: string,
+    sessionId: string,
+    body: { projectId: string; messageID: string },
+  ): Promise<RevertMessagesResult> =>
+    parseBoundary(
+      'POST /api/v1/sessions/:id/messages/revert',
+      revertMessagesResultSchema,
+      await request<unknown>(`/api/v1/sessions/${encodeURIComponent(sessionId)}/messages/revert`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify(body),
+      }),
+    ),
+  sendSessionMessage: async (
+    accessToken: string,
+    sessionId: string,
+    body: SendMessageRequest,
+    opts?: { signal?: AbortSignal; timeoutMs?: number },
+  ) =>
+    parseBoundary(
+      'POST /api/v1/sessions/:id/messages',
+      sessionMessageSchema,
+      await request<unknown>(
+        `/api/v1/sessions/${encodeURIComponent(sessionId)}/messages`,
+        {
+          method: 'POST',
+          headers: { authorization: `Bearer ${accessToken}` },
+          body: JSON.stringify(body),
+          ...(opts?.signal ? { signal: opts.signal } : {}),
+        },
+        opts?.timeoutMs ?? SEND_TIMEOUT_MS,
+      ),
+    ),
+  // SSE transport exception: request() JSON-buffers the answer — the event
+  // stream must keep the Response open. Same headers/envelope pattern as
+  // request() (correlation id, ApiClientError on the pre-headers JSON
+  // answer: the backend answers an honest 503 EXTERNAL_UNAVAILABLE body
+  // BEFORE any text/event-stream header when the runner is down). No
+  // client-side timeout — the stream is long-lived; cancellation arrives
+  // via the caller's AbortSignal. The stream carries live-only detail
+  // (reasoning/tool/text/step markers) project-scoped — durable history
+  // stays on REST, never in this stream.
+  streamSessionEvents: async (
+    accessToken: string,
+    projectId: string,
+    opts?: { signal?: AbortSignal; sessionId?: string; lastEventId?: string },
+  ): Promise<Response> => {
+    const correlationId = crypto.randomUUID();
+    const q = new URLSearchParams({ projectId });
+    if (opts?.sessionId) q.set('session', opts.sessionId);
+    const res = await fetch(
+      `${BASE_URL}/api/v1/sessions/events?${q.toString()}`,
+      {
+        method: 'GET',
+        headers: {
+          accept: 'text/event-stream',
+          authorization: `Bearer ${accessToken}`,
+          'x-correlation-id': correlationId,
+          ...(opts?.lastEventId ? { 'Last-Event-ID': opts.lastEventId } : {}),
+        },
+        ...(opts?.signal ? { signal: opts.signal } : {}),
+      },
+    );
+    if (!res.ok) {
+      const data = (await res.json().catch(() => null)) as (ApiError & { error?: string }) | null;
+      const err = (data ?? {}) as Partial<ApiError>;
+      const headerId = res.headers.get('x-correlation-id');
+      throw new ApiClientError({
+        code: err.code ?? `http_${res.status}`,
+        message: err.message ?? `HTTP ${res.status}`,
+        status: res.status,
+        correlationId: err.correlationId ?? headerId ?? correlationId,
+      });
+    }
+    return res;
+  },
+  // ── Domain interrupt + provider inventory (card 6) — the last two
+  // surfaces that used the deprecated mirror alias are now domain routes:
+  // POST /api/v1/sessions/:id/interrupt and GET /api/v1/sessions/providers.
+  // No mirror transport remains anywhere in the frontend. ──
+  interruptSession: async (
+    accessToken: string,
+    sessionId: string,
+    body: InterruptSessionRequest,
+  ): Promise<SessionInterruptResult> =>
+    parseBoundary(
+      'POST /api/v1/sessions/:id/interrupt',
+      sessionInterruptResultSchema,
+      await request<unknown>(`/api/v1/sessions/${encodeURIComponent(sessionId)}/interrupt`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify(body),
+      }),
+    ),
+  // ── Approval (WEB-20 / D2): POST /api/v1/sessions/:id/approval resolves a
+  // turn parked on `awaiting_approval` (approve resumes the same checkpoint
+  // thread, reject parks it on paused). Same C4 gate in the body as
+  // interrupt/fork; the answer {status: running|paused} is boundary-parsed
+  // with a narrow inline shape (contracts has the request, no result schema
+  // yet — the inline parse keeps the drift loud without a new contract).
+  // `reason` rides the body only as a human note, never secrets.
+  resolveSessionApproval: async (
+    accessToken: string,
+    sessionId: string,
+    body: SessionApprovalRequest,
+    opts?: { signal?: AbortSignal },
+  ): Promise<{ status: 'running' | 'paused' }> =>
+    parseBoundary(
+      'POST /api/v1/sessions/:id/approval',
+      {
+        parse(value: unknown): { status: 'running' | 'paused' } {
+          const record = value as { status?: unknown };
+          if (
+            record !== null &&
+            typeof record === 'object' &&
+            (record.status === 'running' || record.status === 'paused')
+          ) {
+            return { status: record.status };
+          }
+          throw new Error('contract mismatch on POST /api/v1/sessions/:id/approval: status');
+        },
+      },
+      await request<unknown>(`/api/v1/sessions/${encodeURIComponent(sessionId)}/approval`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify(body),
+        ...(opts?.signal ? { signal: opts.signal } : {}),
+      }),
+    ),
+  // ── Fork / revert / snapshot diff (D1 domain contract). Same stance: the
+  // project gate rides the body (fork/stage) or the query (clear/commit/diff),
+  // every answer is boundary-parsed, and 204 answers carry no body. ──
+  forkSession: async (
+    accessToken: string,
+    sessionId: string,
+    body: SessionForkRequest,
+  ): Promise<SessionForkResponse> =>
+    parseBoundary(
+      'POST /api/v1/sessions/:id/fork',
+      sessionForkResponseSchema,
+      await request<unknown>(`/api/v1/sessions/${encodeURIComponent(sessionId)}/fork`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify(body),
+      }),
+    ),
+  stageSessionRevert: async (
+    accessToken: string,
+    sessionId: string,
+    body: RevertStageRequest,
+  ): Promise<RevertInfo> =>
+    parseBoundary(
+      'POST /api/v1/sessions/:id/revert/stage',
+      revertInfoSchema,
+      await request<unknown>(`/api/v1/sessions/${encodeURIComponent(sessionId)}/revert/stage`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify(body),
+      }),
+    ),
+  clearSessionRevert: async (
+    accessToken: string,
+    sessionId: string,
+    projectId: string,
+  ): Promise<void> => {
+    await request<unknown>(
+      `/api/v1/sessions/${encodeURIComponent(sessionId)}/revert?projectId=${encodeURIComponent(projectId)}`,
+      { method: 'DELETE', headers: { authorization: `Bearer ${accessToken}` } },
+    );
+  },
+  commitSessionRevert: async (
+    accessToken: string,
+    sessionId: string,
+    projectId: string,
+  ): Promise<void> => {
+    await request<unknown>(
+      `/api/v1/sessions/${encodeURIComponent(sessionId)}/revert/commit?projectId=${encodeURIComponent(projectId)}`,
+      { method: 'POST', headers: { authorization: `Bearer ${accessToken}` } },
+    );
+  },
+  getSessionSnapshotDiff: async (
+    accessToken: string,
+    sessionId: string,
+    projectId: string,
+    from: string,
+    to: string,
+    opts?: { context?: number; signal?: AbortSignal },
+  ): Promise<SnapshotDiffList> => {
+    const q = new URLSearchParams({ projectId, from, to });
+    if (opts?.context !== undefined) q.set('context', String(opts.context));
+    return parseBoundary(
+      'GET /api/v1/sessions/:id/snapshots/diff',
+      snapshotDiffListSchema,
+      await request<unknown>(
+        `/api/v1/sessions/${encodeURIComponent(sessionId)}/snapshots/diff?${q.toString()}`,
+        {
+          headers: { authorization: `Bearer ${accessToken}` },
+          ...(opts?.signal ? { signal: opts.signal } : {}),
+        },
+      ),
+    );
+  },
+  listSessionProviders: async (
+    accessToken: string,
+    projectId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<SessionRunnerProvider[]> =>
+    parseBoundary(
+      'GET /api/v1/sessions/providers',
+      sessionRunnerProviderListSchema,
+      await request<unknown>(
+        `/api/v1/sessions/providers?projectId=${encodeURIComponent(projectId)}`,
+        {
+          headers: { authorization: `Bearer ${accessToken}` },
+          ...(opts?.signal ? { signal: opts.signal } : {}),
+        },
+      ),
+    ),
+  listSessionModels: async (
+    accessToken: string,
+    projectId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<SessionModel[]> =>
+    parseBoundary(
+      'GET /api/v1/sessions/models',
+      sessionModelListSchema,
+      await request<unknown>(
+        `/api/v1/sessions/models?projectId=${encodeURIComponent(projectId)}`,
+        {
+          headers: { authorization: `Bearer ${accessToken}` },
+          ...(opts?.signal ? { signal: opts.signal } : {}),
+        },
+      ),
+    ),
+  // backend-контракт: agents; UI-название: режимы работы.
+  // Mode registry (backend: /agents) for the chat mode picker inventory
+  // (GET /api/v1/agents) — the chat ModeSelector inventory.
+  // URI-versioned v1 (same canonical prefix as the domain session routes),
+  // same boundary-parse stance: a wire drift fails fast as shape_mismatch,
+  // never a silent cast.
+  listAgents: async (accessToken: string, opts?: { signal?: AbortSignal }): Promise<AgentInfo[]> =>
+    parseBoundary(
+      'GET /api/v1/agents',
+      agentInfoListSchema,
+      await requestV1<unknown>('/agents', {
+        headers: { authorization: `Bearer ${accessToken}` },
+        ...(opts?.signal ? { signal: opts.signal } : {}),
+      }),
+    ),
+  // ── Runs domain — /api/v1/runs* (URI-versioned v1, same stance as
+  // sessions: JWT-guarded, project-scoped via ?projectId=, every answer
+  // parsed with a @rush-code/contracts boundary schema so a wire drift fails
+  // fast as ApiClientError('shape_mismatch')). ──
+  listRuns: async (
+    accessToken: string,
+    projectId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<RunInfoList> =>
+    parseBoundary(
+      'GET /api/v1/runs',
+      runInfoListSchema,
+      await request<unknown>(`/api/v1/runs?projectId=${encodeURIComponent(projectId)}`, {
+        headers: { authorization: `Bearer ${accessToken}` },
+        ...(opts?.signal ? { signal: opts.signal } : {}),
+      }),
+    ),
+  createRun: async (accessToken: string, body: CreateRunRequest): Promise<RunInfo> =>
+    parseBoundary(
+      'POST /api/v1/runs',
+      runInfoSchema,
+      await request<unknown>('/api/v1/runs', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify(body),
+      }),
+    ),
+  getRun: async (
+    accessToken: string,
+    runId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<RunInfo> =>
+    parseBoundary(
+      'GET /api/v1/runs/:id',
+      runInfoSchema,
+      await request<unknown>(`/api/v1/runs/${encodeURIComponent(runId)}`, {
+        headers: { authorization: `Bearer ${accessToken}` },
+        ...(opts?.signal ? { signal: opts.signal } : {}),
+      }),
+    ),
+  // SSE exception (same as streamSessionEvents): keep the Response open;
+  // the backend answers an honest JSON error (503/404/400) BEFORE the
+  // text/event-stream headers, surfaced as ApiClientError. No client timeout
+  // — cancellation is the caller's AbortSignal.
+  streamRunEvents: async (
+    accessToken: string,
+    runId: string,
+    cursor: number,
+    opts?: { signal?: AbortSignal },
+  ): Promise<Response> => {
+    const correlationId = crypto.randomUUID();
+    const res = await fetch(
+      `${BASE_URL}/api/v1/runs/${encodeURIComponent(runId)}/events?cursor=${cursor}`,
+      {
+        method: 'GET',
+        headers: {
+          accept: 'text/event-stream',
+          authorization: `Bearer ${accessToken}`,
+          'x-correlation-id': correlationId,
+        },
+        ...(opts?.signal ? { signal: opts.signal } : {}),
+      },
+    );
+    if (!res.ok) {
+      const data = (await res.json().catch(() => null)) as (ApiError & { error?: string }) | null;
+      const err = (data ?? {}) as Partial<ApiError>;
+      const headerId = res.headers.get('x-correlation-id');
+      throw new ApiClientError({
+        code: err.code ?? `http_${res.status}`,
+        message: err.message ?? `HTTP ${res.status}`,
+        status: res.status,
+        correlationId: err.correlationId ?? headerId ?? correlationId,
+      });
+    }
+    return res;
+  },
   // Docker-registry surface: 200 always means live upstream /v2/_catalog
   // data. Unconfigured/unreachable answers 503 EXTERNAL_UNAVAILABLE
   // («сервис временно недоступен, повторите позже») with Retry-After —
   // surfaced here as ApiClientError (no mock payloads, never 200).
-  getRegistryCatalog: () =>
-    requestV1<RegistryCatalogResponse>('/registry/catalog'),
+  // No token: catalog is public reachability, auth lives server-side.
+  // Optional `signal` forwards React Query cancellation (queryFn signal)
+  // into the timeout controller — no local AbortController in hooks.
+  getRegistryCatalog: (opts?: { signal?: AbortSignal }) =>
+    requestV1<RegistryCatalogResponse>(
+      '/registry/catalog',
+      opts?.signal ? { signal: opts.signal } : {},
+    ),
   // npm surface: 200 always means live Verdaccio /-/ping reachability
   // ({ status: 'up', url, scope }); unconfigured/unreachable answers 503
   // EXTERNAL_UNAVAILABLE («сервис временно недоступен, повторите позже»)
   // with Retry-After — surfaced here as ApiClientError (no mock payloads,
   // token never in payload).
-  getNpmStatus: () =>
-    requestV1<NpmRegistryStatusResponse>('/registry/npm/status'),
+  // Optional `signal` forwards React Query cancellation (queryFn signal).
+  getNpmStatus: (opts?: { signal?: AbortSignal }) =>
+    requestV1<NpmRegistryStatusResponse>(
+      '/registry/npm/status',
+      opts?.signal ? { signal: opts.signal } : {},
+    ),
   // Auth surface (internal accounts): register/login issue the access +
   // rotating refresh pair; refresh/logout carry `credentials: 'include'` so
-  // the httpOnly `devbox-refresh` cookie travels cross-origin (frontend
+  // the httpOnly `rush-code-refresh` cookie travels cross-origin (frontend
   // :3001 → backend). 401 codes are `invalid_credentials` (generic, no
   // enumeration) and `email_taken` (409) — surfaced as ApiClientError.
   // register/login also carry `credentials: 'include'` so the Set-Cookie
-  // pair (devbox-refresh + devbox-auth) is stored on cross-origin dev.
+  // pair (rush-code-refresh + rush-code-auth) is stored on cross-origin dev.
   register: (input: { firstName: string; lastName: string; email: string; password: string }) =>
     requestV1<AuthSession>('/auth/register', {
       method: 'POST',
@@ -195,8 +714,40 @@ export const api = {
       body: JSON.stringify(patch),
     }),
   // Projects surface — strict Postgres-backed, 503 when unavailable.
-  // No mock fallback here: client always talks /api/v1/projects.
+  // No mock fallback here: canonical paths are nested
+  // /organizations/:id/projects. Global GET /projects → 400 ORG_REQUIRED.
   listProjects: () => requestV1<ProjectApiDto[]>('/projects'),
+  listOrgProjects: (accessToken: string, orgId: string, includeDeleted = false) =>
+    requestV1<ProjectApiDto[]>(
+      `/organizations/${encodeURIComponent(orgId)}/projects${includeDeleted ? '?includeDeleted=true' : ''}`,
+      { headers: { authorization: `Bearer ${accessToken}` } },
+    ),
+  createOrgProject: (accessToken: string, orgId: string, input: CreateProjectRequest) =>
+    requestV1<ProjectApiDto>(`/organizations/${encodeURIComponent(orgId)}/projects`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ ...input, orgId }),
+    }),
+  getOrgProject: (accessToken: string, orgId: string, projectId: string, includeDeleted = false) =>
+    requestV1<ProjectApiDto>(
+      `/organizations/${encodeURIComponent(orgId)}/projects/${encodeURIComponent(projectId)}${includeDeleted ? '?includeDeleted=true' : ''}`,
+      { headers: { authorization: `Bearer ${accessToken}` } },
+    ),
+  restoreOrgProject: (accessToken: string, orgId: string, projectId: string) =>
+    requestV1<ProjectApiDto>(
+      `/organizations/${encodeURIComponent(orgId)}/projects/${encodeURIComponent(projectId)}/restore`,
+      {
+        method: 'POST',
+        credentials: 'include',
+        headers: { authorization: `Bearer ${accessToken}` },
+      },
+    ),
+  getEffectiveConfig: (accessToken: string, orgId: string, projectId: string) =>
+    requestV1<{ key: string; value: string; origin: 'project' | 'organization'; overridden: boolean }[]>(
+      `/organizations/${encodeURIComponent(orgId)}/projects/${encodeURIComponent(projectId)}/effective-config`,
+      { headers: { authorization: `Bearer ${accessToken}` } },
+    ),
   createProject: (input: CreateProjectRequest) =>
     requestV1<ProjectApiDto>('/projects', {
       method: 'POST',
@@ -286,22 +837,22 @@ export const api = {
       body: JSON.stringify(input),
     }),
   linkOrgProject: (accessToken: string, id: string, projectId: string) =>
-    requestV1<void>(
-      `/organizations/${encodeURIComponent(id)}/projects/${encodeURIComponent(projectId)}`,
-      {
-        method: 'POST',
-        credentials: 'include',
-        headers: { authorization: `Bearer ${accessToken}` },
-      },
+    Promise.reject(
+      new ApiClientError({
+        code: 'gone',
+        message: 'project links removed — project belongs to exactly one org',
+        status: 410,
+        correlationId: 'client',
+      }),
     ),
   unlinkOrgProject: (accessToken: string, id: string, projectId: string) =>
-    requestV1<void>(
-      `/organizations/${encodeURIComponent(id)}/projects/${encodeURIComponent(projectId)}`,
-      {
-        method: 'DELETE',
-        credentials: 'include',
-        headers: { authorization: `Bearer ${accessToken}` },
-      },
+    Promise.reject(
+      new ApiClientError({
+        code: 'gone',
+        message: 'project links removed — project belongs to exactly one org',
+        status: 410,
+        correlationId: 'client',
+      }),
     ),
   // GET /users/:id — own profile only ( чужой → 403 before any DB lookup,
   // private — never indexed). Surfaced as ApiClientError, no fallbacks.
@@ -309,4 +860,48 @@ export const api = {
     requestV1<AuthUser>(`/users/${encodeURIComponent(id)}`, {
       headers: { authorization: `Bearer ${accessToken}` },
     }),
+  // GET /api/v1/usage — live Zen Go usage (+ optional legacy balance/usage,
+  // additive rolling/daily/weekly/monthly breakdown; Zen percent is exposed
+  // as { used: percent, limit: 100 }). Missing key → 404
+  // opencode_key_missing (hook maps it to the no-key empty state, not 0% bars).
+  getUsage: (accessToken: string) =>
+    requestV1<OpencodeUsage>('/usage', {
+      headers: { authorization: `Bearer ${accessToken}` },
+    }),
+  // Per-consumer vault secrets — Bearer-scoped to the caller. The API key is
+  // write-only: create/update accept plaintext once (encrypted AES-256-GCM at
+  // rest), reads answer identity/label/timestamps only. Missing/foreign ids
+  // answer 404 vault_secret_not_found.
+  listVaultSecrets: (accessToken: string) =>
+    requestV1<VaultSecretList>('/vault/secrets', {
+      headers: { authorization: `Bearer ${accessToken}` },
+    }),
+  createVaultSecret: (accessToken: string, input: VaultSecretInput) =>
+    requestV1<VaultSecretInfo>('/vault/secrets', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(input),
+    }),
+  getVaultSecret: (accessToken: string, id: string) =>
+    requestV1<VaultSecretInfo>(`/vault/secrets/${encodeURIComponent(id)}`, {
+      headers: { authorization: `Bearer ${accessToken}` },
+    }),
+  updateVaultSecret: (
+    accessToken: string,
+    id: string,
+    input: VaultSecretUpdateInput,
+  ) =>
+    requestV1<VaultSecretInfo>(`/vault/secrets/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(input),
+    }),
+  deleteVaultSecret: (accessToken: string, id: string) =>
+    requestV1<VaultSecretDeleteResult>(
+      `/vault/secrets/${encodeURIComponent(id)}`,
+      {
+        method: 'DELETE',
+        headers: { authorization: `Bearer ${accessToken}` },
+      },
+    ),
 };

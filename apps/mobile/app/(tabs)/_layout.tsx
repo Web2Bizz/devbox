@@ -2,11 +2,11 @@ import { Tabs } from "expo-router"
 import { useColorScheme } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { useTranslation } from "react-i18next"
-import { useEvents } from "../../src/stores/events"
-import { useSessions } from "../../src/stores/sessions"
-import { useSessionsList } from "../../src/queries/sessions"
-import { countActiveTasks } from "../../src/lib/active-tasks"
-import { ConnectionBadge } from "../../src/components/ConnectionBadge"
+import { useEvents } from "@/stores/events"
+import { useSessions } from "@/stores/sessions"
+import { useSessionsList } from "@/api/sessions"
+import { countActiveTasks } from "@/utils/active-tasks"
+import { ConnectionBadge } from "@/components/ConnectionBadge"
 import { layout } from "@web2bizz/ui-native"
 
 export default function TabLayout() {
@@ -73,7 +73,7 @@ export default function TabLayout() {
           tabPress: (e) => {
             e.preventDefault()
             // Open new project modal via global UI store — handled in index.tsx
-            const { openNewProject } = require("../../src/stores/ui").useUi.getState()
+            const { openNewProject } = require("@/stores/ui").useUi.getState()
             openNewProject()
           },
         }}

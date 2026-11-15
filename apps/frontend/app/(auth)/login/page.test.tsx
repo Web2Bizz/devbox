@@ -7,8 +7,8 @@
  * "Unexpected error" for 400, 409 email_taken stays in the top Alert).
  */
 import { describe, expect, test } from 'bun:test';
-import { parseRegisterFieldErrors } from '../../../src/lib/register-field-errors';
-import { loginSchema, registerSchema } from '../../../src/lib/auth-schemas';
+import { parseRegisterFieldErrors } from '@/lib/register-field-errors';
+import { loginSchema, registerSchema } from '@/lib/auth-schemas';
 
 describe('parseRegisterFieldErrors', () => {
   test('maps invalid email to the email field', () => {
@@ -123,8 +123,8 @@ describe('login page 400 wiring (source contract, RHF+zod)', () => {
 
   test('dev defaults removed, neutral placeholders, client zod before submit', async () => {
     const source = await loadSource();
-    expect(source).not.toContain('dev@devbox.local');
-    expect(source).not.toContain("defaultValues: { email: 'dev@devbox.local'");
+    expect(source).not.toContain('dev@rush-code.local');
+    expect(source).not.toContain("defaultValues: { email: 'dev@rush-code.local'");
     expect(source).toContain("defaultValues: { email: '', password: '' }");
     expect(source).toContain('name@example.com');
     expect(source).toContain('At least 8 characters');

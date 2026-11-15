@@ -1,0 +1,534 @@
+import { z } from 'zod';
+
+import type {
+  AgentInfo,
+  AgentInfoList,
+  CreateSessionRequest,
+  InterruptSessionRequest,
+  RevertInfo,
+  RevertMessagesRequest,
+  RevertMessagesResult,
+  RevertStageRequest,
+  SendMessageRequest,
+  SessionApprovalDecision,
+  SessionApprovalRequest,
+  SessionApprovalRequestedFrame,
+  SessionCheckpointStatus,
+  SessionExecutionFrame,
+  SessionForkBoundary,
+  SessionForkRequest,
+  SessionForkResponse,
+  SessionInfo,
+  SessionInfoList,
+  SessionInfoModel,
+  SessionModel,
+  SessionInterruptResult,
+  SessionMessage,
+  SessionMessageList,
+  SessionMessagePartDeltaFrame,
+  SessionMessagePartUpdatedFrame,
+  SessionMessageVariant,
+  SessionMessageVariantList,
+  SessionReasoningFrame,
+  SessionRunnerProvider,
+  SessionRunnerProviderList,
+  SessionRunStatus,
+  SessionRunStatusMap,
+  SessionStepFrame,
+  SessionStreamErrorFrame,
+  SessionStreamFrame,
+  SessionTextDeltaFrame,
+  SessionTextEndedFrame,
+  SessionTextStartedFrame,
+  SessionThreadView,
+  SessionToolLifecycleFrame,
+  SnapshotDiff,
+  SnapshotDiffList,
+  ToolCallInfo,
+} from './sessions';
+import { opencodeSessionStatusSchema } from '../opencode-session/opencode-session.schema';
+
+/**
+ * Boundary schemas for sessions.ts (domain /api/v1/sessions* contract).
+ *
+ * createSessionRequestSchema is the backend-verbatim POST validation (same
+ * constraints + error strings the controller enforces); response schemas
+ * mirror contracts/openapi.yaml and are for CLIENT-side parsing — the
+ * shapes are ours, so nullable title/model are explicit (never optional:
+ * the server always answers the key, null when unset).
+ * SessionRunStatus keeps the wire union of the mirror contract (single
+ * source of truth, domain name on top).
+ */
+
+export const sessionInfoModelSchema = z.object({
+  id: z.string({ error: 'Field "model.id" is required' }).min(1),
+  providerID: z.string({ error: 'Field "model.providerID" is required' }).min(1),
+  variant: z.string().optional(),
+}) satisfies z.ZodType<SessionInfoModel>;
+
+export const sessionModelSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  name: z.string({ error: 'Field "name" is required' }),
+  providerID: z.string({ error: 'Field "providerID" is required' }).min(1),
+}) satisfies z.ZodType<SessionModel>;
+
+export const sessionModelListSchema = z.array(sessionModelSchema) satisfies z.ZodType<
+  Array<SessionModel>
+>;
+
+/** Agent registry id — mirrors the backend agentIdPattern (letters/digits/_/-). */
+export const agentIdSchema = z
+  .string({ error: 'Field "agentId" is required' })
+  .min(1)
+  .max(64)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/, {
+    error: 'Field "agentId" has forbidden characters',
+  });
+
+export const agentInfoSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  name: z.string({ error: 'Field "name" is required' }),
+  description: z.string({ error: 'Field "description" is required' }),
+}) satisfies z.ZodType<AgentInfo>;
+
+export const agentInfoListSchema = z.array(agentInfoSchema) satisfies z.ZodType<AgentInfoList>;
+
+export const sessionInfoSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  title: z.string().nullable(),
+  /** ISO-8601 (matches openapi.yaml format: date-time — the service emits
+   * new Date(ms).toISOString(), always a Z-suffixed instant) */
+  createdAt: z.iso.datetime({ error: 'Field "createdAt" must be an ISO-8601 timestamp' }),
+  /** ISO-8601 last activity (message append / binding change) — same
+   * strictness as createdAt: backend-emitted, never an upstream passthrough. */
+  updatedAt: z.iso.datetime({ error: 'Field "updatedAt" must be an ISO-8601 timestamp' }),
+  directory: z.string({ error: 'Field "directory" is required' }).min(1),
+  // Q2: strict like the YAML (format: uuid) — both projectId and createdAt
+  // are backend-GENERATED values (gate uuid / toISOString), never upstream
+  // passthrough, so tightening catches real bugs and cannot reject valid
+  // answers (sessions.service.ts: projectId = narrowed gate input;
+  // createdAt = new Date(time.created).toISOString()).
+  projectId: z.uuid({ error: 'Field "projectId" is required' }),
+  model: sessionInfoModelSchema.nullable(),
+  agentId: agentIdSchema.nullable(),
+  status: opencodeSessionStatusSchema,
+}) satisfies z.ZodType<SessionInfo>;
+
+export const sessionInfoListSchema = z.array(sessionInfoSchema) satisfies z.ZodType<
+  SessionInfoList
+>;
+
+/** Domain-named alias of the shared runtime-status union (single source of truth). */
+export const sessionRunStatusSchema = opencodeSessionStatusSchema satisfies z.ZodType<SessionRunStatus>;
+
+export const sessionRunStatusMapSchema = z.record(
+  z.string(),
+  sessionRunStatusSchema,
+) satisfies z.ZodType<SessionRunStatusMap>;
+
+/**
+ * Checkpoint status (WEB-14 / B3) — mirrors `agent_checkpoints.status`
+ * (plain text, no CHECK): `limit_reached` closes the turn on the
+ * `CHECKPOINT_MAX_TOTAL_STEPS` ceiling, never a throw.
+ */
+export const sessionCheckpointStatusSchema = z.enum(
+  ['running', 'paused', 'awaiting_approval', 'limit_reached', 'cancelled', 'completed', 'failed'],
+  { error: 'Field "status" must be a checkpoint lifecycle value' },
+) satisfies z.ZodType<SessionCheckpointStatus>;
+
+/**
+ * Approval decision (WEB-15 / C1) — `approve` resumes the parked turn,
+ * `reject` stops it without resuming. Single confirmation endpoint.
+ */
+export const sessionApprovalDecisionSchema = z.enum(['approve', 'reject'], {
+  error: 'Field "decision" must be one of approve|reject',
+}) satisfies z.ZodType<SessionApprovalDecision>;
+
+/** POST /api/v1/sessions/{id}/approval body — gate uuid + decision + optional human note. */
+export const sessionApprovalRequestSchema = z.object({
+  projectId: z.uuid({ error: 'Field "projectId" is required' }),
+  decision: sessionApprovalDecisionSchema,
+  reason: z.string().min(1).max(500).optional(),
+}) satisfies z.ZodType<SessionApprovalRequest>;
+
+export type SessionApprovalInput = z.infer<typeof sessionApprovalRequestSchema>;
+
+/**
+ * session.approval.requested — runner parked a turn on `awaiting_approval`.
+ * Session required, reason required (short human-readable pause cause, never
+ * secrets). Unknown extra keys tolerated via catchall (runner enrichment
+ * must not break the confirmation UI).
+ */
+export const sessionApprovalRequestedFrameSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  type: z.literal('session.approval.requested'),
+  data: z.object({
+    sessionID: z.string({ error: 'Field "data.sessionID" is required' }).min(1),
+    reason: z.string({ error: 'Field "data.reason" is required' }).min(1),
+  }).catchall(z.unknown()),
+  session: z.string().optional(),
+}) satisfies z.ZodType<SessionApprovalRequestedFrame>;
+
+/** POST /api/v1/sessions body — projectId required (sessions are project-scoped). */
+export const createSessionRequestSchema = z.object({
+  projectId: z.uuid({ error: 'Field "projectId" is required' }),
+  title: z.string().min(1).max(200).optional(),
+  parentID: z.string().min(1).max(200).optional(),
+  model: sessionInfoModelSchema.optional(),
+  agentId: agentIdSchema.optional(),
+}) satisfies z.ZodType<CreateSessionRequest>;
+
+export type CreateSessionInput = z.infer<typeof createSessionRequestSchema>;
+
+/** GET /api/v1/sessions/{id}/messages item — normalized Session.Message.Info
+ * projection (text null for non-text variants; createdAt is backend-emitted
+ * ISO like SessionInfo.createdAt, hence the same strict datetime).
+ * `parentId`/`kind`/`name`/`status`/`detail` are additive chain hints
+ * (unified ChatEntry) — optional, never required, backend write path untouched.
+ * `name`/`status` are min(1) when present (mirror openapi.yaml minLength: 1);
+ * wire kind=reasoning renders as thinking (frontend tool-timeline entry
+ * named 'reasoning' — thinking vs tool UI split on the name). */
+export const sessionMessageSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  type: z.string({ error: 'Field "type" is required' }).min(1),
+  createdAt: z.iso.datetime({ error: 'Field "createdAt" must be an ISO-8601 timestamp' }),
+  text: z.string().nullable(),
+  parentId: z.string().min(1).nullable().optional(),
+  kind: z.enum(['text', 'tool', 'reasoning']).optional(),
+  name: z.string().min(1).nullable().optional(),
+  status: z.string().min(1).nullable().optional(),
+  detail: z.string().nullable().optional(),
+}) satisfies z.ZodType<SessionMessage>;
+
+export const sessionMessageListSchema = z.array(sessionMessageSchema) satisfies z.ZodType<
+  SessionMessageList
+>;
+
+/** GET /api/v1/sessions/{id}/variants item — branch child (child id, ISO time, preview). */
+export const sessionMessageVariantSchema = z.object({
+  childId: z.string({ error: 'Field "childId" is required' }).min(1),
+  createdAt: z.iso.datetime({ error: 'Field "createdAt" must be an ISO-8601 timestamp' }),
+  preview: z.string({ error: 'Field "preview" is required' }),
+}) satisfies z.ZodType<SessionMessageVariant>;
+
+export const sessionMessageVariantListSchema = z.array(sessionMessageVariantSchema) satisfies z.ZodType<
+  SessionMessageVariantList
+>;
+
+/** Thread view — active chain + branch children + active leaf cursor. */
+export const sessionThreadViewSchema = z.object({
+  chain: sessionMessageListSchema,
+  variants: sessionMessageVariantListSchema,
+  activeLeaf: z.string({ error: 'Field "activeLeaf" is required' }).min(1).nullable(),
+}) satisfies z.ZodType<SessionThreadView>;
+
+/** POST /api/v1/sessions/{id}/messages body — text mirrors the v2 prompt's
+ * only required payload field; projectId is the gate uuid (strict, Q2).
+ * `parentId` is the additive branch tip (unified ChatEntry): omitted = the
+ * linear clock tail, explicit null = root, string = branch tip. */
+export const sendMessageRequestSchema = z.object({
+  projectId: z.uuid({ error: 'Field "projectId" is required' }),
+  text: z.string({ error: 'Field "text" is required' }).min(1),
+  model: sessionInfoModelSchema.optional(),
+  agentId: agentIdSchema.optional(),
+  /** Execution mode; omitted = auto, ask is read-only. */
+  mode: z.enum(['auto', 'ask']).optional(),
+  parentId: z.string().min(1).nullable().optional(),
+}) satisfies z.ZodType<SendMessageRequest>;
+
+/** SSE frame envelope of GET /api/v1/sessions/events — the variant payload
+ * (data) is upstream-owned and passes through as an unknown record;
+ * `session` is the backend-hoisted data.sessionID (no upstream name at the
+ * top level). Narrowed per-type frames (delta/updated) live in sessions.ts. */
+export const sessionStreamFrameSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  type: z.string({ error: 'Field "type" is required' }).min(1),
+  data: z.record(z.string(), z.unknown()),
+  session: z.string().optional(),
+}) satisfies z.ZodType<SessionStreamFrame>;
+
+/** message.part.delta — narrowed streaming-text frame. The field list is
+ * the artifact eventFrames.usedVariants['message.part.delta'] verbatim
+ * (sessionID/messageID/partID/field/delta, all strings) and REQUIRED by
+ * this check: a frame missing any of them is not this variant (safeParse,
+ * never a cast). Unknown extra keys inside data stay tolerated — the
+ * runner may enrich the payload, and value-add must not break the chat. */
+export const sessionMessagePartDeltaFrameSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  type: z.literal('message.part.delta'),
+  data: z.object({
+    sessionID: z.string({ error: 'Field "data.sessionID" is required' }).min(1),
+    messageID: z.string({ error: 'Field "data.messageID" is required' }).min(1),
+    partID: z.string({ error: 'Field "data.partID" is required' }).min(1),
+    field: z.string({ error: 'Field "data.field" is required' }),
+    delta: z.string({ error: 'Field "data.delta" is required' }),
+  }),
+  session: z.string().optional(),
+}) satisfies z.ZodType<SessionMessagePartDeltaFrame>;
+
+/** message.part.updated — narrowed absolute-part-snapshot frame. The field
+ * list is the artifact eventFrames.usedVariants['message.part.updated']
+ * verbatim (sessionID + part object); the part's inner keys (type/text/id)
+ * are variant-owned content the envelope does not mirror, so consumers
+ * still read them with typeof guards (see useSessionChat projections). */
+export const sessionMessagePartUpdatedFrameSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  type: z.literal('message.part.updated'),
+  data: z.object({
+    sessionID: z.string({ error: 'Field "data.sessionID" is required' }).min(1),
+    part: z.record(z.string(), z.unknown()),
+  }),
+  session: z.string().optional(),
+}) satisfies z.ZodType<SessionMessagePartUpdatedFrame>;
+
+/** stream.error — terminal transport frame (C0). Narrow and optional:
+ * the envelope schema stays permissive (`type: string`), this schema lets
+ * consumers detect the terminal channel before the text tract. `data` is
+ * intentionally loose (message/code only) — never secrets. */
+export const sessionStreamErrorFrameSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  type: z.literal('stream.error'),
+  data: z.object({
+    message: z.string().optional(),
+    code: z.string().optional(),
+  }).catchall(z.unknown()),
+  session: z.string().optional(),
+}) satisfies z.ZodType<SessionStreamErrorFrame>;
+
+/**
+ * session.text.started — live text block start (session-owned, no payload
+ * beyond the owner). Envelope stays additive: unknown extra keys tolerated.
+ */
+export const sessionTextStartedFrameSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  type: z.literal('session.text.started'),
+  data: z.object({
+    sessionID: z.string({ error: 'Field "data.sessionID" is required' }).min(1),
+  }).catchall(z.unknown()),
+  session: z.string().optional(),
+}) satisfies z.ZodType<SessionTextStartedFrame>;
+
+/** session.text.delta — live streaming text unit (session + delta required). */
+export const sessionTextDeltaFrameSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  type: z.literal('session.text.delta'),
+  data: z.object({
+    sessionID: z.string({ error: 'Field "data.sessionID" is required' }).min(1),
+    delta: z.string({ error: 'Field "data.delta" is required' }),
+  }).catchall(z.unknown()),
+  session: z.string().optional(),
+}) satisfies z.ZodType<SessionTextDeltaFrame>;
+
+/**
+ * session.text.ended — live text snapshot (session required, text optional:
+ * an empty end still terminates the block and reads as idle upstream).
+ */
+export const sessionTextEndedFrameSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  type: z.literal('session.text.ended'),
+  data: z.object({
+    sessionID: z.string({ error: 'Field "data.sessionID" is required' }).min(1),
+    text: z.string().optional(),
+  }).catchall(z.unknown()),
+  session: z.string().optional(),
+}) satisfies z.ZodType<SessionTextEndedFrame>;
+
+/**
+ * session.reasoning.* — live thinking trace (started/delta/ended). Session
+ * required, delta/text optional (started carries neither). Transport-only
+ * live frames, never chat text: consumers render them as collapsed reasoning
+ * steps. Durable projection (0012): the recorder buffers started/delta into
+ * one kind=reasoning row on ended (tool-timeline entry named 'reasoning').
+ */
+export const sessionReasoningFrameSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  type: z.enum(['session.reasoning.started', 'session.reasoning.delta', 'session.reasoning.ended'], {
+    error: 'Field "type" must be a reasoning lifecycle value',
+  }),
+  data: z.object({
+    sessionID: z.string({ error: 'Field "data.sessionID" is required' }).min(1),
+    delta: z.string().optional(),
+    text: z.string().optional(),
+  }).catchall(z.unknown()),
+  session: z.string().optional(),
+}) satisfies z.ZodType<SessionReasoningFrame>;
+
+/**
+ * session.tool.* — live tool lifecycle (called/progress/success/failed plus
+ * input.started/delta/ended). Session required, detail keys optional and
+ * guarded (tool/toolName/name for the name, message/progress/status/text/
+ * error/delta/input/arguments for the single-line redacted timeline detail).
+ * Transport-only live frames, never chat text: consumers project them to live
+ * status + timeline rows. Durable projection (0012): every broadcast
+ * (called/progress/tool input markers/success/failed) appends one kind=tool row via the
+ * recorder (parent=tip, idempotent by frame id); only markers without stable
+ * call identity stay live-only.
+ */
+export const sessionToolLifecycleFrameSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  type: z.enum(
+    [
+      'session.tool.called',
+      'session.tool.progress',
+      'session.tool.success',
+      'session.tool.failed',
+      'session.tool.input.started',
+      'session.tool.input.delta',
+      'session.tool.input.ended',
+    ],
+    {
+      error: 'Field "type" must be a tool lifecycle value',
+    },
+  ),
+  data: z.object({
+    sessionID: z.string({ error: 'Field "data.sessionID" is required' }).min(1),
+    tool: z.string().optional(),
+    toolName: z.string().optional(),
+    name: z.string().optional(),
+    message: z.string().optional(),
+    progress: z.string().optional(),
+    status: z.string().optional(),
+    text: z.string().optional(),
+    error: z.string().optional(),
+  }).catchall(z.unknown()),
+  session: z.string().optional(),
+}) satisfies z.ZodType<SessionToolLifecycleFrame>;
+
+/**
+ * session.step.* — live turn boundary (started/streamed/ended/failed).
+ * `ended` commits the streamed answer. Live-only.
+ */
+export const sessionStepFrameSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  type: z.enum(['session.step.started', 'session.step.streamed', 'session.step.ended', 'session.step.failed'], {
+    error: 'Field "type" must be a step lifecycle value',
+  }),
+  data: z.object({
+    sessionID: z.string({ error: 'Field "data.sessionID" is required' }).min(1),
+  }).catchall(z.unknown()),
+  session: z.string().optional(),
+}) satisfies z.ZodType<SessionStepFrame>;
+
+/**
+ * session.execution.* — live run boundary
+ * (started/succeeded/failed/interrupted). `succeeded` commits the streamed
+ * answer. Live-only.
+ */
+export const sessionExecutionFrameSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  type: z.enum(
+    ['session.execution.started', 'session.execution.succeeded', 'session.execution.failed', 'session.execution.interrupted'],
+    {
+      error: 'Field "type" must be an execution lifecycle value',
+    },
+  ),
+  data: z.object({
+    sessionID: z.string({ error: 'Field "data.sessionID" is required' }).min(1),
+  }).catchall(z.unknown()),
+  session: z.string().optional(),
+}) satisfies z.ZodType<SessionExecutionFrame>;
+
+/** POST /api/v1/sessions/{id}/interrupt body — projectId is the gate uuid
+ * (strict like the YAML format: uuid; backend-generated, Q2 precedent). */
+export const interruptSessionRequestSchema = z.object({
+  projectId: z.uuid({ error: 'Field "projectId" is required' }),
+}) satisfies z.ZodType<InterruptSessionRequest>;
+
+/** SessionInterruptResult — artifact SessionInterruptResponse is exactly
+ * {interrupted: boolean} (additionalProperties:false); false is the idle
+ * no-op, an honest answer rather than an error. */
+export const sessionInterruptResultSchema = z.object({
+  interrupted: z.boolean({ error: 'Field "interrupted" is required' }),
+}) satisfies z.ZodType<SessionInterruptResult>;
+
+/** SessionRunnerProvider — the REQUIRED subset of the artifact
+ * Provider.Info (id/name/activation/package, enum values verbatim).
+ * settings/headers/body stay upstream: headers may carry auth material
+ * and the UI consumes none of them — never shipped to the browser. */
+export const sessionRunnerProviderSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  name: z.string({ error: 'Field "name" is required' }),
+  activation: z.enum(['auto', 'enabled', 'disabled'], {
+    error: 'Field "activation" must be one of auto|enabled|disabled',
+  }),
+  package: z.string({ error: 'Field "package" is required' }),
+}) satisfies z.ZodType<SessionRunnerProvider>;
+
+export const sessionRunnerProviderListSchema = z.array(sessionRunnerProviderSchema) satisfies z.ZodType<
+  SessionRunnerProviderList
+>;
+
+export type SendMessageInput = z.infer<typeof sendMessageRequestSchema>;
+
+export type InterruptSessionInput = z.infer<typeof interruptSessionRequestSchema>;
+
+/**
+ * POST /api/v1/sessions/{id}/fork body — projectId is the gate uuid (strict,
+ * same rule as create/send): backend-generated, never runtime passthrough.
+ * `before` is the boundary message id; omitted → the whole thread is forked.
+ */
+export const sessionForkRequestSchema = z.object({
+  projectId: z.uuid({ error: 'Field "projectId" is required' }),
+  before: z.string().min(1).max(200).optional(),
+}) satisfies z.ZodType<SessionForkRequest>;
+
+/** Fork boundary — 'through' includes the message, 'before' excludes it. */
+export const sessionForkBoundarySchema = z.object({
+  type: z.enum(['before', 'through'], {
+    error: 'Field "type" must be one of before|through',
+  }),
+  messageID: z.string({ error: 'Field "messageID" is required' }).min(1),
+}) satisfies z.ZodType<SessionForkBoundary>;
+
+/** POST /api/v1/sessions/{id}/fork answer — the created session + its copy boundary. */
+export const sessionForkResponseSchema = z.object({
+  session: sessionInfoSchema,
+  boundary: sessionForkBoundarySchema,
+}) satisfies z.ZodType<SessionForkResponse>;
+
+/** One per-file snapshot diff (hunks absent for a name-only comparison). */
+export const snapshotDiffSchema = z.object({
+  file: z.string({ error: 'Field "file" is required' }).min(1),
+  hunks: z.string().optional(),
+}) satisfies z.ZodType<SnapshotDiff>;
+
+export const snapshotDiffListSchema = z.array(snapshotDiffSchema) satisfies z.ZodType<
+  SnapshotDiffList
+>;
+
+/** POST /api/v1/sessions/{id}/revert/stage body — boundary message + optional path filter. */
+export const revertStageRequestSchema = z.object({
+  projectId: z.uuid({ error: 'Field "projectId" is required' }),
+  messageID: z.string({ error: 'Field "messageID" is required' }).min(1).max(200),
+  files: z.array(z.string().min(1)).optional(),
+}) satisfies z.ZodType<RevertStageRequest>;
+
+/** Staged revert answer — boundary, source snapshot (nullable) and file diffs. */
+export const revertInfoSchema = z.object({
+  messageID: z.string({ error: 'Field "messageID" is required' }).min(1),
+  snapshot: z.string().nullable(),
+  files: z.array(snapshotDiffSchema),
+}) satisfies z.ZodType<RevertInfo>;
+
+/** POST /api/v1/sessions/{id}/messages/revert body — boundary message (files untouched). */
+export const revertMessagesRequestSchema = z.object({
+  projectId: z.uuid({ error: 'Field "projectId" is required' }),
+  messageID: z.string({ error: 'Field "messageID" is required' }).min(1).max(200),
+}) satisfies z.ZodType<RevertMessagesRequest>;
+
+/** POST /api/v1/sessions/{id}/messages/revert answer — new leaf (null when the root was reverted). */
+export const revertMessagesResultSchema = z.object({
+  activeLeaf: z.string({ error: 'Field "activeLeaf" is required' }).min(1).nullable(),
+}) satisfies z.ZodType<RevertMessagesResult>;
+
+/** Tool-call timeline row (call id, registry name, optional namespace, result text). */
+export const toolCallInfoSchema = z.object({
+  id: z.string({ error: 'Field "id" is required' }).min(1),
+  name: z.string({ error: 'Field "name" is required' }).min(1),
+  namespace: z.string().optional(),
+  result: z.string({ error: 'Field "result" is required' }),
+}) satisfies z.ZodType<ToolCallInfo>;
+
+export type SessionForkInput = z.infer<typeof sessionForkRequestSchema>;
+export type RevertStageInput = z.infer<typeof revertStageRequestSchema>;
+export type RevertMessagesInput = z.infer<typeof revertMessagesRequestSchema>;

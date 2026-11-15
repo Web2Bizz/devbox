@@ -3,7 +3,7 @@ import type { AiProvider } from '../types';
 /**
  * MOCK AI provider fixtures — keys are placeholders only.
  * Offline fixture only (not wired): useAiProviders reads the live list from
- * GET /api/opencode/config/providers via the backend reverse-proxy; toggle/
+ * GET /api/v1/sessions/providers via the backend domain API; toggle/
  * configure there stay local-only until backend write endpoints exist.
  * All exports keep the MOCK_ prefix by convention.
  */

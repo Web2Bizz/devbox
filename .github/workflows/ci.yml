@@ -1,64 +1,31 @@
 name: ci
 
-# Monorepo (backend + frontend bun workspace). apps/mobile is intentionally NOT
-# covered here: it is a standalone npm/Expo project with its own package-lock.json
-# and its own workflows (mobile.yml, activation-e2e.yml).
 on:
   push:
-    paths:
-      - "apps/backend/**"
-      - "apps/frontend/**"
-      - "package.json"
-      - "bun.lock"
-      - "bunfig.toml"
-      - ".npmrc"
-      - ".bun-version"
-      - "tsconfig.base.json"
-      - ".github/workflows/ci.yml"
+    branches: [main]
   pull_request:
-    paths:
-      - "apps/backend/**"
-      - "apps/frontend/**"
-      - "package.json"
-      - "bun.lock"
-      - "bunfig.toml"
-      - ".npmrc"
-      - ".bun-version"
-      - "tsconfig.base.json"
 
 jobs:
-  build:
+  quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v5
 
       - uses: oven-sh/setup-bun@v2
         with:
-          # Single source of truth for the pin is .bun-version
-          # (mirrored in packageManager/engines/oven-bun Docker tags).
-          bun-version-file: ".bun-version"
+          bun-version: 1.4.2
 
       - name: Install
-        run: bun install
-        env:
-          # Private scope @web2bizz → https://npm.registry.web2bizz.team.
-          # GitHub masks secrets.* in logs automatically; empty → public-only install.
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: bun install --frozen-lockfile
 
-      - uses: nrwl/nx-set-shas@v4
-        id: setshas
-        with:
-          main-branch-name: main
+      - name: Typecheck
+        run: bun run typecheck
 
-      # no-console in backend src is enforced by biome (backend lint script),
-      # scoped to runtime sources — spec/e2e/test reporters are excluded.
-      - name: Lint affected (tsc --noEmit)
-        run: bunx nx affected -t lint --base=${{ steps.setshas.outputs.base }} --head=${{ steps.setshas.outputs.head }}
+      - name: Lint
+        run: bun run lint
 
-      - name: Build affected
-        run: bunx nx affected -t build --base=${{ steps.setshas.outputs.base }} --head=${{ steps.setshas.outputs.head }}
+      - name: Test
+        run: bun run test
 
-      - name: Test affected
-        run: bunx nx affected -t test --base=${{ steps.setshas.outputs.base }} --head=${{ steps.setshas.outputs.head }}
+      - name: Build
+        run: bun run build

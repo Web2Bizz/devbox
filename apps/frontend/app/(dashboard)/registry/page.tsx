@@ -1,41 +1,21 @@
-'use client';
+import Link from 'next/link';
 
-import { RegistryHub } from '../../../src/components/registry-hub';
-import { useI18n } from '../../../src/i18n';
+export const dynamic = 'force-dynamic';
 
 /**
- * Route: /registry — hub with two Card links (Docker → /registry/docker,
- * npm → /registry/npm). DESIGN §6 exception: hub pages may use Card
- * wrappers; leaf pages (/registry/docker, /registry/npm) stay flat
- * (h2 rows + Separator + Badge). Reusable RegistryHub `items[]` fits
- * future storages/databases hubs.
+ * Gone global (410): this surface now lives under the organization/project.
+ * No auto-redirect (no org guess) — explicit CTA to /organizations.
  */
-export default function RegistryPage() {
-  const { t } = useI18n();
-
+export default function GoneGlobal() {
   return (
-    <div>
-      <div className="mb-4">
-        <h1 className="text-2xl font-semibold">
-          {t.registry.titleA} <span className="text-gradient-brand">{t.registry.titleB}</span>
-        </h1>
-        <p className="text-muted-foreground text-sm">{t.registry.subtitle}</p>
-      </div>
-
-      <RegistryHub
-        items={[
-          {
-            href: '/registry/docker',
-            title: t.registry.dockerTitle,
-            description: t.registry.dockerDesc,
-          },
-          {
-            href: '/registry/npm',
-            title: t.registry.npmTitle,
-            description: t.registry.npmDesc,
-          },
-        ]}
-      />
-    </div>
+    <main className="mx-auto max-w-xl px-6 py-16" data-shell="plain">
+      <h1 className="text-2xl font-semibold">410 — moved under organization</h1>
+      <p className="text-muted-foreground mt-2 text-sm">
+        This page moved to /organizations/[orgId]/projects/[projectId]/…. Pick an organization to continue.
+      </p>
+      <Link href="/organizations" className="mt-6 inline-block underline underline-offset-4 text-sm">
+        ← Back to organizations
+      </Link>
+    </main>
   );
 }

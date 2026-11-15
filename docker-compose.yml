@@ -1,11 +1,11 @@
-# SINGLE compose file for the whole stack (backend + frontend + opencode).
+# SINGLE compose file for the whole stack (backend + frontend).
 # There is no docker-compose.prod.yml / docker-compose.override.yml and no
 # `env_file:` — all configuration arrives via EXTERNAL environment
 # (shell / Dokploy). `.env.example` documents the full variable list;
 # `.env.${NODE_ENV}` files are NOT read by compose at runtime (only CI reads `.env.develop`/`.env.production` as build-args), do not create them for compose.
 #
-# Prod services run REGISTRY images, not local builds: backend/frontend/
-# opencode resolve via TAG (`.../<service>:${TAG:-latest}`, default `:latest`
+# Prod services run REGISTRY images, not local builds: backend/frontend
+# resolve via TAG (`.../<service>:${TAG:-latest}`, default `:latest`
 # = what CI publishes on every build alongside `:dev` and `:<sha>`; prod
 # override pins a tag per environment, e.g. `TAG=<sha>`).
 # There are NO local builds and NO profile-gated services in this file: dev runs the SAME
@@ -13,10 +13,10 @@
 # CI-baked NEXT_PUBLIC_API_URL from `.env.develop` as a build-arg).
 #
 # Postgres is EXTERNAL: no postgres service here, DATABASE_URL fail-fasts
-# when unset (same `:?` pattern as OPENCODE_SERVER_PASSWORD).
+# when unset.
 #
 # Resource limits (ex docker-compose.prod.yml) are baked in directly — they
-# are identical in every environment: backend/frontend 1G/1.0, opencode 2G/2.0.
+# are identical in every environment: backend/frontend 1G/1.0.
 #
 # Dev/prod differences (ex docker-compose.override.yml) are env-driven:
 #   BACKEND_PUBLISH  `[ip:]hostport` целиком, default prod `3100` (все
@@ -27,8 +27,8 @@
 #   LOG_LEVEL        default `info`; the environment sets `debug`, no file does.
 # Usage:
 #   prod: docker compose up -d
-#         (pulls registry images; DATABASE_URL and OPENCODE_SERVER_PASSWORD
-#         are REQUIRED externals — compose fail-fasts without them)
+#         (pulls registry images; DATABASE_URL is a REQUIRED external —
+#         compose fail-fasts without it)
 #   dev:  BACKEND_PUBLISH=127.0.0.1:3100 FRONTEND_PUBLISH=127.0.0.1:8080 \
 #         docker compose up -d
 #         (SAME services from registry images; loopback publish values come
@@ -36,7 +36,7 @@
 #         see README)
 services:
   backend:
-    image: docker.registry.web2bizz.team/web2bizz/devbox/backend:${TAG:-latest}
+    image: docker.registry.web2bizz.team/web2bizz/rush-code/backend:${TAG:-latest}
     restart: unless-stopped
     deploy:
       resources:
@@ -51,10 +51,8 @@ services:
       APP_BACKEND_PROTOCOL: ${APP_BACKEND_PROTOCOL:-http}
       APP_BACKEND_SOCKET: ${APP_BACKEND_SOCKET:-http://localhost:3100}
       # DATABASE_URL must point at the EXTERNAL postgres (no postgres service
-      # in this stack). Fail-fast when unset — same `:?` pattern as
-      # OPENCODE_SERVER_PASSWORD below.
+      # in this stack). Fail-fast when unset.
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is not set — point it at the external postgres}
-      OPENCODE_URL: ${OPENCODE_URL:-http://opencode:4096}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3001,http://localhost:8080}
       REQUEST_TIMEOUT_MS: ${REQUEST_TIMEOUT_MS:-10000}
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -98,7 +96,7 @@ services:
     # NEXT_PUBLIC_API_URL is baked into the registry image at CI build time
     # (docker.yml passes it as build-arg); a different browser-facing API URL
     # needs a rebuilt image, runtime env cannot change the bundle.
-    image: docker.registry.web2bizz.team/web2bizz/devbox/frontend:${TAG:-latest}
+    image: docker.registry.web2bizz.team/web2bizz/rush-code/frontend:${TAG:-latest}
     restart: unless-stopped
     environment:
       HOSTNAME: "0.0.0.0"
@@ -122,60 +120,6 @@ services:
       timeout: 5s
       retries: 6
       start_period: 15s
-
-  # No depends_on from backend: the backend tolerates an unreachable opencode
-  # (mock fallback, never throws at boot), so startup order is not enforced.
-  opencode:
-    image: docker.registry.web2bizz.team/web2bizz/devbox/opencode:${TAG:-latest}
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-          cpus: "2.0"
-        reservations:
-          memory: 512M
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-    security_opt:
-      - no-new-privileges:true
-    environment:
-      OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:?OPENCODE_SERVER_PASSWORD is not set}
-      OPENCODE_API_KEY: ${OPENCODE_API_KEY:-}
-      OPENCODE_BASE_PATH: ${OPENCODE_BASE_PATH:-/}
-    volumes:
-      - opencode-projects:/workspace
-      - opencode-ssh-keys:/root/.ssh
-      - opencode-gh-config:/root/.config/gh
-      - opencode-pnpm-store:/pnpm/store
-      - opencode-pm2-home:/root/.pm2
-      - opencode-data:/root/.local/share/opencode
-      - opencode-secrets:/root/.secrets
-      - opencode-playwright-browsers:/playwright-browsers
-    expose:
-      - 4096
-    networks:
-      - back
-    healthcheck:
-      # curl ships in the image; any HTTP status (even 401/404 behind auth)
-      # means `opencode serve` is up — only a refused connection fails.
-      test: ["CMD-SHELL", "curl -s -o /dev/null http://localhost:4096 || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 6
-      start_period: 30s
-
-volumes:
-  opencode-projects:
-  opencode-ssh-keys:
-  opencode-gh-config:
-  opencode-pnpm-store:
-  opencode-pm2-home:
-  opencode-data:
-  opencode-secrets:
-  opencode-playwright-browsers:
 
 networks:
   front:

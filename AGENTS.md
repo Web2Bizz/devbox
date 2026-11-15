@@ -1,36 +1,54 @@
-# AGENTS.md — DevBox (monorepo)
+# AGENTS.md — Rush Code (monorepo)
 
-Монорепо: `apps/backend` (NestJS API), `apps/frontend` (Next.js 16.3
-Turbopack + `@web2bizz/ui` 0.26.0), `apps/mobile` (Expo 57 / RN 0.86 +
-`@web2bizz/ui-native`), `contracts/openapi.yaml`, `apps/opencode-server`
-(образ opencode, отдельный compose-стек под Dokploy — Dockerfile без
-package.json, не Nx-проект, вне bun workspaces).
+## Сервисы
 
-`apps/mobile` — самостоятельный npm-проект (свой `package-lock.json`,
-`--legacy-peer-deps`), намеренно **вне bun workspaces**: ставится и запускается
-из своей директории, без `bun --filter`.
+- **apps/backend** — NestJS API, основной бэкенд — см. [`apps/backend/AGENTS.md`](apps/backend/AGENTS.md).
+- **apps/frontend** — Next.js веб-шелл — см. [`apps/frontend/AGENTS.md`](apps/frontend/AGENTS.md).
+- **apps/mobile** — Expo-мобильное приложение (standalone npm, вне bun workspaces) — см. [`apps/mobile/AGENTS.md`](apps/mobile/AGENTS.md).
+- **apps/cli** — CLI, интерактивный REPL в стиле opencode — см. [`apps/cli/AGENTS.md`](apps/cli/AGENTS.md).
 
-## Frontend — дизайн-система
+## Пакеты
 
-- Общие правила для всех UI-приложений — реферат
-  [`DESIGN.md`](DESIGN.md) (корень). При расхождении с прикладным
-  `DESIGN.md` побеждает **прикладной**: `apps/frontend/DESIGN.md` (веб-шелл)
-  и `apps/mobile/DESIGN.md` (mobile) ближе к коду и кит-версии.
-- Договорённости по layout/токенам/радиусам/бренду:
-  [`apps/frontend/DESIGN.md`](apps/frontend/DESIGN.md) — читать перед
-  правками шелла (`dashboard-shell`, `layout/Sidebar`, `layout/Content`,
-  `app/globals.css`).
-- Mobile: [`apps/mobile/AGENTS.md`](apps/mobile/AGENTS.md) — структура и
-  гейты mobile-приложения.
-- Порядок стилей: `@web2bizz/ui/styles.css` → `globals.css`
-  (source order, не менять). Hex — только `:root` / `.dark`.
-- Проверки после правок фронта: `bun --filter frontend lint`
-  (`tsc --noEmit`) + `bun --filter frontend build` (`next build --turbopack`).
-  После правок mobile — гейты из `apps/mobile/AGENTS.md` (npm, не bun).
+- **packages/contracts** — общие wire-типы и zod-схемы бэкенд↔фронт — см. [`packages/contracts/AGENTS.md`](packages/contracts/AGENTS.md).
+- **packages/biome-config** — общий Biome-конфиг (`biome.json`: парсер + `noConsole` + test-исключения). Корень (`biome.jsonc`) и каждый сервис (`apps/*/biome.jsonc`, `packages/contracts/biome.jsonc`) только наследуют его через `extends` + локальные игноры сборки.
 
-## Фолбэки запрещены по умолчанию
+## Скрипты
 
-- Никаких тихих фолбэков (дефолтные пути вроде `<cwd>/...`, захардкоженные хосты/порты, подмена отсутствующего значения «удобным») без явного указания пользователя. Не задано → ошибка, а не додумывание.
-- Особенно строго: валидация конфигов и env-переменных (`env.ts`, `.env.example`, `resolveRoot`-подобные резолверы). Отсутствующая обязательная переменная для записи/мутации → fail-fast с понятной ошибкой (что задать, где), а не fallback-путь и не WARN-тихоня. Фолбэк для чтения/readonly допустим лишь как исключение для тюнинга (таймауты/ретраи/хосты dev-dial) и фиксируется комментарием — но НЕ для путей хранения.
-- Единый каталог: `REPOS_ROOT` — единственный источник чтения И записи всего storage (repos list, workspaces tree/submodules, project-files tree, clone dest, projects create/remove). Без конфига — отказ: storage-чтения отвечают 503 `EXTERNAL_UNAVAILABLE` (Retry-After 30, с correlationId), создание проектов — 500 до INSERT; boot без корня продолжается, но лог на уровне ERROR честно сообщает о недоступности (health без изменений). Исключения: `GET /projects` и `GET /projects/:id` без корня — как сейчас (`corrupted` + `storage-unconfigured`). Никогда не читать/создавать `<cwd>/repos`, не отдавать молча `[]`/404 по нему.
-- Прецедент: тихий fallback `REPOS_ROOT` → `<PROJECTS_ROOT>/repos` → `<cwd>/repos` молча создавал проекты не там (см. strict-резолвер projects) — так больше не делать; цепочка удалена полностью, включая READ-пути.
+- `bun run dev` — локальный запуск всего стенда (`nx run-many -t dev`: contracts-watch + backend + frontend).
+- `bun run dev:backend` — только бэкенд (:3100).
+- `bun run dev:frontend` — только фронтенд (:3001).
+- `bun run dev:stop` / `bun run stop` — остановка локального стенда.
+- `bun run dev:restart` / `bun run restart` — перезапуск локального стенда (`stop && dev`).
+- `bun run build` / `build:backend` / `build:frontend` / `build:affected` — сборка всех / точечно / только изменённых.
+- `bun run lint` / `lint:affected` — проверка типов (`tsc --noEmit`) и стиля (`biome lint`) всех / только изменённых.
+- `bun run test` / `test:affected` — тесты всех / только изменённых.
+- `bun run graph` — граф зависимостей проектов.
+
+## Порты
+
+| Порт | Сервис |
+| ---- | ------ |
+| `3100` | backend (NestJS API; compose публикует как `${BACKEND_PUBLISH:-3100}:3100`) |
+| `3001` | frontend dev (`next dev`; prod standalone — `:3000`, compose маппит `8080:3000`) |
+| `8080` | frontend via compose (host-порт к контейнерному `:3000`) |
+| `5432` | Postgres внешний (сервиса в compose нет) |
+
+## Дополнительные правила
+
+- [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
+- [`DESIGN.md`](DESIGN.md)
+- Правки — хирургически точечно: меняй только строки, необходимые для задачи; попутные рефакторинг, переформатирование и расширение скоупа без запроса запрещены.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+When the user types `/graphify`, use the installed graphify skill or instructions before doing anything else.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- Dirty graphify-out/ files are expected after hooks or incremental updates; dirty graph files are not a reason to skip graphify. Only skip graphify if the task is about stale or incorrect graph output, or the user explicitly says not to use it.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- Refresh the graph through the `graphify` pack tool (no shell permission needed): `graphify({command:"update"})` after code changes (AST-only, no LLM/API cost; idempotent — `No code-graph topology changes detected` when nothing moved); after refactors that delete or move code use `graphify({command:"update", force:true})` — without `force` a rebuild with fewer nodes is rejected and the graph silently stays stale. Reads go through the same tool: `query`, `path`, `explain`, `affected`.
+- `bash .opencode/scripts/graphify/run.sh` (`index|search|status`, also `graphify({command:"index"|"search"|"status"})`) maintains only the lightweight search index — it does not refresh `graphify-out/`.

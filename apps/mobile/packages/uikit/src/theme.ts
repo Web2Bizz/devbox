@@ -3,8 +3,9 @@
  *
  * Goals:
  * - Single source of truth for every hex literal scattered across app/ and src/.
- * - Accent follows the app icon gradient Pink -> Orange
- *   (#FF2A7A -> #FF5E62 -> #FF9966, see assets/icon-source.svg).
+ * - Accent follows the CLI 5-stop RUSH CODE brand scale
+ *   (#FFB02E -> #FF4A2D -> #E93A6B -> #8B3DFF -> #2E9BFF, see assets/icon-source.svg
+ *   and apps/cli/src/ui/screens/home/constants.ts HOME_TITLE_STOPS).
  * - Provide light/dark-aware tokens so `isDark ? X : Y` branches become
  *   `isDark ? colors.accentDark : colors.accent` instead of raw hexes.
  *
@@ -16,38 +17,39 @@
  * When adding a new color, extend this file — never inline a hex elsewhere.
  */
 
-// ── Accent — pink/orange ramp sampled from the app icon gradient ─────────────
+// ── Accent — CLI 5-stop brand scale (warm yellow → red-orange → pink → violet → blue) ─────────────
+// Former pink/orange ramp removed: #FF2A7A #FF5E62 #FF9966 (3-stop, 135deg).
 // Former blue values removed: #2563eb #1d4ed8 #3b82f6 #60a5fa #93c5fd
 // #eff6ff #dbeafe #1e293b #334155 #0f172a
 // (Hue 217-221 (blue) → 340 (pink) / 15-20 (orange).)
 const accent = {
-  /** Primary accent — icons, checkmarks, active text on light bg. Icon pink. */
-  DEFAULT: "#FF2A7A",
-  /** Stronger variant for text on muted bg, light theme. Deep pink. */
-  strong: "#C81D5E",
-  /** Lighter for dark theme icons / checkmarks. Icon gradient mid. */
-  light: "#FF5E62",
-  /** Pale for dark theme secondary text on muted. Icon orange. */
-  pale: "#FF9966",
-  /** Extra pale for dark muted text. Light peach. */
-  extraPale: "#FFB199",
-  /** Muted bg — selected rows, banners, chips on light. Pink-peach tint. */
-  muted: "#FFF0EA",
+  /** Primary accent — middle pink stop of the CLI scale (#E93A6B). Best white-text contrast of the saturated stops on both themes (yellow #FFB02E fails on light, sky #2E9BFF is weaker as primary); direct hue heir of the old icon pink #FF2A7A. */
+  DEFAULT: "#E93A6B",
+  /** Stronger variant for text on muted bg, light theme. Darkened primary. */
+  strong: "#A91E52",
+  /** Lighter for dark theme icons / checkmarks. CLI scale stop 2 (red-orange). */
+  light: "#FF4A2D",
+  /** Pale for dark theme secondary text on muted. CLI scale stop 4 (violet). */
+  pale: "#8B3DFF",
+  /** Extra pale for dark muted text. CLI scale stop 5 (blue). */
+  extraPale: "#2E9BFF",
+  /** Muted bg — selected rows, banners, chips on light. Primary tint. */
+  muted: "#FDEFF3",
   /** Muted bg — dark. Warm maroon. */
-  mutedDark: "#2E1A22",
-  /** Border on light muted bg. Peach. */
-  border: "#FFD9CC",
+  mutedDark: "#2B1522",
+  /** Border on light muted bg. Primary tint edge. */
+  border: "#F5C6D4",
   /** Border on dark muted bg. Warm maroon edge. */
-  borderDark: "#4A2633",
+  borderDark: "#4A2536",
   /** Глубокий magenta — фон баннера revert (session/[id]). */
   bannerBg: "#7A1E43",
   /** Светлый персик — цвет ТЕКСТА заголовка баннера (UpdateBanner, dark). */
   bannerText: "#FFE4D9",
-  /** Banner dark bg. Warm near-black. */
+  /** Banner dark bg. Warm near-black (matches app.json adaptiveIcon/splash). */
   bannerDark: "#1F1016",
   /** Chip bg light/dark alias — kept explicit for call sites. */
-  chipBg: "#FFF0EA",
-  chipBgDark: "#2E1A22",
+  chipBg: "#FDEFF3",
+  chipBgDark: "#2B1522",
 } as const
 
 // ── Neutral — grays / backgrounds used throughout the app ────────────────────
@@ -121,7 +123,7 @@ const semantic = {
   error: "#ef4444",
   errorStrong: "#dc2626",
   warning: "#f59e0b",
-  info: "#FF5E62",
+  info: "#2E9BFF",
 } as const
 
 // ── Roles — токены по смыслу, а не по «степени серого» ──────────────────────

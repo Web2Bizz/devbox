@@ -5,7 +5,7 @@
  * Covers: kit UserTrigger rest/ref forward (0.25.9 regression stays green on
  * 0.26.0), open/close (click opens, Escape closes + focus return), sign-out
  * pushes /login, Tab reachability, ru labels via I18nProvider + cookie.
- * Trigger accessible name is now the kit displayName ("Devbox Developer"),
+ * Trigger accessible name is now the kit displayName ("Rush Code Developer"),
  * not the removed userMenu.openMenu aria-label (kit trigger renders the
  * name visibly; Radix still supplies aria-haspopup/expanded + data-state).
  *
@@ -85,9 +85,9 @@ mock.module('next/navigation', () => ({
 // Canned identity (module top — mock factories below close over these).
 const ME_USER = {
   id: 'mock-user-1',
-  firstName: 'Devbox',
+  firstName: 'Rush Code',
   lastName: 'Developer',
-  email: 'dev@devbox.local',
+  email: 'dev@rush-code.local',
   provider: 'local' as const,
   createdAt: '2026-01-15T09:00:00.000Z',
 };
@@ -125,11 +125,23 @@ mock.module('../../api/client', () => ({
 }));
 
 const { cleanup, render, screen, waitFor } = await import('@testing-library/react');
-const userEvent = (await import('@testing-library/user-event')).default;
+const { QueryClientProvider } = await import('@tanstack/react-query');
+const { createElement, useState } = await import('react');
+const { createQueryClient } = await import('../../lib/query-client');
 const { I18nProvider } = await import('../../i18n');
+const userEvent = (await import('@testing-library/user-event')).default;
 const { HeaderProfileDropdown } = await import('../profile-dropdown');
 const { ProfileDropdownUserTrigger } = await import('@web2bizz/ui/widgets');
 const { setSession, clearSession } = await import('../../lib/auth-store');
+
+// useHeaderProfile is useQuery-backed now (same PROFILE_QUERY_KEY as the
+// /profile page) — every render needs a QueryClientProvider. Fresh client
+// per render keeps tests isolated; within one render concurrent mounts
+// share the entry (dedup 2→1 is covered in useProfile.test.tsx).
+function wrapper({ children }: { children: React.ReactNode }) {
+  const [client] = useState(() => createQueryClient());
+  return createElement(QueryClientProvider, { client }, children);
+}
 
 // Network seam stub (offline fallback; the module mock above is primary).
 // Seeded per test (sign-out clears the store, so beforeEach re-seeds).
@@ -163,10 +175,10 @@ afterEach(() => {
   pushMock.mockClear();
 });
 
-const USER = { name: 'Devbox Developer', email: 'dev@devbox.local' };
+const USER = { name: 'Rush Code Developer', email: 'dev@rush-code.local' };
 // Kit trigger renders AvatarFallback initial ("D") + visible displayName, so
-// the accessible name concatenates ("DDevbox Developer"). Match by substring.
-const TRIGGER_NAME = /Devbox Developer/;
+// the accessible name concatenates ("DRush Code Developer"). Match by substring.
+const TRIGGER_NAME = /Rush Code Developer/;
 const FIND_TIMEOUT = 5000;
 
 describe('ProfileDropdownUserTrigger rest/ref forward (0.25.9 regression)', () => {
@@ -206,7 +218,7 @@ describe('ProfileDropdownUserTrigger rest/ref forward (0.25.9 regression)', () =
 describe('HeaderProfileDropdown (pure kit AuthorizedUserProfile)', () => {
   test('closed trigger exposes menu semantics; click opens with profile + sign-out', async () => {
     const user = userEvent.setup();
-    render(<HeaderProfileDropdown />);
+    render(<HeaderProfileDropdown />, { wrapper });
 
     const trigger = await screen.findByRole('button', { name: TRIGGER_NAME }, { timeout: FIND_TIMEOUT });
     // Radix Slot props must reach the kit trigger (the 0.25.9 bug: they did not).
@@ -229,7 +241,7 @@ describe('HeaderProfileDropdown (pure kit AuthorizedUserProfile)', () => {
 
   test('sign-out pushes /login', async () => {
     const user = userEvent.setup();
-    render(<HeaderProfileDropdown />);
+    render(<HeaderProfileDropdown />, { wrapper });
 
     const trigger = await screen.findByRole('button', { name: TRIGGER_NAME }, { timeout: FIND_TIMEOUT });
     await user.click(trigger);
@@ -241,7 +253,7 @@ describe('HeaderProfileDropdown (pure kit AuthorizedUserProfile)', () => {
 
   test('Escape closes the menu and returns focus to the trigger', async () => {
     const user = userEvent.setup();
-    render(<HeaderProfileDropdown />);
+    render(<HeaderProfileDropdown />, { wrapper });
 
     const trigger = await screen.findByRole('button', { name: TRIGGER_NAME }, { timeout: FIND_TIMEOUT });
     await user.click(trigger);
@@ -256,7 +268,7 @@ describe('HeaderProfileDropdown (pure kit AuthorizedUserProfile)', () => {
 
   test('keyboard: Tab moves focus into the open menu (arrows roving pending kit fix)', async () => {
     const user = userEvent.setup();
-    render(<HeaderProfileDropdown />);
+    render(<HeaderProfileDropdown />, { wrapper });
 
     const trigger = await screen.findByRole('button', { name: TRIGGER_NAME }, { timeout: FIND_TIMEOUT });
     await user.click(trigger);
@@ -278,13 +290,14 @@ describe('HeaderProfileDropdown (pure kit AuthorizedUserProfile)', () => {
   });
 
   test('ru locale renders translated labels', async () => {
-    document.cookie = 'devbox-locale=ru; path=/';
+    document.cookie = 'rush-code-locale=ru; path=/';
     try {
       const user = userEvent.setup();
       render(
         <I18nProvider>
           <HeaderProfileDropdown />
         </I18nProvider>,
+        { wrapper },
       );
 
       const trigger = await screen.findByRole('button', { name: TRIGGER_NAME }, { timeout: FIND_TIMEOUT });
@@ -294,7 +307,7 @@ describe('HeaderProfileDropdown (pure kit AuthorizedUserProfile)', () => {
       expect(screen.getByRole('link', { name: 'Профиль' })).toBeDefined();
       expect(screen.getByRole('button', { name: 'Выйти' })).toBeDefined();
     } finally {
-      document.cookie = 'devbox-locale=; path=/; max-age=0';
+      document.cookie = 'rush-code-locale=; path=/; max-age=0';
     }
   });
 });

@@ -66,8 +66,8 @@ To ship a scoped package:
 ```bash
 # token in a 600 file, never in image layers / history
 grep -oP '(?<=_authToken=).*' ~/.npmrc | tr -d '\r\n ' > /tmp/npm-token && chmod 600 /tmp/npm-token
-docker build --secret id=NPM_TOKEN,src=/tmp/npm-token -f apps/backend/Dockerfile -t devbox-backend:test .
-docker build --secret id=NPM_TOKEN,src=/tmp/npm-token -f apps/frontend/Dockerfile -t devbox-frontend:test .
+docker build --secret id=NPM_TOKEN,src=/tmp/npm-token -f apps/backend/Dockerfile -t rush-code-backend:test .
+docker build --secret id=NPM_TOKEN,src=/tmp/npm-token -f apps/frontend/Dockerfile -t rush-code-frontend:test .
 shred -u /tmp/npm-token
 ```
 

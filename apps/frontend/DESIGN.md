@@ -1,7 +1,7 @@
-# DevBox Frontend — DESIGN
+# Rush Code Frontend — DESIGN
 
 Дизайн-договорённости `apps/frontend` (Next 16.3 Turbopack + `@web2bizz/ui`
-0.26.0). Подробности у кита: `node_modules/@web2bizz/ui/AGENTS.md`,
+0.26.3). Подробности у кита: `node_modules/@web2bizz/ui/AGENTS.md`,
 `docs/agents/anti-patterns.md`.
 
 ## 1. Порядок стилей
@@ -13,7 +13,7 @@
 
 `globals.css` грузится ПОЗЖЕ, поэтому его `:root` / `.dark` выигрывают
 у дефолтов кита при равной специфичности (source order). Порядок менять
-нельзя: бренд-токены (`--accent` → `--brand-1`) зависят от него.
+нельзя: бренд-токены (`--accent` → `--brand-3`) зависят от него.
 
 ## 2. Токены
 
@@ -28,8 +28,8 @@
 
 Header кита (`shape=rounded`, default `sharp`!) несёт `sm:rounded-xl` на самом `<header>`
 → его радиус = `--radius-xl` = `--radius`. Позиционирование — наше
-(sticky-pin в `globals.css` `.app-shell > .app-header`: `position: sticky`,
-`top: var(--header-sticky-top)`, `z-index: 30`): кит 0.25.9 убрал
+(`position: sticky`, `top: 0` — собственного отступа у бара нет, inset даёт
+слой; `z-index: 30`): кит 0.25.9 убрал
 `variant=fixed|sticky` + `wide` + `headerWrapperClassNames`/`headerSpacerClassName`
 (чистый бар без обёртки, `wide` больше нет — ширина задаётся шеллом).
 
@@ -38,14 +38,42 @@ Header кита (`shape=rounded`, default `sharp`!) несёт `sm:rounded-xl` �
 | Токен                | Значение            |
 | -------------------- | ------------------- |
 | `--header-height`    | `70px`              |
-| `--header-sticky-top`| `0px` → `0.5rem` от `sm` |
+| `--header-sticky-top`| `0px` → `0.5rem` от `sm` (кит; **нами не используется** — Header стоит на `top-0`) |
 
 ### Бренд (единственное место с hex — `:root` / `.dark` в `globals.css`)
 
-Лого-палитра `#FF2A7A → #FF5E62 → #FF9966` живёт только в
-`--brand-1/2/3`. Всё остальное ссылается семантически:
-`--accent: var(--brand-1)`, `--gradient-brand`, `--filter-logo-glow`,
-утилиты `.text-gradient-brand` / `.logo-glow` / `.shadow-brand-glow`.
+Бренд-шкала CLI (5 стопов, horizontal 90deg — как заголовок CLI,
+`apps/cli/src/ui/screens/home/constants.ts` `HOME_TITLE_STOPS`)
+живёт только в `--brand-1..5`. Всё остальное ссылается семантически:
+`--accent: var(--brand-3)`, `--gradient-brand`, утилита
+`.text-gradient-brand`.
+
+| Токен                | Значение              | Роль                                                        |
+| -------------------- | --------------------- | ----------------------------------------------------------- |
+| `--brand-1`          | `#FFB02E`             | градиент, стоп 0% (жёлто-оранжевый)                         |
+| `--brand-2`          | `#FF4A2D`             | градиент, стоп 25% (красно-оранжевый) + `--accent-secondary`|
+| `--brand-3`          | `#E93A6B`             | градиент, стоп 50% (розовый) + `--accent` (primary)         |
+| `--brand-4`          | `#8B3DFF`             | градиент, стоп 75% (фиолетовый)                             |
+| `--brand-5`          | `#2E9BFF`             | градиент, стоп 100% (сине-голубой)                          |
+| `--gradient-brand`   | `linear-gradient(90deg, 5 стопов)` | бренд-градиент (текст, кнопки `primaryBrand`)   |
+
+Primary = `--brand-3` `#E93A6B` (средний розовый стоп): единственный
+насыщенный стоп шкалы с пригодным контрастом белого текста и на светлом,
+и на тёмном (жёлтый `#FFB02E` на белом и голубой `#2E9BFF` на тёмном как
+текстовые акценты проваливаются; розовый — прямой наследник старого
+`#FF2A7A` по hue, узнаваемость бренда сохраняется).
+
+### Маппинг терминальных имён CLI → веб-hex
+
+CLI красит роли именами терминала (fg-only, фонов нет), веб — hex из
+бренд-шкалы / семантики. Таблица единственного соответствия:
+
+| CLI имя             | CLI код            | Веб-hex   | Источник веб-hex                          |
+| ------------------- | ------------------ | --------- | ----------------------------------------- |
+| `cyan` (user)       | `ESC[36m`          | `#2E9BFF`| `--brand-5` (голубой конец шкалы)         |
+| `green` (agent)     | `ESC[32m`          | `#22c55e`| semantic success (смысл сохранён, не бренд)|
+| `yellow` (header)   | `ESC[33m`          | `#FFB02E`| `--brand-1` (жёлтое начало шкалы)         |
+| `red` (error)       | `ESC[31m`          | `#ef4444`| semantic error (смысл сохранён, не бренд) |
 
 ### Оверлей / scrim
 
@@ -99,21 +127,37 @@ frontend. Новый компонент **не считается зарегис
 
 ### 3.2 Компоненты (`src/components/`)
 
+- `ModeSelector`
 - `AuthHeader`
 - `ChatInput`
+- `ChatLiveStatus`
 - `ChatMessageRow`
-- `ChatWindow`
+- `ChatStreamingRow`
+- `ChatThinkingRow`
+- `ChatThread`
+- `ChatThreadEmpty`
+- `ChatThreadLoading`
+- `ChatToolTimeline`
 - `CreateOrganizationDialog`
 - `CreateProjectDialog`
+- `OrganizationSwitcher`
 - `RunningSessionRow`
 - `RunningSessionsTab`
-- `SessionRow`
-- `SessionsTab`
+- `SessionList`
+- `SessionsSidebar`
 - `ProjectCardSkeleton`
 - `ProjectDetailSkeleton`
 - `ProjectsHeaderSkeleton`
 
-### 3.3 Инфраструктура (`src/i18n`, `src/providers`)
+### 3.3 Фичи (`src/features/`)
+
+- `ApiKeyDialog`
+- `ChatSection`
+- `ChatForkDialog`
+- `ChatRevertDialog`
+- `UsageSection`
+
+### 3.4 Инфраструктура (`src/i18n`, `src/providers`)
 
 - `I18nProvider`
 - `Providers`
@@ -122,8 +166,9 @@ frontend. Новый компонент **не считается зарегис
 ## 4. Правило радиусов
 
 **Sidebar + Content = Header.** `.app-sidebar` и `.app-content` используют
-`border-radius: var(--radius-lg)` — визуально тот же радиус, что у бара
-Header. Только `var()`-ссылки; hex — только в `:root` / `.dark`.
+`border-radius: var(--radius-xl)` — визуально тот же радиус, что у бара
+Header (`sm:rounded-xl` в ките). Только `var()`-ссылки; hex — только
+в `:root` / `.dark`.
 
 **Вложенность уменьшает радиус.** Каждый уровень вложенности внутри
 `.app-content` / `.app-sidebar` / `Card` должен использовать меньший радиус,
@@ -132,7 +177,7 @@ Header. Только `var()`-ссылки; hex — только в `:root` / `.d
 
 | Уровень | Контейнер | Радиус |
 | ------- | --------- | ------ |
-| 0 — шелл | Header bar, `.app-sidebar`, `.app-content` | `var(--radius-lg)` (`--radius` = 0.75rem) |
+| 0 — шелл | Header bar, `.app-sidebar`, `.app-content` | `var(--radius-xl)` (`--radius` = 0.75rem) |
 | 1 — карточка/блок внутри Content | `Card`, `.status-grid > *`, секции | `var(--radius-md)` (`calc(var(--radius) - 2px)`) |
 | 2 — вложенный элемент внутри Card | `Badge`, `Button`, инпуты, вложенный `Card`/панель | `var(--radius-sm)` (`calc(var(--radius) - 4px)`) или `var(--radius-xs)` |
 | 3+ — глубокая вложенность | чипы, мелкие контролы | `var(--radius-xs)` / `calc(var(--radius) - 6px)` |
@@ -146,14 +191,14 @@ Header. Только `var()`-ссылки; hex — только в `:root` / `.d
 
 ## 4.1 Запреты декора
 
-- **Градиенты в блоках запрещены.** `linear-gradient`/`radial-gradient`/`conic-gradient` не использовать для `background` блоков, карточек, панелей, секций. Единственное исключение — **кнопки** (`Button variant="primaryBrand"` и аналогичные бренд-кнопки) — им градиент разрешён. Текстовый градиент `.text-gradient-brand` для логотипа/вордмарка — тоже ок (это текст, не блок).
-- **Тени запрещены.** `box-shadow`/`drop-shadow`/`filter: drop-shadow` не использовать для блоков и карточек. Исключение — фокус-ринги/доступность (`:focus-visible`) и бренд-кнопки если того требует кит; декоративные `shadow-*`/`shadow-brand-glow` на блоках — нельзя.
+- **Градиенты — минимальное использование.** `linear-gradient`/`radial-gradient`/`conic-gradient` использовать по минимуму: только там, где оправдано (бренд-кнопки `Button variant="primaryBrand"`, текстовый градиент `.text-gradient-brand` для логотипа/вордмарка). В `background` блоков, карточек, панелей, секций — не применять.
+- **Тени запрещены.** `box-shadow`/`drop-shadow`/`filter: drop-shadow` не использовать в дизайне вообще — ни для блоков, ни для карточек, ни для любых других элементов. Исключений нет.
 - **CSS-трансформации запрещены.** `transform`/`translate`/`scale`/`rotate`/`skew` и `transition: transform` не применять к блокам/карточкам для декора (hover-подъёмы, наклоны и т.п. — нельзя). Разрешены только трансформации, требуемые доступностью/китом (Radix `DropdownMenu`/`Drawer` анимации, `Sidebar` chevron — уже в `globals.css`).
 
 ## 5. Структура шелла
 
 ```tsx
-<div className="app-shell-container mx-auto w-full max-w-none px-2"> // full-width, 8px по бокам
+<div className="app-shell-container mx-auto w-full max-w-none p-2"> // слой: внешний отступ по всем сторонам (0.5rem)
   <div className="app-shell">                              // grid
     <Header shape="rounded" />                            // row 1: header header
     <Sidebar />                                           // row 2 col 1
@@ -162,24 +207,24 @@ Header. Только `var()`-ссылки; hex — только в `:root` / `.d
 </div>
 ```
 
-- Контейнер — `mx-auto w-full max-w-none px-2` + CSS
-  `.app-shell-container { max-width: none; margin-inline: auto;
-  padding-inline: 0.5rem; box-sizing: border-box }`: full-width
-  без лимита, минимальные боковые 8px, центрирование. Внутренний
-  `.app-shell` держит `padding-inline: 0` (боковые даёт контейнер,
-  без удвоения) и `max-width: 100% + box-sizing` — без горизонтального
-  скролла. Кит 0.25.9 в entry `components`/`widgets` **не экспортирует**
+- **Слой владеет внешним отступом.** Контейнер — `mx-auto w-full
+  max-w-none p-2` (0.5rem по всем направлениям; раньше было `px-2 pb-4`,
+  т.е. сверху 0): full-width без лимита, gutters по кругу, центрирование.
+  Внутренние блоки (Header/Sidebar/Content) **не задают собственных
+  внешних отступов** — только `grid-area` + sticky-пин. Внутренний
+  `.app-shell` держит `padding: 0` (отступы даёт контейнер, без удвоения)
+  и `max-width: 100% + box-sizing` — без горизонтального скролла. Кит 0.25.9 в entry `components`/`widgets` **не экспортирует**
   layout-`Container` (только `ChartContainer` в full/widgets) —
   отдельный импорт не делаем, только классы. Если кит добавит
   `Container` — заменить внешнюю обёртку на него.
 - Kit Header — чистый бар без обёртки (0.25.9: `variant`/`wide`/враппер
   удалены, остался `shape`: `rounded` = бордер + радиус + клиппинг,
   `sharp` = квадрат без бордера, default `sharp` — всегда передаём
-  `shape="rounded"`): sticky-пин (`position: sticky`,
-  `top: var(--header-sticky-top)`) задаёт шелл в `globals.css`
-  (`.app-shell > .app-header`), ширина — шеллом, flatten-селекторы
-  запрещены (см. правило радиусов ниже).
-- Grid: `row1: header header / row2: sidebar content`, `gap: 1rem`
+  `shape="rounded"`): sticky-пин (`position: sticky`) задаёт шелл,
+  `top: 0` — бар НЕ несёт собственного вертикального отступа (inset даёт
+  слой, `--header-sticky-top` кита не используется), ширина — шеллом,
+  flatten-селекторы запрещены (см. правило радиусов ниже).
+- Grid: `row1: header header / row2: sidebar content`, `row-gap: 1rem`, `column-gap: 0.5rem`
   (гаттеры, чтобы скругления были видны), `300px + 1fr`.
 - Content full-width: `.app-content { width: 100%; min-width: 0 }` (grid-area
   content, скролл только здесь) + `.page-inner { width: 100%; max-width: none;
@@ -197,10 +242,27 @@ Header. Только `var()`-ссылки; hex — только в `:root` / `.d
   не трогать, открываeтся триггером из Header (`menuToggleSlot`).
 - Mobile `<768px`: одна колонка (`header / content`), aside скрыт.
 
+### 5.1 Слой чата (отдельный вариант шелла)
+
+Шелл имеет вариант `data-shell-variant="chat"` — он включается только на
+`/organizations/[orgId]/projects/[projectId]/sessions/[sessionId]`
+(детект по `usePathname` в `DashboardShell`, серверные layout-ы
+route-agnostic). Отличия РОВНО два, все остальные страницы не меняются:
+
+- `Content` (`variant="chat"` → `data-content-variant="chat"`) получает
+  `grid-area: 1/2/-1/3` и `z-index: 0`, БЕЗ хрома панели (без `border`,
+  без `background` — только `overflow/scroll`; радиус при отсутствии фона
+  не играет) — панель тянется на всю вертикаль
+  слоя и уходит под Header. Header остаётся `z-30` (выше панели), его
+  позиция и размеры не меняются — меняется только высота `Content`.
+- Внутренний padding панели: `padding-top: calc(var(--header-height) + 1rem)`
+  вместо `1.5rem` — контент чата начинается под баром и не «выезжает»
+  за пределы слоя (скролл остаётся внутри `Content`).
+
 ## 6. Бренд
 
-`SidebarBrand` (`src/components/layout/Sidebar.tsx`: `Image`
-`/devbox-logo.png` 36 `priority` + `.logo-glow`, `DevBox` в
+`SidebarBrand` (`src/components/layout/Sidebar/Sidebar.tsx`: `Image`
+`/assets/logo.png` 36 `priority`, `Rush Code` в
 `.text-gradient-brand`, `t.nav.console`) — единый источник.
 
 - Header `leadingSlot`: `<SidebarBrand />` + (title/breadcrumbs, если есть).
@@ -226,9 +288,14 @@ Header. Только `var()`-ссылки; hex — только в `:root` / `.d
   `DropdownMenuItem asChild`, Slot роняет role=menuitem/roving/item-refs —
   Arrow-навигация крашит Radix `focusFirst` (документировано в
   `profile-dropdown.test.tsx`, ждёт патча кита).
-- Desktop `aside`: только `<SidebarNav />`, бренда нет.
+- Desktop `aside`: `<SidebarNav />` по умолчанию (бренда нет); на сессионных
+  маршрутах (`…/projects/[projectId]/sessions[/…]`) содержимое заменяется
+  списком чатов (`SessionsSidebar` → `SessionList`, передаётся шеллом через
+  `DashboardShell sidebar`), навигация проекта там не показывается; на
+  мобиле то же самое внутри drawer (закрывается по переходу через
+  `useSidebarClose`).
 - Mobile drawer: свой `<SidebarBrand />`-фолбэк + кнопка закрытия.
-- i18n `en`/`ru` через `useI18n`, URL плоские (кука `devbox-locale`).
+- i18n `en`/`ru` через `useI18n`, URL плоские (кука `rush-code-locale`).
 
 ## 7. Плоский Content, без вложенных обводок
 
@@ -284,3 +351,30 @@ h2-строки + `Separator` + `Badge`).
 | 2026-10-11 | Из-за вставки реестра перенумерованы секции: правило радиусов §3 → §4 (запреты декора §3.1 → §4.1), структура шелла §4 → §5, бренд §5 → §6, плоский Content §6 → §7; внутренняя ссылка «§6 без исключений» → «§7» | Guard ожидает реестр в §3; нумерация держится сплошной без разрывов |
 | 2026-10-11 | Зафиксирован токен `--overlay-scrim: rgb(0 0 0 / 0.5)` (затемнение под мобильным drawer, `.app-sidebar-overlay`) в §2; объявление в `:root`/`globals.css` и замена литерала в коде — отдельная задача | Единственный оставшийся magic-color в `app/globals.css:355`; hex/rgba законны только внутри блока палитры `:root` / `.dark` |
 | 2026-10-11 | `I18nContext` НЕ внесён в реестр: это объект `createContext`, а не компонент; срабатывание guard на нём — известный false positive | Реестр описывает объявления компонентов; мусорные сущности в дизайн-документ не вносятся |
+| 2026-10-20 | usage переехал `src/components/usage/` → `src/features/usage/` без смены логики: `ApiKeyDialog` + `UsageSection` перенесены из §3.2 в новый §3.3 «Фичи», инфраструктура §3.3 → §3.4 | Первый фича-модуль; page `/profile` остаётся тонкой композицией `<UsageSection />` |
+| 2026-11-03 | Кит поднят `0.26.0` → `0.26.3`; чат собран на китовых примитивах: `PromptInput` (композер, submit↔stop, Enter), `MessageScroller` (Viewport role=region / Content role=log, autoScroll + anchor), `Message`/`MessageText`/`Bubble`, `ShimmerText` в статусе стрима; `ModelSelector` переведён с нативного `<select>` на китовый `Select` | Задача «все компоненты чата — из кита»; собственные скролл-логика, InputGroup-композер и `<select>` удалены |
+| 2026-11-03 | Список чатов переехал в sidebar: на маршрутах `…/projects/[projectId]/sessions[/[sessionId]]` шелл подменяет `SidebarNav` компонентом `SessionList` (через `DashboardShell sidebar` + `useSidebarClose` для drawer); `/sessions` в content показывает подсказку «выберите чат» вместо второго списка | Продуктовое решение: чаты живут рядом с перепиской, а не в content-блоке |
+| 2026-11-03 | Слой владеет внешним отступом: контейнер шелла `p-2` (0.5rem по кругу; было `px-2 pb-4`), Header `sticky top-0` — без собственного вертикального отступа (`--header-sticky-top` кита не используется), auth-слой тоже `p-2` и `min-h` пересчитан | Задача «убери у Header отступ сверху; отступ по бокам — задача слоя, задать 2-й размер отступа» |
+| 2026-11-03 | Sidebar и Content: `border-radius: var(--radius-xl)` (было `--radius-lg`) — уровень 0 шелла, §4 | Задача «сделать Sidebar и Content border-radius: xl» |
+| 2026-11-03 | Слой чата: `data-shell-variant="chat"` (детект по `usePathname` в `DashboardShell`) — `Content` получает `grid-area: 1/2/-1/3` + `z-0`, тянется на всю вертикаль слоя и уходит под Header (`z-30`, позиция/размер бара не меняются), внутренний `padding-top: calc(var(--header-height) + 1rem)`; остальные страницы не меняются | Задача «Content по высоте до Header только для слоя чата» (§5.1) || 2026-11-03 | Sidebar и Content: `border-radius: var(--radius-xl)` (было `--radius-lg`) — уровень 0 шелла, §4 | Задача «сделать Sidebar и Content border-radius: xl» || 2026-11-03 | Слой чата: `data-shell-variant="chat"` (детект по `usePathname` в `DashboardShell`) — `Content` получает `grid-area: 1/2/-1/3` + `z-0`, тянется на всю вертикаль слоя и уходит под Header (`z-30`, позиция/размер бара не меняются), внутренний `padding-top: calc(var(--header-height) + 1rem)`; остальные страницы не меняются | Задача «Content по высоте до Header только для слоя чата» (§5.1) |
+
+## 9. DRAFT (не финализировано, требует approve): nested org-shell + 1:1
+
+DRAFT-предложение (без approve не применять как правило):
+
+- URL вложенные: `/organizations/[orgId]/projects/[projectId]/…`, сессии
+  `…/sessions/[sessionId]`. `/` — plain без сайдбара; `/organizations` и
+  `/organizations/[orgId]` — plain без сайдбара (`data-shell="plain"`).
+  Сайдбар только внутри проекта (`data-shell="dashboard"`, project shell
+  layout `organizations/[orgId]/projects/[projectId]/layout.tsx`:
+  SidebarNav items[] проектный, switcher-проп orgId, breadcrumbs,
+  выход → `/organizations/[orgId]`, хелперы `src/lib/navigation.ts`).
+- Глобальных nav нет: `SidebarNav` по умолчанию — только org-хаб;
+  проектный набор (`Overview/Sessions/Secrets/AI Providers/Registry`)
+  передаётся через `sidebarItems`. Старые глобальные
+  (`/projects`, `/secrets`, `/ai-providers`, `/registry*`) — 410 + CTA
+  на `/organizations` (без угадывания org). Легаси `/projects/[id]/**`
+  — 404 + CTA (id без org не резолвится, mismatch → 404 без утечки).
+- Guard-матрица: auth — nested org/project + legacy globals (гость → /login);
+  unauth — /login|/register|/restore (авторизован → /organizations);
+  `/` — гость → /login, авторизован → /organizations.

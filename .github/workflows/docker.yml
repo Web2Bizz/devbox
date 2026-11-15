@@ -16,15 +16,14 @@ name: Docker
 #   .env.production; триггер сейчас dev + dispatch — для main оставлена
 #   готовность маппинга, новый триггер НЕ добавлялся). Файл — ЕДИНСТВЕННЫЙ
 #   источник build-значений (vars-override нет; CHANGEME из файла никогда
-#   не запекается — guard падает fail-fast). Версия opencode ниоткуда не
-#   пробрасывается — берётся дефолт Dockerfile (ARG OPENCODE_VERSION).
+#   не запекается — guard падает fail-fast).
 #   Compose runtime по-прежнему читает ТОЛЬКО внешнее окружение (см. шапку
 #   docker-compose.yml): чувствительное (DATABASE_URL, пароли, токены,
 #   webhook) — через secrets/vars/compose `:?`, в `.env.develop`/
 #   `.env.production` ему места нет.
 #   - needs-цепочка внутри этого workflow, а не отдельный workflow_run:
-#     deploy видит outputs affected-матрицы/opencode-фильтра и пропускается
-#     при пустой публикации; workflow_run не имел бы к ним доступа.
+#     deploy видит outputs affected-матрицы и пропускается при пустой
+#     публикации; workflow_run не имел бы к ним доступа.
 # Required configuration:
 #   secrets.DOCKER_REGISTRY_PASSWORD ... пароль registry (логин: app)
 #   secrets.NPM_TOKEN ................ приватный npm registry (@web2bizz/*)
@@ -34,14 +33,7 @@ name: Docker
 #     CI-only блок в .env.example).
 # Нейминг — через ./.github/actions/resolve-names: ORG/REPO/SERVICE
 # Сервисы ищутся в apps/* и services/* (монорепозиторий).
-# NOTE(apps/opencode-server): opencode-server НЕ входит в affected-матрицу
-# (у него нет package.json — не Nx-проект, в `nx show projects --affected`
-# не появляется, плюс его Dockerfile собирается своим контекстом, а не
-# корнем `.`), поэтому собирается ниже отдельным job'ом `opencode` вне
-# матрицы (Dockerfile apps/opencode-server/Dockerfile, контекст
-# apps/opencode-server, нейминг через resolve-names:
-# REGISTRY/OWNER/REPO/opencode). Корневой
-# docker-compose.yml при этом тянет ВСЕ образы из registry (тег через `TAG`,
+# Корневой docker-compose.yml тянет ВСЕ образы из registry (тег через `TAG`,
 # дефолт `:latest`; локальных build'ов в compose нет). Публикуемые образы —
 # для Dokploy-деплоев, забирающих готовые образы из registry.
 # NOTE(bun): адаптация шаблона @web2bizz/scaffold под bun-монорепо —
@@ -104,14 +96,6 @@ jobs:
         run: |
           DISCOVERED='${{ steps.discover.outputs.services }}'
           echo "Discovered services (apps/*, services/*): $DISCOVERED"
-          # opencode-server собирается отдельным job'ом `opencode` (свой
-          # build-контекст apps/opencode-server, не корень `.`) — из общей
-          # матрицы исключён всегда: иначе ручной запуск (matrix=DISCOVERED)
-          # и Nx-fail-safe собрали бы его с неверным контекстом и дважды
-          # (дубль job'а `opencode`). В affected-ветке исключение no-op:
-          # без package.json это не Nx-проект и в пересечение не попадает.
-          DISCOVERED=$(echo "$DISCOVERED" | python3 -c "import json,sys; print(json.dumps([s for s in json.load(sys.stdin) if s != 'opencode-server']))")
-          echo "Docker services (opencode-server excluded): $DISCOVERED"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             # ручной запуск — все сервисы из discover
             echo "matrix=$DISCOVERED" >> "$GITHUB_OUTPUT"
@@ -239,129 +223,22 @@ jobs:
           secrets: |
             NPM_TOKEN=${{ secrets.NPM_TOKEN }}
 
-  # apps/opencode-server — не Nx-проект (нет package.json) и собирается
-  # своим контекстом, поэтому вне affected-матрицы по дизайну: явный job
-  # ниже, при push — только если затронуты apps/opencode-server/** или сам
-  # workflow; при ручном запуске — всегда. В discovery (apps/*) он появится,
-  # но affected-пересечение его отсекает (как mobile) — двойной сборки нет.
-  opencode-filter:
-    runs-on: ubuntu-latest
-    outputs:
-      build: ${{ steps.check.outputs.build }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          submodules: recursive
-
-      - name: Check whether opencode needs a build
-        id: check
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "build=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          BEFORE="${{ github.event.before }}"
-          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-            # неизвестная база (новая ветка/форс-пуш) — fail-safe: собираем
-            echo "build=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if git diff --name-only "$BEFORE" "${{ github.sha }}" -- apps/opencode-server .github/workflows/docker.yml | grep -q .; then
-            echo "build=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "build=false" >> "$GITHUB_OUTPUT"
-          fi
-
-  opencode:
-    needs: [opencode-filter]
-    if: needs.opencode-filter.outputs.build == 'true'
-    runs-on: ubuntu-latest
-    env:
-      REGISTRY: docker.registry.web2bizz.team
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          submodules: recursive
-
-      - name: Resolve registry names
-        id: names
-        uses: ./.github/actions/resolve-names
-        with:
-          registry: ${{ env.REGISTRY }}
-          service: opencode
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to Docker Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: app
-          password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
-
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ steps.names.outputs.service_image_path }}
-          tags: |
-            type=ref,event=branch
-            type=sha,prefix=
-            type=raw,value=latest
-
-      - name: Load build-time env file
-        run: |
-          case "${{ github.ref_name }}" in
-            main) ENV_FILE=.env.production ;;
-            *) ENV_FILE=.env.develop ;;
-          esac
-          test -f "$ENV_FILE" || { echo "::error::$ENV_FILE is missing — tracked build-time env files (.env.develop/.env.production) must exist"; exit 1; }
-          echo "Loading build-time env from $ENV_FILE (branch ${{ github.ref_name }})"
-          set -a
-          # shellcheck disable=SC1090
-          . "./$ENV_FILE"
-          set +a
-          # No version passthrough: opencode builds with the Dockerfile
-          # default (ARG OPENCODE_VERSION). The file is sourced whole for
-          # future build-time values.
-
-      - name: Build and push opencode image
-        uses: docker/build-push-action@v6
-        with:
-          context: apps/opencode-server
-          file: apps/opencode-server/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          # No build-args: apps/opencode-server/Dockerfile declares
-          # ARG OPENCODE_VERSION with its own default — the image builds
-          # with that version, nothing is passed from CI.
-
   # Redeploy всего compose-стека в Dokploy одним POST на webhook
   # compose-сущности (сценарий `compose` шаблона — см. шапку файла).
   # Запускается только если что-то реально опубликовано (непустая affected-
-  # матрица или opencode-билд) и никто не упал; иначе скипается молча.
+  # матрица) и никто не упал; иначе скипается молча.
   # Ручной workflow_dispatch публикует всё + триггерит redeploy (escape hatch).
   deploy:
     name: Trigger Dokploy compose redeploy
-    needs: [affected, docker, opencode-filter, opencode]
-    # always(): docker/opencode скипаются при пустой матрице/фильтре —
+    needs: [affected, docker]
+    # always(): docker скипается при пустой матрице —
     # без always() deploy тоже скипался бы и условие не вычислилось бы.
     if: >-
       always() &&
       needs.affected.result == 'success' &&
-      needs.opencode-filter.result == 'success' &&
       (needs.docker.result == 'success' || needs.docker.result == 'skipped') &&
-      (needs.opencode.result == 'success' || needs.opencode.result == 'skipped') &&
-      ((needs.affected.outputs.matrix != '[]' && needs.affected.outputs.matrix != '') ||
-        needs.opencode-filter.outputs.build == 'true')
+      needs.affected.outputs.matrix != '[]' &&
+      needs.affected.outputs.matrix != ''
     runs-on: ubuntu-latest
     steps:
       - name: Redeploy compose stack

@@ -1,0 +1,7 @@
+# Evolution log — silent-stream-k7
+
+- Epoch 1 (coarse hypothesis): симптом «файл создан, чат пуст» → кандидаты frameText-дроп + frameToolName-слепота + псевдо-trace + ?session=/терминатор; решение — medium-план diag→fix→verify, только план.
+- Epoch 2 (evidence): доказано код-ридингом — useChat.ts:124-181 frameText null-дроп, :193-204 frameToolName legacy-only, :461 session-фильтр, :491-506 только text-trace; sessions-client.ts:202-292 fail-soft; harness toStreamFrame:975-991 passthrough, streamEvents:1003-1195 фильтр+replay, recordHostEvent:846-910 только текст; contracts schema:148-201 permissive envelope; chat-window/timeline/agent-thinking рендер готов, но сигнала нет.
+- Epoch 3 (decisions): SSE только аддитивно (envelope не сужать); tool-прогресс ephemeral (SSE-state), durable только текст; фронт-канон нерушим; карточки строго diag→fix→verify. Отклонено: сужение envelope enumом, запись тулзов в messages/history, verbose навсегда.
+- Epoch 4 (refinement): D1 — временный diag-лог типов/фильтра/дропа + один auto-прогон + поля payload; F2 — frameToolName на session.tool.*, tool мимо append, per-turn trace, kind аддитивно; V3 — auto-сценарий + ассёрты + lint/build/guard.
+- Epoch 5 (validation): сверка с каноном (слои, useEffect-исключение, guard no-opencode-transport, kit-only, AppLogger однострочники) и границами (persist не трогать, ?session quiet-empty сохранить); complexity D1 low / F2 medium / V3 low; риск F2 medium с митигацией; синтез PLAN.md.

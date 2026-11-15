@@ -2,10 +2,16 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "target": "ES2023",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "CommonJS",
     "outDir": "dist",
     "rootDir": "src",
+    "paths": {
+      "@common/*": ["./src/common/*"],
+      "@app/*": ["./src/app/*"],
+      "@users/*": ["./src/users/*"],
+      "@utils/*": ["./src/utils/*"],
+      "@types/*": ["./src/types/*"]
+    },
     "declaration": false,
     "declarationMap": false,
     "removeComments": true,

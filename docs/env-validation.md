@@ -32,7 +32,6 @@ is the only place that validates them (zod@4), and `docs/env-validation.md`
 | --- | ---------- |
 | `APP_BACKEND_PORT` (`PORT` legacy) | Missing, or not a numeric port 1–65535 |
 | `APP_BACKEND_SOCKET` (+ composed) | Not a URL with a host |
-| `OPENCODE_URL` (+ composed) | Not a URL with a host |
 | `GITHUB_API_URL` | Not a URL with a host |
 | `NEXT_PUBLIC_API_URL` | Set but not a URL with a host (unset → backend socket) |
 | `CORS_ORIGINS` | Any entry not an `http(s)` URL — message carries the `entry #N` index |
@@ -42,8 +41,8 @@ is the only place that validates them (zod@4), and `docs/env-validation.md`
 | `GITHUB_APP_SLUG` | Set but not URL-safe |
 | `GITHUB_APP_*` pair | Partially configured (ID without key or vice versa) |
 | `GITHUB_APP_PRIVATE_KEY_PATH` | Set but unreadable (message carries the path, never the key) |
-| `POSTGRES_PORT` / `OPENCODE_PORT` / `NEXT_PUBLIC_PORT` | Set but not a numeric port |
-| `APP_BACKEND_PROTOCOL` / `OPENCODE_PROTOCOL` | Not `http`/`https` |
+| `POSTGRES_PORT` / `NEXT_PUBLIC_PORT` | Set but not a numeric port |
+| `APP_BACKEND_PROTOCOL` | Not `http`/`https` |
 | `REQUEST_TIMEOUT_MS` | Not a non-negative integer |
 | `DOCKER_REGISTRY_URL` | Set but not a URL with a host (unset → skipped, never an error) |
 | `DOCKER_REGISTRY_TIMEOUT_MS` | Set but not a non-negative integer |
@@ -58,7 +57,8 @@ is the only place that validates them (zod@4), and `docs/env-validation.md`
 | `JWT_ACCESS_TTL` / `JWT_REFRESH_TTL` | Set but not `15m`/`1h`/`7d`/seconds 60–7776000 |
 | `AUTH_LEGACY_MOCK_FALLBACK` | Set but not `true`/`false` (`1`/`0` ok) |
 | `OPENCODE_KEYS_ENCRYPTION_KEY` | Set but shorter than 32 chars (value never echoed) |
-| `OPENCODE_BILLING_URL` | Set but not a URL with a host (unset → unverified default, never an error) |
+| `OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS` | Set but shorter than 32 chars (value never echoed) |
+| `OPENCODE_KEYS_ACTIVE_KEY_ID` / `OPENCODE_KEYS_PREVIOUS_KEY_ID` | Set but not `^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$` (ids are plaintext, never secrets) |
 
 Broken composites (`http://:` from `${...}` interpolation with an empty HOST)
 are NOT errors: they recompose from the parts + WARN.
@@ -68,7 +68,6 @@ are NOT errors: they recompose from the parts + WARN.
 | Notice | Meaning |
 | ------ | ------- |
 | `APP_BACKEND_HOST` empty → `localhost` | Dev default; set explicitly for production |
-| `OPENCODE_HOST` empty → `localhost`, `OPENCODE_PORT` unset → `4096` | Dev defaults (explicit `0.0.0.0` is preserved verbatim, no WARN) |
 | `POSTGRES_HOST` empty → `localhost`, `POSTGRES_PORT` unset → `5432` | Only when composing from `POSTGRES_*` |
 | `LOG_LEVEL` unset/unknown → `info` | Expected `debug\|info\|warn\|error` |
 | `GITHUB_APP_*` empty pair | Normal: github endpoints answer 401/503 until configured |
@@ -90,7 +89,8 @@ are NOT errors: they recompose from the parts + WARN.
 | `JWT_ACCESS_TTL` / `JWT_REFRESH_TTL` unset → `15m` / `7d` | Dev defaults (seconds 900 / 604800) |
 | `AUTH_LEGACY_MOCK_FALLBACK` unset → `true` | Dev default: `x-user-id` mock identity still accepted; set `false` for production |
 | `OPENCODE_KEYS_ENCRYPTION_KEY` unset → key endpoints 500 | WARN + `opencode_keys_unconfigured` at use-time (never boot fail-fast); set explicitly for production |
-| `OPENCODE_BILLING_URL` unset → `https://api.opencode.ai/usage` | Unverified default (no public billing path discoverable) + WARN; override in `.env` when known |
+| `OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS` set → rotation window | WARN (converge stale rows via lazy re-encrypt + `keys:reencrypt`, then remove it) |
+| `OPENCODE_KEYS_ACTIVE_KEY_ID` / `OPENCODE_KEYS_PREVIOUS_KEY_ID` unset → `v1` / `v0` | Silent defaults (ids are plaintext envelope metadata, never secrets) |
 | `GITHUB_APP_INSTALLATION_ID` set | **Deprecated** legacy single-install dev fallback — prefer per-user installations via the install flow |
 | `PROJECTS_ROOT` points to a missing directory | File browser 404s until it exists |
 | Unknown app-prefixed key (`APP_BACKEND_PORTT`, …) | Likely typo — only `APP_/OPENCODE_/POSTGRES_/DATABASE_URL/CORS_/REQUEST_TIMEOUT_MS/EXTERNAL_/LOG_LEVEL/NEXT_PUBLIC_/GITHUB_/DOCKER_/DOCKER_REGISTRY_/NPM_/NPM_REGISTRY_/JWT_/AUTH_/PROJECTS_ROOT` prefixes are reported; unrelated OS vars (`PATH`, `HOME`, …) stay silent |
@@ -100,7 +100,9 @@ are NOT errors: they recompose from the parts + WARN.
 `DATABASE_URL`, `POSTGRES_PASSWORD`, `DOCKER_REGISTRY_USER/PASSWORD/TOKEN`,
 `NPM_REGISTRY_TOKEN`, `NPM_TOKEN` (legacy fallback),
 `NPM_REGISTRY_USER/PASSWORD` (basic pair), `JWT_ACCESS_SECRET`,
-`JWT_REFRESH_SECRET`, `OPENCODE_KEYS_ENCRYPTION_KEY`, per-user OpenCode API
+`JWT_REFRESH_SECRET`, `OPENCODE_KEYS_ENCRYPTION_KEY`,
+`OPENCODE_KEYS_ENCRYPTION_KEY_PREVIOUS`,
+per-user OpenCode API
 keys, password hashes, access/refresh tokens,
 private keys, tokens: never appear in
 errors, warnings, or logs — only key NAMES plus the `.env.example` pointer.

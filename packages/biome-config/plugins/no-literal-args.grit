@@ -1,0 +1,27 @@
+// no-literal-args: string literals as direct `new` arguments are banned;
+// use a named constant or `Class.name`. One line per whitelist exception.
+// Scope is deliberately `new` only: method calls (`.split(",")`,
+// `.toString("base64url")`) are stdlib idioms, and GritQL has no type info
+// to tell service methods apart. Call arguments, decorator arguments
+// (@Controller, @Get, ...) and literals nested in option objects/arrays
+// ({ sameSite: "lax" }) are out of scope — `within` climbs recursively,
+// so JsObjectExpression/JsArrayExpression are excluded explicitly.
+// Verified on Biome 2.5.15: literal-side matching (one diagnostic per
+// literal); regexes must be full-match with (?:...) groups only —
+// capturing (...) breaks the query ("matched N variables, expected 0").
+language js(typescript)
+
+JsStringLiteralExpression() as $lit where {
+  $lit <: within JsNewExpression(callee = `$callee`),
+  $lit <: not within JsObjectExpression(),
+  $lit <: not within JsArrayExpression(),
+  $callee <: not r"^(?:Error|TypeError|RangeError|SyntaxError|URIError|AggregateError)$",
+  $callee <: not r"^\w*(?:Exception|Error)$",
+  $callee <: not r"^RegExp$"
+} where {
+  register_diagnostic(
+    span = $lit,
+    message = "String literal in argument: use a constant or `Class.name`.",
+    severity = "error"
+  )
+}

@@ -33,19 +33,19 @@ name: Activation E2E (Maestro)
 # devices against a real server, so asserting on it here would be asserting
 # on the harness rather than the app.
 #
-# NOTE: this workflow intentionally has NO `push:` trigger. The pull_request
-# check is the only gate for the activation suite. With `push:` present the
-# same commit was tested twice — once as pull_request, and then again as `push`
-# to dev/main the moment the PR merged — and the emulator jobs below are
-# budgeted by the tens of minutes, so that second run was a full duplicate of
-# a suite that had already passed on that exact tree. Removing `push:` means a
-# direct push to dev/main (i.e. bypassing a PR) will NOT run E2E.
+# POLICY: no APK assembly on pull_request. The PR stage runs only fast checks
+# (mobile.yml `test` + ci.yml lint/build/test); the emulator suite below needs
+# a freshly assembled APK, so it runs ONLY after merge — on `push` to
+# dev/main — exactly once per merged tree. With a `pull_request` trigger the
+# same tree would pay emulator time twice (tens of minutes per half), so it
+# is deliberately absent here.
 #
-# That is deliberate, not a hole: neither branch is protected today, but branch
-# protection is the documented way to make the PR check mandatory, and once it
-# is enabled every change to dev/main must arrive through a pull_request —
-# exactly where this workflow runs. Until then, workflow_dispatch stays the
-# manual escape hatch for an on-demand run.
+# Direct pushes to dev/main (bypassing a PR) WILL run E2E — that is the price
+# of the post-merge gate, not a hole. Neither branch is protected today, but
+# once branch protection is enabled every change must arrive through a
+# pull_request, and the fast checks above are the mandatory PR gate (do NOT
+# list apk/core/newer as required PR checks — they never report on a PR).
+# workflow_dispatch stays the manual escape hatch for an on-demand run.
 #
 # WHY THIS IS THREE JOBS (and not one 90-minute job anymore):
 # The old single job was CANCELLED at its timeout-minutes: 90 ceiling on run
@@ -76,7 +76,7 @@ name: Activation E2E (Maestro)
 #      suite behaviour in the middle of a flake investigation).
 
 on:
-  pull_request:
+  push:
     branches: [main, dev]
     paths:
       - "apps/mobile/app/**"
@@ -294,7 +294,7 @@ jobs:
   # =====================================================================
   # core — the regression gate. Boots ONE emulator, runs CORE_FLOWS only
   # (run-e2e-flows.sh core: blocking semantics, break-on-failure, rc=1).
-  # Runs in PARALLEL with `newer`; its failure blocks the PR check, its
+  # Runs in PARALLEL with `newer`; its failure fails the post-merge run, its
   # artifacts are independent of newer's.
   # =====================================================================
   core:

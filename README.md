@@ -1,10 +1,9 @@
-# DevBox — monorepo
+# Rush Code — monorepo
 
 Bun workspaces monorepo: NestJS 12 (backend) + Next.js 16.3 + Turbopack
 (frontend) + Expo 57 / React Native 0.86 (mobile, `@web2bizz/ui-native`) +
-Postgres. Shared contract in `contracts/`, opencode server image in
-`apps/opencode-server/` (standalone Dockerfile, no package.json — not a bun
-workspace, like `apps/mobile`).
+Postgres. Shared contract in `contracts/`; the backend runs the embedded
+OpenCode host in-process (no separate runner).
 
 > Runtime: **Bun 1.4.2** (pinned in `.bun-version` — the single source of truth,
 > mirrored in `packageManager`, `engines`, `oven/bun` Docker tags and CI).
@@ -18,7 +17,6 @@ apps/
   backend/    # NestJS 12 + TypeScript 6 + Zod 4 + Drizzle API (GET /health)
   frontend/   # Next.js 16.3 App Router + React 19 + TypeScript + @web2bizz/ui (output: standalone, bundler: Turbopack)
   mobile/     # Expo 57 / RN 0.86 + @web2bizz/ui-native (standalone npm project, NOT a bun workspace)
-  opencode-server/  # opencode image (Dockerfile + entrypoint.sh + reload-secrets.sh; deploy via root docker-compose.yml)
 contracts/    # openapi.yaml (API contract) + opencode-upstream.json
 docs/         # env validation, auth, npm registry, migration notes
 DESIGN.md     # repo-wide design-system referat (frontend + mobile)
@@ -60,24 +58,6 @@ conditional Android build + Release/Prerelease) и ручной
 (`workflow_dispatch`, без paths-фильтров). `activation-e2e.yml` тоже
 paths-gated (`apps/mobile/app/**`, `src/**`, `packages/**`).
 
-## apps/opencode-server
-
-Образ `opencode` (`Dockerfile` + `entrypoint.sh` + `reload-secrets.sh`
-внутри `apps/opencode-server/`). Входит в корневой
-`docker-compose.yml` как сервис `opencode` (registry-образ
-`docker.registry.web2bizz.team/web2bizz/devbox/opencode:${TAG:-latest}`, сеть `back`, `expose 4096` без публикации наружу —
-порт виден только внутри сети) и публикуется через CI
-(`docker.yml`, job `opencode`, вне affected-матрицы — у него нет package.json,
-не Nx-проект) в self-hosted registry
-для Dokploy/prod-деплоев, забирающих готовый образ. Тома —
-`opencode-*` (`projects`, `ssh-keys`, `gh-config`, `pnpm-store`,
-`opencode-data`, …), лимиты prod — `2G`/`2.0` (тяжёлый образ: Playwright
-Chromium + pm2). Требует `OPENCODE_SERVER_PASSWORD` (fail-fast, если не
-задан). Отдельного compose-файла у сервиса нет: единый файл — корневой
-`docker-compose.yml` (внутренние сети `front`/`back`); Dokploy деплоит
-корневой стек целиком через compose-redeploy webhook (см. `docker.yml`, job
-`deploy`).
-
 ## Frontend UI kit (@web2bizz/ui)
 
 Private Verdaccio package (`https://npm.registry.web2bizz.team`, scope
@@ -94,10 +74,10 @@ never by hand-editing the version). Mobile uses the sibling package
   write the secret file with `printf '%s'`, a trailing newline breaks auth
   with HTTP 400). Details: `docs/npm-registry.md`.
 - Wiring (App Router): `@web2bizz/ui/styles.css` imported once in
-  `app/layout.tsx`, `<ThemeProvider defaultTheme="system"
-  storageKey="devbox-frontend-theme">` via `src/providers.tsx`
-  (mount-guarded — the kit reads `localStorage` in its initializer, which
-  throws during SSR prerender). Page UI uses modular imports
+  `app/layout.tsx` (no `ThemeProvider` — the kit provider is NOT SSR-safe:
+  it reads `localStorage` in its initializer with no guard → ReferenceError
+  during prerender, and the mount-guard workaround is banned). Page UI uses
+  modular imports
   (`@web2bizz/ui/components`, `@web2bizz/ui/features`) and semantic tokens —
   no hardcoded colors, no local `cn()`, no `npx shadcn add` in the app.
 - Kit API ground truth lives in the package after install:
@@ -109,8 +89,9 @@ never by hand-editing the version). Mobile uses the sibling package
   `leadingSlot`, actions/user + `LanguageSwitcher compact` +
   `ThemeToggleDefault` → `trailingSlot`, drawer trigger → `menuToggleSlot`.
   Shell stays `div.app-shell` + `div.app-main` + drawer (`Sidebar open/onClose`);
-  i18n `en/ru` cookie-only (`devbox-locale`), brand tokens + `light/dark` via
-  `globals.css` + `ThemeProvider` (`devbox-frontend-theme`), flat URLs
+  i18n `en/ru` cookie-only (`rush-code-locale`), brand tokens via
+  `globals.css` (no theme context — dark-mode toggling unavailable until an
+  SSR-safe provider lands), flat URLs
   `/login /projects /secrets /profile /ai-providers`, Next `16.3.6` +
   Turbopack + React `19.3.0`.
 
@@ -125,7 +106,7 @@ never by hand-editing the version). Mobile uses the sibling package
 ```bash
 cp .env.example .env
 bun install
-bun run dev:backend   # http://localhost:3000/health
+bun run dev:backend   # http://localhost:3100/health (or $APP_BACKEND_PORT/health)
 bun run dev:frontend  # http://localhost:3001 (or $NEXT_PUBLIC_PORT)
 ```
 
@@ -142,28 +123,97 @@ docker compose up -d
 # backend  → http://localhost:3000/health (`bun dist/main.js` on oven/bun:1.4.2)
 ```
 
-## PM2 dev (local, one command)
+## Nx dev (local, one command)
 
-PM2 reads the repo-root `.env` via `ecosystem.config.cjs` (no `env_file`
-dependency) and injects it into both apps. Works with a real `.env` or with
-built-in dev defaults (`PORT` 3000, `NEXT_PUBLIC_PORT` 3001, `OPENCODE_SERVER_URL`
-`http://localhost:4096`, empty `DATABASE_URL` → backend boots with
-`db: "skipped"`). PM2 spawns `bun run dev` / `bun run dev:next` per app.
+Nx runs the persistent `dev` targets of `@rush-code/contracts` (`tsc --watch`),
+backend (`nest start --watch`) and frontend (`next dev --turbopack`) in
+parallel with prefixed streaming logs. The repo-root `.env` is injected into
+every target by `scripts/dev/with-env.ts` (shell wins > file; missing `.env`
+falls back to built-in dev defaults: backend `:3100` with `db: "skipped"`,
+frontend `:3001`). Each server watches its own sources — there is no outer
+file-watcher, so no double-restart
+inotify crash-loops. Nx is a task runner, not a supervisor: no autorestart /
+backoff — a crashing server exits non-zero and fails the run; fix the crash
+and rerun. Stop everything with `Ctrl+C` (no daemon left behind).
 
 ```bash
 cp .env.example .env   # once; .env is gitignored, never commit it
 bun install
-bun run dev            # pm2 start ecosystem.config.cjs (idempotent: starts or restarts)
-bun run dev:shutdown   # pm2 delete ecosystem.config.cjs + pm2 kill (idempotent)
-# aliases (kept for compatibility):
-bun run dev:pm2        # = bun run dev
-bun run dev:logs       # follow logs (= dev:pm2:logs)
-bun run dev:pm2:logs   # alias, kept for compatibility
-bun run dev:restart    # pm2 restart ecosystem.config.cjs --update-env
-bun run dev:pm2:restart # alias, kept for compatibility
-bun run dev:pm2:stop   # pm2 delete ecosystem.config.cjs
-# backend  → http://localhost:3000/health (or $PORT/health)
+bun run dev            # nx run-many -t dev: contracts-watch + backend + frontend
+bun run dev:backend    # backend (+ contracts build) → http://localhost:3100/health (or $APP_BACKEND_PORT/health)
+bun run dev:frontend   # frontend (+ contracts build) → http://localhost:3001 (or $NEXT_PUBLIC_PORT)
+# backend  → http://localhost:3100/health (or $APP_BACKEND_PORT/health)
 # frontend → http://localhost:3001 (or $NEXT_PUBLIC_PORT)
+```
+
+# Запуск
+
+## Локальный запуск
+
+Предусловия: Bun 1.4.2 (сверь с `.bun-version`), `cp .env.example .env` один раз
+(`.env` в gitignore, не коммитить), внешний Postgres (своего сервиса в
+`docker-compose.yml` нет), свободные порты `3100`/`3001`. Запуск, управление
+и логи — только через nx (см. `bun run dev*` выше).
+
+Старт:
+
+```bash
+cp .env.example .env   # once; .env is gitignored, never commit it
+bun install
+bun run dev:backend
+bun run dev:frontend
+```
+
+Важно (окружение): `scripts/dev/with-env.ts` отдаёт приоритет
+`process.env` над файлом `.env`. Если `DATABASE_URL`/`POSTGRES_*` уже есть в
+окружении терминала, они перебьют значения из
+`.env` — backend стартует, в `/health` будет `db:"up"`, но любой запрос к БД
+упадёт `relation ... does not exist` → 503 EXTERNAL_UNAVAILABLE. Стартуй с
+чистым окружением, иначе стенд поднимется на чужой БД:
+
+```bash
+env -u DATABASE_URL -u POSTGRES_USER -u POSTGRES_PASSWORD -u POSTGRES_DB -u POSTGRES_HOST -u POSTGRES_PORT \
+  bun run dev:backend
+env -u DATABASE_URL -u POSTGRES_USER -u POSTGRES_PASSWORD -u POSTGRES_DB -u POSTGRES_HOST -u POSTGRES_PORT \
+  bun run dev:frontend
+```
+
+Логи — через nx (`--output-style=stream`, см. `bun run dev*` выше).
+
+Проверки:
+
+```bash
+curl -s http://localhost:3100/health   # 200 {"status":"ok","db":"up",...}
+curl -sI http://localhost:3001        # 307 location /login (Next 16.3.6 Turbopack Ready)
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3001/login   # 200
+```
+
+Порты: `3100` backend · `3001` frontend (`next dev`) · `5432` Postgres внешний ·
+`8080` frontend via compose (Next standalone, compose маппит `8080:3000`).
+
+Env-имена (значений не пиши, секреты — только имена, источник — `.env.example`):
+`APP_BACKEND_PORT`, `APP_BACKEND_HOST`, `APP_BACKEND_PROTOCOL`,
+`APP_BACKEND_SOCKET`,
+`POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_PORT`,
+`POSTGRES_HOST`, `DATABASE_URL`, `JWT_ACCESS_SECRET`, `CORS_ORIGINS`,
+`REQUEST_TIMEOUT_MS`, `LOG_LEVEL`, `BACKEND_PUBLISH`, `FRONTEND_PUBLISH`,
+`TAG`, `NEXT_PUBLIC_PORT`, `NEXT_PUBLIC_API_URL`, `NPM_TOKEN`.
+
+`JWT_ACCESS_SECRET` — опционально: без него backend генерирует эфемерный
+dev-секрет, и все сессии сбрасываются при каждом рестарте; с ним — сессии живут
+между рестартами.
+
+## Production запуск
+
+Только то, что уже есть в репо: сборка/старт или единый
+`docker-compose.yml` (сети `front`/`back`, registry-образы
+`docker.registry.web2bizz.team/web2bizz/rush-code/<service>:${TAG:-latest}`).
+`TAG` и `DATABASE_URL` — обязательны извне
+(shell/Dokploy, не из git).
+
+```bash
+docker login docker.registry.web2bizz.team   # registry приватный
+docker compose pull && docker compose up -d   # prod: registry-образы, лимиты вшиты, standalone
 ```
 
 ## Окружение (dev/prod)
@@ -183,47 +233,47 @@ Single source: `.env.example` → скопируй в `.env` (gitignored, сек
 | `APP_BACKEND_HOST` | хост backend для сборки URL (пусто → `localhost`) | пусто | пусто | нет |
 | `APP_BACKEND_PROTOCOL` | схема backend URL | `http` | `https` | нет |
 | `APP_BACKEND_SOCKET` | публичный URL backend (браузер + compose default API) | `http://localhost:3100` | `https://api.example.com` | да (prod) |
-| `OPENCODE_URL` | адрес OpenCode stand (`0.0.0.0` маппится на `127.0.0.1` в коде; в compose дефолт — `http://opencode:4096` внутри сети) | `http://127.0.0.1:4096` | `http://opencode:4096` | нет |
-| `OPENCODE_SERVER_PASSWORD` | пароль `opencode serve` (compose fail-fast без него; в секреты, не в git) | задай | задай | да (compose) |
-| `POSTGRES_USER` | пользователь Postgres | `devbox` | `devbox` | нет |
+| `POSTGRES_USER` | пользователь Postgres | `rushcode` | `rushcode` | нет |
 | `POSTGRES_PASSWORD` | пароль Postgres (замени в prod) | `changeme` | замени | да (prod) |
-| `POSTGRES_DB` | имя базы | `devbox` | `devbox` | нет |
+| `POSTGRES_DB` | имя базы | `rushcode` | `rushcode` | нет |
 | `POSTGRES_PORT` | хост-порт Postgres | `5432` | `5432` | нет |
 | `POSTGRES_HOST` | хост внешней PG (сервиса postgres в compose нет) | `pg.db.web2bizzz.store` | свой хост | нет (код) |
-| `DATABASE_URL` | строка подключения к внешней PG (в compose обязательна — fail-fast) | `postgres://devbox:changeme@pg.db.web2bizzz.store:5432/devbox` | та же схема, свой пароль | да (compose) |
+| `DATABASE_URL` | строка подключения к внешней PG (в compose обязательна — fail-fast) | `postgres://rushcode:changeme@pg.db.web2bizzz.store:5432/rushcode` | та же схема, свой пароль | да (compose) |
 | `CORS_ORIGINS` | разрешённые origins фронтенда | `http://localhost:3001,http://localhost:8080` | `https://app.example.com` | да (prod) |
 | `REQUEST_TIMEOUT_MS` | таймаут upstream-запросов backend | `10000` | `10000` | нет |
 | `LOG_LEVEL` | уровень логов | `debug` | `info` | нет |
 | `BACKEND_PUBLISH` | публикация backend (`[ip:]hostport`, контейнерный `:3100` фиксирован) | `127.0.0.1:3100` | `3100` | нет |
 | `FRONTEND_PUBLISH` | публикация frontend prod (`[ip:]hostport`, контейнерный `:3000` фиксирован) | `127.0.0.1:8080` | `8080` | нет |
-| `TAG` | тег registry-образов backend/frontend/opencode (`.../<service>:${TAG:-latest}`; CI пушит `:dev` + `:<sha>` + `:latest`) | `latest` (дефолт) | `<sha>` (пин sha) | нет |
+| `TAG` | тег registry-образов backend/frontend (`.../<service>:${TAG:-latest}`; CI пушит `:dev` + `:<sha>` + `:latest`) | `latest` (дефолт) | `<sha>` (пин sha) | нет |
 | `NEXT_PUBLIC_PORT` | порт `next dev` (prod standalone всегда `:3000`) | `3001` | `3001` | нет |
 | `NEXT_PUBLIC_API_URL` | URL backend для браузера (build ARG) | `http://localhost:3100` | `https://api.example.com` | да (prod) |
 | `NPM_TOKEN` | токен приватного registry `@web2bizz` (только env/secret, не в git) | env | CI secret | да (сборка) |
 
 ```bash
 docker login docker.registry.web2bizz.team   # registry приватный: без логина pull не заберёт образы
-docker compose pull && docker compose up -d   # prod: registry-образы, лимиты вшиты, standalone (DATABASE_URL и OPENCODE_SERVER_PASSWORD обязательны, извне)
+docker compose pull && docker compose up -d   # prod: registry-образы, лимиты вшиты, standalone (DATABASE_URL обязательна, извне)
 BACKEND_PUBLISH=127.0.0.1:3100 FRONTEND_PUBLISH=127.0.0.1:8080 docker compose up -d  # dev: те же registry-образы, loopback-публикация (NEXT_PUBLIC_API_URL уже запечён в образ CI из .env.develop)
 ```
 
-Порты: `3100` backend · `8080` frontend (standalone `:3000`) · `4096` opencode только внутри сети (`expose`, наружу не публикуется). Postgres — внешний (в compose сервиса нет). Порт `3001` (`NEXT_PUBLIC_PORT`) — только хост-локальный `next dev` (`bun run dev:frontend` / pm2), compose его не публикует.
-Сети: `front` (frontend↔backend) · `back` (backend↔opencode).
-Volumes: `opencode-*` (workspace/ssh/gh-config/pnpm-store/pm2/opencode-data/secrets/playwright-browsers). Бэкап БД — на стороне внешнего Postgres.
+Порты: `3100` backend · `8080` frontend (standalone `:3000`). Postgres — внешний (в compose сервиса нет). Порт `3001` (`NEXT_PUBLIC_PORT`) — только хост-локальный `next dev` (`bun run dev:frontend` / `bun run dev`), compose его не публикует.
+Сети: `front` (frontend↔backend) · `back` (backend, внутренняя).
+Volumes: compose-томов нет. Бэкап БД — на стороне внешнего Postgres.
 
 ## Commands
 
 | Command              | What it does                          |
 | -------------------- | ------------------------------------- |
 | `bun install`        | install all workspaces (`bun.lock`)   |
-| `bun run dev`        | pm2 cluster (backend+frontend, via bun)|
-| `bun run dev:shutdown` | stop cluster + kill pm2 daemon        |
-| `bun run dev:backend`| backend dev (`bun --bun nest start --watch`, :3000) |
-| `bun run dev:frontend`| frontend dev (next dev, :3001)        |
-| `bun run build`      | build all workspaces (`bun --filter …`); in CI the same goes via `nx affected` (touched projects only) |
-| `bun run lint`       | `tsc --noEmit` + `biome lint` per workspace (Biome replaces eslint — no eslint config left) |
-| `bun run test`       | `bun test --pass-with-no-tests` per workspace; in CI via `nx affected` (backend tests run on `dist`, so build precedes test) |
-| `docker compose up -d` | full stack from registry images (backend + frontend + opencode; postgres внешний) |
+| `bun run dev`        | nx `run-many -t dev` (contracts-watch + backend + frontend, streaming logs; `Ctrl+C` stops) |
+| `bun run dev:backend`| backend dev (`nx run backend:dev` → contracts build + `nest start --watch`, :3100) |
+| `bun run dev:frontend`| frontend dev (`nx run frontend:dev` → contracts build + `next dev`, :3001) |
+| `bun run build`      | `nx run-many -t build` (all projects; `build:backend` / `build:frontend` per app, `build:affected` for touched only) |
+| `bun run lint`       | `nx run-many -t lint` (`tsc --noEmit` + `biome lint` per project; `lint:affected` for touched only; Biome replaces eslint — no eslint config left; shared config in `packages/biome-config/biome.json`, per-app `biome.jsonc` only `extends` it) |
+| `bun run test`       | `nx run-many -t test` (per-project runner; `test:affected` for touched only; backend tests run on `dist`, so build precedes test) |
+| `bun run graph`      | `nx graph` (project dependency graph) |
+| `docker compose up -d` | full stack from registry images (backend + frontend; postgres внешний) |
+
+`dev` / `dev:backend` / `dev:frontend` run on nx (`run-many -t dev` / `run <project>:dev`) with a contracts build first (`dependsOn: ^build`) — the `.env` bridge is `scripts/dev/with-env.ts`. `bun --filter <app> <script>` remains as low-level direct access.
 
 `apps/mobile` is **not** in `workspaces` and has no `bun --filter` script — it
 is a separate npm project run from its own directory:
@@ -257,8 +307,7 @@ the `publish-*` mobile workflows are manual (`workflow_dispatch`).
   only source, no repo-vars override; fail-closed: the frontend job errors
   before the build when the value is empty or a `CHANGEME` placeholder —
   no silent localhost bake; backend gets no build-arg, its Dockerfile
-  declares no ARG). The opencode image takes its version from the Dockerfile
-  default (`ARG OPENCODE_VERSION`) — CI passes no version build-arg.
+  declares no ARG).
   After a successful publish the `deploy` job triggers one Dokploy compose
   redeploy (POST to `secrets.DOKPLOY_COMPOSE_WEBHOOK` — the `compose` scenario
   adapted from `@web2bizz/scaffold` `pipelines/publish/docker`, webhook via
@@ -276,7 +325,6 @@ the `publish-*` mobile workflows are manual (`workflow_dispatch`).
   base, frontend on the regular one. Backend runs `bun dist/main.js`, frontend
   runs `bun apps/frontend/server.js` (Next standalone,
   `output: 'standalone'` preserved). Healthchecks probe via `bun -e fetch(…)`.
-- `apps/opencode-server/` is part of the root compose stack (service `opencode`) — deployed via the Dokploy compose redeploy (see its section above).
 
 ### CI status — NOT green (honest)
 
@@ -300,13 +348,14 @@ npm run dev:frontend         # next dev
 ```
 
 Notes: backend `start` (`bun dist/main.js`) also runs as `node dist/main` —
-compiled output is plain JS. PM2 fallback: set `script: 'npm', args: 'run dev'`
-/ `'run dev:next'` in `ecosystem.config.cjs`. Frontend `start` under node:
+compiled output is plain JS. Without bun, run the per-app scripts directly
+(`npm run dev` in `apps/backend`, `npm run dev:next` in `apps/frontend`) —
+`bunx nx` / `scripts/dev/with-env.ts` need bun. Frontend `start` under node:
 `node .next/standalone/apps/frontend/server.js`.
 
 ## Ports
 
-- `3000` backend · `3001` frontend (next dev) / `8080` frontend via compose (Next standalone)
+- `3100` backend · `3001` frontend (next dev) / `8080` frontend via compose (Next standalone)
 
 ## Repos registry (readonly)
 

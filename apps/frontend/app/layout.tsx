@@ -3,12 +3,14 @@ import type { ReactNode } from 'react';
 import { cookies } from 'next/headers';
 import '@web2bizz/ui/styles.css';
 import './globals.css';
-import { Providers } from '../src/providers';
-import { en } from '../src/i18n/dictionaries/en';
-import { ru } from '../src/i18n/dictionaries/ru';
+import { Providers } from '@/lib/providers';
+import { ToasterHost } from '@/components/toaster-host';
+import { ThemeScript } from '@/components/theme-script';
+import { en } from '@/i18n/dictionaries/en';
+import { ru } from '@/i18n/dictionaries/ru';
 
 /**
- * Localized metadata without breaking flat URLs: the `devbox-locale`
+ * Localized metadata without breaking flat URLs: the `rush-code-locale`
  * cookie (written by I18nProvider/LanguageSwitcher) is read per-request.
  * Default locale `en`. No `[locale]` segment, no middleware rewrite —
  * `/login`, `/projects`, … stay byte-identical in both languages.
@@ -17,7 +19,7 @@ export async function generateMetadata(): Promise<Metadata> {
   let locale: string | undefined;
   try {
     const store = await cookies();
-    locale = store.get('devbox-locale')?.value;
+    locale = store.get('rush-code-locale')?.value;
   } catch {
     locale = undefined;
   }
@@ -27,22 +29,26 @@ export async function generateMetadata(): Promise<Metadata> {
     description: dict.metadata.description,
     icons: {
       icon: [
-        { url: '/icon.png', type: 'image/png' },
-        { url: '/devbox-logo.png', type: 'image/png' },
+        { url: '/assets/favicon.ico', type: 'image/x-icon' },
+        { url: '/assets/icon.png', type: 'image/png', sizes: '512x512' },
       ],
-      shortcut: '/devbox-logo.png',
-      apple: '/devbox-logo.png',
+      shortcut: '/assets/favicon.ico',
+      apple: [{ url: '/assets/apple-icon.png', sizes: '180x180' }],
     },
   };
 }
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    // suppressHydrationWarning: ThemeProvider toggles `light`/`dark` class on
-    // <html> after mount; the server prerender can't know the stored theme.
     <html lang="en" suppressHydrationWarning>
+      <head>
+        <ThemeScript storageKey="theme" defaultTheme="system" />
+      </head>
       <body>
-        <Providers>{children}</Providers>
+        <Providers>
+          {children}
+          <ToasterHost />
+        </Providers>
       </body>
     </html>
   );

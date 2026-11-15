@@ -1,5 +1,6 @@
-# graphify — индексы вне репо (/tmp/opencode), на случай in-repo кеша — игнор
+# graphify — индексы в проекте (.graphify/ — персистентно, переживает reboot /tmp; graphify-out/ — граф знаний и кеш), в git не отправлять
 .graphify/
+graphify-out/
 .tmp/
 tmp/opencode/
 .opencode/.cache/
@@ -34,8 +35,7 @@ build/
 *.tgz
 
 # GitHub App private key (file-based, never commit the PEM)
-keys/
-keys/*.pem
+/keys/
 *.pem
 
 # Logs
@@ -52,7 +52,7 @@ npm-debug.log*
 # Docker / misc
 .docker/
 
-# Devbox workspace
+# Rush Code workspace
 workspace/**
 !workspace/.gitkeep
 
@@ -69,3 +69,7 @@ apps/backend/repos/**
 apps/mobile/.supervisor/
 apps/mobile/.autopilot/
 apps/mobile/.playwright-mcp/
+.playwright-mcp/
+
+# Tavily research captures (local cache, not repo content)
+.tavily/**

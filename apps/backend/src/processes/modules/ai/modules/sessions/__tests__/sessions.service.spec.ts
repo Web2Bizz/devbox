@@ -1,0 +1,635 @@
+import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import { UnauthorizedException } from '@nestjs/common';
+import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
+import type { AppLogger } from '@common/logger';
+import { SessionsService } from '../sessions.service';
+import type {
+  CreateSessionInput,
+  InterruptSessionInput,
+  RevertStageRequest,
+  SendMessageInput,
+  SessionForkRequest,
+} from '../sessions.dto';
+import { SessionStreamService } from '../modules/events/session-stream.service';
+import { SessionFrameBufferService } from '../modules/events/session-frame-buffer.service';
+import { AssistantRecorderService } from '../modules/recorder/assistant-recorder.service';
+import { SessionRuntimeStateService } from '../modules/state/session-runtime-state.service';
+
+const UID = '123e4567-e89b-12d3-a456-426614174001';
+const PID = '123e4567-e89b-12d3-a456-426614174003';
+const JAIL = '/tmp/repos';
+const DIR = `${JAIL}/orgs/${UID}/projects/${PID}/content`;
+
+type Case = { name: string; run: () => Promise<void> | void };
+
+const cases: Array<Case> = [];
+let currentSuite = '';
+
+function describe(name: string, fn: () => void): void {
+  currentSuite = name;
+  fn();
+  currentSuite = '';
+}
+
+function it(name: string, run: () => Promise<void> | void): void {
+  cases.push({ name: currentSuite ? `${currentSuite} :: ${name}` : name, run });
+}
+
+function silentLogger(): AppLogger {
+  return {
+    debug() {},
+    info() {},
+    log() {},
+    warn() {},
+    error() {},
+    fatal() {},
+  } as unknown as AppLogger;
+}
+
+type FakeReq = ExpressRequest & { destroyed: boolean };
+
+function fakeReq(): FakeReq {
+  const emitter = new EventEmitter() as EventEmitter & { destroyed: boolean };
+  emitter.destroyed = false;
+  return emitter as unknown as FakeReq;
+}
+
+type FakeRes = {
+  writes: Array<string>;
+  headers: Record<string, string>;
+  writableEnded: boolean;
+  destroyed: boolean;
+  setHeader: (name: string, value: string) => void;
+  flushHeaders: () => void;
+  write: (chunk: unknown) => boolean;
+  end: () => void;
+};
+
+function fakeRes(): FakeRes {
+  const writes: Array<string> = [];
+  const headers: Record<string, string> = {};
+  const res: FakeRes = {
+    writes,
+    headers,
+    writableEnded: false,
+    destroyed: false,
+    setHeader: (name, value) => {
+      headers[name] = value;
+    },
+    flushHeaders: () => {},
+    write: (chunk) => {
+      writes.push(String(chunk));
+      return true;
+    },
+    end: () => {
+      res.writableEnded = true;
+    },
+  };
+  return res;
+}
+
+function iterableOf(frames: Array<unknown>): AsyncIterable<unknown> {
+  return {
+    async *[Symbol.asyncIterator](): AsyncGenerator<unknown> {
+      for (const frame of frames) yield frame;
+    },
+  };
+}
+
+type Frame = { id: string; type: string; data: Record<string, unknown> };
+
+function sessionFrame(id: string, sessionID: string): Frame {
+  return { id, type: 'session.text.delta', data: { sessionID, delta: id } };
+}
+
+function unscopedFrame(id: string): Frame {
+  return { id, type: 'server.connected', data: { version: '2.2.5' } };
+}
+
+type StreamHarness = { svc: SessionStreamService; calls: Array<string> };
+
+function harness(options: {
+  localSessionIds: Array<string>;
+  hostBindings?: Map<string, string>;
+  frames: Array<unknown>;
+}): StreamHarness {
+  const calls: Array<string> = [];
+  const host = {
+    getHost: async (): Promise<unknown> => {
+      calls.push('host.getHost');
+      return {};
+    },
+    isUp: (): boolean => true,
+    subscribeEvents: async (): Promise<AsyncIterable<unknown>> => {
+      calls.push('host.subscribeEvents');
+      return iterableOf(options.frames);
+    },
+  };
+  const access = {
+    resolveProjectDirectory: async (projectId: string, userId: string): Promise<unknown> => {
+      calls.push(`access:${projectId}:${userId}`);
+      return { projectId, directory: DIR };
+    },
+  };
+  const history = {
+    async listLocalSessions(): Promise<Array<unknown>> {
+      return options.localSessionIds.map((id) => ({ id }));
+    },
+    async listSessionIdsWithMessages(): Promise<Array<string>> {
+      return [];
+    },
+    async listHostBindings(): Promise<Map<string, string>> {
+      return options.hostBindings ?? new Map();
+    },
+    async findSessionByHostSessionId(): Promise<undefined> {
+      return undefined;
+    },
+    async getAgent(): Promise<undefined> {
+      return undefined;
+    },
+  };
+  const logger = silentLogger();
+  const state = new SessionRuntimeStateService();
+  const buffer = new SessionFrameBufferService();
+  const recorder = new AssistantRecorderService(
+    host as unknown as ConstructorParameters<typeof AssistantRecorderService>[0],
+    history as unknown as ConstructorParameters<typeof AssistantRecorderService>[1],
+    state,
+    logger,
+  );
+  const args: Array<unknown> = [
+    host,
+    access,
+    { assertServeUser() {} },
+    history,
+    state,
+    buffer,
+    recorder,
+    logger,
+  ];
+  const svc = new SessionStreamService(
+    ...(args as unknown as ConstructorParameters<typeof SessionStreamService>),
+  );
+  return { svc, calls };
+}
+
+function parseWrites(writes: Array<string>): Array<unknown> {
+  // C0 wire format: every data frame is written as ONE chunk
+  // `id: <id>\nevent: message\ndata: {...}\n\n` (id-less frames are bare
+  // `data: {...}\n\n`); heartbeats (`: ping`) are transport-only. Extract
+  // the data: lines per chunk instead of matching the chunk start.
+  const out: Array<unknown> = [];
+  for (const chunk of writes) {
+    if (chunk.startsWith(': ping')) continue;
+    const dataLines: Array<string> = [];
+    for (const line of chunk.split('\n')) {
+      if (line.startsWith('data:')) dataLines.push(line.slice('data:'.length).trim());
+    }
+    if (dataLines.length === 0) continue;
+    out.push(JSON.parse(dataLines.join('\n')));
+  }
+  return out;
+}
+
+async function runStream(options: {
+  localSessionIds: Array<string>;
+  hostBindings?: Map<string, string>;
+  frames: Array<unknown>;
+}): Promise<{ delivered: Array<unknown>; res: FakeRes; calls: Array<string> }> {
+  const { svc, calls } = harness(options);
+  const res = fakeRes();
+  await svc.streamEvents(UID, PID, 'cid-test', fakeReq(), res as unknown as ExpressResponse);
+  return { delivered: parseWrites(res.writes), res, calls };
+}
+
+function frameSessions(frames: Array<unknown>): Array<unknown> {
+  return frames.map((frame) => (frame as { session?: unknown } | null)?.session);
+}
+
+function frameIds(frames: Array<unknown>): Array<unknown> {
+  return frames.map((frame) => (frame as { id?: unknown } | null)?.id);
+}
+
+describe('SessionStreamService.streamEvents project scoping (embedded host)', () => {
+  it('delivers frames whose session belongs to the requested project', async () => {
+    const own = sessionFrame('e-own', 'ses_own');
+    const { delivered, res } = await runStream({
+      localSessionIds: ['ses_own'],
+      frames: [own],
+    });
+    assert.deepEqual(frameIds(delivered), ['e-own']);
+    assert.deepEqual(frameSessions(delivered), ['ses_own']);
+    assert.equal(res.writableEnded, true, 'the relay must end the response');
+  });
+
+  it('drops frames from sessions of another project', async () => {
+    const own = sessionFrame('e-own', 'ses_own');
+    const foreign = sessionFrame('e-foreign', 'ses_foreign');
+    const { delivered } = await runStream({
+      localSessionIds: ['ses_own'],
+      frames: [own, foreign],
+    });
+    assert.deepEqual(
+      frameIds(delivered),
+      ['e-own'],
+      `a foreign session frame leaked into the stream: ${JSON.stringify(frameSessions(delivered))}`,
+    );
+  });
+
+  it('drops frames without a session id (cannot be attributed to the project)', async () => {
+    const unscoped = unscopedFrame('e-unscoped');
+    const { delivered } = await runStream({
+      localSessionIds: ['ses_own'],
+      frames: [unscoped],
+    });
+    assert.deepEqual(
+      delivered,
+      [],
+      `an unscoped frame leaked into the stream: ${JSON.stringify(delivered)}`,
+    );
+  });
+
+  it('delivers nothing when the project has no sessions', async () => {
+    const frames = [sessionFrame('e-own', 'ses_own'), sessionFrame('e-foreign', 'ses_foreign')];
+    const { delivered } = await runStream({ localSessionIds: [], frames });
+    assert.deepEqual(
+      delivered,
+      [],
+      `frames leaked into an empty-project stream: ${JSON.stringify(frameSessions(delivered))}`,
+    );
+  });
+
+  it('delivers frames of every session owned by the project', async () => {
+    const first = sessionFrame('e-first', 'ses_a');
+    const second = sessionFrame('e-second', 'ses_b');
+    const foreign = sessionFrame('e-foreign', 'ses_c');
+    const { delivered } = await runStream({
+      localSessionIds: ['ses_a', 'ses_b'],
+      frames: [first, second, foreign],
+    });
+    assert.deepEqual(frameIds(delivered), ['e-first', 'e-second']);
+    assert.deepEqual(frameSessions(delivered), ['ses_a', 'ses_b']);
+  });
+
+  it('re-keys a host session id to OUR durable uuid', async () => {
+    const hostFrame = sessionFrame('e-host', 'ses_e2e_alpha');
+    const { delivered } = await runStream({
+      localSessionIds: ['123e4567-e89b-12d3-a456-426614174092'],
+      hostBindings: new Map([['ses_e2e_alpha', '123e4567-e89b-12d3-a456-426614174092']]),
+      frames: [hostFrame],
+    });
+    assert.deepEqual(frameIds(delivered), ['e-host']);
+    assert.deepEqual(frameSessions(delivered), ['123e4567-e89b-12d3-a456-426614174092']);
+    const data = (delivered[0] as { data?: Record<string, unknown> }).data ?? {};
+    assert.equal(data.sessionID, '123e4567-e89b-12d3-a456-426614174092');
+    assert.equal(data.delta, 'e-host', 'the variant payload must pass through intact');
+  });
+
+  it('drops an unbound host session (never leaks another project host id)', async () => {
+    const foreignHost = sessionFrame('e-foreign-host', 'ses_foreign_host');
+    const { delivered } = await runStream({
+      localSessionIds: ['ses_own'],
+      hostBindings: new Map([['ses_e2e_alpha', 'ses_own']]),
+      frames: [foreignHost],
+    });
+    assert.deepEqual(delivered, []);
+  });
+
+  it('resolves the gate once and keeps one recorder + one stream subscription', async () => {
+    const { calls } = await runStream({
+      localSessionIds: ['ses_own'],
+      frames: [sessionFrame('e-own', 'ses_own'), sessionFrame('e-own-2', 'ses_own')],
+    });
+    assert.equal(
+      calls.filter((call) => call.startsWith('access:')).length,
+      1,
+      'the project gate must be resolved once per stream',
+    );
+    const hostSubs = calls.filter((call) => call === 'host.subscribeEvents').length;
+    // streamEvents lazily starts the single process-level assistant recorder
+    // (test harnesses are fresh per case), then subscribes the client stream.
+    assert.equal(hostSubs, 2, `expected recorder + stream subscription, got ${hostSubs}`);
+  });
+});
+
+describe('SessionsService gate order (401 before any zone work)', () => {
+  const SID = '123e4567-e89b-12d3-a456-426614174010';
+  const TREE = '0123456789abcdef0123456789abcdef01234567';
+
+  function gatedService(): { svc: SessionsService; zoneCalls: Array<string> } {
+    const zoneCalls: Array<string> = [];
+    const host = {
+      sessionCreate: async (): Promise<unknown> => {
+        zoneCalls.push('host.sessionCreate');
+        return { id: 'ses_host' };
+      },
+      sessionRemove: async (): Promise<void> => {
+        zoneCalls.push('host.sessionRemove');
+      },
+      sessionInterrupt: async (): Promise<unknown> => {
+        zoneCalls.push('host.sessionInterrupt');
+        return { interrupted: true };
+      },
+      providerList: async (): Promise<unknown> => {
+        zoneCalls.push('host.providerList');
+        return { data: [] };
+      },
+      modelList: async (): Promise<unknown> => {
+        zoneCalls.push('host.modelList');
+        return { data: [] };
+      },
+    };
+    const access = {
+      resolveProjectDirectory: async (projectId: string): Promise<unknown> => {
+        zoneCalls.push(`access:${projectId}`);
+        return { projectId, directory: DIR };
+      },
+    };
+    const auth = {
+      assertServeUser(): void {
+        zoneCalls.push('auth');
+        throw new UnauthorizedException();
+      },
+    };
+    const history = {
+      listLocalSessions: async (): Promise<Array<unknown>> => {
+        zoneCalls.push('history.listLocalSessions');
+        return [];
+      },
+      listMessages: async (): Promise<Array<unknown>> => {
+        zoneCalls.push('history.listMessages');
+        return [];
+      },
+      saveLocalSession: async (): Promise<void> => {
+        zoneCalls.push('history.saveLocalSession');
+      },
+      getHostSessionId: async (): Promise<undefined> => {
+        zoneCalls.push('history.getHostSessionId');
+        return undefined;
+      },
+      getAgent: async (): Promise<undefined> => {
+        zoneCalls.push('history.getAgent');
+        return undefined;
+      },
+      appendMessage: async (): Promise<void> => {
+        zoneCalls.push('history.appendMessage');
+      },
+      discardSession: async (): Promise<void> => {
+        zoneCalls.push('history.discardSession');
+      },
+    };
+    const stream = {
+      streamEvents: async (): Promise<void> => {
+        zoneCalls.push('stream.streamEvents');
+      },
+    };
+    const messaging = {
+      send: async (): Promise<unknown> => {
+        zoneCalls.push('messaging.send');
+        return {};
+      },
+    };
+    const inventory = {
+      providers: async (): Promise<Array<unknown>> => {
+        zoneCalls.push('inventory.providers');
+        return [];
+      },
+      models: async (): Promise<Array<unknown>> => {
+        zoneCalls.push('inventory.models');
+        return [];
+      },
+    };
+    const workspace = {
+      stage: async (): Promise<unknown> => {
+        zoneCalls.push('workspace.stage');
+        return {};
+      },
+      clear: async (): Promise<void> => {
+        zoneCalls.push('workspace.clear');
+      },
+      commit: async (): Promise<void> => {
+        zoneCalls.push('workspace.commit');
+      },
+      diff: async (): Promise<Array<unknown>> => {
+        zoneCalls.push('workspace.diff');
+        return [];
+      },
+      capture: async (): Promise<undefined> => {
+        zoneCalls.push('workspace.capture');
+        return undefined;
+      },
+    };
+    const state = {
+      isBusy: (): boolean => {
+        zoneCalls.push('state.isBusy');
+        return false;
+      },
+      clearBusy: (): boolean => {
+        zoneCalls.push('state.clearBusy');
+        return true;
+      },
+      bindHostSession(): void {
+        zoneCalls.push('state.bindHostSession');
+      },
+      unbindHostSession(): void {
+        zoneCalls.push('state.unbindHostSession');
+      },
+    };
+    const buffer = {
+      push: (): void => {
+        zoneCalls.push('buffer.push');
+      },
+      pushIdle: (): void => {
+        zoneCalls.push('buffer.pushIdle');
+      },
+    };
+    const args: Array<unknown> = [
+      host,
+      access,
+      auth,
+      history,
+      stream,
+      messaging,
+      inventory,
+      workspace,
+      state,
+      buffer,
+      undefined,
+      silentLogger(),
+    ];
+    return {
+      svc: new SessionsService(...(args as unknown as ConstructorParameters<typeof SessionsService>)),
+      zoneCalls,
+    };
+  }
+
+  async function rejects401(promise: Promise<unknown>): Promise<void> {
+    await assert.rejects(promise, (err: unknown) => err instanceof UnauthorizedException);
+  }
+
+  it('every domain method answers 401 before any zone/host/history work', async () => {
+    const { svc, zoneCalls } = gatedService();
+    await rejects401(svc.list(UID, PID, 'cid'));
+    await rejects401(svc.statusMap(UID, PID, 'cid'));
+    await rejects401(svc.listMessages(UID, SID, PID, undefined, undefined, 'cid'));
+    await rejects401(svc.create(UID, {} as CreateSessionInput, 'cid'));
+    await rejects401(
+      svc.sendMessage(UID, SID, { projectId: PID, text: 'hi' } as SendMessageInput, 'cid'),
+    );
+    await rejects401(
+      svc.interrupt(UID, SID, { projectId: PID } as InterruptSessionInput, 'cid'),
+    );
+    await rejects401(svc.providers(UID, PID, 'cid'));
+    await rejects401(svc.models(UID, PID, 'cid'));
+    await rejects401(svc.fork(UID, SID, { projectId: PID } as SessionForkRequest, 'cid'));
+    await rejects401(
+      svc.stageRevert(
+        UID,
+        SID,
+        { projectId: PID, messageID: 'm1' } as RevertStageRequest,
+        'cid',
+      ),
+    );
+    await rejects401(svc.clearRevert(UID, SID, PID, 'cid'));
+    await rejects401(svc.commitRevert(UID, SID, PID, 'cid'));
+    await rejects401(svc.snapshotDiff(UID, SID, PID, TREE, TREE, undefined, 'cid'));
+    await rejects401(svc.listVariants(UID, SID, PID, null, 'cid'));
+    await rejects401(svc.revertMessages(UID, SID, PID, 'm1', 'cid'));
+    const unexpected = zoneCalls.filter(
+      (call) => call !== 'auth' && !call.startsWith('access:'),
+    );
+    assert.deepEqual(unexpected, [], `a zone was reached before the 401: ${unexpected.join(',')}`);
+    assert.equal(
+      zoneCalls.filter((call) => call === 'auth').length,
+      15,
+      'each method must reach the serve-user gate',
+    );
+  });
+});
+
+describe('SessionsService branches (leaf/variants/revert)', () => {
+  const SID = '123e4567-e89b-12d3-a456-426614174010';
+
+  function branchService(history: Record<string, unknown>): SessionsService {
+    const access = {
+      resolveProjectDirectory: async (projectId: string): Promise<unknown> => ({
+        projectId,
+        directory: DIR,
+      }),
+    };
+    const auth = { assertServeUser(): void {} };
+    const buffer = { push(): void {} };
+    const args: Array<unknown> = [
+      {},
+      access,
+      auth,
+      history,
+      {},
+      {},
+      {},
+      {},
+      {},
+      buffer,
+      undefined,
+      silentLogger(),
+    ];
+    return new SessionsService(
+      ...(args as unknown as ConstructorParameters<typeof SessionsService>),
+    );
+  }
+
+  it('listMessages with leafId narrows to the active chain (unknown leaf 404)', async () => {
+    const svc = branchService({
+      listActiveChain: async (): Promise<Array<unknown>> => [{ id: 'root' }, { id: 'c' }],
+    });
+    const chain = await svc.listMessages(UID, SID, PID, undefined, undefined, 'cid', 'c');
+    assert.deepEqual(
+      chain.map((row) => (row as { id: string }).id),
+      ['root', 'c'],
+    );
+    const empty = branchService({ listActiveChain: async (): Promise<Array<unknown>> => [] });
+    await assert.rejects(empty.listMessages(UID, SID, PID, undefined, undefined, 'cid', 'nope'));
+  });
+
+  it('listVariants delegates to history (unknown parent 404)', async () => {
+    const svc = branchService({
+      listMessages: async (): Promise<Array<unknown>> => [{ id: 'root' }, { id: 'c' }],
+      listVariants: async (): Promise<Array<unknown>> => [{ childId: 'c' }],
+    });
+    const out = await svc.listVariants(UID, SID, PID, 'root', 'cid');
+    assert.equal(out.length, 1);
+    await assert.rejects(svc.listVariants(UID, SID, PID, 'nope', 'cid'));
+  });
+
+  it('revertMessages answers the new leaf (unknown boundary 404)', async () => {
+    const svc = branchService({ revertMessages: async (): Promise<string | null> => 'root' });
+    const out = await svc.revertMessages(UID, SID, PID, 'b', 'cid');
+    assert.deepEqual(out, { activeLeaf: 'root' });
+    const missing = branchService({ revertMessages: async (): Promise<undefined> => undefined });
+    await assert.rejects(missing.revertMessages(UID, SID, PID, 'nope', 'cid'));
+  });
+
+  it('revertMessages on the root answers null and omits parentId/leafId in buffer', async () => {
+    const pushes: Array<{ type: string; payload: unknown }> = [];
+    const access = {
+      resolveProjectDirectory: async (projectId: string): Promise<unknown> => ({
+        projectId,
+        directory: DIR,
+      }),
+    };
+    const auth = { assertServeUser(): void {} };
+    const history = { revertMessages: async (): Promise<null> => null };
+    const buffer = {
+      push: (type: string, payload: unknown): void => {
+        pushes.push({ type, payload });
+      },
+    };
+    const args: Array<unknown> = [
+      {},
+      access,
+      auth,
+      history,
+      {},
+      {},
+      {},
+      {},
+      {},
+      buffer,
+      undefined,
+      silentLogger(),
+    ];
+    const svc = new SessionsService(
+      ...(args as unknown as ConstructorParameters<typeof SessionsService>),
+    );
+    const out = await svc.revertMessages(UID, SID, PID, 'root', 'cid');
+    assert.deepEqual(out, { activeLeaf: null });
+    assert.equal(pushes.length, 1);
+    assert.equal(pushes[0]?.type, 'session.reverted');
+    const payload = pushes[0]?.payload as Record<string, unknown>;
+    assert.equal(payload.sessionID, SID);
+    assert.equal(payload.messageID, 'root');
+    assert.ok(!('parentId' in payload), 'root revert must omit parentId');
+    assert.ok(!('leafId' in payload), 'root revert must omit leafId');
+  });
+});
+
+async function main(): Promise<void> {
+  let failed = 0;
+  for (const c of cases) {
+    try {
+      await c.run();
+      console.log(`ok   - ${c.name}`);
+    } catch (err) {
+      failed += 1;
+      console.error(`FAIL - ${c.name}: ${(err as Error).message}`);
+    }
+  }
+  console.log(`\n${cases.length - failed}/${cases.length} checks passed`);
+  if (failed > 0) process.exitCode = 1;
+}
+
+void main().catch((err: unknown) => {
+  console.error(`sessions service checks failed to run: ${(err as Error).message}`);
+  process.exit(1);
+});

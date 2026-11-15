@@ -11,14 +11,11 @@ const nextConfig = {
   // Backend API stays a separate service; no rewrites — the browser calls
   // NEXT_PUBLIC_API_URL directly (see src/api/client.ts). CORS_ORIGINS on the
   // backend must include the Next.js origin.
+  // No `/` redirect here: edge `proxy.ts` owns `/` (guest → /login, authed
+  // → /projects) so authed users skip the /login bounce; `app/page.tsx`
+  // stays as the no-proxy fallback (guest → /login).
   async redirects() {
     return [
-      {
-        source: '/',
-        destination: '/login',
-        // 307 Temporary Redirect (not permanent — keeps POST/method, no cache).
-        permanent: false,
-      },
       {
         source: '/registries',
         destination: '/registry/docker',

@@ -1,30 +1,21 @@
 openapi: 3.0.3
 info:
-  title: Devbox opencode proxy API
+  title: Rush Code opencode proxy API
   version: 0.1.0
   description: >-
-    Thin proxy layer between frontend clients and the live opencode server.
-    Backend (node:http) forwards /api/v1/* to OPENCODE_SERVER_URL with
-    REQUEST_TIMEOUT_MS timeout; unreachable upstream answers 503
+    Backend serves versioned domain routes (/api/v1/*) consumed by frontend
+    clients; the OpenCode transport is the embedded in-process host
+    (OpencodeHostService), not an external runner. Upstream dependencies are
+    called with REQUEST_TIMEOUT_MS timeout; unreachable upstream answers 503
     EXTERNAL_UNAVAILABLE («сервис временно недоступен, повторите позже»)
     with a Retry-After header — no mock fallbacks, a 200 always means live
-    upstream data.
+    upstream data. An upstream that refuses the credentials we sent (401/403)
+    answers 503 EXTERNAL_UNAUTHORIZED instead — a distinct code and NO
+    Retry-After (a retry with the same credentials cannot help). Request-level
+    upstream 4xx are never masked as outages: 400/422 answer
+    EXTERNAL_BAD_REQUEST (400/422) and 404 answers EXTERNAL_NOT_FOUND (404),
+    both non-retryable and without Retry-After.
     Error envelope is always { code, message, correlationId }.
-    New sdk mirror (VERSION_NEUTRAL, no version segment):
-    /api/opencode/session, /api/opencode/session/status,
-    /api/opencode/session/{id} (GET/DELETE/PATCH),
-    /api/opencode/session/{id}/message (GET with limit/before + POST),
-    /api/opencode/session/{id}/message/{messageID},
-    /api/opencode/session/{id}/prompt_async (204),
-    /api/opencode/session/{id}/command, /api/opencode/session/{id}/shell,
-    /api/opencode/session/{id}/fork, /api/opencode/session/{id}/abort,
-    /api/opencode/config/providers, /api/opencode/global/event (SSE),
-    /api/opencode/global/health, /api/opencode/event (SSE) — same paths as
-    the upstream opencode OpenAPI so the frontend uses the SAME
-    @opencode-ai/sdk against
-    <NEXT_PUBLIC_API_URL>/api/opencode. Unreachable upstream answers 503
-    EXTERNAL_UNAVAILABLE with Retry-After (no mock 200s).
-
     Versioning policy:
     - canonical: /api/v1/* (frontend clients must use these paths);
     - removed: unversioned /api/* aliases were deleted → 404 { code: 'not_found', … };
@@ -95,86 +86,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/v1/session:
-    get:
-      summary: Active session (proxy → opencode server, 503 when unreachable)
-      operationId: getSessionV1
-      parameters:
-        - name: Api-Version
-          in: header
-          required: false
-          description: Effective URI API version (always "1" for this endpoint).
-          schema:
-            type: string
-            example: '1'
-      responses:
-        '200':
-          description: live session
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Session'
-        '503':
-          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
-          headers:
-            Retry-After:
-              description: seconds to wait before retrying
-              schema:
-                type: string
-                example: '30'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-  /api/v1/messages:
-    get:
-      summary: Session messages (proxy → opencode server, 503 when unreachable)
-      operationId: listMessagesV1
-      parameters:
-        - name: Api-Version
-          in: header
-          required: false
-          description: Effective URI API version (always "1" for this endpoint).
-          schema:
-            type: string
-            example: '1'
-        - name: sessionId
-          in: query
-          required: false
-          schema:
-            type: string
-      responses:
-        '200':
-          description: live messages
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MessagesResponse'
-        '503':
-          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
-          headers:
-            Retry-After:
-              description: seconds to wait before retrying
-              schema:
-                type: string
-                example: '30'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
   /api/v1/projects:
-    get:
-      summary: List projects
-      operationId: listProjectsV1
-      responses:
-        '200':
-          description: projects
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Project'
     post:
       summary: Create project
       operationId: createProjectV1
@@ -237,7 +149,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Project'
     delete:
-      summary: Delete project (cascades chats/sessions)
+      summary: Soft-delete project (status=deleted, stops containers, restore via API)
       operationId: deleteProjectV1
       parameters:
         - name: id
@@ -348,7 +260,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/GithubLinkStatus'
     post:
-      summary: Link GitHub repository (format validation only, no tokens stored)
+      summary: Link GitHub repository (REMOVED — 410, set githubOwner/githubRepo via PATCH)
       operationId: linkGithubV1
       parameters:
         - name: id
@@ -370,7 +282,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Project'
     delete:
-      summary: Unlink GitHub repository
+      summary: Unlink GitHub repository (REMOVED — 410)
       operationId: unlinkGithubV1
       parameters:
         - name: id
@@ -397,7 +309,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/GithubInstallUrl'
         '503':
-          description: GitHub App slug is not configured
+          description: GitHub App slug / install state secret is not configured
           content:
             application/json:
               schema:
@@ -419,16 +331,10 @@ paths:
           schema:
             type: string
             default: install
-        - name: userId
+        - name: state
           in: query
-          required: false
-          description: MVP mock user key (x-user-id header wins over this param)
-          schema:
-            type: string
-        - name: x-user-id
-          in: header
-          required: false
-          description: MVP mock user key (wins over ?userId)
+          required: true
+          description: Signed install state issued by GET /api/v1/projects/github/install-url
           schema:
             type: string
       responses:
@@ -439,7 +345,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/GithubCallbackResult'
         '400':
-          description: bad query (installation_id / setup_action)
+          description: bad query (installation_id / setup_action / state) or an invalid/expired state (code GITHUB_STATE_INVALID)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: state belongs to another user (GITHUB_STATE_FORBIDDEN) or the installation is owned by another user / predates the state (GITHUB_INSTALLATION_FORBIDDEN)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: GitHub App / install state secret is not configured
           content:
             application/json:
               schema:
@@ -500,18 +418,6 @@ paths:
             minimum: 1
             maximum: 100
             default: 30
-        - name: userId
-          in: query
-          required: false
-          description: MVP mock user key (x-user-id header wins over this param)
-          schema:
-            type: string
-        - name: x-user-id
-          in: header
-          required: false
-          description: MVP mock user key (wins over ?userId)
-          schema:
-            type: string
       responses:
         '200':
           description: installation repositories (normalized)
@@ -703,19 +609,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/v1/key:
+  /api/v1/vault/secrets:
     get:
-      summary: Whether you have an OpenCode API key stored (existence only, never the key)
-      operationId: getOpencodeKeyStatusV1
+      summary: List your stored vault secrets
+      operationId: listVaultSecretsV1
       security:
         - bearerAuth: []
       responses:
         '200':
-          description: key status
+          description: vault secrets of the caller (never ciphertext)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OpencodeKeyStatus'
+                $ref: '#/components/schemas/VaultSecretList'
         '401':
           description: missing/invalid bearer
           content:
@@ -728,9 +634,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-    put:
-      summary: Store your own OpenCode API key (AES-256-GCM at rest, never returned or logged)
-      operationId: putOpencodeKeyV1
+    post:
+      summary: Store a vault secret (AES-256-GCM at rest, never echoed)
+      operationId: createVaultSecretV1
       security:
         - bearerAuth: []
       requestBody:
@@ -738,14 +644,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/OpencodeKeyBody'
+              $ref: '#/components/schemas/VaultSecretInput'
       responses:
-        '200':
-          description: stored (ok + updatedAt, no secret echo)
+        '201':
+          description: stored (identity, label and timestamps only — no secret echo)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OpencodeKeyResult'
+                $ref: '#/components/schemas/VaultSecretInfo'
         '400':
           description: bad request (validation)
           content:
@@ -758,8 +664,46 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
-          description: key encryption is not configured (code opencode_keys_unconfigured)
+          description: key storage is not configured (code opencode_keys_unconfigured)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/vault/secrets/{id}:
+    get:
+      summary: Get one of your vault secrets (never the ciphertext)
+      operationId: getVaultSecretV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: vault secret (identity, label and timestamps only)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VaultSecretInfo'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: vault_secret_not_found (missing or owned by another consumer)
           content:
             application/json:
               schema:
@@ -770,20 +714,347 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-    delete:
-      summary: Delete your stored OpenCode API key (idempotent)
-      operationId: deleteOpencodeKeyV1
+    put:
+      summary: Update a vault secret (re-encrypts a new key and/or label)
+      operationId: updateVaultSecretV1
       security:
         - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultSecretUpdateInput'
+      responses:
+        '200':
+          description: updated secret (identity, label and timestamps only)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VaultSecretInfo'
+        '400':
+          description: bad request (validation)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: vault_secret_not_found (missing or owned by another consumer)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: key storage is not configured (code opencode_keys_unconfigured)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    delete:
+      summary: Delete a vault secret (404 when not owned/missing)
+      operationId: deleteVaultSecretV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
       responses:
         '200':
           description: deleted
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OpencodeKeyDeleteResult'
+                $ref: '#/components/schemas/VaultSecretDeleteResult'
         '401':
           description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: vault_secret_not_found (missing or owned by another consumer)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/vault/organizations/{orgId}/secrets:
+    get:
+      summary: List organization vault secrets (members only)
+      operationId: listOrganizationVaultSecretsV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: organization vault secrets (never ciphertext)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VaultSecretList'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: not found (or not a member — existence is not leaked)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    post:
+      summary: Store an organization vault secret (maintainer only)
+      operationId: createOrganizationVaultSecretV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultSecretInput'
+      responses:
+        '201':
+          description: stored (identity, label and timestamps only — no secret echo)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VaultSecretInfo'
+        '400':
+          description: bad request (validation)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: member without the maintainer role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: not found (or not a member — existence is not leaked)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: key storage is not configured (code opencode_keys_unconfigured)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/vault/organizations/{orgId}/secrets/{id}:
+    get:
+      summary: Get one organization vault secret (members only)
+      operationId: getOrganizationVaultSecretV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: vault secret (identity, label and timestamps only)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VaultSecretInfo'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: not found (or not a member/secret — existence is not leaked)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    put:
+      summary: Update an organization vault secret (maintainer only)
+      operationId: updateOrganizationVaultSecretV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultSecretUpdateInput'
+      responses:
+        '200':
+          description: updated secret (identity, label and timestamps only)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VaultSecretInfo'
+        '400':
+          description: bad request (validation)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: member without the maintainer role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: not found (or not a member/secret — existence is not leaked)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: key storage is not configured (code opencode_keys_unconfigured)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    delete:
+      summary: Delete an organization vault secret (maintainer only)
+      operationId: deleteOrganizationVaultSecretV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VaultSecretDeleteResult'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: member without the maintainer role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: not found (or not a member/secret — existence is not leaked)
           content:
             application/json:
               schema:
@@ -821,18 +1092,48 @@ paths:
                 $ref: '#/components/schemas/ApiError'
         '429':
           description: upstream rate limit (code EXTERNAL_RATE_LIMITED, retry later)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '502':
+          description: upstream server error passthrough (code EXTERNAL_UPSTREAM_5XX, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '503':
           description: upstream unavailable or shape mismatch (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '504':
-          description: upstream timeout (code EXTERNAL_TIMEOUT)
+          description: upstream timeout (code EXTERNAL_TIMEOUT, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
           content:
             application/json:
               schema:
@@ -970,7 +1271,7 @@ paths:
                 $ref: '#/components/schemas/ApiError'
   /api/v1/organizations/invites/accept:
     post:
-      summary: Accept a single-use invite token (caller joins the org)
+      summary: Accept a persistent single-use invite (uuidv7, no TTL, caller joins the org)
       operationId: acceptOrganizationInviteV1
       security:
         - bearerAuth: []
@@ -994,19 +1295,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '404':
-          description: invite not found or already used (also unknown org/user)
+          description: invite not found or already used (also unknown org/user, email mismatch)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '409':
           description: already a member, or org already has a maintainer
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '410':
-          description: invite expired (ORG_INVITE_TTL_SEC window passed)
           content:
             application/json:
               schema:
@@ -1117,7 +1412,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
     delete:
-      summary: Delete organization (maintainer only, projects survive — links cascade)
+      summary: Delete organization (maintainer only, cascade soft-deletes projects + stops containers)
       operationId: deleteOrganizationV1
       security:
         - bearerAuth: []
@@ -1383,7 +1678,7 @@ paths:
                 $ref: '#/components/schemas/ApiError'
   /api/v1/organizations/{id}/invites:
     post:
-      summary: Mint a single-use invite token (maintainer only, TTL ORG_INVITE_TTL_SEC)
+      summary: Mint a persistent single-use invite (maintainer only, uuidv7, no TTL)
       operationId: createOrganizationInviteV1
       security:
         - bearerAuth: []
@@ -1437,18 +1732,37 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/v1/organizations/{id}/projects/{projectId}:
+  /api/v1/organizations/{id}/projects:
+    get:
+      summary: List organization projects (canonical, ?includeDeleted member-visible)
+      operationId: listOrgProjectsV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: includeDeleted
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: org projects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Project'
     post:
-      summary: Attach a project to the organization (maintainer only, metadata-only — no disk move)
-      description: >-
-        Project homes resolve per scope (ProjectScope user|org):
-        users/<uuid>/projects/<id>/content vs
-        orgs/<uuid>/projects/<id>/content. Linking writes only the
-        projects_and_organizations join row — disk homes are NOT moved (see
-        docs/manual-migration-orgs-layout.md). Sessions/chats/files of a
-        linked project admit any member of a linked org; user-space projects
-        admit only the owner.
-      operationId: linkOrganizationProjectV1
+      summary: Create project in organization (orgId forced from path)
+      operationId: createOrgProjectV1
       security:
         - bearerAuth: []
       parameters:
@@ -1458,90 +1772,92 @@ paths:
           schema:
             type: string
             format: uuid
-        - name: projectId
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProject'
       responses:
-        '204':
-          description: linked
-        '401':
-          description: missing/invalid bearer
+        '201':
+          description: created
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
-        '403':
-          description: member without the maintainer role
+                $ref: '#/components/schemas/Project'
+  /api/v1/organizations/{id}/projects/{projectId}:
+    get:
+      summary: Get organization project (mismatch → 404, ?includeDeleted)
+      operationId: getOrgProjectV1
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: project
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: '#/components/schemas/Project'
         '404':
-          description: not found (org, requester membership, or project)
+          description: not found (or belongs to another org — no leak)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-        '409':
-          description: project is already linked to this organization
+    patch:
+      summary: Update organization project
+      operationId: updateOrgProjectV1
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProject'
+      responses:
+        '200':
+          description: updated
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
-        '503':
-          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: '#/components/schemas/Project'
     delete:
-      summary: Detach a project from the organization (maintainer only, project survives)
-      operationId: unlinkOrganizationProjectV1
+      summary: Soft-delete organization project (stops containers)
+      operationId: deleteOrgProjectV1
       security:
         - bearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - name: projectId
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
       responses:
         '204':
-          description: unlinked
-        '401':
-          description: missing/invalid bearer
+          description: soft-deleted
+  /api/v1/organizations/{id}/projects/{projectId}/restore:
+    post:
+      summary: Restore soft-deleted project (API only, no UI)
+      operationId: restoreOrgProjectV1
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: restored
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
-        '403':
-          description: member without the maintainer role
+                $ref: '#/components/schemas/Project'
+  /api/v1/organizations/{id}/projects/{projectId}/effective-config:
+    get:
+      summary: Effective config (project overrides org, secrets masked)
+      operationId: getOrgProjectEffectiveConfigV1
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: effective entries (value + origin/overridden)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
-        '404':
-          description: not found (org, requester membership, or link row)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '503':
-          description: postgres unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
+                type: array
+                items:
+                  $ref: '#/components/schemas/EffectiveConfigEntry'
   /api/v1/projects/{id}/files:
     get:
       summary: Readonly project file listing (path + depth, jailed, depth 0-5)
@@ -1674,71 +1990,42 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/v1/chat:
-    post:
-      summary: Send chat message (proxy → opencode server, 503 when unreachable)
-      operationId: sendChatV1
-      parameters:
-        - name: Api-Version
-          in: header
-          required: false
-          description: Effective URI API version (always "1" for this endpoint).
-          schema:
-            type: string
-            example: '1'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SendChatRequest'
-      responses:
-        '200':
-          description: live assistant reply
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SendChatResponse'
-        '400':
-          description: bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '503':
-          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
-          headers:
-            Retry-After:
-              description: seconds to wait before retrying
-              schema:
-                type: string
-                example: '30'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-  /api/opencode/session:
+  /api/v1/sessions:
     get:
-      summary: List sessions (sdk → opencode server, 503 when unreachable)
-      operationId: opencodeListSessions
-      tags: [opencode]
+      summary: List project sessions (domain shape; runtime status derived from the live session runner)
+      operationId: listSessionsDomain
+      tags: [sessions]
       parameters:
-        - name: directory
+        - name: projectId
           in: query
           required: false
+          description: Owning project uuid — the C4 gate; missing answers 400 PROJECT_REQUIRED (fail-closed, never a global listing).
           schema:
             type: string
+            format: uuid
       responses:
         '200':
-          description: live sessions
+          description: domain sessions (always an array; empty when the project has none)
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/Session'
+                  $ref: '#/components/schemas/SessionInfo'
+        '400':
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or the session runner rejected the request (code EXTERNAL_BAD_REQUEST) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '503':
-          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          description: session runner unreachable (code EXTERNAL_UNAVAILABLE, Retry-After) or it refused our credentials (code EXTERNAL_UNAUTHORIZED, no Retry-After)
           headers:
             Retry-After:
               description: seconds to wait before retrying
@@ -1750,180 +2037,36 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
     post:
-      summary: Create session (sdk → opencode server, 503 when unreachable)
-      operationId: opencodeCreateSession
-      tags: [opencode]
-      parameters:
-        - name: directory
-          in: query
-          required: false
-          schema:
-            type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                title:
-                  type: string
-                parentID:
-                  type: string
-      responses:
-        '200':
-          description: live session
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Session'
-        '503':
-          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
-          headers:
-            Retry-After:
-              description: seconds to wait before retrying
-              schema:
-                type: string
-                example: '30'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-  /api/opencode/session/status:
-    get:
-      summary: Get session status (sdk → opencode server, 503 when unreachable)
-      operationId: opencodeSessionStatus
-      tags: [opencode]
-      parameters:
-        - name: directory
-          in: query
-          required: false
-          schema:
-            type: string
-      responses:
-        '200':
-          description: live session status map
-          content:
-            application/json:
-              schema:
-                type: object
-                description: upstream session.status payload (live only)
-        '503':
-          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
-          headers:
-            Retry-After:
-              description: seconds to wait before retrying
-              schema:
-                type: string
-                example: '30'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-  /api/opencode/session/{id}:
-    get:
-      summary: Get session (sdk → opencode server, 503 when unreachable)
-      operationId: opencodeGetSession
-      tags: [opencode]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: directory
-          in: query
-          required: false
-          schema:
-            type: string
-      responses:
-        '200':
-          description: live session
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Session'
-        '503':
-          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
-          headers:
-            Retry-After:
-              description: seconds to wait before retrying
-              schema:
-                type: string
-                example: '30'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-    delete:
-      summary: Delete session (sdk → opencode server, 503 when unreachable)
-      operationId: opencodeDeleteSession
-      tags: [opencode]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: directory
-          in: query
-          required: false
-          schema:
-            type: string
-      responses:
-        '200':
-          description: deleted flag (live upstream only)
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [deleted]
-                properties:
-                  deleted:
-                    type: boolean
-                    example: true
-        '503':
-          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
-          headers:
-            Retry-After:
-              description: seconds to wait before retrying
-              schema:
-                type: string
-                example: '30'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-    patch:
-      summary: Update session (sdk → opencode server, 503 when unreachable)
-      operationId: opencodeUpdateSession
-      tags: [opencode]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: directory
-          in: query
-          required: false
-          schema:
-            type: string
+      summary: Create a project session (domain shape; title/parentID forwarded honestly)
+      operationId: createSessionDomain
+      tags: [sessions]
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/OpencodeSessionUpdate'
+              $ref: '#/components/schemas/CreateSessionRequest'
       responses:
         '200':
-          description: live session
+          description: created domain session
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Session'
+                $ref: '#/components/schemas/SessionInfo'
+        '400':
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate), invalid body (code bad_request — our zod) or the session runner rejected the payload (code EXTERNAL_BAD_REQUEST) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '503':
-          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          description: session runner unreachable (code EXTERNAL_UNAVAILABLE, Retry-After) or it refused our credentials (code EXTERNAL_UNAUTHORIZED, no Retry-After)
           headers:
             Retry-After:
               description: seconds to wait before retrying
@@ -1934,100 +2077,165 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/opencode/session/{id}/message:
+  /api/v1/sessions/status:
     get:
-      summary: List session messages (sdk → opencode server, 503 when unreachable)
-      operationId: opencodeListMessages
-      tags: [opencode]
+      summary: Runtime status map for project sessions (sessionId → busy/idle snapshot; retry lives on the event stream)
+      operationId: sessionStatusDomain
+      tags: [sessions]
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          description: Owning project uuid — the C4 gate; missing answers 400 PROJECT_REQUIRED.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: sessionId → status map derived from the live runner state (the 2.x server exposes no status-list path; the legacy one the mirror proxies is not served)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionRunStatusMap'
+        '400':
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or the session runner rejected the request (code EXTERNAL_BAD_REQUEST) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: session runner unreachable (code EXTERNAL_UNAVAILABLE, Retry-After) or it refused our credentials (code EXTERNAL_UNAUTHORIZED, no Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/sessions/providers:
+    get:
+      summary: List the project session-runner providers (required artifact subset; credential-bearing members are never projected)
+      operationId: listSessionProvidersDomain
+      tags: [sessions]
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          description: Owning project uuid — the C4 gate; missing answers 400 PROJECT_REQUIRED.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: domain provider rows (always an array; empty when the runner reports none)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SessionRunnerProvider'
+        '400':
+          description: >-
+            missing projectId (code PROJECT_REQUIRED, the C4 gate) or the session runner rejected the
+            request (code EXTERNAL_BAD_REQUEST, honest upstream 400 passthrough) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: >-
+            unknown project for this caller (code not_found, no existence leak — the C4 gate) or the
+            location is unknown upstream (code EXTERNAL_NOT_FOUND, honest upstream 404 passthrough) —
+            non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: >-
+            session runner unreachable (code EXTERNAL_UNAVAILABLE, Retry-After), it refused our
+            credentials (code EXTERNAL_UNAUTHORIZED, no Retry-After) or a provider row drifted off the
+            artifact REQUIRED set (code EXTERNAL_UNAVAILABLE — contract drift fails loud, never a
+            silently skipped row)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/sessions/{id}/messages:
+    get:
+      summary: List session messages (normalized domain rows; text projection of the runtime message union)
+      operationId: listSessionMessagesDomain
+      tags: [sessions]
       parameters:
         - name: id
           in: path
           required: true
           schema:
             type: string
-        - name: directory
+        - name: projectId
           in: query
           required: false
+          description: Owning project uuid — the C4 gate; missing answers 400 PROJECT_REQUIRED.
           schema:
             type: string
+            format: uuid
         - name: limit
           in: query
           required: false
-          description: Max messages to return (non-negative integer; upstream default when omitted).
+          description: Max messages (non-negative integer; upstream default when omitted).
           schema:
             type: integer
             minimum: 0
-        - name: before
+        - name: cursor
           in: query
           required: false
-          description: Cursor message id — return messages before it (upstream pagination).
+          description: Opaque pagination cursor passed through to the session runner.
           schema:
             type: string
       responses:
         '200':
-          description: live messages
-          headers:
-            x-next-cursor:
-              description: Opaque upstream pagination cursor (present only when upstream sends it).
-              schema:
-                type: string
-            Link:
-              description: RFC 8288 pagination links (present only when upstream sends them).
-              schema:
-                type: string
+          description: normalized messages (always an array; empty when the session has none)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessagesResponse'
-        '503':
-          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
-          headers:
-            Retry-After:
-              description: seconds to wait before retrying
-              schema:
-                type: string
-                example: '30'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-    post:
-      summary: Send session message (sdk → opencode server, 503 when unreachable)
-      operationId: opencodePrompt
-      tags: [opencode]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: directory
-          in: query
-          required: false
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/OpencodePrompt'
-      responses:
-        '200':
-          description: live assistant reply
-          content:
-            application/json:
-              schema:
-                type: object
-                description: upstream session.prompt payload (live only)
+                type: array
+                items:
+                  $ref: '#/components/schemas/SessionMessage'
         '400':
-          description: bad request (parts must be a non-empty array; command/shell required fields missing)
+          description: >-
+            missing projectId (code PROJECT_REQUIRED, the C4 gate), invalid query (code bad_request — our
+            limit validation) or the session runner rejected the request shape (code
+            EXTERNAL_BAD_REQUEST, honest upstream 400 passthrough) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: >-
+            unknown project for this caller (code not_found, no existence leak — the C4 gate) or
+            session absent upstream (code EXTERNAL_NOT_FOUND, honest upstream 404 passthrough) —
+            non-retryable, no Retry-After
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '503':
-          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          description: session runner unreachable (code EXTERNAL_UNAVAILABLE, Retry-After) or it refused our credentials (code EXTERNAL_UNAUTHORIZED, no Retry-After)
           headers:
             Retry-After:
               description: seconds to wait before retrying
@@ -2038,61 +2246,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/opencode/session/{id}/message/{messageID}:
-    get:
-      summary: Get session message (sdk → opencode server, 503 when unreachable)
-      operationId: opencodeGetMessage
-      tags: [opencode]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: messageID
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: directory
-          in: query
-          required: false
-          schema:
-            type: string
-      responses:
-        '200':
-          description: live message
-          content:
-            application/json:
-              schema:
-                type: object
-                description: upstream session.message payload (live only)
-        '503':
-          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
-          headers:
-            Retry-After:
-              description: seconds to wait before retrying
-              schema:
-                type: string
-                example: '30'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-  /api/opencode/session/{id}/prompt_async:
     post:
-      summary: Send async session message, return immediately (sdk → opencode server, 503 when unreachable)
-      operationId: opencodePromptAsync
-      tags: [opencode]
+      summary: Send a session message (queues the prompt on the session runner; the reply streams over /api/v1/sessions/events)
+      operationId: sendSessionMessageDomain
+      tags: [sessions]
       parameters:
         - name: id
           in: path
           required: true
-          schema:
-            type: string
-        - name: directory
-          in: query
-          required: false
           schema:
             type: string
       requestBody:
@@ -2100,18 +2261,339 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/OpencodePrompt'
+              $ref: '#/components/schemas/SendMessageRequest'
+      responses:
+        '200':
+          description: queued user message receipt (domain row)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionMessage'
+        '400':
+          description: >-
+            missing projectId (code PROJECT_REQUIRED, the C4 gate), invalid body (code bad_request — our
+            zod) or the session runner rejected the payload shape (code EXTERNAL_BAD_REQUEST, honest
+            upstream 400 passthrough) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) or session absent upstream (code EXTERNAL_NOT_FOUND, honest upstream 404 passthrough) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: session runner unreachable (code EXTERNAL_UNAVAILABLE, Retry-After), it refused our credentials (code EXTERNAL_UNAUTHORIZED, no Retry-After) or it reported a conflict (upstream 409 surfaces as a 503 with Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/sessions/{id}/messages/revert:
+    post:
+      summary: Revert the durable message tail from a boundary (messages only, files untouched)
+      operationId: revertSessionMessagesDomain
+      tags: [sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevertMessagesRequest'
+      responses:
+        '200':
+          description: new leaf cursor after the soft-delete (the boundary parent, null when the root was reverted)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevertMessagesResult'
+        '400':
+          description: >-
+            missing projectId (code PROJECT_REQUIRED, the C4 gate) or invalid body (code bad_request — our
+            zod) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) or the boundary message is absent (code MessageNotFound) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: session runner or durable store unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/sessions/{id}/interrupt:
+    post:
+      summary: 'Interrupt the active session execution (idle interruption is an honest no-op: interrupted=false)'
+      operationId: interruptSessionDomain
+      tags: [sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InterruptSessionRequest'
+      responses:
+        '200':
+          description: interrupted flag (false = the session was idle — honest data, never an error)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionInterruptResult'
+        '400':
+          description: >-
+            missing projectId (code PROJECT_REQUIRED, the C4 gate), invalid body (code bad_request — our
+            zod) or the session runner rejected the request shape (code EXTERNAL_BAD_REQUEST, honest
+            upstream 400 passthrough) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: >-
+            unknown project for this caller (code not_found, no existence leak — the C4 gate) or session
+            absent upstream (code EXTERNAL_NOT_FOUND, honest upstream 404 passthrough) — non-retryable,
+            no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: >-
+            session runner unreachable (code EXTERNAL_UNAVAILABLE, Retry-After), it refused our
+            credentials (code EXTERNAL_UNAUTHORIZED, no Retry-After) or its answer drifted off the
+            artifact interrupt shape (code EXTERNAL_UNAVAILABLE — contract drift fails loud)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/sessions/{id}/approval:
+    post:
+      summary: Resolve a turn parked on awaiting_approval (approve resumes the same checkpoint thread, reject parks it on paused)
+      operationId: resolveSessionApprovalDomain
+      tags: [sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionApprovalRequest'
+      responses:
+        '200':
+          description: approval resolution (running = resumed on the same thread_id, paused = parked without resuming)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionApprovalResult'
+        '400':
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or invalid body (code bad_request — our zod) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: no turn awaiting approval (code ApprovalNotPending) or the resumed turn is already running (code ApprovalTurnBusy) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: session runner or durable store unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/sessions/{id}/fork:
+    post:
+      summary: Fork a session at a message boundary (copy of the durable thread up to it)
+      operationId: forkSessionDomain
+      tags: [sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionForkRequest'
+      responses:
+        '200':
+          description: created session plus the boundary that was copied ('before' excludes the message, 'through' includes it)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionForkResponse'
+        '400':
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or invalid body (code bad_request — our zod) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) or the boundary message is absent (code MessageNotFound) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: the thread has no messages to fork (code ForkEmpty) — non-retryable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: session runner or durable store unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/sessions/{id}/revert/stage:
+    post:
+      summary: Stage a revert of the files touched after a message boundary (snapshot restore + diff)
+      operationId: stageSessionRevertDomain
+      tags: [sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevertStageRequest'
+      responses:
+        '200':
+          description: staged revert state (boundary, source snapshot or null, produced file diffs)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevertInfo'
+        '400':
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or invalid body (code bad_request — our zod) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, nobody) or the boundary message is absent (code MessageNotFound) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: snapshots unavailable (not a git repository / code EXTERNAL_UNAVAILABLE, Retry-After) or the durable store is unreachable
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/sessions/{id}/revert:
+    delete:
+      summary: Discard the staged revert (restore the files to their pre-stage state)
+      operationId: clearSessionRevertDomain
+      tags: [sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: projectId
+          in: query
+          required: false
+          description: Owning project uuid — the C4 gate; missing answers 400 PROJECT_REQUIRED.
+          schema:
+            type: string
+            format: uuid
       responses:
         '204':
-          description: prompt accepted (live upstream only)
+          description: staged revert cleared, files restored to their pre-stage state
         '400':
-          description: bad request (parts must be a non-empty array)
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '503':
-          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          description: snapshot restore unavailable (code EXTERNAL_UNAVAILABLE, Retry-After)
           headers:
             Retry-After:
               description: seconds to wait before retrying
@@ -2122,20 +2604,627 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/opencode/session/{id}/command:
+  /api/v1/sessions/{id}/revert/commit:
     post:
-      summary: Send command to session (sdk → opencode server, 503 when unreachable)
-      operationId: opencodeRunCommand
-      tags: [opencode]
+      summary: Commit the staged revert (keep the restored files, drop the staged state)
+      operationId: commitSessionRevertDomain
+      tags: [sessions]
       parameters:
         - name: id
           in: path
           required: true
           schema:
             type: string
-        - name: directory
+        - name: projectId
           in: query
           required: false
+          description: Owning project uuid — the C4 gate; missing answers 400 PROJECT_REQUIRED.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: staged revert committed and cleared
+        '400':
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: durable store unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/sessions/{id}/snapshots/diff:
+    get:
+      summary: Per-file diff between two session snapshots (git tree ids)
+      operationId: sessionSnapshotDiffDomain
+      tags: [sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: projectId
+          in: query
+          required: false
+          description: Owning project uuid — the C4 gate; missing answers 400 PROJECT_REQUIRED.
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          required: true
+          description: Source snapshot id (git tree) from RevertInfo.snapshot.
+          schema:
+            type: string
+        - name: to
+          in: query
+          required: true
+          description: Target snapshot id (git tree).
+          schema:
+            type: string
+        - name: context
+          in: query
+          required: false
+          description: Unchanged lines around each hunk (git -U).
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        '200':
+          description: per-file diff rows (empty when the trees are equal)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SnapshotDiff'
+        '400':
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or missing/invalid from/to (code bad_request) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: snapshots unavailable (not a git repository / code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/sessions/events:
+    get:
+      summary: Live session events (SSE; domain frames {id, type, data, session?})
+      operationId: streamSessionEventsDomain
+      tags: [sessions]
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          description: >-
+            Owning project uuid — the C4 gate decides WHO may stream; the runner event bus itself is
+            server-global (same as the deprecated mirror), `session` on each frame scopes rows.
+            Missing projectId answers 400 PROJECT_REQUIRED.
+          schema:
+            type: string
+            format: uuid
+        - name: session
+          in: query
+          required: false
+          description: >-
+            Optional session id narrowing the subscription to one session (server-side predicate over
+            the existing localSessionIds filter, which stays as defense-in-depth). Unknown/foreign
+            session answers a quiet empty stream (heartbeat flows, no frames) — never 404, so the C4
+            gate does not leak existence. Omitted → multiplex of the caller's project sessions.
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          required: false
+          description: >-
+            Fallback resume cursor (frame id); the primary resume signal is the `Last-Event-ID`
+            request header. Replay starts after the cursor; unknown/empty cursor replays the full
+            local buffer filtered to this subscription.
+          schema:
+            type: string
+        - name: Last-Event-ID
+          in: header
+          required: false
+          description: SSE-native resume cursor (frame id from the `id:` line); `?cursor=` is the fallback.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: >-
+            text/event-stream of domain SessionStreamFrame rows. Transport: every data frame carries
+            an `id:` line (Last-Event-ID redial) and `event: message`; idle gaps emit the SSE comment
+            `: ping` every ~15s (never a data frame — parsers skip it, the watchdog treats it as
+            activity). A mid-stream failure writes one terminal `stream.error` frame then ends the
+            stream (quiet abort/disconnect stays silent). Clients parse fail-soft (broken chunks are
+            skipped, the stream stays alive) and narrow the subscription with `?session=`.
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/SessionStreamFrame'
+        '400':
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: session runner unreachable (code EXTERNAL_UNAVAILABLE, Retry-After) or it refused our credentials (code EXTERNAL_UNAUTHORIZED, no Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/runs:
+    post:
+      summary: Create an agent run (domain shape; project-scoped, server-owned branch/worktree)
+      operationId: createRunDomain
+      tags: [runs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRunRequest'
+      responses:
+        '201':
+          description: created run row
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunInfo'
+        '400':
+          description: missing or invalid projectId (codes PROJECT_REQUIRED / bad_request — the C4 gate and our zod) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: missing/invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: database unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    get:
+      summary: List project runs (newest first)
+      operationId: listRunsDomain
+      tags: [runs]
+      parameters:
+        - name: projectId
+          in: query
+          required: true
+          description: Project uuid (the C4 gate; missing/blank answers 400 PROJECT_REQUIRED).
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: run rows for this project (always an array; empty when none)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunInfoList'
+        '400':
+          description: missing projectId (code PROJECT_REQUIRED) or invalid projectId (code bad_request — the C4 gate and our zod) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: missing/invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: database unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/runs/{id}:
+    get:
+      summary: Get one agent run by id (domain shape)
+      operationId: getRunDomain
+      tags: [runs]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Run uuid.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: run row for this caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunInfo'
+        '400':
+          description: invalid run id (code bad_request — our zod) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: missing/invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: run absent or unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: database unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/runs/{id}/events:
+    get:
+      summary: Live run events (SSE; per-run seq-ordered RunStreamFrame rows)
+      operationId: streamRunEventsDomain
+      tags: [runs]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Run uuid.
+          schema:
+            type: string
+            format: uuid
+        - name: cursor
+          in: query
+          required: false
+          description: last delivered seq; catch-up seq > cursor then live
+          schema:
+            type: string
+      responses:
+        '200':
+          description: text/event-stream of RunStreamFrame rows (id is the per-run monotonic seq)
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/RunStreamFrame'
+        '400':
+          description: invalid run id (code bad_request — our zod) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: missing/invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: run absent or unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: database unreachable before the stream headers are sent (code EXTERNAL_UNAVAILABLE, Retry-After; answers JSON, not SSE)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/workspaces/clone:
+    post:
+      summary: Clone a repo into the per-user workspace (idempotent, per-user lock)
+      operationId: cloneWorkspaceV1
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CloneWorkspace'
+      responses:
+        '202':
+          description: clone job enqueued (or already running — idempotent per user+repo)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceCloneJob'
+        '400':
+          description: bad repoUrl/repoName
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: installation belongs to another user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: storage unconfigured (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/workspaces/{repo}/clone-status:
+    get:
+      summary: Clone job status for a repo in the per-user workspace
+      operationId: getWorkspaceCloneStatusV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: repo
+          in: path
+          required: true
+          example: demo
+          schema:
+            type: string
+      responses:
+        '200':
+          description: clone job row for this repo+user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceCloneJob'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: no clone job for this repo+user (also for a malformed repo name)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/workspaces/{repo}/tree:
+    get:
+      summary: Readonly workspace file tree (jailed per-user, depth 0-5)
+      operationId: getWorkspaceTreeV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: repo
+          in: path
+          required: true
+          example: demo
+          schema:
+            type: string
+        - name: path
+          in: query
+          required: false
+          example: '.'
+          schema:
+            type: string
+            default: '.'
+        - name: depth
+          in: query
+          required: false
+          example: 1
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 5
+            default: 1
+      responses:
+        '200':
+          description: jailed directory tree (recursive via children)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceTreeNode'
+        '400':
+          description: invalid query (depth must be an integer 0-5)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: traversal forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: storage unconfigured (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/workspaces/{repo}/submodules:
+    get:
+      summary: Workspace repo submodules (.gitmodules + status, jailed paths)
+      operationId: listWorkspaceSubmodulesV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: repo
+          in: path
+          required: true
+          example: demo
+          schema:
+            type: string
+      responses:
+        '200':
+          description: parsed submodule rows (always an array; empty when the repo has none)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WorkspaceSubmodule'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: repo not found (also for a malformed repo name)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: storage unconfigured (code EXTERNAL_UNAVAILABLE, Retry-After)
+          headers:
+            Retry-After:
+              description: seconds to wait before retrying
+              schema:
+                type: string
+                example: '30'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/agents:
+    get:
+      summary: List available AI agents
+      operationId: listAgentsV1
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: agent registry rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Agent'
+        '401':
+          description: missing/invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/agents/{agentId}/ask:
+    post:
+      summary: Ask an AI agent a question (mock answer)
+      operationId: askAgentV1
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          example: ask
           schema:
             type: string
       requestBody:
@@ -2143,259 +3232,68 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/OpencodeCommand'
+              $ref: '#/components/schemas/AgentAskRequest'
       responses:
         '200':
-          description: live assistant reply
+          description: agent answer
           content:
             application/json:
               schema:
-                type: object
-                description: upstream session.command payload (live only)
+                $ref: '#/components/schemas/AgentAskAnswer'
         '400':
-          description: bad request (command + arguments are required)
+          description: invalid body (question must be non-empty, at most 4000 chars)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-        '503':
-          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
-          headers:
-            Retry-After:
-              description: seconds to wait before retrying
-              schema:
-                type: string
-                example: '30'
+        '401':
+          description: missing/invalid bearer
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/opencode/session/{id}/shell:
-    post:
-      summary: Run shell command in session (sdk → opencode server, 503 when unreachable)
-      operationId: opencodeRunShell
-      tags: [opencode]
+        '404':
+          description: agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/sessions/models:
+    get:
+      summary: List session-runner models filtered to the OpenCode Go/Zen family
+      operationId: listSessionModelsDomain
+      tags: [sessions]
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: directory
+        - name: projectId
           in: query
           required: false
+          description: Owning project uuid — the C4 gate; missing answers 400 PROJECT_REQUIRED.
           schema:
             type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/OpencodeShell'
+            format: uuid
       responses:
         '200':
-          description: live created message
+          description: domain model rows (always an array; empty when the runner reports none)
           content:
             application/json:
               schema:
-                type: object
-                description: upstream session.shell payload (live only)
+                type: array
+                items:
+                  $ref: '#/components/schemas/SessionModel'
         '400':
-          description: bad request (agent + command are required)
+          description: missing projectId (code PROJECT_REQUIRED, the C4 gate) or the session runner rejected the request (code EXTERNAL_BAD_REQUEST) — non-retryable, no Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: unknown project for this caller (code not_found, no existence leak — the C4 gate) — non-retryable, no Retry-After
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '503':
-          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
-          headers:
-            Retry-After:
-              description: seconds to wait before retrying
-              schema:
-                type: string
-                example: '30'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-  /api/opencode/session/{id}/fork:
-    post:
-      summary: Fork session (sdk → opencode server, 503 when unreachable)
-      operationId: opencodeForkSession
-      tags: [opencode]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: directory
-          in: query
-          required: false
-          schema:
-            type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/OpencodeFork'
-      responses:
-        '200':
-          description: live forked session
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Session'
-        '503':
-          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
-          headers:
-            Retry-After:
-              description: seconds to wait before retrying
-              schema:
-                type: string
-                example: '30'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-  /api/opencode/session/{id}/abort:
-    post:
-      summary: Abort session (sdk → opencode server, 503 when unreachable)
-      operationId: opencodeAbortSession
-      tags: [opencode]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: directory
-          in: query
-          required: false
-          schema:
-            type: string
-      responses:
-        '200':
-          description: abort result (live upstream only)
-          content:
-            application/json:
-              schema:
-                type: object
-                description: upstream session.abort payload (live only)
-        '503':
-          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
-          headers:
-            Retry-After:
-              description: seconds to wait before retrying
-              schema:
-                type: string
-                example: '30'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-  /api/opencode/config/providers:
-    get:
-      summary: List providers (sdk → opencode server, 503 when unreachable)
-      operationId: opencodeListProviders
-      tags: [opencode]
-      parameters:
-        - name: directory
-          in: query
-          required: false
-          schema:
-            type: string
-      responses:
-        '200':
-          description: live providers
-          content:
-            application/json:
-              schema:
-                type: object
-                description: upstream config.providers payload (live only)
-        '503':
-          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
-          headers:
-            Retry-After:
-              description: seconds to wait before retrying
-              schema:
-                type: string
-                example: '30'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-  /api/opencode/global/event:
-    get:
-      summary: Subscribe to opencode events (SSE re-stream, 503 when unreachable)
-      operationId: opencodeStreamEvents
-      tags: [opencode]
-      responses:
-        '200':
-          description: text/event-stream of upstream GlobalEvent frames (live only)
-          content:
-            text/event-stream:
-              schema:
-                type: string
-                example: 'data: {"type":"session.created"}\n\n'
-        '503':
-          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
-          headers:
-            Retry-After:
-              description: seconds to wait before retrying
-              schema:
-                type: string
-                example: '30'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-  /api/opencode/global/health:
-    get:
-      summary: Opencode server health (passthrough, 503 when unreachable)
-      operationId: opencodeGlobalHealth
-      tags: [opencode]
-      responses:
-        '200':
-          description: live upstream health ({healthy, version})
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OpencodeHealth'
-        '503':
-          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
-          headers:
-            Retry-After:
-              description: seconds to wait before retrying
-              schema:
-                type: string
-                example: '30'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-  /api/opencode/event:
-    get:
-      summary: Subscribe to legacy opencode events (SSE re-stream, 503 when unreachable)
-      operationId: opencodeStreamLegacyEvents
-      tags: [opencode]
-      parameters:
-        - name: directory
-          in: query
-          required: false
-          schema:
-            type: string
-      responses:
-        '200':
-          description: text/event-stream of upstream Event frames (live only)
-          content:
-            text/event-stream:
-              schema:
-                type: string
-                example: 'data: {"type":"session.created"}\n\n'
-        '503':
-          description: opencode server unreachable (code EXTERNAL_UNAVAILABLE, Retry-After)
+          description: session runner unreachable (code EXTERNAL_UNAVAILABLE, Retry-After) or it refused our credentials (code EXTERNAL_UNAUTHORIZED, no Retry-After)
           headers:
             Retry-After:
               description: seconds to wait before retrying
@@ -2420,6 +3318,7 @@ components:
       properties:
         status:
           type: string
+          enum: [ok]
           example: ok
         db:
           type: string
@@ -2630,17 +3529,1123 @@ components:
       properties:
         title:
           type: string
+    SessionInfoModel:
+      type: object
+      required: [id, providerID]
+      description: Model attached to a session (translated from the runtime model ref; null on the session row until set).
+      properties:
+        id:
+          type: string
+        providerID:
+          type: string
+        variant:
+          type: string
+    SessionInfo:
+      type: object
+      required: [id, title, createdAt, updatedAt, directory, projectId, model, agentId, status]
+      description: >-
+        Domain session row (GET/POST /api/v1/sessions) — OUR shape, stable while
+        the runtime behind it changes: title/model are explicitly nullable
+        (a fresh session carries neither), createdAt is ISO-8601 (the runtime
+        keeps epoch millis; the backend converts), directory is the jailed
+        project path the session works in, projectId is OUR uuid (bound by
+        the access gate, not the runtime's internal project hash), agentId is
+        the registry agent answering the session (null when created without
+        one — pre-agent rows answer null, never absent).
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+          description: ISO-8601 timestamp of the last activity (message append / binding change)
+        directory:
+          type: string
+        projectId:
+          type: string
+          format: uuid
+        model:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/SessionInfoModel'
+        agentId:
+          type: string
+          nullable: true
+          description: registry agent id (e.g. ask); null when the session was created without an agent
+          example: ask
+        status:
+          $ref: '#/components/schemas/SessionRunStatus'
+    AgentInfo:
+      type: object
+      required: [id, name, description]
+      description: >-
+        AI agent row of GET /api/v1/agents (same id/name/description shape as
+        the Agent schema — AgentInfo is the sessions-domain alias used by the
+        chat agent picker).
+      properties:
+        id:
+          type: string
+          example: ask
+        name:
+          type: string
+          example: Ask
+        description:
+          type: string
+    CreateSessionRequest:
+      type: object
+      required: [projectId]
+      description: >-
+        POST /api/v1/sessions body — projectId is required (sessions are
+        project-scoped); title/parentID are honestly forwarded to the runtime
+        create (the deprecated mirror could not forward them). model is the
+        SessionInfoModel ref (upstream Model.Ref shape); without it the
+        runner picks its server default. agentId is the optional registry
+        agent answering the session (additive — existing clients sending none
+        keep working); without it the session answers through 'ask'.
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        parentID:
+          type: string
+          minLength: 1
+          maxLength: 200
+        model:
+          allOf:
+            - $ref: '#/components/schemas/SessionInfoModel'
+        agentId:
+          type: string
+          description: registry agent id (e.g. ask)
+          example: ask
+    SessionRunStatus:
+      description: >-
+        Runtime status snapshot of one session: busy while the server reports
+        an active drain for it, idle otherwise. The transient retry state
+        (shape shared via the same union) is observable on the event stream
+        only — a REST snapshot never fakes it.
+      allOf:
+        - $ref: '#/components/schemas/OpencodeSessionStatus'
+    SessionRunStatusMap:
+      type: object
+      description: GET /api/v1/sessions/status payload — sessionId → derived runtime status.
+      additionalProperties:
+        $ref: '#/components/schemas/SessionRunStatus'
+    SessionMessage:
+      type: object
+      required: [id, type, createdAt, text]
+      description: >-
+        Normalized domain message row (GET/POST /api/v1/sessions/{id}/messages) — the chat-visible
+        projection of the runtime message union (provenance
+        contracts/opencode-stand-2.2.0.json Session.Message.*): id/type/time.created are required on
+        every variant; text is the variant's own text or the assistant content[] text parts joined,
+        null for non-text variants (never faked). Variant nesting the UI does not consume is
+        intentionally not exposed. parentId/kind are additive chain hints (unified ChatEntry) —
+        optional, backend write path untouched, absent reads as a linear text chain.
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          description: variant discriminator (user, assistant, system, synthetic, shell, skill, idle, agent-switched, model-switched, location-switched, compaction …) — kept open, the variant set is upstream-owned
+        createdAt:
+          type: string
+          format: date-time
+        text:
+          type: string
+          nullable: true
+        parentId:
+          type: string
+          nullable: true
+          minLength: 1
+          description: additive chain link (parent message id, null for the root) — optional
+        kind:
+          type: string
+          enum: [text, tool, reasoning]
+          description: additive entry kind (unified ChatEntry) — optional, absent reads as text; reasoning rows render as thinking (frontend projects them into tool-timeline entries named 'reasoning')
+        name:
+          type: string
+          minLength: 1
+          nullable: true
+          description: additive tool/reasoning name (registry tool id, or 'reasoning' for thinking traces) — optional
+        status:
+          type: string
+          minLength: 1
+          nullable: true
+          description: additive lifecycle status (called/progress/done/failed, started/delta/ended) — optional
+        detail:
+          type: string
+          nullable: true
+          description: additive single-line detail (never secrets) — optional
+    SendMessageRequest:
+      type: object
+      required: [projectId, text]
+      description: >-
+        POST /api/v1/sessions/{id}/messages body — text mirrors the session
+        runner prompt's only required payload field; files/agents/skills/delivery stay unexposed
+        until a consumer exists (nothing invented). model is the
+        SessionInfoModel ref (same as on create); without it the runner
+        keeps the session model. agentId is the optional registry agent
+        answering this turn (additive); without it the session keeps its
+        stored agent.
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        text:
+          type: string
+          minLength: 1
+        model:
+          allOf:
+            - $ref: '#/components/schemas/SessionInfoModel'
+        agentId:
+          type: string
+          description: registry agent id (e.g. ask)
+          example: ask
+        mode:
+          type: string
+          enum: [auto, ask]
+          description: >-
+            execution mode of the turn (additive); omitted = auto, ask is
+            read-only (mutating tools are filtered at bind time and refused
+            again by dispatch)
+        parentId:
+          type: string
+          nullable: true
+          minLength: 1
+          description: >-
+            explicit branch parent (active-leaf tip the client renders,
+            additive); omitted = the linear clock tail, null = explicit root
+    SessionMessageVariant:
+      type: object
+      required: [childId, createdAt, preview]
+      description: >-
+        Branch child of one parent message (GET /api/v1/sessions/{id}/variants) —
+        the branch-switcher row: child id, creation time and a short text
+        preview. Time-ordered (createdAt ASC, id ASC).
+      properties:
+        childId:
+          type: string
+          minLength: 1
+        createdAt:
+          type: string
+          format: date-time
+        preview:
+          type: string
+    SessionThreadView:
+      type: object
+      required: [chain, variants, activeLeaf]
+      description: >-
+        Thread view of one session — the active chain (root to leaf), the
+        branch children of the viewed parent and the active leaf cursor (null
+        when the thread is empty or the root was reverted).
+      properties:
+        chain:
+          type: array
+          items:
+            $ref: '#/components/schemas/SessionMessage'
+        variants:
+          type: array
+          items:
+            $ref: '#/components/schemas/SessionMessageVariant'
+        activeLeaf:
+          type: string
+          nullable: true
+    RevertMessagesRequest:
+      type: object
+      required: [projectId, messageID]
+      description: >-
+        POST /api/v1/sessions/{id}/messages/revert body — projectId is the C4
+        gate uuid, messageID is the revert boundary (the boundary plus all its
+        descendants are soft-deleted, files untouched).
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        messageID:
+          type: string
+          minLength: 1
+          maxLength: 200
+    RevertMessagesResult:
+      type: object
+      required: [activeLeaf]
+      description: >-
+        POST /api/v1/sessions/{id}/messages/revert answer — the new leaf cursor
+        after the soft-delete (the boundary parent, null when the root was
+        reverted). Unknown boundary answers 404 MessageNotFound, never null.
+      properties:
+        activeLeaf:
+          type: string
+          nullable: true
+    SessionStreamFrame:
+      type: object
+      required: [id, type, data]
+      description: >-
+        SSE frame of GET /api/v1/sessions/events — envelope of the flat runtime event frame
+        (provenance contracts/opencode-stand-2.2.0.json eventFrames). `session` is the
+        backend-hoisted variant sessionID (data.sessionID, the only nesting the provenance
+        artifact carries on session-scoped variants) so
+        consumers never touch the upstream name at the top level; `data` stays the variant-owned
+        payload passed through untouched (envelope-only stance of card 3 — the large variant union
+        is never mirrored here). Wire: `id:` line mirrors `id` (Last-Event-ID cursor),
+        `: ping` comments are transport heartbeats (not frames), and `type: stream.error`
+        is the terminal failure frame (finite data.message/code, then the stream ends).
+        Live frames (session.text.*, session.reasoning.*, session.tool.*, session.step.*,
+        session.execution.*) ride this envelope project-scoped: text deltas, step/execution
+        markers and tool markers/input.* stay live-only, while reasoning/tool project durably
+        via recorder as kind=reasoning/tool rows. Reload refetches the durable thread (REST)
+        while the live trace restarts empty.
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          description: frame variant; `stream.error` is the terminal failure (not chat text)
+        data:
+          type: object
+          description: per-type upstream payload, passed through
+        session:
+          type: string
+          description: hoisted session id when the variant carries one
+    SessionTextStartedFrame:
+      type: object
+      required: [id, type, data]
+      description: Live text block start (session.text.started) — owner only, live-only, never durable.
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [session.text.started]
+        data:
+          type: object
+          required: [sessionID]
+          properties:
+            sessionID:
+              type: string
+        session:
+          type: string
+    SessionTextDeltaFrame:
+      type: object
+      required: [id, type, data]
+      description: Live streaming text unit (session.text.delta) — rendered as chat text, live-only.
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [session.text.delta]
+        data:
+          type: object
+          required: [sessionID, delta]
+          properties:
+            sessionID:
+              type: string
+            delta:
+              type: string
+        session:
+          type: string
+    SessionTextEndedFrame:
+      type: object
+      required: [id, type, data]
+      description: Live text snapshot (session.text.ended) — empty text still terminates the block.
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [session.text.ended]
+        data:
+          type: object
+          required: [sessionID]
+          properties:
+            sessionID:
+              type: string
+            text:
+              type: string
+        session:
+          type: string
+    SessionReasoningFrame:
+      type: object
+      required: [id, type, data]
+      description: >-
+        Live thinking trace (session.reasoning.started/delta/ended) — collapsed reasoning steps
+        beside the answer, live frame, never chat text. Durable projection via recorder as one
+        kind=reasoning row (buffers started/delta, commits on ended).
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [session.reasoning.started, session.reasoning.delta, session.reasoning.ended]
+        data:
+          type: object
+          required: [sessionID]
+          properties:
+            sessionID:
+              type: string
+            delta:
+              type: string
+            text:
+              type: string
+        session:
+          type: string
+    SessionToolLifecycleFrame:
+      type: object
+      required: [id, type, data]
+      description: >-
+        Live tool lifecycle (session.tool.called/progress/success/failed plus
+        session.tool.input.started/delta/ended) — timeline steps, live frame, never chat text.
+        Durable projection via recorder as kind=tool row (called/progress/success/failed);
+        markers/input.* stay live-only.
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [session.tool.called, session.tool.progress, session.tool.success, session.tool.failed, session.tool.input.started, session.tool.input.delta, session.tool.input.ended]
+        data:
+          type: object
+          required: [sessionID]
+          properties:
+            sessionID:
+              type: string
+            tool:
+              type: string
+            toolName:
+              type: string
+            name:
+              type: string
+            message:
+              type: string
+            progress:
+              type: string
+            status:
+              type: string
+            text:
+              type: string
+            error:
+              type: string
+        session:
+          type: string
+    SessionStepFrame:
+      type: object
+      required: [id, type, data]
+      description: Live turn boundary (session.step.started/streamed/ended/failed) — ended commits the answer.
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [session.step.started, session.step.streamed, session.step.ended, session.step.failed]
+        data:
+          type: object
+          required: [sessionID]
+          properties:
+            sessionID:
+              type: string
+        session:
+          type: string
+    SessionExecutionFrame:
+      type: object
+      required: [id, type, data]
+      description: Live run boundary (session.execution.started/succeeded/failed/interrupted) — succeeded commits the answer.
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [session.execution.started, session.execution.succeeded, session.execution.failed, session.execution.interrupted]
+        data:
+          type: object
+          required: [sessionID]
+          properties:
+            sessionID:
+              type: string
+        session:
+          type: string
+    InterruptSessionRequest:
+      type: object
+      required: [projectId]
+      description: >-
+        POST /api/v1/sessions/{id}/interrupt body — projectId is the gate uuid. The runner's own
+        resume knob (provenance contracts/opencode-stand-2.2.0.json interrupt parameters) has
+        no UI consumer and is deliberately not exposed — nothing invented.
+      properties:
+        projectId:
+          type: string
+          format: uuid
+    SessionInterruptResult:
+      type: object
+      required: [interrupted]
+      description: >-
+        POST /api/v1/sessions/{id}/interrupt answer — domain form of the artifact
+        SessionInterruptResponse ({interrupted} verbatim, contracts/opencode-stand-2.2.0.json
+        paths['/api/session/{sessionID}/interrupt']). false is the idle no-op: an honest
+        answer, never an error.
+      properties:
+        interrupted:
+          type: boolean
+    SessionApprovalDecision:
+      type: string
+      enum: [approve, reject]
+      description: >-
+        Human decision for a turn parked in awaiting_approval (WEB-15 / C1) —
+        approve resumes the turn on the same checkpoint thread, reject stops
+        it without resuming.
+    SessionApprovalRequest:
+      type: object
+      required: [projectId, decision]
+      description: >-
+        POST /api/v1/sessions/{id}/approval body — projectId is the C4 gate uuid
+        (strict like interrupt/fork, backend-generated, never upstream passthrough).
+        reason is the human note (rejection motive / approval comment), optional.
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        decision:
+          $ref: '#/components/schemas/SessionApprovalDecision'
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+    SessionApprovalResult:
+      type: object
+      required: [status]
+      description: >-
+        POST /api/v1/sessions/{id}/approval answer — running means the turn
+        resumed on the same checkpoint thread, paused means it parked without
+        resuming (cancel rides a separate endpoint and never lands here).
+      properties:
+        status:
+          type: string
+          enum: [running, paused]
+    SessionRunnerProvider:
+      type: object
+      required: [id, name, activation, package]
+      description: >-
+        GET /api/v1/sessions/providers row — the REQUIRED subset of the artifact Provider.Info
+        (contracts/opencode-stand-2.2.0.json components.schemas['Provider.Info']:
+        id/name/activation/package, activation enum verbatim). Optional and sensitive
+        Provider.Info members (settings/headers/body — headers can carry auth material) are
+        never projected to the browser and are not consumed by the UI.
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        activation:
+          type: string
+          enum: [auto, enabled, disabled]
+        package:
+          type: string
+    SessionForkRequest:
+      type: object
+      required: [projectId]
+      description: >-
+        POST /api/v1/sessions/{id}/fork body — projectId is the C4 gate uuid.
+        `before` is the boundary message id: the copy keeps every message
+        STRICTLY BEFORE it; omitted → the whole thread is forked (boundary =
+        the newest message, type 'through').
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        before:
+          type: string
+          minLength: 1
+          maxLength: 200
+    SessionForkBoundary:
+      type: object
+      required: [type, messageID]
+      description: Boundary the fork copied to — 'through' includes the message, 'before' excludes it.
+      properties:
+        type:
+          type: string
+          enum: [before, through]
+        messageID:
+          type: string
+    SessionForkResponse:
+      type: object
+      required: [session, boundary]
+      description: POST /api/v1/sessions/{id}/fork answer — the created session plus its copy boundary.
+      properties:
+        session:
+          $ref: '#/components/schemas/SessionInfo'
+        boundary:
+          $ref: '#/components/schemas/SessionForkBoundary'
+    SnapshotDiff:
+      type: object
+      required: [file]
+      description: >-
+        One file entry of a session snapshot comparison; `hunks` is the unified
+        diff body when patches were requested (absent for a name-only listing).
+      properties:
+        file:
+          type: string
+        hunks:
+          type: string
+    RevertStageRequest:
+      type: object
+      required: [projectId, messageID]
+      description: POST /api/v1/sessions/{id}/revert/stage body — boundary message plus optional path filter.
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        messageID:
+          type: string
+          minLength: 1
+          maxLength: 200
+        files:
+          type: array
+          items:
+            type: string
+            minLength: 1
+    RevertInfo:
+      type: object
+      required: [messageID, snapshot, files]
+      description: >-
+        Staged revert state — the boundary message, the snapshot files were
+        restored FROM (null when the project has no git snapshot for that
+        turn) and the file diffs the revert produced.
+      properties:
+        messageID:
+          type: string
+        snapshot:
+          type: string
+          nullable: true
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/SnapshotDiff'
+    ToolCallInfo:
+      type: object
+      required: [id, name, result]
+      description: One tool call visible in the session timeline (runtime call id, registry name, optional namespace, result text).
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        namespace:
+          type: string
+        result:
+          type: string
+    RunStatus:
+      type: string
+      enum: [open, running, awaiting_human, failed, merged, abandoned]
+      description: Lifecycle status of one agent run.
+    RunInfo:
+      type: object
+      required:
+        [id, projectId, title, status, definitionSetHash, baseCommit, branch, worktree, sandboxId, agentId, model, createdAt, updatedAt]
+      description: >-
+        Domain run row (GET/POST /api/v1/runs) — the harness-owned run: id is a
+        uuidv7 (creation order is monotonic), branch/worktree are server-owned
+        (agent/<run_id> inside the REPOS_ROOT jail), baseCommit is the
+        Forward-Only lower bound and definitionSetHash pins the active
+        definition set the run was created with. nullable members are explicit
+        keys (never absent): title until named, sandboxId/agentId/model while
+        the run owns none.
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: uuidv7 (Bun.randomUUIDv7())
+        projectId:
+          type: string
+          format: uuid
+        title:
+          type: string
+          nullable: true
+        status:
+          $ref: '#/components/schemas/RunStatus'
+        definitionSetHash:
+          type: string
+          minLength: 1
+          description: pin of the active definition set the run was created with
+        baseCommit:
+          type: string
+          minLength: 1
+          description: sha of the Forward-Only lower bound
+        branch:
+          type: string
+          minLength: 1
+          description: server-owned agent branch (agent/<run_id>)
+          example: agent/0199c5b6-7c8f-7a1b-9d2e-1f2a3b4c5d6e
+        worktree:
+          type: string
+          minLength: 1
+          description: worktree path inside the REPOS_ROOT jail
+        sandboxId:
+          type: string
+          nullable: true
+          description: opencode-runner slot; null while the run owns none
+        agentId:
+          type: string
+          nullable: true
+          description: registry agent id (e.g. ask); null when the run was created without an agent
+          example: ask
+        model:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/SessionInfoModel'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    RunInfoList:
+      type: array
+      description: GET /api/v1/runs payload — always an array, empty when the project has none.
+      items:
+        $ref: '#/components/schemas/RunInfo'
+    CreateRunRequest:
+      type: object
+      required: [projectId]
+      description: >-
+        POST /api/v1/runs body — projectId is required (runs are project-scoped);
+        title is optional (the run may stay unnamed until the server names it).
+        agentId/model reuse the sessions registry id and SessionInfoModel ref
+        (never duplicates). definitionSetHash pins an explicit definition set;
+        without it the server uses the active set.
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        agentId:
+          type: string
+          description: registry agent id (e.g. ask)
+          example: ask
+        model:
+          allOf:
+            - $ref: '#/components/schemas/SessionInfoModel'
+        definitionSetHash:
+          type: string
+          minLength: 1
+          description: explicit definition-set pin; omitted = the active set
+    RunStreamFrame:
+      type: object
+      required: [id, type, data]
+      description: >-
+        SSE frame of GET /api/v1/runs/{id}/events — `id` is the per-run monotonic
+        seq rendered as a string (the cursor is the last delivered value, the
+        stream replays seq > cursor then goes live). `type` lists the prototype
+        frame set only; the full run union grows and consumers ignore unknown
+        values. `data` is the variant-owned payload passed through untouched.
+      properties:
+        id:
+          type: string
+          description: per-run monotonic seq as a string
+        type:
+          type: string
+          enum: [run.started, run.step.started, run.step.committed, run.step.failed]
+          description: prototype frame set (the full run union grows)
+        data:
+          type: object
+          description: variant-owned payload, passed through
+        run:
+          type: string
+          description: hoisted run id when the variant carries one
+    ToolView:
+      type: object
+      required: [id, title, description, inputSchema]
+      description: >-
+        Model-facing projection of a ToolDescriptor (D3) — the only tool shape
+        the LLM sees; the server trims the registry descriptor before shipping
+        it. The id keeps its origin prefix (mcp|skill|native) and a dotted
+        native path (native:git.recon).
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: '^(mcp|skill|native):[a-z0-9._/-]+$'
+          example: native:git.recon
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        inputSchema:
+          type: object
+          description: JSON schema of the tool input
+        outputSchema:
+          type: object
+          description: JSON schema of the tool output (when the tool declares one)
+    OpencodeLocationRef:
+      type: object
+      required: [directory]
+      additionalProperties: false
+      description: >-
+        Session location — jailed directory of the project. Verbatim upstream (contracts/opencode-stand-2.2.0.json:
+        Location.PublicRef = {directory} only — no workspaceID in the published 2.x shape).
+        `Location.PublicRef` passthrough (2.2.0 live spec; required field of
+        Session.Info.location). Rush Code adds no fields here.
+      properties:
+        directory:
+          type: string
+    OpencodeSessionModelRef:
+      type: object
+      required: [id, providerID]
+      additionalProperties: false
+      description: >-
+        Model reference attached to a session (upstream `Model.Ref` passthrough).
+        Distinct from OpencodeModelRef (prompt-body provider/model pair).
+      properties:
+        id:
+          type: string
+        providerID:
+          type: string
+        variant:
+          type: string
+    OpencodeSessionTokens:
+      type: object
+      required: [input, output, reasoning, cache]
+      additionalProperties: false
+      description: Token usage counters of a session (upstream `TokenUsage.Info` passthrough).
+      properties:
+        input:
+          type: number
+        output:
+          type: number
+        reasoning:
+          type: number
+        cache:
+          type: object
+          required: [read, write]
+          additionalProperties: false
+          properties:
+            read:
+              type: number
+            write:
+              type: number
+    OpencodeSessionTime:
+      type: object
+      required: [created, updated]
+      additionalProperties: false
+      description: >-
+        Session timestamps in epoch millis (upstream Session.Info.time). idle/viewed
+        exist on the live 2.2.0 spec and may be absent until the server sets them.
+      properties:
+        created:
+          type: number
+        updated:
+          type: number
+        idle:
+          type: number
+        viewed:
+          type: number
+        archived:
+          type: number
+    OpencodePermissionEffect:
+      type: string
+      enum: [allow, deny, ask]
+      description: Permission rule effect (upstream `Permission.Effect`).
+    OpencodePermissionRule:
+      type: object
+      required: [action, resource, effect]
+      additionalProperties: false
+      description: One rule of the session permissions ruleset (upstream `Permission.Rule`).
+      properties:
+        action:
+          type: string
+        resource:
+          type: string
+        effect:
+          $ref: '#/components/schemas/OpencodePermissionEffect'
+    OpencodeSessionForkBoundary:
+      type: object
+      required: [type, messageID]
+      additionalProperties: false
+      description: >-
+        Fork cut position (upstream `Session.ForkBoundary` — the anyOf of
+        before/through objects, identical shapes, collapsed to an enum here).
+      properties:
+        type:
+          type: string
+          enum: [before, through]
+        messageID:
+          type: string
+    OpencodeSessionFork:
+      type: object
+      required: [sessionID, boundary]
+      additionalProperties: false
+      description: Provenance of a forked session (upstream Session.Info.fork).
+      properties:
+        sessionID:
+          type: string
+        boundary:
+          $ref: '#/components/schemas/OpencodeSessionForkBoundary'
+    OpencodeFileDiff:
+      type: object
+      required: [file, patch, additions, deletions, status]
+      additionalProperties: false
+      description: >-
+        File change row of a revert snapshot (upstream `FileDiff.Info` — provenance
+        contracts/opencode-stand-2.2.0.json: field is `file`; the pinned sdk 1.18.33 still names it `path`,
+        upstream renamed it to `file` by 2.2.0).
+      properties:
+        file:
+          type: string
+        patch:
+          type: string
+        additions:
+          type: integer
+          minimum: 0
+        deletions:
+          type: integer
+          minimum: 0
+        status:
+          type: string
+          enum: [added, deleted, modified]
+        more:
+          type: boolean
+          enum: [true]
+    OpencodeSessionRevert:
+      type: object
+      required: [messageID]
+      additionalProperties: false
+      description: >-
+        Revert state attached to a session (upstream `Session.Revert`; 2.2.0 dropped
+        the sdk 1.18.33 `diff` field — provenance contracts/opencode-stand-2.2.0.json).
+      properties:
+        messageID:
+          type: string
+        partID:
+          type: string
+        snapshot:
+          type: string
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/OpencodeFileDiff'
+    OpencodeSession:
+      type: object
+      required: [id, projectID, cost, tokens, time, location]
+      additionalProperties: false
+      description: >-
+        Opencode session as the /api/opencode/* mirror answers: GET list item,
+        POST create, GET /{id} — VERBATIM upstream `Session.Info` passthrough
+        (2.2.0 live spec; the mirror only unwraps the {data}/{data,cursor}
+        envelopes and never re-maps fields). Everything outside the required
+        set appears only once the server sets it — a freshly created session
+        carries no `title` (provenance: contracts/opencode-stand-2.2.0.json, live probe).
+      properties:
+        id:
+          type: string
+        parentID:
+          type: string
+        projectID:
+          type: string
+        agent:
+          type: string
+        model:
+          $ref: '#/components/schemas/OpencodeSessionModelRef'
+        cost:
+          type: number
+        tokens:
+          $ref: '#/components/schemas/OpencodeSessionTokens'
+        outcome:
+          type: string
+          enum: [succeeded, failed, interrupted]
+        time:
+          $ref: '#/components/schemas/OpencodeSessionTime'
+        title:
+          type: string
+        subpath:
+          type: string
+        metadata:
+          type: object
+          description: free-form upstream metadata bag (Session.Metadata)
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/OpencodePermissionRule'
+        fork:
+          $ref: '#/components/schemas/OpencodeSessionFork'
+        revert:
+          $ref: '#/components/schemas/OpencodeSessionRevert'
+        location:
+          $ref: '#/components/schemas/OpencodeLocationRef'
+    OpencodeSessionStatusAction:
+      type: object
+      required: [reason, provider, title, message, label]
+      description: Retry action detail carried by a retry status (upstream session.status payload).
+      properties:
+        reason:
+          type: string
+        provider:
+          type: string
+        title:
+          type: string
+        message:
+          type: string
+        label:
+          type: string
+        link:
+          type: string
+    OpencodeSessionStatus:
+      description: >-
+        Live status of one session. Shape carried from the pinned
+        @opencode-ai/sdk v2 `SessionStatus` union — the 2.2.0 openapi.json
+        publishes no session-status schema, and the legacy GET /session/status
+        path our status route proxies is not served by the current stand
+        (SPA catch-all). Consumers must treat unknown type values as neither
+        busy nor idle.
+      oneOf:
+        - type: object
+          required: [type]
+          properties:
+            type:
+              type: string
+              enum: [idle]
+        - type: object
+          required: [type]
+          properties:
+            type:
+              type: string
+              enum: [busy]
+        - type: object
+          required: [type, attempt, message, next]
+          properties:
+            type:
+              type: string
+              enum: [retry]
+            attempt:
+              type: integer
+              minimum: 1
+            message:
+              type: string
+            next:
+              type: number
+              description: epoch millis of the next retry attempt
+            action:
+              $ref: '#/components/schemas/OpencodeSessionStatusAction'
+    OpencodeSessionStatusMap:
+      type: object
+      description: >-
+        GET /api/opencode/session/status payload — upstream session.status map
+        (sessionID → status) passthrough.
+      additionalProperties:
+        $ref: '#/components/schemas/OpencodeSessionStatus'
+    OpencodeEventDurable:
+      type: object
+      required: [aggregateID, seq, version]
+      description: Durable-seq marker some upstream event variants carry.
+      properties:
+        aggregateID:
+          type: string
+        seq:
+          type: number
+        version:
+          type: number
+    OpencodeEvent:
+      type: object
+      required: [id, type, data]
+      description: >-
+        Flat v2 bus event re-streamed by GET /api/opencode/event. The pinned
+        sdk `event.subscribe()` parses the upstream SSE envelope
+        {id?, event, data:JSON-string} away, and our relay writes the PARSED
+        event object as the downstream data: frame — so the downstream frame
+        is the flat event object itself (verified by live /api/event probe:
+        data: {"id":"evt_…","type":"server.connected","data":{}}; sdk
+        V2EventSubscribeResponses.200 = V2Event). `type` discriminates a large
+        upstream-owned variant union; per-variant data payloads pass through
+        as unknown records (mirroring every variant = card 4).
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        data:
+          type: object
+          description: per-type upstream payload (variant-owned, untouched)
+        metadata:
+          type: object
+        durable:
+          $ref: '#/components/schemas/OpencodeEventDurable'
+        location:
+          $ref: '#/components/schemas/OpencodeLocationRef'
+    OpencodeBusEvent:
+      type: object
+      required: [id, type, properties]
+      description: >-
+        Flat LEGACY bus event ({id, type, properties}) — shape of the pinned
+        sdk `Event` union members, carried inside GlobalEvent.payload below.
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        properties:
+          type: object
+          description: per-type upstream payload (variant-owned, untouched)
+    OpencodeGlobalEvent:
+      type: object
+      required: [directory, payload]
+      description: >-
+        Legacy global frame re-streamed by GET /api/opencode/global/event:
+        routing envelope ({directory, project?, workspace?}) wrapping a flat
+        bus event in `payload` — shape from the pinned sdk `GlobalEvent`.
+        The current 2.2.0 stand does NOT serve /global/event (SPA catch-all);
+        replacing this surface is card 4 scope.
+      properties:
+        directory:
+          type: string
+        project:
+          type: string
+        workspace:
+          type: string
+        payload:
+          $ref: '#/components/schemas/OpencodeBusEvent'
     OpencodeHealth:
       type: object
       required: [healthy, version]
-      description: GET /api/opencode/global/health payload (upstream global.health passthrough).
+      description: GET /api/opencode/global/health payload — synthesized by the backend from the 2.x v2 liveness endpoint GET /api/info (there is no upstream `healthy` field; healthy=true iff /api/info answered 2xx JSON with a string version). Shape is unchanged from the legacy global.health passthrough.
       properties:
         healthy:
           type: boolean
           example: true
         version:
           type: string
-          example: 1.18.33
+          example: 2.2.0
+    ProjectStatus:
+      type: string
+      enum: [active, deleted]
+    EffectiveConfigEntry:
+      type: object
+      required: [key, value, origin, overridden]
+      properties:
+        key:
+          type: string
+        value:
+          type: string
+          description: masked when secret-backed
+        origin:
+          type: string
+          enum: [project, organization]
+        overridden:
+          type: boolean
     ApiError:
       type: object
       required: [code, message, correlationId]
@@ -2651,7 +4656,16 @@ components:
         typed upstream codes: EXTERNAL_TIMEOUT (504, per-attempt
         REQUEST_TIMEOUT_MS budget exceeded), EXTERNAL_UNAVAILABLE (503,
         network/unknown upstream failure), EXTERNAL_RATE_LIMITED (429),
-        EXTERNAL_UPSTREAM_5XX (502 or the upstream 5xx), GITHUB_AUTH
+        EXTERNAL_UPSTREAM_5XX (502 or the upstream 5xx), EXTERNAL_UNAUTHORIZED
+        (503, the upstream refused the credentials we sent — upstream
+        401/403, never a caller session problem: the answer is 503 and NOT
+        401 on purpose, and it carries NO Retry-After because a retry with
+        the same credentials cannot help), EXTERNAL_BAD_REQUEST (the upstream
+        rejected THIS request shape — upstream 400/422 answered as 400/422,
+        non-retryable, no Retry-After: repeating the request cannot help),
+        EXTERNAL_NOT_FOUND (the upstream knows the resource is absent —
+        upstream 404 answered as 404, non-retryable, no Retry-After),
+        GITHUB_AUTH
         (401/403 from the GitHub App surface), auth codes:
         invalid_credentials (401, generic — no user enumeration),
         email_taken (409), provider_not_configured (501 stub seam).
@@ -2682,7 +4696,7 @@ components:
           example: Lovelace
         email:
           type: string
-          example: ada@devbox.local
+          example: ada@rush-code.local
         provider:
           type: string
           enum: [local, sso-oauth, github-app]
@@ -2712,48 +4726,76 @@ components:
           properties:
             user:
               $ref: '#/components/schemas/AuthUser'
-    OpencodeKeyBody:
+    VaultSecretInfo:
       type: object
-      required: [apiKey]
-      description: Your own OpenCode API key (stored AES-256-GCM encrypted, never returned or logged).
+      required: [id, provider, label, createdAt, updatedAt]
+      description: Stored vault secret as exposed by the API (never the key or ciphertext).
+      properties:
+        id:
+          type: string
+          format: uuid
+        provider:
+          type: string
+          example: opencode
+        label:
+          type: string
+          example: primary
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    VaultSecretList:
+      type: object
+      required: [secrets]
+      properties:
+        secrets:
+          type: array
+          items:
+            $ref: '#/components/schemas/VaultSecretInfo'
+    VaultSecretInput:
+      type: object
+      required: [provider, apiKey]
+      description: Write-only vault input (the plaintext key is encrypted at rest and never returned or logged).
+      properties:
+        provider:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: '^[a-z0-9][a-z0-9._-]*$'
+          example: opencode
+        apiKey:
+          type: string
+          minLength: 20
+          maxLength: 1024
+        label:
+          type: string
+          maxLength: 64
+          example: primary
+    VaultSecretUpdateInput:
+      type: object
+      description: Partial update — at least one of apiKey/label must be present.
       properties:
         apiKey:
           type: string
           minLength: 20
           maxLength: 1024
-    OpencodeKeyResult:
-      type: object
-      required: [ok, updatedAt]
-      properties:
-        ok:
-          type: boolean
-          example: true
-        updatedAt:
+        label:
           type: string
-          format: date-time
-    OpencodeKeyDeleteResult:
+          maxLength: 64
+    VaultSecretDeleteResult:
       type: object
       required: [ok]
-      description: Idempotent delete acknowledgement (no timestamp).
+      description: Delete acknowledgement (404 when the secret is missing or owned by another consumer).
       properties:
         ok:
           type: boolean
           example: true
-    OpencodeKeyStatus:
-      type: object
-      required: [configured]
-      description: Key existence only (never the key itself).
-      properties:
-        configured:
-          type: boolean
-          example: true
-        updatedAt:
-          type: string
-          format: date-time
     OpencodeUsage:
       type: object
-      required: [balance, usage, updatedAt]
-      description: Live upstream balance+usage (updatedAt = upstream response time, no cache).
+      required: [updatedAt]
+      description: Live Zen Go usage (https://opencode.ai/zen/go/v1/usage — percent windows mapped to used/limit 100; rolling is the 5h window). Legacy balance/usage are optional (old payloads only). Optional rolling/daily/weekly/monthly pass through only when upstream carries finite numbers — never derived.
       properties:
         balance:
           type: number
@@ -2764,6 +4806,25 @@ components:
         updatedAt:
           type: string
           format: date-time
+        rolling:
+          $ref: '#/components/schemas/OpencodeLimitBucket'
+        daily:
+          $ref: '#/components/schemas/OpencodeLimitBucket'
+        weekly:
+          $ref: '#/components/schemas/OpencodeLimitBucket'
+        monthly:
+          $ref: '#/components/schemas/OpencodeLimitBucket'
+    OpencodeLimitBucket:
+      type: object
+      required: [used, limit]
+      description: Real used/limit pair from upstream (no derivation from totals).
+      properties:
+        used:
+          type: number
+          example: 12.5
+        limit:
+          type: number
+          example: 100
     AuthRegister:
       type: object
       required: [firstName, lastName, email, password]
@@ -2776,7 +4837,7 @@ components:
           example: Lovelace
         email:
           type: string
-          example: ada@devbox.local
+          example: ada@rush-code.local
         password:
           type: string
           minLength: 8
@@ -2786,7 +4847,7 @@ components:
       properties:
         email:
           type: string
-          example: ada@devbox.local
+          example: ada@rush-code.local
         password:
           type: string
           minLength: 8
@@ -2803,13 +4864,132 @@ components:
           type: string
         lastName:
           type: string
+    CloneWorkspace:
+      type: object
+      required: [repoUrl, repoName]
+      properties:
+        repoUrl:
+          type: string
+          description: 'Clone source: https://…, ssh://git@host/… or git@host:path (exact-host allow-list).'
+        repoName:
+          type: string
+          description: Repo dir name inside the user workspace (no slashes/traversal).
+        installationId:
+          type: integer
+          description: GitHub App installation id; must belong to the caller (403 otherwise).
+    WorkspaceCloneJob:
+      type: object
+      required: [userSpace, repoName, status, progress, error, updatedAt]
+      properties:
+        userSpace:
+          type: string
+          example: alice
+        repoName:
+          type: string
+          example: demo
+        status:
+          type: string
+          enum: [queued, cloning, ready, failed]
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        error:
+          type: string
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+    WorkspaceTreeNode:
+      type: object
+      required: [path, type]
+      properties:
+        path:
+          type: string
+          example: README.md
+        type:
+          type: string
+          enum: [file, dir]
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkspaceTreeNode'
+    WorkspaceSubmodule:
+      type: object
+      required: [path, url, sha, status]
+      properties:
+        path:
+          type: string
+          example: libs/shared
+        url:
+          type: string
+          nullable: true
+        sha:
+          type: string
+          nullable: true
+        status:
+          type: string
+    Agent:
+      type: object
+      required: [id, name, description]
+      properties:
+        id:
+          type: string
+          example: ask
+        name:
+          type: string
+          example: Ask
+        description:
+          type: string
+    AgentAskRequest:
+      type: object
+      required: [question]
+      properties:
+        question:
+          type: string
+          minLength: 1
+          maxLength: 4000
+    AgentAskAnswer:
+      type: object
+      required: [agentId, answer]
+      properties:
+        agentId:
+          type: string
+          example: ask
+        answer:
+          type: string
+    SessionModel:
+      type: object
+      required: [id, name, providerID]
+      description: >-
+        GET /api/v1/sessions/models row — runner model inventory entry filtered to the
+        OpenCode Go/Zen family (providerID opencode / opencode-go / opencode-zen).
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        providerID:
+          type: string
+          enum: [opencode, opencode-go, opencode-zen]
     Project:
       type: object
-      required: [id, name, createdAt, updatedAt]
+      required: [id, orgId, name, status, createdAt, updatedAt]
       properties:
         id:
           type: string
           format: uuid
+        orgId:
+          type: string
+          nullable: true
+          description: Owning organization (1:1, immutable after create). null for user-space projects
+        status:
+          $ref: '#/components/schemas/ProjectStatus'
+        deletedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Soft-delete timestamp (null when active; restore via POST .../restore, API only)
         name:
           type: string
         description:
@@ -2843,10 +5023,18 @@ components:
           type: string
           nullable: true
           description: "Machine reason when corrupted (missing-dir, no-git, rev-parse-failed, fsck-failed, timeout, storage-unconfigured, …). storage-unconfigured = REPOS_ROOT empty (required for project writes; fallback chain is readonly-registry only)"
+        scope:
+          type: string
+          enum: [user, org]
+          deprecated: true
+          description: REMOVED (1:1 model) — kept for old caches only
     CreateProject:
       type: object
-      required: [name]
+      required: [orgId, name]
       properties:
+        orgId:
+          type: string
+          format: uuid
         name:
           type: string
         description:
@@ -2961,10 +5149,10 @@ components:
           example: acme
         name:
           type: string
-          example: devbox-backend
+          example: rush-code-backend
         fullName:
           type: string
-          example: acme/devbox-backend
+          example: acme/rush-code-backend
         private:
           type: boolean
         defaultBranch:
@@ -2972,14 +5160,14 @@ components:
           example: main
         url:
           type: string
-          example: https://github.com/acme/devbox-backend
+          example: https://github.com/acme/rush-code-backend
     GithubInstallUrl:
       type: object
       required: [url]
       properties:
         url:
           type: string
-          example: https://github.com/apps/devbox/installations/new
+          example: https://github.com/apps/rush-code/installations/new
     GithubCallbackResult:
       type: object
       required: [ok, installationId]
@@ -3129,17 +5317,23 @@ components:
           $ref: '#/components/schemas/OrgRole'
     OrganizationInvite:
       type: object
-      required: [token, orgId, role, expiresAt]
-      description: single-use bearer token (returned ONCE, never logged; TTL ORG_INVITE_TTL_SEC, default 24h)
+      required: [token, orgId, role, createdAt]
+      description: persistent single-use uuidv7 invite (returned ONCE, never logged; no TTL — links never expire)
       properties:
         token:
           type: string
+          format: uuid
+          description: uuidv7 invite token (link material, single-use)
         orgId:
           type: string
           format: uuid
+        email:
+          type: string
+          nullable: true
+          description: bound email (lowercased) or null for open link-invites
         role:
           $ref: '#/components/schemas/OrgRole'
-        expiresAt:
+        createdAt:
           type: string
           format: date-time
     CreateInvite:
@@ -3148,37 +5342,18 @@ components:
         role:
           $ref: '#/components/schemas/OrgRole'
           default: user
+        email:
+          type: string
+          format: email
+          description: bound email for email-invites; absent = open link-invite
     AcceptInvite:
       type: object
       required: [token]
       properties:
         token:
           type: string
-# Proxy mapping (backend node:http → opencode server):
-#   GET  /api/v1/session       → GET  {OPENCODE_SERVER_URL}/session
-#   GET  /api/v1/messages?s=…  → GET  {OPENCODE_SERVER_URL}/messages?sessionId=…
-#   POST /api/v1/chat          → POST {OPENCODE_SERVER_URL}/chat
-# Sdk mirror (backend NestJS OpencodeController → opencode server via
-# @opencode-ai/sdk 1.18.33 pinned, VERSION_NEUTRAL under /api — no version
-# segment; upstream snapshot: contracts/opencode-upstream.json, GET /doc):
-#   GET    /api/opencode/session                 → sdk session.list()
-#   POST   /api/opencode/session                 → sdk session.create()
-#   GET    /api/opencode/session/status          → sdk session.status()
-#   GET    /api/opencode/session/{id}            → sdk session.get()
-#   DELETE /api/opencode/session/{id}            → sdk session.delete()
-#   PATCH  /api/opencode/session/{id}            → sdk session.update()
-#   POST   /api/opencode/session/{id}/fork       → sdk session.fork()
-#   GET    /api/opencode/session/{id}/message    → sdk session.messages() (+limit/before, x-next-cursor/Link passthrough)
-#   POST   /api/opencode/session/{id}/message    → sdk session.prompt() (full body)
-#   GET    /api/opencode/session/{id}/message/{messageID} → sdk session.message()
-#   POST   /api/opencode/session/{id}/prompt_async → sdk session.promptAsync() (204)
-#   POST   /api/opencode/session/{id}/command    → sdk session.command()
-#   POST   /api/opencode/session/{id}/shell      → sdk session.shell()
-#   POST   /api/opencode/session/{id}/abort      → sdk session.abort()
-#   GET    /api/opencode/config/providers        → sdk config.providers()
-#   GET    /api/opencode/global/event (SSE)      → sdk global.event() re-stream
-#   GET    /api/opencode/global/health           → raw GET {upstream}/global/health (no sdk binding)
-#   GET    /api/opencode/event (SSE)             → sdk event.subscribe() re-stream
+          format: uuid
+          description: uuidv7 invite token
 # Removed: unversioned /api/session, /api/messages, /api/chat → 404 not_found.
 # Reserved: /api/v2/* → 404 { code: 'not_found', … } (no v2 bindings yet).
 # Timeout: REQUEST_TIMEOUT_MS (default 10000) per attempt via AbortController/fetch signal.

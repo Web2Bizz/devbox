@@ -7,7 +7,7 @@ import { MOCK_SECRETS, MOCK_SECRET_VALUES } from '../lib/mocks/secrets';
 import type { SecretItem } from '../lib/types';
 import { useI18n } from '../i18n';
 
-export interface UseSecretsResult {
+export type UseSecretsResult = {
   secrets: SecretItem[];
   loading: boolean;
   error: string | null;
@@ -19,7 +19,7 @@ export interface UseSecretsResult {
   copy: (id: string) => Promise<void>;
   remove: (id: string) => void;
   reload: () => void;
-}
+};
 
 /**
  * Mock secrets hook: list + reveal/hide + copy + delete (local only).

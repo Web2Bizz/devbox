@@ -1,38 +1,40 @@
 import { Global, Module } from '@nestjs/common';
-import { DbModule } from '../db/db.module.js';
-import { AuthController } from './auth.controller.js';
+import { UsersModule } from '@users/users.module';
+import { OrganizationsModule } from '../organizations/organizations.module';
+import { AuthController } from './auth.controller';
 import {
   GithubAppProviderStub,
   LocalAuthProvider,
   SsoOauthProviderStub,
-} from './auth-provider.js';
-import { IdentityService } from './identity.service.js';
-import { JwtAuthGuard } from './jwt-auth.guard.js';
-import { PasswordService } from './password.service.js';
-import { TokenService } from './token.service.js';
-import { UsersService } from './users.service.js';
-import { UsersController } from './users.controller.js';
+} from './auth-provider';
+import { IdentityService } from './identity.service';
+import { JwtAuthGuard } from './jwt-auth.guard';
+import { TokenService } from './token.service';
 
+// SCOPE: Common
 /**
  * AuthModule — internal accounts (email+password, argon2id + HS256 JWT).
- * Global: JwtAuthGuard + IdentityService are injectable anywhere (github /
- * workspaces controllers use them to replace the duplicated mock
- * resolveUserId). Registered in AppModule imports.
+ * Common-scope sibling of users/ (top-level src/auth, not nested): JWT guard,
+ * token/password providers and identity live here, user profiles stay in
+ * src/users. Global: JwtAuthGuard + IdentityService are injectable anywhere
+ * (github / workspaces controllers use them to replace the duplicated mock
+ * resolveUserId). User registry lives in the global UsersModule
+ * (src/users) — imported here so the local provider and guard resolve;
+ * UsersModule never imports AuthModule (module graph stays acyclic).
+ * Registered in AppModule imports.
  */
 @Global()
 @Module({
-  imports: [DbModule],
-  controllers: [AuthController, UsersController],
+  imports: [UsersModule, OrganizationsModule],
+  controllers: [AuthController],
   providers: [
-    PasswordService,
     TokenService,
-    UsersService,
     LocalAuthProvider,
     SsoOauthProviderStub,
     GithubAppProviderStub,
     IdentityService,
     JwtAuthGuard,
   ],
-  exports: [UsersService, TokenService, IdentityService, JwtAuthGuard, PasswordService],
+  exports: [TokenService, IdentityService, JwtAuthGuard],
 })
 export class AuthModule {}

@@ -1,15 +1,16 @@
 /**
  * Shared domain types for mocked dashboard pages.
- * Real API DTOs live in src/api/types.ts — these mirror the future
- * backend contracts so hooks can swap mocks for `api.*` calls later.
+ * Real API DTOs live in '@rush-code/contracts' (via src/api/types.ts
+ * re-export) — these mirror the backend contracts so hooks can swap
+ * mocks for `api.*` calls later.
  * TODO REAL-API: replace mock sources inside hooks with ApiClient calls.
  */
 
-import type { ProjectScope } from '../api/types';
+import type { ProjectScope } from '@rush-code/contracts';
 
 export type ProjectStatus = 'active' | 'draft' | 'archived';
 
-export interface Project {
+export type Project = {
   id: string;
   name: string;
   description: string;
@@ -23,9 +24,9 @@ export interface Project {
   corruptedReason: string | null;
   /** Disk-home scope (user|org); optional — old caches/imports stay valid. */
   scope?: ProjectScope;
-}
+};
 
-export interface SecretItem {
+export type SecretItem = {
   id: string;
   name: string;
   projectId: string;
@@ -33,27 +34,45 @@ export interface SecretItem {
   maskedPreview: string;
   /** ISO-8601 */
   updatedAt: string;
-}
+};
 
-export interface Profile {
+/** Single quota bucket: consumed units vs granted total. */
+export type LimitQuota = {
+  used: number;
+  total: number;
+};
+
+/**
+ * Optional usage limits (all buckets optional). Frontend-local: '@rush-code/contracts'
+ * AuthUser carries no 'limits' yet (backend + contracts/openapi.yaml have no quota fields) —
+ * when the wire contract gains it, delete these and import from the package instead.
+ */
+export type AuthLimits = {
+  daily?: LimitQuota;
+  weekly?: LimitQuota;
+  monthly?: LimitQuota;
+};
+
+export type Profile = {
   id: string;
   name: string;
   email: string;
-  role: string;
   /** ISO-8601 */
   createdAt: string;
-}
+  /** Optional usage limits (extra-contract wire field, mirrors AuthUser.limits). */
+  limits?: AuthLimits;
+};
 
 export type AiProviderStatus = 'connected' | 'disconnected' | 'error';
 
-export interface AiProvider {
+export type AiProvider = {
   id: string;
   name: string;
   description: string;
   enabled: boolean;
   status: AiProviderStatus;
   modelsCount: number;
-}
+};
 
 /**
  * Docker-registry surface (mirrors GET /health `registry` flag).
@@ -63,14 +82,14 @@ export interface AiProvider {
  */
 export type RegistryStatus = 'up' | 'down' | 'skipped';
 
-export interface RegistryItem {
+export type RegistryItem = {
   id: string;
   name: string;
   /** Base URL, no trailing slash (display only, no secrets). */
   url: string;
   status: RegistryStatus;
   repositories?: string[];
-}
+};
 
 /**
  * npm surface (mirrors GET /api/v1/registry/npm/status + /health `npmRegistry` flag).
@@ -80,7 +99,7 @@ export interface RegistryItem {
  */
 export type NpmStatus = 'up' | 'down' | 'skipped';
 
-export interface NpmPackageItem {
+export type NpmPackageItem = {
   id: string;
   name: string;
   /** Registry base URL (display only, no secrets). */
@@ -88,4 +107,4 @@ export interface NpmPackageItem {
   /** Observed scope, e.g. '@web2bizz' (carries no secrets). */
   scope: string;
   status: NpmStatus;
-}
+};

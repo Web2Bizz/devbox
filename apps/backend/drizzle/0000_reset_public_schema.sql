@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS public.projects_and_organizations, public.organization_invites, public.project_sessions, public.project_chats, public.user_opencode_keys, public.user_opencode_keys_backup_0006, public.organization_members, public.organizations, public.github_installations, public.users, public.projects CASCADE;

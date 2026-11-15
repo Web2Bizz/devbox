@@ -1,0 +1,7 @@
+{
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "name": "@rush-code/biome-config",
+  "projectType": "library",
+  "sourceRoot": "packages/biome-config",
+  "targets": {}
+}

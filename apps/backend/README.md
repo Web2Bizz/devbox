@@ -1,9 +1,9 @@
-# Backend — opencode proxy layer (NestJS 12)
+# Backend — embedded OpenCode host API (NestJS 12)
 
-NestJS 12 API that fronts the live opencode server (migrated from `node:http`).
+NestJS 12 API with the OpenCode V2 host running in-process (migrated from `node:http`).
 
 Contract: [`contracts/openapi.yaml`](../../contracts/openapi.yaml) ·
-DTOs: [`src/contracts.ts`](./src/contracts.ts) (duplicated in frontend, no cross-imports).
+DTOs: [`@rush-code/contracts`](../../packages/contracts/src/index.ts) (single source of truth; [`src/contracts.ts`](./src/contracts.ts) is a deprecated re-export).
 
 ## Stack (pinned)
 
@@ -33,7 +33,6 @@ See [`.env.example`](./.env.example):
 | Var | Default | What |
 | --- | ------- | ---- |
 | `APP_BACKEND_PORT` (`PORT` legacy) | `3000` | listen port (required, empty → fail-fast) |
-| `OPENCODE_URL` (`OPENCODE_SERVER_URL` legacy) | `http://localhost:4096` | upstream opencode server (proxy target) |
 | `CORS_ORIGINS` | `http://localhost:${NEXT_PUBLIC_PORT},http://localhost:8080` | allowlist, comma-separated |
 | `REQUEST_TIMEOUT_MS` | `10000` | upstream fetch timeout (AbortController) |
 | `LOG_LEVEL` | `info` | debug/info/warn/error |
@@ -64,12 +63,8 @@ Nested `GithubModule` (imported by `ProjectsModule`, never in `AppModule`):
 | Route | Upstream | Fallback |
 | ----- | -------- | -------- |
 | `GET /health` | local only (drizzle `SELECT 1`) | `{ status:'ok', db }` |
-| `GET /api/v1/session` | `GET {OPENCODE_URL}/session` | mock-session-1 |
-| `GET /api/v1/messages?sessionId=` | `GET {OPENCODE_URL}/messages?...` | 1 mock message |
-| `POST /api/v1/chat` | `POST {OPENCODE_URL}/chat` | mock echo |
 
-`POST /api/v1/chat` body validated by `ZodValidationPipe(sendChatSchema)`
-(Standard Schema). Errors use `{ code, message, correlationId }` + `x-correlation-id` header.
+Errors use `{ code, message, correlationId }` + `x-correlation-id` header.
 Swagger UI: `GET /swagger` · JSON: `GET /swagger.json` · YAML: `GET /openapi.yaml`.
 
 ## Commands
@@ -84,8 +79,8 @@ npm run lint --workspace=apps/backend  # tsc --noEmit
 ## Диагностика регистрации
 
 Регистрация: `POST /api/v1/auth/register` → `201 { user, accessToken, refreshToken }`
-+ `Set-Cookie: devbox-refresh` (httpOnly, `path=/api/v1/auth`, `SameSite=Lax`,
-`Secure` только в production) и `devbox-auth=1` (маркер для Next-middleware).
++ `Set-Cookie: rush-code-refresh` (httpOnly, `path=/api/v1/auth`, `SameSite=Lax`,
+`Secure` только в production) и `rush-code-auth=1` (маркер для Next-middleware).
 Фронт шлёт `credentials: 'include'`, успех → `setSession()` → `/projects` →
 `GET /api/v1/auth/me` (`Authorization: Bearer …`) → `200`.
 
@@ -108,7 +103,7 @@ npm run lint --workspace=apps/backend  # tsc --noEmit
 ```bash
 docker logs <backend> 2>&1 | grep '\[correlationId\]'
 # или
-bun run dev:logs 2>&1 | grep 'email_taken'   # pm2-процесс `devbox-backend`, не systemd
+bun run dev 2>&1 | grep 'email_taken'   # nx-таргет `backend:dev`, не systemd
 bun run build && bun dist/auth/auth.e2e.js  # 18/18, включая correlationId-сквозняк
 curl -v -X POST http://localhost:3000/api/v1/auth/register \
   -H 'content-type: application/json' -H 'x-correlation-id: debug-001' \

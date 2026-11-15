@@ -1,11 +1,11 @@
 import { Injectable, UnauthorizedException } from "@nestjs/common";
-import { AppLogger } from "../common/app-logger.service.js";
-import { PasswordService } from "./password.service.js";
-import { UsersService, type StoredUser } from "./users.service.js";
-import type { AuthProviderId } from "./users.service.js";
+import { AppLogger } from "@common/logger";
+import { verifyPassword } from "@users/utils/password";
+import { UsersService } from "@users/users.service";
+import type { AuthProviderId, StoredUser } from "@users/users.types";
 
 /** Strategy seam for external identity providers (local + future stubs). */
-export interface AuthProvider {
+export type AuthProvider = {
   readonly id: AuthProviderId;
   /** Returns the user on success, null on bad credentials (caller answers 401/409). */
   verify(
@@ -13,7 +13,7 @@ export interface AuthProvider {
     password: string,
     correlationId?: string,
   ): Promise<StoredUser | null>;
-}
+};
 
 export type { AuthProviderId };
 
@@ -24,8 +24,7 @@ export class LocalAuthProvider implements AuthProvider {
 
   constructor(
     private readonly users: UsersService,
-    private readonly passwords: PasswordService,
-    private readonly logger: AppLogger = new AppLogger("LocalAuthProvider"),
+    private readonly logger: AppLogger = new AppLogger(LocalAuthProvider.name),
   ) {}
 
   async verify(
@@ -33,12 +32,12 @@ export class LocalAuthProvider implements AuthProvider {
     password: string,
     correlationId?: string,
   ): Promise<StoredUser | null> {
-    const user = await this.users.findByEmail(email, correlationId);
+    const user: StoredUser | null = await this.users.findByEmail(email, correlationId);
     // Same code path for unknown emails (timing-neutral, no enumeration).
-    const hash = user?.passwordHash ?? "";
-    const ok =
+    const hash: string = user?.passwordHash ?? "";
+    const ok: boolean =
       hash !== "" &&
-      (await this.passwords.verify(password, hash, correlationId));
+      (await verifyPassword(password, hash, this.logger, correlationId));
     if (!ok || !user) {
       this.logger.warn("[auth] local verify failed", correlationId);
       return null;

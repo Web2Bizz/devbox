@@ -3,38 +3,38 @@
 import { useCallback, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiClientError, api } from '../api/client';
+import { getValidAccessToken } from '../lib/auth-store';
 import { formatApiError } from '../lib/format-error';
 import type { Project } from '../lib/types';
-import type { ProjectApiDto } from '../api/types';
+import type { Project as ProjectApiDto } from '@rush-code/contracts';
 import { useI18n } from '../i18n';
 
 export function mapApiToProject(dto: ProjectApiDto): Project {
   const repo =
     dto.githubOwner && dto.githubRepo ? `${dto.githubOwner}/${dto.githubRepo}` : undefined;
+  const status = (dto as { status?: string }).status === 'deleted' ? 'archived' : 'active';
   return {
     id: dto.id,
     name: dto.name,
     description: dto.description ?? '',
-    status: 'active',
+    status,
     updatedAt: dto.updatedAt,
     repo,
     // Backend always sends these; default keeps compat with stale caches.
     corrupted: dto.corrupted ?? false,
     corruptedReason: dto.corruptedReason ?? null,
-    // Additive scope passthrough (optional — old DTOs/caches stay valid).
-    ...(dto.scope ? { scope: dto.scope } : {}),
   };
 }
 
 export const projectQueryKey = (id: string) => ['project', id] as const;
 
-export interface UseProjectResult {
+export type UseProjectResult = {
   project: Project | null;
   loading: boolean;
   error: string | null;
   notFound: boolean;
   reload: () => void;
-}
+};
 
 /**
  * Production-ready single-project hook backed by TanStack Query.
@@ -42,7 +42,11 @@ export interface UseProjectResult {
  * - `enabled: !!id` prevents fetch when id is missing
  * - 404 maps to `notFound: true`
  */
-export function useProject(id: string | null | undefined): UseProjectResult {
+export function useProject(
+  orgId: string | null | undefined,
+  id: string | null | undefined,
+  includeDeleted = false,
+): UseProjectResult {
   const { t } = useI18n();
   const queryClient = useQueryClient();
 
@@ -51,11 +55,13 @@ export function useProject(id: string | null | undefined): UseProjectResult {
     isLoading,
     error: queryError,
   } = useQuery({
-    queryKey: id ? projectQueryKey(id) : ['project', 'empty'],
-    enabled: !!id,
+    queryKey: orgId && id ? ['org-project', orgId, id, includeDeleted ? 'with-deleted' : 'active'] : ['project', 'empty'],
+    enabled: !!orgId && !!id,
     queryFn: async (): Promise<Project | null> => {
-      if (!id) return null;
-      const dto = await api.getProject(id);
+      if (!orgId || !id) return null;
+      const token = await getValidAccessToken();
+      if (!token) throw new Error(t.errors.sessionExpired);
+      const dto = await api.getOrgProject(token, orgId, id, includeDeleted);
       return mapApiToProject(dto);
     },
     placeholderData: (prev) => prev,
@@ -67,7 +73,7 @@ export function useProject(id: string | null | undefined): UseProjectResult {
   });
 
   const { error, notFound } = useMemo(() => {
-    if (!id) {
+    if (!orgId || !id) {
       return { error: t.projects.notFoundDesc, notFound: true };
     }
     if (!queryError) return { error: null, notFound: false };
@@ -75,17 +81,17 @@ export function useProject(id: string | null | undefined): UseProjectResult {
     const msg = formatted === 'Unexpected error' ? t.errors.unexpected : formatted;
     const is404 = queryError instanceof ApiClientError && queryError.status === 404;
     return { error: msg, notFound: is404 };
-  }, [id, queryError, t]);
+  }, [orgId, id, queryError, t]);
 
-  const loading = !!id && isLoading && !project;
+  const loading = !!orgId && !!id && isLoading && !project;
 
   const reload = useCallback(() => {
-    if (!id) return;
-    void queryClient.invalidateQueries({ queryKey: projectQueryKey(id) });
-  }, [id, queryClient]);
+    if (!orgId || !id) return;
+    void queryClient.invalidateQueries({ queryKey: ['org-project', orgId, id] });
+  }, [orgId, id, queryClient]);
 
-  const effectiveLoading = id ? loading : false;
-  const effectiveProject = id ? project : null;
+  const effectiveLoading = orgId && id ? loading : false;
+  const effectiveProject = orgId && id ? project : null;
 
   return {
     project: effectiveProject,

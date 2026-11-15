@@ -31,6 +31,15 @@ export type ChatEntryTool = {
   /** Chain link — the text entry the tool turn belongs to (null = root). */
   parentId: string | null;
   at: number;
+  /**
+   * H2: stable call identity (frontend-only, never wire).
+   * Durable rows carry it in the id (`<parent>:<callID>:called|result`,
+   * in-process `callID` uppercase); live rows carry the SSE payload
+   * (`data.callID`/`data.callId`/`data.toolCallId`). Pairing key for the
+   * called→done upsert/collapse — the linear parentId chain never pairs
+   * (every row parents the previous one), name alone over-collapses.
+   */
+  callId?: string;
 };
 
 export type ChatEntry = ChatEntryText | ChatEntryTool;
@@ -50,6 +59,45 @@ type WireMessage = SessionMessage & {
 function readParentId(row: WireMessage): string | null {
   const candidate = row.parentId ?? row.parentID;
   return typeof candidate === 'string' && candidate.length > 0 ? candidate : null;
+}
+
+/**
+ * H2: call identity of a durable tool row id.
+ * In-process ids are `<parent>:<callID>:called|result` (callID uppercase);
+ * the middle segment is the call. Recorder uuid rows carry no call —
+ * answer undefined (no pairing, no invention).
+ */
+export function parseDurableToolCallId(id: string): string | undefined {
+  const parts = id.split(':');
+  if (parts.length < 3) return undefined;
+  const tail = parts[parts.length - 1];
+  if (tail !== 'called' && tail !== 'result') return undefined;
+  const callId = parts[parts.length - 2];
+  return typeof callId === 'string' && callId.length > 0 ? callId : undefined;
+}
+
+/**
+ * H2: call identity of a live SSE tool frame payload.
+ * Checks both casings — in-process puts `callID` (uppercase ID), other
+ * harnesses `callId`/`toolCallId`. Guarded read, never throws, never
+ * invents: undefined when the frame carries no stable call.
+ */
+export function readFrameToolCallId(data: unknown): string | undefined {
+  if (typeof data !== 'object' || data === null) return undefined;
+  const record = data as Record<string, unknown>;
+  const top: Array<unknown> = [record.callID, record.callId, record.toolCallId];
+  for (const candidate of top) {
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  const nested = record.call;
+  if (typeof nested === 'object' && nested !== null) {
+    const inner = nested as Record<string, unknown>;
+    const nestedCandidates: Array<unknown> = [inner.callID, inner.callId];
+    for (const candidate of nestedCandidates) {
+      if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -83,6 +131,9 @@ export function toChatEntries(rows: Array<SessionMessage>): Array<ChatEntry> {
               : 'done';
       const rawName: unknown = (wire as Record<string, unknown>).name;
       const rawDetail: unknown = (wire as Record<string, unknown>).detail;
+      // H2: suture the call identity from the durable id
+      // (`<parent>:<callID>:called|result`) for the called→done pairing.
+      const durableCallId = parseDurableToolCallId(row.id);
       next.push({
         id: row.id,
         kind: 'tool',
@@ -100,6 +151,7 @@ export function toChatEntries(rows: Array<SessionMessage>): Array<ChatEntry> {
         status,
         parentId,
         at: row.createdAt ? Date.parse(row.createdAt) || Date.now() : Date.now(),
+        ...(durableCallId ? { callId: durableCallId } : {}),
       });
       prevId = row.id;
       continue;
@@ -115,7 +167,9 @@ export function toChatEntries(rows: Array<SessionMessage>): Array<ChatEntry> {
     });
     prevId = row.id;
   }
-  return next;
+  // H2: one row per call — drop the in-flight marker when its terminal
+  // (same callId) already landed. Done/error render untouched.
+  return collapsePairedToolCalls(next);
 }
 
 /** Chain → legacy chat rows (adapter: text entries only, order preserved). */
@@ -164,6 +218,61 @@ export function lastToolEntry(chain: Array<ChatEntry>): ChatEntryTool | null {
 }
 
 /**
+ * H2: collapse the in-flight marker when its terminal already landed.
+ * The durable projection persists every broadcast (called + done/failed as
+ * two kind=tool rows) while the timeline shows one row per call — so a
+ * `called`/`progress` marker with the same `callId` as a landed `done`/
+ * `failed` is dropped, the terminal stays. Pairing is strictly by callId
+ * (the linear parentId chain never pairs — every row parents the previous
+ * one; name alone over-collapses across calls). Rows without a callId
+ * (recorder uuid rows, legacy frames) are left untouched. `reasoning` is
+ * excluded — the thinking trace owns its lifecycle. Pure, order-preserving.
+ */
+export function collapsePairedToolCalls(entries: Array<ChatEntry>): Array<ChatEntry> {
+  const terminalCallIds = new Set<string>();
+  for (const entry of entries) {
+    if (entry.kind !== 'tool' || entry.name === 'reasoning') continue;
+    if ((entry.status === 'done' || entry.status === 'failed') && entry.callId) {
+      terminalCallIds.add(entry.callId);
+    }
+  }
+  if (terminalCallIds.size === 0) return entries;
+  // Chain repair: surviving rows parent through the dropped marker
+  // (`done.parentId` is the paired `called` id) — re-link them to the
+  // marker's own parent so `buildThreadRows` still walks root→leaf.
+  const droppedParent = new Map<string, string | null>();
+  for (const entry of entries) {
+    if (
+      entry.kind === 'tool' &&
+      entry.name !== 'reasoning' &&
+      entry.status !== 'done' &&
+      entry.status !== 'failed' &&
+      entry.callId &&
+      terminalCallIds.has(entry.callId)
+    ) {
+      droppedParent.set(entry.id, entry.parentId);
+    }
+  }
+  if (droppedParent.size === 0) return entries;
+  const resolveParent = (pid: string | null): string | null => {
+    let current = pid;
+    const seen = new Set<string>();
+    while (current !== null && droppedParent.has(current) && !seen.has(current)) {
+      seen.add(current);
+      current = droppedParent.get(current) ?? null;
+    }
+    return current;
+  };
+  const next: Array<ChatEntry> = [];
+  for (const entry of entries) {
+    if (droppedParent.has(entry.id)) continue;
+    const parentId = resolveParent(entry.parentId);
+    next.push(parentId === entry.parentId ? entry : { ...entry, parentId });
+  }
+  return next;
+}
+
+/**
  * Merge durable entries with live sidecar entries (reload/resync parity).
  * REST already carries kind=tool/reasoning chain links (0012) while the
  * sidecar may still hold the live burst of the open turn — merge keeps the
@@ -192,14 +301,24 @@ export function mergeTextAndLiveTools(
   const durableIds = new Set<string>(textEntries.map((entry) => entry.id));
   const durableToolKeys = new Set<string>(
     textEntries
-      .filter((entry) => entry.kind === 'tool')
+      .filter(isToolEntry)
       .map((entry) => `${entry.name}|${entry.status}|${entry.parentId ?? ''}`),
+  );
+  // H2: callId-aware dedupe — the linear parentId chain never matches a
+  // live sidecar parent, so a live `called` would otherwise resurrect beside
+  // its durable `done`. Same callId+status dedupes across the id change.
+  const durableCallKeys = new Set<string>(
+    textEntries
+      .filter(isToolEntry)
+      .filter((entry) => entry.callId)
+      .map((entry) => `${entry.callId}|${entry.status}`),
   );
   const liveMissing: Array<ChatEntry> = [];
   for (const entry of prevEntries) {
     if (durableIds.has(entry.id)) continue;
     if (entry.kind === 'tool') {
       if (durableToolKeys.has(`${entry.name}|${entry.status}|${entry.parentId ?? ''}`)) continue;
+      if (entry.callId && durableCallKeys.has(`${entry.callId}|${entry.status}`)) continue;
       liveMissing.push(entry);
       continue;
     }
@@ -209,7 +328,9 @@ export function mergeTextAndLiveTools(
     liveMissing.push(entry);
   }
   if (liveMissing.length === 0) return textEntries;
-  return [...textEntries, ...liveMissing];
+  // H2: a replayed live `called` marker must not resurrect beside its
+  // durable `done` — collapse the pair to the single terminal row.
+  return collapsePairedToolCalls([...textEntries, ...liveMissing]);
 }
 
 /**

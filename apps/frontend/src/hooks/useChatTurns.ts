@@ -372,6 +372,9 @@ export function useChatTurns(params: {
     chain.clearChain();
     setError(null);
     setApproval(null);
+    // H1: a bound historical session never owns the live sidecar row —
+    // clear a stale activeToolName carried from the previous session.
+    setActiveToolName(null);
     // New bound session — the tool timeline starts over.
     resetTraceFlags();
     setToolTrace([]);

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { listSessionMessages, sessionEventStream } from '../api/sessions-client';
 import {
   mergeTextAndLiveTools,
+  readFrameToolCallId,
   toChatEntries,
   type ChatEntryToolStatus,
 } from '../lib/chat-chain';
@@ -266,7 +267,11 @@ export function useSseConnection(params: {
             // then CONTINUE past the text tract. Tool payloads NEVER enter
             // `appendLiveText()`/`streamingRef`/`partLens`, so the streamed answer
             // stays clean; `finalize()` still owns the commit.
-            turns.setActiveToolName(toolName);
+            // Replay gate (H1): a full-replay connect replays old tool frames
+            // with sending:false — they must not raise the live sidecar row.
+            // Only a live turn (sending:true) owns activeToolName (same gate
+            // as finalize); the durable chain still accumulates for F5 catch-up.
+            if (turns.sendingRef.current) turns.setActiveToolName(toolName);
             const toolDetail = parseToolDetail(frame);
             // Unified chain: the same live tool turn lands as a homogeneous
             // `tool` entry (durable REST never carries it — reload preserves
@@ -280,7 +285,11 @@ export function useSseConnection(params: {
                       frame.type.startsWith('session.tool.input.')
                     ? 'progress'
                     : 'called';
-            chain.appendToolLive(toolName, toolDetail, toolStatus);
+            // H2: suture the live burst by call identity (both casings —
+            // in-process puts `callID` uppercase) so the terminal flips its
+            // own `called` row instead of appending a Running neighbour.
+            const toolCallId = readFrameToolCallId(frame.data);
+            chain.appendToolLive(toolName, toolDetail, toolStatus, toolCallId);
             const toolFlags = turns.traceFlagsRef.current;
             if (frame.type === 'session.tool.success' || frame.type === 'session.tool.failed') {
               if (!toolFlags.toolDone.has(toolName)) {

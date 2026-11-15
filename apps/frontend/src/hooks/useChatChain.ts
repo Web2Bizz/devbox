@@ -35,7 +35,12 @@ export type UseChatChain = {
   mergeHistory: (rows: Array<SessionMessage>) => void;
   appendUserText: (text: string) => string;
   appendAssistantPartial: (partial: string) => string | null;
-  appendToolLive: (name: string, detail: string | undefined, status: ChatEntryToolStatus) => boolean;
+  appendToolLive: (
+    name: string,
+    detail: string | undefined,
+    status: ChatEntryToolStatus,
+    callId?: string,
+  ) => boolean;
 };
 
 function tipId(entries: Array<ChatEntry>, leafId: string | null): string | null {
@@ -118,7 +123,40 @@ export function useChatChain(): UseChatChain {
   }, []);
 
   const appendToolLive = useCallback(
-    (name: string, detail: string | undefined, status: ChatEntryToolStatus): boolean => {
+    (name: string, detail: string | undefined, status: ChatEntryToolStatus, callId?: string): boolean => {
+      // H2: suture by callId — a terminal (`done`/`failed`) flips its own
+      // `called`/`progress` row in place (same id, chain links intact)
+      // instead of appending a neighbour that would hang as Running forever.
+      if ((status === 'done' || status === 'failed') && callId) {
+        const refPrev = entriesRef.current;
+        for (let index = refPrev.length - 1; index >= 0; index -= 1) {
+          const entry = refPrev[index];
+          if (
+            entry &&
+            entry.kind === 'tool' &&
+            entry.callId === callId &&
+            entry.status !== 'done' &&
+            entry.status !== 'failed'
+          ) {
+            const targetId = entry.id;
+            const nextDetail = detail ?? entry.detail;
+            setEntries((prev) =>
+              prev.map((candidate) =>
+                candidate.kind === 'tool' && candidate.id === targetId
+                  ? {
+                      ...candidate,
+                      status,
+                      ...(nextDetail ? { detail: nextDetail } : {}),
+                      at: Date.now(),
+                    }
+                  : candidate,
+              ),
+            );
+            setLeafId(targetId);
+            return true;
+          }
+        }
+      }
       const parent = tipId(entriesRef.current, leafIdRef.current);
       // Sync burst guard via refs (no stale `appended` flag: the `setEntries`
       // updater runs later, so the return value must come from the current ref).
@@ -131,6 +169,7 @@ export function useChatChain(): UseChatChain {
         status,
         parentId: parent,
         at: Date.now(),
+        ...(callId ? { callId } : {}),
       };
       setEntries((prev) => {
         // Race guard: a concurrent burst may have landed between the ref
